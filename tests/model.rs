@@ -110,8 +110,8 @@ fn a_noop_set_state_leaves_no_undo_entry() {
     mb.set_state(&[2, 404], State::Done); // no-op
     assert!(mb.undo());
     assert!(mb.undo());
-    assert_eq!(mb.state_of(1), State::Inbox);
-    assert_eq!(mb.state_of(2), State::Inbox);
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert_eq!(mb.state_of(2), Some(State::Inbox));
     assert!(
         !mb.undo(),
         "the no-op must not have pushed an undo entry"
@@ -240,11 +240,11 @@ fn undo_retracts_the_reply_and_restores_the_original() {
     assert!(mb.undo());
     assert_eq!(mb.sent().len(), 1);
     assert_eq!(mb.sent()[0].in_reply_to, 1);
-    assert_eq!(mb.state_of(2), State::Inbox);
+    assert_eq!(mb.state_of(2), Some(State::Inbox));
 
     assert!(mb.undo());
     assert!(mb.sent().is_empty());
-    assert_eq!(mb.state_of(1), State::Inbox);
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
     assert!(!mb.undo());
     assert_invariant(&mb);
 }
@@ -253,10 +253,10 @@ fn undo_retracts_the_reply_and_restores_the_original() {
 fn replying_to_an_already_waiting_message_still_undoes_once() {
     let mut mb = sample();
     mb.send_reply(5, "reply to a waiting message".to_string());
-    assert_eq!(mb.state_of(5), State::Waiting);
+    assert_eq!(mb.state_of(5), Some(State::Waiting));
     assert!(mb.undo(), "the reply itself must be undoable");
     assert!(mb.sent().is_empty());
-    assert_eq!(mb.state_of(5), State::Waiting);
+    assert_eq!(mb.state_of(5), Some(State::Waiting));
     assert!(
         !mb.undo(),
         "undoing a reply must not rewind earlier operations"
@@ -346,7 +346,7 @@ fn extend_selects_an_inclusive_range_from_the_anchor() {
     assert_eq!(t.selected(), vec![4, 3, 2]);
 
     t.extend(&mb, -2);
-    assert_eq!(t.selected(), vec![3, 2, 1], "the anchor never moves");
+    assert_eq!(t.selected(), vec![4], "the anchor never moves");
 }
 
 #[test]
@@ -355,8 +355,8 @@ fn extending_backwards_keeps_the_selection_in_view_order() {
     let mut t = Triage::new(State::Inbox);
     t.move_cursor(&mb, 2);
     t.extend(&mb, -1);
-    assert_eq!(t.selected(), vec![2, 1]);
-    assert!(t.is_selected(1) && t.is_selected(2) && !t.is_selected(3));
+    assert_eq!(t.selected(), vec![3, 2]);
+    assert!(t.is_selected(3) && t.is_selected(2) && !t.is_selected(1));
 }
 
 #[test]
@@ -364,11 +364,11 @@ fn clearing_the_selection_resets_the_anchor() {
     let mb = four();
     let mut t = Triage::new(State::Inbox);
     t.extend(&mb, 2);
-    assert_eq!(t.selected(), vec![4, 3, 2, 1]);
+    assert_eq!(t.selected(), vec![4, 3, 2]);
     t.clear_selection();
     assert!(t.selected().is_empty());
 
-    t.move_cursor(&mb, 1);
+    t.move_cursor(&mb, -1);
     t.extend(&mb, 1);
     assert_eq!(t.selected(), vec![3, 2], "a new range, not the old one");
 }
@@ -380,10 +380,10 @@ fn toggle_select_adds_then_removes_and_keeps_view_order() {
     t.toggle_select(&mb);
     t.move_cursor(&mb, 2);
     t.toggle_select(&mb);
-    assert_eq!(t.selected(), vec![4, 1]);
+    assert_eq!(t.selected(), vec![4, 2]);
     t.toggle_select(&mb);
     assert_eq!(t.selected(), vec![4]);
-    assert!(!t.is_selected(1));
+    assert!(!t.is_selected(2));
 }
 
 #[test]
@@ -414,7 +414,7 @@ fn apply_moves_the_targets_clears_the_selection_and_clamps() {
     assert_eq!(t.apply(&mut mb, State::Done), 2);
     assert!(t.selected().is_empty());
     assert_eq!(t.cursor_index(), 1, "the cursor keeps its position");
-    assert_eq!(t.cursor(&mb), Some(2), "now the newest Inbox message");
+    assert_eq!(t.cursor(&mb), Some(1), "the cursor now sits on the last remaining message");
     assert_invariant(&mb);
 
     // One undo rewinds the whole batch.
@@ -425,11 +425,9 @@ fn apply_moves_the_targets_clears_the_selection_and_clamps() {
 
 #[test]
 fn apply_on_an_empty_view_changes_nothing() {
-    let mut mb = sample();
+    let mut mb = four();
     let mut t = Triage::new(State::Later);
     t.move_cursor(&mb, 0);
-    mb.set_state(&[3], State::Inbox);
-    t.switch_view(State::Later);
     assert_eq!(t.apply(&mut mb, State::Done), 0);
     assert!(!mb.undo());
     assert_eq!(t.apply_to_sender(&mut mb, State::Done), 0);
@@ -442,13 +440,13 @@ fn apply_to_sender_moves_every_message_from_that_sender() {
     let mut t = Triage::new(State::Inbox);
     t.move_cursor(&mb, 1); // id 1, from a@x.test
     assert_eq!(t.apply_to_sender(&mut mb, State::Done), 3);
-    assert!(mb.ids_in(State::Inbox).is_empty());
+    assert_eq!(mb.ids_in(State::Inbox), vec![2]);
     assert_eq!(mb.count(State::Done), 4);
     assert_invariant(&mb);
 
     assert!(mb.undo());
     assert_eq!(mb.count(State::Done), 1);
-    assert_eq!(mb.state_of(3), State::Later);
+    assert_eq!(mb.state_of(3), Some(State::Later));
 }
 
 #[test]

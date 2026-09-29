@@ -35,6 +35,9 @@ gpui_kit::actions!(
 
 /// Key context of the root view.
 pub const MAIL_CONTEXT: &str = "MailApp";
+/// Binding predicate for the list keymap: `MailApp` but not while a text input has focus
+/// (a focused kit `Input` sets context `Input`; bare-letter bindings would otherwise steal typing).
+const MAIL_BINDING: &str = "MailApp && !Input";
 /// Key context of the command palette.
 pub const PALETTE_CONTEXT: &str = "CommandPalette";
 /// Key context of the compose pane.
@@ -42,7 +45,7 @@ pub const COMPOSE_CONTEXT: &str = "Compose";
 
 /// Register the whole keymap.
 pub fn bind_keys(cx: &mut App) {
-    let m = Some(MAIL_CONTEXT);
+    let m = Some(MAIL_BINDING);
     cx.bind_keys([
         KeyBinding::new("j", SelectNext, m),
         KeyBinding::new("down", SelectNext, m),
