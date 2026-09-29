@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::theme::ActiveTheme;
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
@@ -53,6 +54,22 @@ impl MailApp {
         &self.focus_handle
     }
 
+    pub fn palette_open(&self) -> bool {
+        self.palette.is_some()
+    }
+
+    pub fn compose_open(&self) -> bool {
+        self.compose.is_some()
+    }
+
+    pub fn help_open(&self) -> bool {
+        self.help
+    }
+
+    pub fn opened(&self) -> Option<MessageId> {
+        self.opened
+    }
+
     fn modal_open(&self) -> bool {
         self.palette.is_some() || self.compose.is_some()
     }
@@ -86,7 +103,7 @@ impl MailApp {
         self.palette = None;
         self.compose = None;
         self._modal_sub = None;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -140,7 +157,7 @@ impl MailApp {
                 }
             },
         ));
-        window.focus(&palette.focus_handle(cx));
+        window.focus(&palette.focus_handle(cx), cx);
         self.palette = Some(palette);
         cx.notify();
     }
@@ -175,7 +192,7 @@ impl MailApp {
                 cx.notify();
             },
         ));
-        window.focus(&compose.focus_handle(cx));
+        window.focus(&compose.focus_handle(cx), cx);
         self.compose = Some(compose);
         cx.notify();
     }
@@ -209,7 +226,7 @@ impl MailApp {
             .to_string()
     }
 
-    fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &App) -> impl IntoElement {
+    fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &App) -> Stateful<Div> {
         let t = cx.theme();
         let is_cursor = ix == self.triage.cursor_index();
         let selected = self.triage.is_selected(msg.id);
@@ -294,12 +311,13 @@ impl MailApp {
                 cx.processor(|this, range: std::ops::Range<usize>, _window, cx| {
                     let ids = this.mailbox.ids_in(this.triage.view);
                     let newest = this.newest();
-                    range
-                        .filter_map(|ix| {
-                            let msg = this.mailbox.get(*ids.get(ix)?)?;
-                            Some(this.render_row(msg, ix, &newest, cx))
-                        })
-                        .collect::<Vec<_>>()
+                    let mut rows = Vec::with_capacity(range.len());
+                    for ix in range {
+                        if let Some(msg) = ids.get(ix).and_then(|id| this.mailbox.get(*id)) {
+                            rows.push(this.render_row(msg, ix, &newest, cx));
+                        }
+                    }
+                    rows
                 }),
             )
             .track_scroll(&self.list_scroll)
@@ -431,7 +449,7 @@ impl Focusable for MailApp {
 
 impl Render for MailApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let counts = TriageState::ALL.map(|s| self.mailbox.count(s));
+        let counts = TriageState::ALL.map(|s| (s, self.mailbox.count(s)));
         let hint = if self.compose.is_some() {
             HintMode::Compose
         } else {
