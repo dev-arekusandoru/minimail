@@ -40,8 +40,10 @@ fn sample() -> Mailbox {
 
 fn assert_invariant(mb: &Mailbox) {
     let total = mb.messages().len();
-    let sum: usize = State::ALL.iter().map(|s| mb.count(*s)).sum();
-    assert_eq!(sum, total, "every message must be in exactly one state");
+    let sum: usize = State::ALL.iter().map(|s| mb.count(*s)).sum::<usize>()
+        + mb.screener_ids().len()
+        + mb.hidden_count();
+    assert_eq!(sum, total, "every message is visible, screened or hidden");
     let mut all: Vec<u32> = Vec::new();
     for state in State::ALL {
         let ids = mb.ids_in(state);
@@ -53,9 +55,10 @@ fn assert_invariant(mb: &Mailbox) {
         assert!(ids.iter().all(|id| mb.state_of(*id) == Some(state)));
         all.extend(ids);
     }
+    all.extend(mb.screener_ids());
     all.sort_unstable();
     all.dedup();
-    assert_eq!(all.len(), total, "the four views must partition the mailbox");
+    assert_eq!(all.len(), total - mb.hidden_count(), "views must not overlap");
 }
 
 // ------------------------------------------------------------------ ordering
@@ -509,4 +512,477 @@ fn the_default_fixture_is_large_varied_and_consistent() {
         assert!(mb.count(state) > 0, "{state:?} view must not be empty");
     }
     assert_invariant(&mb);
+}
+
+// ------------------------------------------------------- v2: visibility etc.
+
+mod v2 {
+    use super::*;
+    use mail_classifier::clock::{DAY, HOUR};
+    use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
+    use mail_classifier::model::{OUTBOX_DELAY, Tag};
+
+    /// 2026-10-01T00:00:00Z, a Thursday.
+    const T0: i64 = 1_790_812_800;
+
+    /// `(id, thread, from, received, state)`.
+    fn threaded(specs: &[(u32, u32, &str, &str, State)]) -> Mailbox {
+        let msgs: Vec<serde_json::Value> = specs
+            .iter()
+            .map(|(id, th, from, received, state)| {
+                serde_json::json!({
+                    "id": id, "thread_id": th, "from_name": from, "from_email": from,
+                    "to": "you@example.com", "subject": format!("s{id}"),
+                    "body": "b\n\nc", "received": received, "state": state,
+                })
+            })
+            .collect();
+        Mailbox::from_json(&serde_json::to_string(&msgs).unwrap()).unwrap()
+    }
+
+    fn sug(message: u32, key: QuestionKey, value: AnswerValue) -> Suggestion {
+        Suggestion {
+            message,
+            key,
+            answer: Answer {
+                probabilities: vec![],
+                value,
+                confidence: 0.9,
+            },
+        }
+    }
+
+    type Snap = (u32, State, Vec<Tag>, Option<i64>, Option<i64>);
+    fn snapshot(mb: &Mailbox) -> Vec<Snap> {
+        mb.messages()
+            .iter()
+            .map(|m| {
+                (
+                    m.id,
+                    m.state,
+                    mb.tags(m.id).to_vec(),
+                    mb.waiting_since(m.id),
+                    mb.snoozed_until(m.id),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn default_fixture_has_a_small_screener_and_keeps_the_invariant() {
+        let mb = Mailbox::load_default();
+        assert!(mb.messages().len() >= 60);
+        let mut senders: Vec<String> = mb
+            .screener_ids()
+            .iter()
+            .map(|id| mb.get(*id).unwrap().from_email.clone())
+            .collect();
+        senders.sort();
+        senders.dedup();
+        assert!((3..=5).contains(&senders.len()), "{senders:?}");
+        assert_eq!(mb.hidden_count(), 0);
+        assert_invariant(&mb);
+    }
+
+    #[test]
+    fn screener_is_newest_first_and_allow_moves_mail_to_its_state_view() {
+        let mut mb = Mailbox::from_json_with_contacts(
+            &serde_json::to_string(&serde_json::json!([
+                msg(1, 1, "known@x.test", "2026-09-01T00:00:00Z"),
+                msg(2, 2, "new@x.test", "2026-09-02T00:00:00Z"),
+                msg(3, 3, "New@x.test", "2026-09-03T00:00:00Z"),
+            ]))
+            .unwrap(),
+            r#"["KNOWN@x.test"]"#,
+        )
+        .unwrap();
+        assert_eq!(mb.screener_ids(), vec![3, 2]);
+        assert_eq!(mb.ids_in(State::Inbox), vec![1]);
+        assert!(mb.allow_sender("new@x.test"));
+        assert!(!mb.allow_sender("new@x.test"));
+        assert!(mb.screener_ids().is_empty());
+        assert_eq!(mb.ids_in(State::Inbox), vec![3, 2, 1]);
+        assert!(mb.undo());
+        assert_eq!(mb.screener_ids(), vec![3, 2]);
+        assert_invariant(&mb);
+    }
+
+    fn msg(id: u32, thread: u32, from: &str, received: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id, "thread_id": thread, "from_name": from, "from_email": from,
+            "to": "you@example.com", "subject": "s", "body": "b\n\nc", "received": received,
+        })
+    }
+
+    #[test]
+    fn block_hides_without_deleting_and_beats_the_screener() {
+        let mut mb = Mailbox::from_json_with_contacts(
+            &serde_json::to_string(&serde_json::json!([
+                msg(1, 1, "new@x.test", "2026-09-01T00:00:00Z"),
+                msg(2, 2, "ok@x.test", "2026-09-02T00:00:00Z"),
+            ]))
+            .unwrap(),
+            r#"["ok@x.test"]"#,
+        )
+        .unwrap();
+        assert!(mb.block_sender("new@x.test"));
+        assert!(!mb.block_sender("new@x.test"));
+        assert!(mb.screener_ids().is_empty(), "blocked is hidden, not screened");
+        assert_eq!(mb.hidden_count(), 1);
+        assert_eq!(mb.messages().len(), 2);
+        // Allowing a blocked sender does not resurrect it.
+        mb.allow_sender("new@x.test");
+        assert_eq!(mb.ids_in(State::Inbox), vec![2]);
+        assert_invariant(&mb);
+        assert!(mb.undo()); // allow
+        assert!(mb.undo()); // block
+        assert_eq!(mb.hidden_count(), 0);
+        assert_eq!(mb.screener_ids(), vec![1]);
+    }
+
+    #[test]
+    fn mute_and_unsubscribe_hide_and_undo() {
+        let mut mb = threaded(&[
+            (1, 10, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox),
+            (2, 10, "b@x.test", "2026-09-02T00:00:00Z", State::Later),
+            (3, 11, "a@x.test", "2026-09-03T00:00:00Z", State::Inbox),
+            (4, 12, "c@x.test", "2026-09-04T00:00:00Z", State::Inbox),
+        ]);
+        assert!(mb.mute_thread(10));
+        assert!(!mb.mute_thread(10));
+        assert!(mb.is_muted(10) && !mb.is_muted(11));
+        assert_eq!(mb.hidden_count(), 2);
+        assert_eq!(mb.state_of(2), Some(State::Later), "hidden mail keeps its state");
+        assert_eq!(mb.count(State::Later), 0);
+
+        assert!(mb.unsubscribe("A@x.test"));
+        assert!(!mb.unsubscribe("a@x.test"));
+        assert_eq!(mb.unsubscribed(), ["A@x.test"]);
+        assert_eq!(mb.ids_in(State::Inbox), vec![4]);
+        assert_eq!(mb.hidden_count(), 3);
+        assert_invariant(&mb);
+
+        assert!(mb.undo());
+        assert!(mb.unsubscribed().is_empty());
+        assert_eq!(mb.ids_in(State::Inbox), vec![4, 3]);
+        assert!(mb.undo());
+        assert!(!mb.is_muted(10));
+        assert_eq!(mb.hidden_count(), 0);
+    }
+
+    #[test]
+    fn set_state_at_stamps_waiting_and_clears_it_on_leave() {
+        let mut mb = sample();
+        assert_eq!(mb.set_state_at(&[1], State::Waiting, 500), 1);
+        assert_eq!(mb.waiting_since(1), Some(500));
+        mb.set_state(&[2], State::Waiting);
+        assert_eq!(mb.waiting_since(2), None, "plain set_state records no time");
+        mb.set_state_at(&[1], State::Done, 600);
+        assert_eq!(mb.waiting_since(1), None);
+        assert!(mb.undo());
+        assert_eq!(mb.waiting_since(1), Some(500));
+        assert!(mb.undo() && mb.undo());
+        assert_eq!(mb.waiting_since(1), None);
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+    }
+
+    #[test]
+    fn waiting_resurfaces_after_three_days_and_tick_is_idempotent() {
+        let mut mb = threaded(&[(1, 1, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox)]);
+        mb.set_state_at(&[1], State::Waiting, T0);
+        let undo_depth_probe = snapshot(&mb);
+
+        let r = mb.tick(T0 + 3 * DAY - 1);
+        assert!(r.resurfaced.is_empty());
+        assert_eq!(mb.state_of(1), Some(State::Waiting));
+
+        let r = mb.tick(T0 + 3 * DAY);
+        assert_eq!(r.resurfaced, vec![1]);
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert_eq!(mb.tags(1), [Tag::NoReply]);
+        assert_eq!(mb.waiting_since(1), None);
+
+        let after = snapshot(&mb);
+        let again = mb.tick(T0 + 3 * DAY);
+        assert_eq!(again, Default::default());
+        assert_eq!(snapshot(&mb), after);
+        assert_ne!(after, undo_depth_probe);
+
+        // tick pushed no undo step: undo reverts the earlier set_state_at.
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert!(!mb.undo());
+    }
+
+    #[test]
+    fn waiting_does_not_resurface_when_someone_replied_after() {
+        // Thread 1: reply arrives 2026-10-02, after we started waiting on T0.
+        let mut mb = threaded(&[
+            (1, 1, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox),
+            (2, 1, "a@x.test", "2026-10-01T12:00:00Z", State::Inbox),
+            // Thread 2: the only other message is older than waiting_since.
+            (3, 2, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox),
+            (4, 2, "a@x.test", "2026-09-02T00:00:00Z", State::Inbox),
+        ]);
+        mb.set_state_at(&[1, 3], State::Waiting, T0);
+        let r = mb.tick(T0 + 4 * DAY);
+        assert_eq!(r.resurfaced, vec![3]);
+        assert_eq!(mb.state_of(1), Some(State::Waiting));
+    }
+
+    #[test]
+    fn leaving_and_reentering_waiting_drops_the_no_reply_tag() {
+        let mut mb = threaded(&[(1, 1, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox)]);
+        mb.set_state_at(&[1], State::Waiting, T0);
+        mb.tick(T0 + 3 * DAY);
+        mb.set_state_at(&[1], State::Waiting, T0 + 3 * DAY);
+        assert!(mb.tags(1).is_empty());
+        assert_eq!(mb.waiting_since(1), Some(T0 + 3 * DAY));
+    }
+
+    #[test]
+    fn snooze_wakes_exactly_at_the_return_time_and_undoes() {
+        let mut mb = sample();
+        assert_eq!(mb.snooze(&[1, 2, 3], T0 + HOUR, T0), 3);
+        assert_eq!(mb.state_of(1), Some(State::Later));
+        assert_eq!(mb.snoozed_until(3), Some(T0 + HOUR));
+        assert_eq!(mb.snooze(&[1], T0 + HOUR, T0), 0, "same time is a no-op");
+
+        assert!(mb.tick(T0 + HOUR - 1).woken.is_empty());
+        let r = mb.tick(T0 + HOUR);
+        assert_eq!(r.woken.len(), 3);
+        assert_eq!(mb.state_of(3), Some(State::Inbox), "message 3 was Later, now Inbox");
+        assert_eq!(mb.snoozed_until(3), None);
+        assert!(mb.tick(T0 + HOUR).woken.is_empty());
+
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert_eq!(mb.state_of(3), Some(State::Later));
+        assert_eq!(mb.snoozed_until(3), None);
+    }
+
+    #[test]
+    fn manually_leaving_later_clears_the_snooze() {
+        let mut mb = sample();
+        mb.snooze(&[1], T0 + HOUR, T0);
+        mb.set_state(&[1], State::Done);
+        assert_eq!(mb.snoozed_until(1), None);
+        mb.tick(T0 + 2 * HOUR);
+        assert_eq!(mb.state_of(1), Some(State::Done));
+    }
+
+    #[test]
+    fn snooze_presets_roll_over_and_land_on_the_right_weekday() {
+        let mb = sample();
+        // T0 = Thursday 00:00.
+        let [tonight, tomorrow, monday] = mb.snooze_presets(T0 + 9 * HOUR);
+        assert_eq!(tonight, ("Tonight", T0 + 18 * HOUR));
+        assert_eq!(tomorrow, ("Tomorrow", T0 + DAY + 8 * HOUR));
+        assert_eq!(monday, ("Monday", T0 + 4 * DAY + 8 * HOUR));
+        // Past 18:00 (and exactly 18:00): Tonight becomes tomorrow evening.
+        assert_eq!(mb.snooze_presets(T0 + 18 * HOUR)[0].1, T0 + DAY + 18 * HOUR);
+        assert_eq!(mb.snooze_presets(T0 + 20 * HOUR)[0].1, T0 + DAY + 18 * HOUR);
+        // On a Monday, "Monday" means next week.
+        let mon = T0 + 4 * DAY + 10 * HOUR;
+        assert_eq!(mb.snooze_presets(mon)[2].1, T0 + 11 * DAY + 8 * HOUR);
+        // Sunday -> next day.
+        assert_eq!(mb.snooze_presets(T0 + 3 * DAY)[2].1, T0 + 4 * DAY + 8 * HOUR);
+    }
+
+    #[test]
+    fn parse_snooze_accepts_units_and_rejects_junk() {
+        let mb = sample();
+        let _ = &mb;
+        use mail_classifier::model::parse_snooze;
+        assert_eq!(parse_snooze("30m", T0), Some(T0 + 1800));
+        assert_eq!(parse_snooze(" 3H ", T0), Some(T0 + 3 * HOUR));
+        assert_eq!(parse_snooze("2d", T0), Some(T0 + 2 * DAY));
+        for bad in ["", "0m", "m", "3", "3w", "-1h", "1.5h", "3 h", "99999999999999999999d"] {
+            assert_eq!(parse_snooze(bad, T0), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn outbox_holds_reply_until_due_and_tick_flushes_once() {
+        let mut mb = sample();
+        mb.send_reply_at(1, "hi".into(), T0);
+        assert_eq!(mb.state_of(1), Some(State::Waiting));
+        assert_eq!(mb.waiting_since(1), Some(T0));
+        assert_eq!(mb.outbox().len(), 1);
+        assert_eq!(mb.outbox()[0].due, T0 + OUTBOX_DELAY);
+        assert!(mb.sent().is_empty());
+
+        assert_eq!(mb.tick(T0 + OUTBOX_DELAY - 1).flushed, 0);
+        assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 1);
+        assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 0);
+        assert!(mb.outbox().is_empty());
+        assert_eq!(mb.sent().len(), 1);
+        assert_eq!(mb.sent()[0].body, "hi");
+    }
+
+    #[test]
+    fn undo_after_flush_reverts_state_only() {
+        let mut mb = sample();
+        mb.send_reply_at(1, "hi".into(), T0);
+        mb.tick(T0 + 60);
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert_eq!(mb.sent().len(), 1, "the sent mail already left");
+    }
+
+    #[test]
+    fn undo_before_flush_pulls_the_reply_back() {
+        let mut mb = sample();
+        mb.send_reply_at(1, "hi".into(), T0);
+        assert!(mb.undo());
+        assert!(mb.outbox().is_empty());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert_eq!(mb.tick(T0 + 60).flushed, 0);
+        assert!(mb.sent().is_empty());
+    }
+
+    #[test]
+    fn recall_last_takes_the_newest_and_restores_prior_state() {
+        let mut mb = sample();
+        assert_eq!(mb.recall_last(T0), None);
+        mb.send_reply_at(1, "first".into(), T0);
+        mb.send_reply_at(3, "second".into(), T0 + 1);
+        let r = mb.recall_last(T0 + 2).unwrap();
+        assert_eq!((r.in_reply_to, r.body.as_str()), (3, "second"));
+        assert_eq!(mb.state_of(3), Some(State::Later), "prior state restored");
+        assert_eq!(mb.state_of(1), Some(State::Waiting));
+        assert_eq!(mb.outbox().len(), 1);
+        // Its undo step is consumed: undo now reverts the *first* send.
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert!(mb.outbox().is_empty());
+        assert!(!mb.undo());
+    }
+
+    #[test]
+    fn recall_keeps_unrelated_later_undo_steps_intact() {
+        let mut mb = sample();
+        mb.send_reply_at(1, "x".into(), T0);
+        mb.set_state(&[2], State::Done);
+        assert!(mb.recall_last(T0).is_some());
+        assert_eq!(mb.state_of(2), Some(State::Done));
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(2), Some(State::Inbox));
+    }
+
+    #[test]
+    fn immediate_send_reply_still_undoes_sent() {
+        let mut mb = sample();
+        mb.send_reply(1, "now".into());
+        assert_eq!(mb.sent().len(), 1);
+        assert!(mb.outbox().is_empty());
+        assert!(mb.undo());
+        assert!(mb.sent().is_empty());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+    }
+
+    #[test]
+    fn accept_applies_each_kind_and_undoes_as_one_step() {
+        let mut mb = sample();
+        let before = snapshot(&mb);
+        mb.add_suggestions(vec![
+            sug(1, QuestionKey::SuggestedState, AnswerValue::Choice(2)),
+            sug(1, QuestionKey::NeedsReply, AnswerValue::Bool(true)),
+            sug(1, QuestionKey::Urgency, AnswerValue::Score(3.6)),
+            sug(1, QuestionKey::Kind, AnswerValue::Choice(1)),
+            sug(2, QuestionKey::Spam, AnswerValue::Bool(true)),
+        ]);
+        assert_eq!(mb.pending(1).len(), 4);
+        assert_eq!(mb.accept_suggestions(1), 4);
+        assert!(mb.pending(1).is_empty());
+        assert_eq!(mb.pending(2).len(), 1, "other messages untouched");
+        assert_eq!(mb.state_of(1), Some(State::Later));
+        let tags = mb.tags(1);
+        assert!(tags.contains(&Tag::NeedsReply));
+        assert!(tags.contains(&Tag::Urgent(4)));
+        assert!(tags.contains(&Tag::Kind(Kind::Receipt)));
+        assert_eq!(mb.accept_suggestions(1), 0);
+
+        assert!(mb.undo());
+        assert_eq!(snapshot(&mb), before);
+        assert_eq!(mb.pending(1).len(), 4, "undo restores the pending badges");
+        assert!(!mb.undo(), "accept was exactly one step");
+
+        assert_eq!(mb.accept_suggestions(2), 1);
+        assert_eq!(mb.state_of(2), Some(State::Done));
+        assert_eq!(mb.tags(2), [Tag::Spam]);
+    }
+
+    #[test]
+    fn negative_answers_change_nothing_and_urgency_replaces() {
+        let mut mb = sample();
+        mb.add_suggestions(vec![
+            sug(1, QuestionKey::Spam, AnswerValue::Bool(false)),
+            sug(1, QuestionKey::Urgency, AnswerValue::Score(2.0)),
+        ]);
+        mb.accept_suggestions(1);
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert_eq!(mb.tags(1), [Tag::Urgent(2)]);
+        assert!(mb.apply_auto(sug(1, QuestionKey::Urgency, AnswerValue::Score(5.0))));
+        assert_eq!(mb.tags(1), [Tag::Urgent(5)]);
+        assert!(!mb.apply_auto(sug(1, QuestionKey::Urgency, AnswerValue::Score(5.0))));
+        assert!(mb.undo());
+        assert_eq!(mb.tags(1), [Tag::Urgent(2)]);
+    }
+
+    #[test]
+    fn reject_drops_pending_and_undo_restores() {
+        let mut mb = sample();
+        mb.add_suggestions(vec![
+            sug(1, QuestionKey::Spam, AnswerValue::Bool(true)),
+            sug(2, QuestionKey::Spam, AnswerValue::Bool(true)),
+        ]);
+        assert_eq!(mb.reject_suggestions(1), 1);
+        assert_eq!(mb.reject_suggestions(1), 0);
+        assert!(mb.pending(1).is_empty());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert!(mb.undo());
+        assert_eq!(mb.pending(1).len(), 1);
+        assert_eq!(mb.pending(2).len(), 1);
+    }
+
+    #[test]
+    fn newer_suggestion_replaces_the_pending_one_for_same_question() {
+        let mut mb = sample();
+        mb.add_suggestions(vec![sug(1, QuestionKey::SuggestedState, AnswerValue::Choice(3))]);
+        mb.add_suggestions(vec![sug(1, QuestionKey::SuggestedState, AnswerValue::Choice(2))]);
+        assert_eq!(mb.pending(1).len(), 1);
+        mb.accept_suggestions(1);
+        assert_eq!(mb.state_of(1), Some(State::Later));
+    }
+
+    #[test]
+    fn apply_auto_clears_matching_pending_and_undoes() {
+        let mut mb = sample();
+        mb.add_suggestions(vec![sug(1, QuestionKey::Spam, AnswerValue::Bool(true))]);
+        assert!(mb.apply_auto(sug(1, QuestionKey::Spam, AnswerValue::Bool(true))));
+        assert!(mb.pending(1).is_empty());
+        assert_eq!(mb.state_of(1), Some(State::Done));
+        assert!(mb.undo());
+        assert_eq!(mb.state_of(1), Some(State::Inbox));
+        assert!(mb.tags(1).is_empty());
+        assert_eq!(mb.pending(1).len(), 1);
+        assert!(!mb.apply_auto(sug(99, QuestionKey::Spam, AnswerValue::Bool(true))));
+    }
+
+    #[test]
+    fn out_of_range_choices_are_ignored() {
+        let mut mb = sample();
+        assert!(!mb.apply_auto(sug(1, QuestionKey::SuggestedState, AnswerValue::Choice(9))));
+        assert!(!mb.apply_auto(sug(1, QuestionKey::Kind, AnswerValue::Choice(9))));
+        assert!(!mb.undo());
+    }
+
+    #[test]
+    fn sender_wide_state_change_includes_hidden_mail() {
+        let mut mb = sample();
+        mb.mute_thread(1);
+        assert_eq!(mb.set_state_for_sender("a@x.test", State::Done), 3);
+        assert_invariant(&mb);
+    }
 }
