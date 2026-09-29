@@ -75,6 +75,14 @@ impl Harness<'_> {
     fn total(&mut self) -> usize {
         self.read(|a| a.mailbox.messages().len())
     }
+    /// Visible counts + screener + hidden: every message is in exactly one bucket.
+    fn accounted(&mut self) -> usize {
+        self.read(|a| {
+            TriageState::ALL.iter().map(|s| a.mailbox.count(*s)).sum::<usize>()
+                + a.mailbox.screener_ids().len()
+                + a.mailbox.hidden_count()
+        })
+    }
 }
 
 #[gpui_kit::gpui::test]
@@ -118,7 +126,7 @@ fn state_keys_move_messages_and_undo(cx: &mut TestAppContext) {
     h.keys("w");
     assert_eq!(h.state_of(b), Waiting);
     let c = h.cursor().unwrap();
-    h.keys("l");
+    h.keys("l 1"); // `l` opens the snooze picker; 1 = Tonight
     assert_eq!(h.state_of(c), Later);
     assert_eq!(h.count(Inbox), start[0] - 3);
     assert_eq!(h.count(Waiting), start[1] + 1);
@@ -136,7 +144,7 @@ fn state_keys_move_messages_and_undo(cx: &mut TestAppContext) {
     assert_eq!(h.state_of(d), Done);
     h.keys("u u u");
     assert_eq!(h.counts(), start);
-    assert_eq!(h.counts().iter().sum::<usize>(), total);
+    assert_eq!(h.accounted(), total);
     // Extra undo is harmless.
     h.keys("u");
     assert_eq!(h.counts(), start);
@@ -219,13 +227,14 @@ fn reply_send_moves_to_waiting(cx: &mut TestAppContext) {
     assert_eq!(h.counts(), start);
     h.keys("cmd-enter");
     assert!(!h.read(|a| a.compose_open()));
-    let (n, reply) = h.read(|a| {
+    let (n, sent, reply) = h.read(|a| {
         (
+            a.mailbox.outbox().len(),
             a.mailbox.sent().len(),
-            a.mailbox.sent().last().map(|r| (r.in_reply_to, r.body.clone())),
+            a.mailbox.outbox().last().map(|o| (o.reply.in_reply_to, o.reply.body.clone())),
         )
     });
-    assert_eq!(n, 1);
+    assert_eq!((n, sent), (1, 0), "sends wait in the outbox first");
     let (to, body) = reply.unwrap();
     assert_eq!(to, id);
     assert!(body.contains("thanks je"), "body was {body:?}");
@@ -233,8 +242,12 @@ fn reply_send_moves_to_waiting(cx: &mut TestAppContext) {
     assert_eq!(h.count(Waiting), start[1] + 1);
     assert_eq!(h.count(Inbox), start[0] - 1);
 
+    // Undo recalls the pending reply and reopens compose.
     h.keys("u");
+    assert!(h.read(|a| a.compose_open()));
+    assert_eq!(h.read(|a| a.mailbox.outbox().len()), 0);
     assert_eq!(h.state_of(id), Inbox);
+    h.keys("escape");
 }
 
 #[gpui_kit::gpui::test]
@@ -342,7 +355,7 @@ fn shift_e_marks_all_from_sender_done(cx: &mut TestAppContext) {
     });
     assert_eq!(remaining, 0);
     assert!(h.count(Done) > start[3]);
-    assert_eq!(h.counts().iter().sum::<usize>(), h.total());
+    assert_eq!(h.accounted(), h.total());
     h.keys("u");
     assert_eq!(h.counts(), start);
 }
@@ -352,15 +365,15 @@ fn counts_always_sum_to_total(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let total = h.total();
     let seq = [
-        "e", "j", "w", "j j", "l", "shift-j", "i", "2", "j", "e", "3", "w", "u", "4", "k", "i",
-        "1", "x", "j", "x", "l", "shift-w", "u u", "r", "a b", "cmd-enter", "shift-l", "j", "enter",
+        "e", "j", "w", "j j", "l escape", "shift-j", "i", "2", "j", "e", "3", "w", "u", "4", "k", "i",
+        "1", "x", "j", "x", "l escape", "shift-w", "u u", "r", "a b", "cmd-enter", "shift-l", "j", "enter",
         "shift-i", "u", "cmd-k", "m a r k space d o n e", "enter", "?", "?", "e", "shift-e",
         "u u u", "2", "e", "x", "shift-k", "w", "escape",
     ];
     for step in seq {
         h.keys(step);
         assert_eq!(
-            h.counts().iter().sum::<usize>(),
+            h.accounted(),
             total,
             "invariant broken after {step:?}"
         );

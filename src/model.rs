@@ -583,7 +583,7 @@ impl Mailbox {
 
     /// Apply every pending suggestion for `id`. One undo entry; returns the
     /// number accepted.
-    pub fn accept_suggestions(&mut self, id: MessageId) -> usize {
+    pub fn accept_suggestions(&mut self, id: MessageId, now: Timestamp) -> usize {
         let (mine, rest): (Vec<_>, Vec<_>) =
             self.pending.iter().cloned().partition(|s| s.message == id);
         if mine.is_empty() {
@@ -592,7 +592,7 @@ impl Mailbox {
         let mut changes = vec![Change::Pending(self.pending.clone()), self.snapshot(id)];
         self.pending = rest;
         for s in &mine {
-            self.apply(s);
+            self.apply(s, now);
         }
         changes.reverse();
         self.push_undo(changes);
@@ -614,7 +614,7 @@ impl Mailbox {
 
     /// Apply one suggestion immediately (System 1 auto mode). One undo entry.
     /// False if it was a no-op or the message is unknown.
-    pub fn apply_auto(&mut self, s: Suggestion) -> bool {
+    pub fn apply_auto(&mut self, s: Suggestion, now: Timestamp) -> bool {
         if !self.index.contains_key(&s.message) {
             return false;
         }
@@ -624,7 +624,7 @@ impl Mailbox {
         );
         self.pending
             .retain(|p| !(p.message == s.message && p.key == s.key));
-        self.apply(&s);
+        self.apply(&s, now);
         let changed = match (&before.0, self.snapshot(s.message)) {
             (Change::Msg(_, st, meta), Change::Msg(_, st2, meta2)) => {
                 *st != st2 || *meta != meta2
@@ -643,7 +643,7 @@ impl Mailbox {
     }
 
     /// Apply a suggestion's answer to its message (no undo bookkeeping).
-    fn apply(&mut self, s: &Suggestion) {
+    fn apply(&mut self, s: &Suggestion, now: Timestamp) {
         let id = s.message;
         let Some(&i) = self.index.get(&id) else {
             return;
@@ -651,12 +651,12 @@ impl Mailbox {
         match (s.key, &s.answer.value) {
             (QuestionKey::SuggestedState, AnswerValue::Choice(n)) => {
                 if let Some(state) = TriageState::ALL.get(*n).copied() {
-                    self.apply_state(i, state);
+                    self.apply_state(i, state, now);
                 }
             }
             (QuestionKey::Spam, AnswerValue::Bool(true)) => {
                 self.add_tag(id, Tag::Spam);
-                self.apply_state(i, TriageState::Done);
+                self.apply_state(i, TriageState::Done, now);
             }
             (QuestionKey::NeedsReply, AnswerValue::Bool(true)) => self.add_tag(id, Tag::NeedsReply),
             (QuestionKey::Urgency, AnswerValue::Score(v)) => {
@@ -682,12 +682,13 @@ impl Mailbox {
         }
     }
 
-    fn apply_state(&mut self, i: usize, state: TriageState) {
+    fn apply_state(&mut self, i: usize, state: TriageState, now: Timestamp) {
         if self.messages[i].state != state {
             self.messages[i].state = state;
             let meta = self.meta.entry(self.messages[i].id).or_default();
-            meta.waiting_since = None;
+            meta.waiting_since = (state == TriageState::Waiting).then_some(now);
             meta.snoozed_until = None;
+            meta.tags.retain(|t| *t != Tag::NoReply);
         }
     }
 

@@ -1,6 +1,14 @@
 //! Actions (namespace `mail`), keymap and the command list shown in the palette/help.
 
 use crate::app::palette::{PaletteDismiss, PaletteMoveDown, PaletteMoveUp, PaletteRun};
+use crate::app::panels::{RULES_CONTEXT, RulesClose, RulesNext, RulesPrev, RulesRevoke};
+use crate::app::settings::{
+    SETTINGS_CONTEXT, SettingsClose, SettingsNext, SettingsPrev, SettingsThresholdDown,
+    SettingsThresholdUp, SettingsToggleMode,
+};
+use crate::app::snooze::{
+    SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
+};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -30,7 +38,23 @@ gpui_kit::actions!(
         ShowWaiting,
         ShowLater,
         ShowDone,
-        ToggleHelp
+        ToggleHelp,
+        OpenSnoozePicker,
+        AcceptSuggestions,
+        RejectSuggestions,
+        AcceptRule,
+        DismissRule,
+        ToggleRules,
+        ShowScreener,
+        AllowSender,
+        BlockSender,
+        MuteThread,
+        Unsubscribe,
+        SummarizeThread,
+        ToggleSettings,
+        StartSession,
+        OpenSearch,
+        ClassifyVisible
     ]
 );
 
@@ -61,7 +85,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("o", OpenMessage, m),
         KeyBinding::new("e", MarkDone, m),
         KeyBinding::new("w", MarkWaiting, m),
-        KeyBinding::new("l", MarkLater, m),
+        KeyBinding::new("l", OpenSnoozePicker, m),
         KeyBinding::new("i", MoveToInbox, m),
         KeyBinding::new("shift-e", SenderDone, m),
         KeyBinding::new("shift-w", SenderWaiting, m),
@@ -76,6 +100,40 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("3", ShowLater, m),
         KeyBinding::new("4", ShowDone, m),
         KeyBinding::new("?", ToggleHelp, m),
+        KeyBinding::new("y", AcceptSuggestions, m),
+        KeyBinding::new("n", RejectSuggestions, m),
+        KeyBinding::new("shift-y", AcceptRule, m),
+        KeyBinding::new("shift-n", DismissRule, m),
+        KeyBinding::new("shift-r", ToggleRules, m),
+        KeyBinding::new("5", ShowScreener, m),
+        KeyBinding::new("a", AllowSender, m),
+        KeyBinding::new("b", BlockSender, m),
+        KeyBinding::new("m", MuteThread, m),
+        KeyBinding::new("shift-u", Unsubscribe, m),
+        KeyBinding::new("s", SummarizeThread, m),
+        KeyBinding::new("cmd-,", ToggleSettings, m),
+        KeyBinding::new("t", StartSession, m),
+        KeyBinding::new("/", OpenSearch, m),
+        KeyBinding::new("c", ClassifyVisible, m),
+        // Snooze picker.
+        KeyBinding::new("1", SnoozePreset1, Some("SnoozePicker && !Input")),
+        KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
+        KeyBinding::new("3", SnoozePreset3, Some("SnoozePicker && !Input")),
+        KeyBinding::new("4", SnoozeCustom, Some("SnoozePicker && !Input")),
+        KeyBinding::new("escape", SnoozeCancel, Some(SNOOZE_CONTEXT)),
+        // Settings panel.
+        KeyBinding::new("j", SettingsNext, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("k", SettingsPrev, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("space", SettingsToggleMode, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("=", SettingsThresholdUp, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("-", SettingsThresholdDown, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("escape", SettingsClose, Some(SETTINGS_CONTEXT)),
+        // Rules panel.
+        KeyBinding::new("j", RulesNext, Some(RULES_CONTEXT)),
+        KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),
+        KeyBinding::new("backspace", RulesRevoke, Some(RULES_CONTEXT)),
+        KeyBinding::new("d", RulesRevoke, Some(RULES_CONTEXT)),
+        KeyBinding::new("escape", RulesClose, Some(RULES_CONTEXT)),
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),
@@ -120,7 +178,7 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Open message", "enter", OpenMessage),
         cmd!("Mark done", "e", MarkDone),
         cmd!("Mark waiting", "w", MarkWaiting),
-        cmd!("Mark later", "l", MarkLater),
+        cmd!("Mark later", "", MarkLater),
         cmd!("Move to inbox", "i", MoveToInbox),
         cmd!("Mark all from sender done", "shift-e", SenderDone),
         cmd!("Mark all from sender waiting", "shift-w", SenderWaiting),
@@ -134,5 +192,21 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Show done", "4", ShowDone),
         cmd!("Toggle command palette", "cmd-k", ToggleCommandPalette),
         cmd!("Toggle help", "?", ToggleHelp),
+        cmd!("Snooze…", "l", OpenSnoozePicker),
+        cmd!("Accept suggestions", "y", AcceptSuggestions),
+        cmd!("Reject suggestions", "n", RejectSuggestions),
+        cmd!("Accept rule suggestion", "shift-y", AcceptRule),
+        cmd!("Dismiss rule suggestion", "shift-n", DismissRule),
+        cmd!("Toggle rules panel", "shift-r", ToggleRules),
+        cmd!("Show screener", "5", ShowScreener),
+        cmd!("Allow sender (screener)", "a", AllowSender),
+        cmd!("Block sender (screener)", "b", BlockSender),
+        cmd!("Mute thread", "m", MuteThread),
+        cmd!("Unsubscribe from sender", "shift-u", Unsubscribe),
+        cmd!("Summarize thread", "s", SummarizeThread),
+        cmd!("Toggle settings", "cmd-,", ToggleSettings),
+        cmd!("Start triage session", "t", StartSession),
+        cmd!("Search", "/", OpenSearch),
+        cmd!("Classify visible mail", "c", ClassifyVisible),
     ]
 }
