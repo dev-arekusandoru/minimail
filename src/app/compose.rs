@@ -5,7 +5,7 @@ use crate::app::chrome::{HintBar, HintMode};
 use crate::model::{Message, MessageId};
 use gpui_kit::{
     component::{
-        input::{Textarea, TextareaState},
+        input::{InputEvent, Textarea, TextareaState},
         label::Label,
     },
     *,
@@ -35,6 +35,21 @@ impl ComposeReply {
         } else {
             format!("Re: {}", msg.subject)
         };
+        // The kit Textarea binds cmd-enter ("secondary-enter") itself, inserting a
+        // newline and emitting PressEnter; treat that as "send" and drop the newline.
+        cx.subscribe(&body, |this, body, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::PressEnter { secondary: true, .. }) {
+                let mut text = body.read(cx).value().to_string();
+                if text.ends_with('\n') {
+                    text.pop();
+                }
+                cx.emit(ComposeEvent::Send {
+                    in_reply_to: this.in_reply_to,
+                    body: text,
+                });
+            }
+        })
+        .detach();
         Self {
             in_reply_to: msg.id,
             to: format!("{} <{}>", msg.from_name, msg.from_email),

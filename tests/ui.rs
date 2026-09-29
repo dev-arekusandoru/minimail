@@ -315,12 +315,21 @@ fn x_toggles_selection_then_mark_done(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn shift_e_marks_all_from_sender_done(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let (email, expected) = h.read(|a| {
-        let id = a.triage.cursor(&a.mailbox).unwrap();
-        let email = a.mailbox.get(id).unwrap().from_email.clone();
-        let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
-        (email, n)
-    });
+    // Move the cursor (via keys) to a message whose sender has several messages.
+    let multi = |h: &mut Harness| {
+        h.read(|a| {
+            let id = a.triage.cursor(&a.mailbox).unwrap();
+            let email = a.mailbox.get(id).unwrap().from_email.clone();
+            let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
+            (email, n)
+        })
+    };
+    let mut guard = 0;
+    while multi(&mut h).1 < 2 && guard < 60 {
+        h.keys("j");
+        guard += 1;
+    }
+    let (email, expected) = multi(&mut h);
     assert!(expected > 1, "fixture should have multiple msgs per sender");
     let start = h.counts();
     h.keys("shift-e");
