@@ -44,14 +44,6 @@ impl CommandPalette {
             }
         })
         .detach();
-        cx.bind_keys([
-            KeyBinding::new("up", PaletteMoveUp, Some(PALETTE_CONTEXT)),
-            KeyBinding::new("ctrl-p", PaletteMoveUp, Some(PALETTE_CONTEXT)),
-            KeyBinding::new("down", PaletteMoveDown, Some(PALETTE_CONTEXT)),
-            KeyBinding::new("ctrl-n", PaletteMoveDown, Some(PALETTE_CONTEXT)),
-            KeyBinding::new("enter", PaletteRun, Some(PALETTE_CONTEXT)),
-            KeyBinding::new("escape", PaletteDismiss, Some(PALETTE_CONTEXT)),
-        ]);
         Self {
             input,
             query: String::new(),

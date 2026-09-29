@@ -207,7 +207,7 @@ fn exactly_one_state_survives_a_long_mixed_run_of_operations() {
             _ => {
                 let mut t = Triage::new(state_of(rng.next()));
                 t.move_cursor(&mb, rng.next() as isize % 7 - 3);
-                if rng.next() % 2 == 0 {
+                if rng.next().is_multiple_of(2) {
                     t.extend(&mb, rng.next() as isize % 5 - 2);
                 }
                 t.apply(&mut mb, state_of(rng.next()));

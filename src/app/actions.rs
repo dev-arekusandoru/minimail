@@ -1,5 +1,6 @@
 //! Actions (namespace `mail`), keymap and the command list shown in the palette/help.
 
+use crate::app::palette::{PaletteDismiss, PaletteMoveDown, PaletteMoveUp, PaletteRun};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -46,6 +47,7 @@ pub const COMPOSE_CONTEXT: &str = "Compose";
 /// Register the whole keymap.
 pub fn bind_keys(cx: &mut App) {
     let m = Some(MAIL_BINDING);
+    let p = Some(PALETTE_CONTEXT);
     cx.bind_keys([
         KeyBinding::new("j", SelectNext, m),
         KeyBinding::new("down", SelectNext, m),
@@ -77,9 +79,14 @@ pub fn bind_keys(cx: &mut App) {
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),
-        // Palette context: escape/cmd-k close it (palette-specific keys live in palette.rs).
-        KeyBinding::new("escape", ToggleCommandPalette, Some(PALETTE_CONTEXT)),
-        KeyBinding::new("cmd-k", ToggleCommandPalette, Some(PALETTE_CONTEXT)),
+        // Palette context.
+        KeyBinding::new("up", PaletteMoveUp, p),
+        KeyBinding::new("ctrl-p", PaletteMoveUp, p),
+        KeyBinding::new("down", PaletteMoveDown, p),
+        KeyBinding::new("ctrl-n", PaletteMoveDown, p),
+        KeyBinding::new("enter", PaletteRun, p),
+        KeyBinding::new("escape", PaletteDismiss, p),
+        KeyBinding::new("cmd-k", ToggleCommandPalette, p),
     ]);
 }
 
