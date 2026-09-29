@@ -1,6 +1,7 @@
 //! Keyboard-first command palette.
 
 use crate::app::actions::{self, CommandSpec, PALETTE_CONTEXT};
+use crate::search::Query;
 use gpui_kit::{
     prelude::FluentBuilder as _,
     component::{
@@ -26,6 +27,8 @@ pub struct CommandPalette {
 pub enum PaletteEvent {
     Run(Box<dyn Action>),
     Dismiss,
+    /// Enter on a search query (`/…` or containing `from:` etc.); carries the raw text.
+    Search(String),
 }
 
 actions!(
@@ -67,6 +70,14 @@ impl CommandPalette {
     fn visible(&self) -> Vec<usize> {
         filter_specs(&self.query, &self.commands)
     }
+
+    /// Names of the commands currently listed (empty while a search query is shown).
+    pub fn rows(&self) -> Vec<String> {
+        if Query::is_search(&self.query) {
+            return Vec::new();
+        }
+        self.visible().into_iter().map(|i| self.commands[i].name.to_owned()).collect()
+    }
 }
 
 impl Focusable for CommandPalette {
@@ -95,7 +106,9 @@ impl Render for CommandPalette {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &PaletteRun, _, cx| {
-                if let Some(&index) = this.visible().get(this.selected) {
+                if Query::is_search(&this.query) {
+                    cx.emit(PaletteEvent::Search(this.query.clone()));
+                } else if let Some(&index) = this.visible().get(this.selected) {
                     cx.emit(PaletteEvent::Run((this.commands[index].action)()));
                 }
             }))
@@ -112,7 +125,20 @@ impl Render for CommandPalette {
             .rounded_md()
             .child(Input::new(&self.input).appearance(false))
             .child(div().h(px(1.)).bg(rgb(BORDER)))
-            .child(
+            .child(if Query::is_search(&self.query) {
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_sm()
+                    .text_color(rgb(ACCENT))
+                    .bg(rgb(ROW_SELECTED))
+                    .rounded_sm()
+                    .child(SharedString::from(format!(
+                        "Search: {}",
+                        Query::parse(&self.query).describe()
+                    )))
+                    .into_any_element()
+            } else {
                 div()
                     .id("palette-list")
                     .flex()
@@ -134,15 +160,18 @@ impl Render for CommandPalette {
                                 el.bg(rgb(ROW_SELECTED)).text_color(rgb(ACCENT))
                             })
                             .child(command.name)
-                            .child(
-                                Kbd::new(
-                                    Keystroke::parse(command.key)
-                                        .unwrap_or_else(|_| Keystroke::parse("space").unwrap()),
+                            .when(!command.key.is_empty(), |el| {
+                                el.child(
+                                    Kbd::new(
+                                        Keystroke::parse(command.key)
+                                            .unwrap_or_else(|_| Keystroke::parse("space").unwrap()),
+                                    )
+                                    .appearance(false),
                                 )
-                                .appearance(false),
-                            )
-                    })),
-            )
+                            })
+                    }))
+                    .into_any_element()
+            })
     }
 }
 
