@@ -80,7 +80,8 @@ gpui_kit::actions!(
         GrowListPane,
         ShrinkListPane,
         ResetPanes,
-        TogglePaneLayout
+        TogglePaneLayout,
+        ToggleSidebar
     ]
 );
 
@@ -187,6 +188,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-left", ShrinkListPane, m),
         KeyBinding::new("alt-r", ResetPanes, m),
         KeyBinding::new("alt-l", TogglePaneLayout, m),
+        KeyBinding::new("cmd-b", ToggleSidebar, m),
         // Snooze picker.
         KeyBinding::new("1", SnoozePreset1, Some("SnoozePicker && !Input")),
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
@@ -348,6 +350,7 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(View, "Shrink list pane", "alt-left", ShrinkListPane),
         cmd!(View, "Reset pane sizes", "alt-r", ResetPanes),
         cmd!(View, "Toggle pane layout", "alt-l", TogglePaneLayout),
+        cmd!(View, "Toggle sidebar", "cmd-b", ToggleSidebar),
         // Sidebar navigation.
         cmd!(Navigate, "Go to inbox", "g i", GoInbox),
         cmd!(Navigate, "Go to snoozed", "g s", GoSnoozed),
