@@ -31,7 +31,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 📝 **Thread summaries** | Opt-in. Shows the summary, action items and dates above the thread. |
 | ⏰ **Snooze with a return time** | Tonight, tomorrow, Monday or a custom time (`3h`, `2d`). The message returns to the Inbox when it's due. |
 | 🔁 **Follow-ups that come back** | Waiting threads with no reply after 3 days return to the Inbox, tagged *no reply*. |
-| 🛡️ **Screener** | First-time senders wait until you allow or block them. Blocking hides mail and never deletes it. |
+| 🛡️ **Screener** | First-time senders wait until you allow or block them. Blocking hides mail and never deletes it.  Allowing a sender adds them to your address book, so the decision survives a restart.
 | 🪄 **Rules from your habits** | Do the same thing to one sender twice and it offers to make it a rule. |
 | 🔍 **Search** | `from:`, `subject:`, `is:`, `before:`, `after:` and free text. |
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
@@ -117,11 +117,23 @@ cargo clippy --all-targets -- -D warnings   # lint
 
 The UI tests run headless. They drive the real views with simulated keystrokes and a fake clock, so no window opens.
 
+### Where the data lives
+
+Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
+`~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
+its directory) on first launch, migrated forward through `PRAGMA user_version`,
+and seeded once from `fixtures/contacts_seed.json`; afterwards the file is
+yours, so deleting it just re-seeds on the next start. Allowing a sender in the
+Screener writes a contact there (undo takes it back out), and everything else
+the app tracks — messages, triage, rules, themes — still comes from the
+fixtures.
+
 ### Project layout
 
 ```
 src/
 ├── model/        # triage states, undo, snooze, screener, outbox (pure logic; split by concern)
+├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding
 ├── judge/        # System 1 classifier interface, stub provider, routing policy
 ├── summary.rs    # thread summarizer interface + stub
 ├── search.rs     # query parser
@@ -131,7 +143,7 @@ src/
 ├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
 └── app/          # GPUI views: main window, palette, compose, panels; icons.rs is the icon language table, row.rs the row frame
     └── mail_app/ # MailApp split by concern: accessors, actions, modals, help, rows, list, reader, render (+ grouping, mouse)
-fixtures/         # mock mailbox + known contacts
+fixtures/         # mock mailbox + the seed address book (contacts_seed.json, embedded at build time)
 themes/           # built-in themes (JSON, embedded at build time)
 tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs)
 ```
