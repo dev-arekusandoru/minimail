@@ -6,7 +6,6 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds,
     WindowOptions, base::Root, px, size,
 };
-use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
@@ -47,7 +46,7 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
         .expect("open window");
         (window.downcast::<Root>().expect("root").into(), content)
     });
-    let mut h = Harness { cx, window, app };
+    let h = Harness { cx, window, app };
     h.cx.run_until_parked();
     h
 }

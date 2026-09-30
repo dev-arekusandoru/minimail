@@ -171,12 +171,14 @@ pub fn help_columns(panel_w: f32) -> usize {
     (((panel_w - 2. * HELP_PAD) / HELP_COLUMN_W).floor() as usize).clamp(1, 3)
 }
 
+type CloseHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
 /// Shortcut overlay panel: constrained to the window, multi-column when wide,
 /// scrolling its body (via `scroll`) when the content is taller than the window.
 #[derive(IntoElement)]
 pub struct HelpOverlay {
     scroll: ScrollHandle,
-    on_close: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    on_close: CloseHandler,
 }
 
 impl HelpOverlay {
