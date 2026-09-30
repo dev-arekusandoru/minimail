@@ -2,7 +2,7 @@
 
 # ✉️ mail-classifier
 
-**A keyboard-first email client that treats your inbox as a to-do list.**
+**A keyboard-first, mouse-friendly email client that treats your inbox as a to-do list.**
 
 Built in Rust with [GPUI](https://www.gpui.rs/) and [gpui-kit](https://gpui-kit.com/).
 
@@ -24,6 +24,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | | |
 |---|---|
 | ⌨️ **Keyboard-first** | Every action has a key. `cmd-k` opens a command palette and `?` shows every shortcut. |
+| 🖱️ **Mouse and keyboard driven** | Everything the keys do is one click away, and keys keep working after clicks. A toolbar carries the message actions (Done, Waiting, Inbox, Later…, Select, Reply, Summarize, Accept/Reject AI, Mute, Unsubscribe, all-from-sender) and global ones (search box, Commands, Triage session, Undo, Classify, Rules, Settings, `?`); hover a button to see its shortcut. Click a row to open it, tick its checkbox (or cmd-click) to select, shift-click for a range, click a pending AI badge to accept it (right-click rejects), click sidebar tabs, palette and snooze entries, and click outside a panel to close it. |
 | ✅ **Inbox as a to-do list** | Every message is in exactly one of Inbox, Waiting, Later or Done. Every action can be undone. |
 | 📦 **Batch triage** | Multi-select with `shift-j`/`shift-k` or `x`, or act on everything from one sender at once. |
 | 🧠 **System 1 classifier** | Labels spam, needs-reply, urgency, kind and a suggested state. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. The interface mirrors [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). |

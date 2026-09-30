@@ -926,10 +926,50 @@ impl MailApp {
             .to_string()
     }
 
+    /// Uniform height of every list row (message rows and thread headers).
+    pub(super) fn row_h(&self) -> f32 {
+        row::row_height(self.preview_lines)
+    }
+
+    /// Cursor / open / checked state of the row for message `id`.
+    pub fn row_visual(&self, id: MessageId) -> RowVisual {
+        RowVisual {
+            cursor: self.cursor_id() == Some(id),
+            open: self.opened == Some(id),
+            checked: self.mode == ListMode::State && self.triage.is_selected(id),
+        }
+    }
+
+    /// Icons of the right-hand cluster of message `id` that fit the list width: `(shown, hidden)`.
+    pub fn row_icons(&self, id: MessageId, width: f32) -> (Vec<Glyph>, Vec<Glyph>) {
+        let Some(msg) = self.mailbox.get(id) else {
+            return (Vec::new(), Vec::new());
+        };
+        let pending = self.mailbox.pending(id);
+        let return_time_shown = self.triage.view == TriageState::Later && self.mode == ListMode::State;
+        let glyphs = icons::glyphs_for(&GlyphInputs {
+            tags: self.mailbox.tags(id),
+            pending: &pending,
+            muted: self.mailbox.is_muted(msg.thread_id),
+            new_sender: self.mailbox.is_screened(id),
+            snoozed: self.mailbox.snoozed_until(id).is_some() && !return_time_shown,
+            attachment: crate::preview::mentions_attachment(&msg.subject, &msg.body),
+        });
+        icons::split_overflow(&glyphs, icons::max_icons(width))
+    }
+
+    fn row_click(
+        ix: usize,
+        cx: &Context<Self>,
+    ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, ev: &ClickEvent, window, cx| this.click_row(ix, ev, window, cx))
+    }
+
+    /// Message row: sender + date, full-width subject, optional preview, icon cluster.
     fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> Stateful<Div> {
         let t = theme::active(cx);
-        let is_cursor = ix == self.cursor_ix();
-        let selected = self.mode == ListMode::State && self.triage.is_selected(msg.id);
+        let mut visual = self.row_visual(msg.id);
+        visual.cursor = ix == self.cursor_ix();
         let date = match self.mailbox.snoozed_until(msg.id) {
             Some(until) if self.triage.view == TriageState::Later && self.mode == ListMode::State => {
                 format!("↩ {}", format_when(until))
@@ -937,81 +977,95 @@ impl MailApp {
             _ => Self::clock_label(&msg.received, newest),
         };
         let pending = self.mailbox.pending(msg.id);
-        let hover = t.hover;
-        let row_click = |cx: &Context<Self>| {
-            cx.listener(move |this, ev: &ClickEvent, window, cx| this.click_row(ix, ev, window, cx))
-        };
-        div()
-            .id(("row", msg.id as usize))
-            .h(px(ROW_H))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .text_size(px(13.))
-            .border_l_2()
-            .border_color(if is_cursor { t.accent } else { transparent_black() })
-            .when(selected, |d| d.bg(t.accent.opacity(0.16)))
-            .when(is_cursor && !selected, |d| d.bg(t.selection))
-            .cursor_pointer()
-            .hover(move |s| s.bg(hover))
-            .child(self.row_checkbox(ix, selected, cx))
+        let unread = !self.read.contains(&msg.id)
+            && self.mailbox.state_of(msg.id) == Some(TriageState::Inbox);
+        let (shown, hidden) = self.row_icons(msg.id, self.list_w);
+        let very_urgent = shown.contains(&Glyph::UrgentHigh);
+        let emphasis = if unread || visual.open { FontWeight::SEMIBOLD } else { FontWeight::NORMAL };
+        let lines = self.preview_lines;
+        let hint = icons::suggestion_summary(&pending);
+        let ix_id = msg.id as usize;
+        row::frame(div().id(("row", ix_id)), visual, &t, self.row_h())
+            .child(self.row_checkbox(ix, visual.checked, cx))
+            .child(row::status_icon(visual.open, unread, very_urgent, &t))
             .child(
                 div()
-                    .id(("row-body", msg.id as usize))
+                    .id(("row-body", ix_id))
                     .flex_1()
                     .min_w_0()
+                    .h_full()
                     .flex()
-                    .items_center()
-                    .gap_2()
-                    .on_click(row_click(cx))
+                    .flex_col()
+                    .justify_center()
+                    .overflow_hidden()
+                    .on_click(Self::row_click(ix, cx))
                     .child(
                         div()
-                            .w(px(120.))
-                            .flex_none()
+                            .h(px(18.))
                             .truncate()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(t.text)
+                            .font_weight(emphasis)
                             .child(msg.from_name.clone()),
                     )
                     .child(
                         div()
-                            .flex_1()
+                            .h(px(18.))
                             .truncate()
-                            .text_color(t.text_muted)
+                            .text_color(t.text)
+                            .font_weight(if unread { FontWeight::MEDIUM } else { FontWeight::NORMAL })
                             .child(msg.subject.clone()),
-                    ),
-            )
-            .child(
-                div()
-                    .id(("row-badges", msg.id as usize))
-                    .when(!pending.is_empty(), |d| {
-                        d.tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(
-                                "Accept AI labels (y) · right-click to reject (n)",
-                            )
-                            .build(window, cx)
-                        })
-                        .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                            this.suggestions_at(ix, true, w, cx)
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, _: &MouseDownEvent, w, cx| {
-                                this.suggestions_at(ix, false, w, cx)
-                            }),
+                    )
+                    .when(lines > 0, |d| {
+                        d.child(
+                            div()
+                                .h(px(row::PREVIEW_LINE_H * f32::from(lines)))
+                                .line_clamp(lines as usize)
+                                .text_size(px(12.))
+                                .line_height(px(row::PREVIEW_LINE_H))
+                                .text_color(t.text_muted)
+                                .child(crate::preview::snippet(&msg.body)),
                         )
-                    })
-                    .child(badges(self.mailbox.tags(msg.id), &pending)),
+                    }),
             )
             .child(
                 div()
-                    .id(("row-date", msg.id as usize))
+                    .h_full()
                     .flex_none()
-                    .text_size(px(11.))
-                    .text_color(t.text_muted)
-                    .on_click(row_click(cx))
-                    .child(date),
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .justify_start()
+                    .pt(px(3.))
+                    .child(
+                        div()
+                            .id(("row-date", ix_id))
+                            .h(px(18.))
+                            .flex()
+                            .items_center()
+                            .text_size(px(11.))
+                            .text_color(if unread { t.accent } else { t.text_muted })
+                            .on_click(Self::row_click(ix, cx))
+                            .child(date),
+                    )
+                    .child(
+                        div()
+                            .id(("row-badges", ix_id))
+                            .h(px(18.))
+                            .flex()
+                            .items_center()
+                            .when(!pending.is_empty(), |d| {
+                                d.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                                    this.suggestions_at(ix, true, w, cx)
+                                }))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this, _: &MouseDownEvent, w, cx| {
+                                        this.suggestions_at(ix, false, w, cx)
+                                    }),
+                                )
+                            })
+                            .child(icons::cluster(&shown, &hidden, &hint, &t, ix_id)),
+                    ),
             )
     }
 
@@ -1042,8 +1096,15 @@ impl MailApp {
             .when(selected > 0, |d| {
                 d.child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
                         .text_color(t.accent)
-                        .child(format!("{selected} selected")),
+                        .child(format!("{selected} selected"))
+                        .child(
+                            button("btn-clear-selection", "Clear", "Clear selection", "escape", cx)
+                                .on_click(run(ClearSelection)),
+                        ),
                 )
             });
         let body = if count == 0 {
