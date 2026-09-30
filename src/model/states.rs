@@ -27,22 +27,25 @@ impl Mailbox {
         changed
     }
 
+    /// Move every message from `email` currently in `from` to `state`. One undo
+    /// step; returns the number changed.
     pub fn set_state_for_sender(
         &mut self,
         email: &str,
-        only_inbox: bool,
+        from: TriageState,
         state: TriageState,
     ) -> usize {
-        let ids: Vec<_> = self
-            .messages
-            .iter()
-            .filter(|m| {
-                m.from_email.eq_ignore_ascii_case(email)
-                    && (!only_inbox || m.state == TriageState::Inbox)
-            })
-            .map(|m| m.id)
-            .collect();
+        let ids = self.sender_ids_in(email, from);
         self.set_state(&ids, state)
+    }
+
+    /// Messages from `email` currently in `from` (what a sender-wide action moves).
+    pub fn sender_ids_in(&self, email: &str, from: TriageState) -> Vec<MessageId> {
+        self.messages
+            .iter()
+            .filter(|m| m.from_email.eq_ignore_ascii_case(email) && m.state == from)
+            .map(|m| m.id)
+            .collect()
     }
 
     pub fn mark_spam(&mut self, ids: &[MessageId], block: bool) -> usize {

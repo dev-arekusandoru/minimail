@@ -390,23 +390,22 @@ fn sender_wide_delete_and_inbox_confirm(cx: &mut TestAppContext) {
     h.keys("1");
     assert_eq!(h.count(TriageState::Deleted), 2);
 
-    // One message back to Inbox by hand, then the sender-wide move asks about it.
-    h.keys("u");
-    h.goto(2);
-    h.keys("d");
-    assert_eq!(h.count(TriageState::Deleted), 1);
+    // From Trash, the sender-wide move brings the sender's trashed mail back.
+    h.keys("g d");
     h.keys("shift-i");
-    assert_eq!(h.dialog_title(), "Move all 1 messages from alice in Inbox?");
+    assert_eq!(h.dialog_title(), "Move to Inbox all 2 messages from alice in Trash?");
     h.keys("1");
-    assert_eq!(h.count(TriageState::Inbox), 1, "sender-wide Inbox only touches Inbox mail");
-    assert_eq!(h.count(TriageState::Deleted), 1);
+    assert_eq!(h.count(TriageState::Inbox), 2);
+    assert_eq!(h.count(TriageState::Deleted), 0);
+    h.keys("u");
+    assert_eq!(h.count(TriageState::Deleted), 2, "one undo step restores both");
 }
 
 #[gpui_kit::gpui::test]
 fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-f");
-    assert_eq!(h.dialog_title(), "File all 1 messages from alice in Inbox?");
+    assert_eq!(h.dialog_title(), "File all 1 message from alice in Inbox?");
     h.keys("1");
     assert!(h.folder_rows().contains(&"Receipts".to_owned()));
     h.keys("enter");
@@ -414,7 +413,7 @@ fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
 
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-s");
-    assert_eq!(h.dialog_title(), "Snooze all 1 messages from alice in Inbox?");
+    assert_eq!(h.dialog_title(), "Snooze all 1 message from alice in Inbox?");
     h.keys("1");
     assert!(h.read(|a| a.snooze_open()), "confirm opens the snooze picker");
     h.keys("1");

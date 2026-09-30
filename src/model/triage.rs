@@ -95,15 +95,17 @@ impl Triage {
         self.clamp(mb);
         changed
     }
+    /// Move every message from the cursor's sender that shares the cursor
+    /// message's state to `state`, then re-clamp the cursor.
     pub fn apply_to_sender(&mut self, mb: &mut Mailbox, state: TriageState) -> usize {
-        let Some(sender) = self
+        let Some((sender, from)) = self
             .cursor(mb)
             .and_then(|id| mb.get(id))
-            .map(|m| m.from_email.clone())
+            .map(|m| (m.from_email.clone(), m.state))
         else {
             return 0;
         };
-        let changed = mb.set_state_for_sender(&sender, true, state);
+        let changed = mb.set_state_for_sender(&sender, from, state);
         self.clamp(mb);
         changed
     }

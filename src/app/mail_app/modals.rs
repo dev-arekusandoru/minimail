@@ -302,8 +302,8 @@ impl MailApp {
 pub(super) enum FileAction {
     /// File these messages (`f`, the reader bar).
     Ids(Vec<MessageId>),
-    /// File every Inbox message from this sender (`shift-f`).
-    Sender(String),
+    /// File every message from this sender in the given state (`shift-f`).
+    Sender(String, TriageState),
     /// Post-send: file the original and its sent replies.
     AfterReply(MessageId),
     /// Block (`b`) or unsubscribe (`shift-u`), then move that sender's Inbox mail.
@@ -314,6 +314,25 @@ pub(super) enum FileAction {
 enum Pick {
     File(FolderId),
     Create(String),
+}
+
+/// A sender-wide action's scope: the cursor's sender and their messages in the
+/// cursor message's state.
+struct SenderScope {
+    name: String,
+    email: String,
+    ids: Vec<MessageId>,
+    from: TriageState,
+    /// Where those messages live, for the confirm title ("Inbox", "Archive", a folder).
+    place: String,
+}
+
+impl SenderScope {
+    fn title(&self, verb: &str) -> String {
+        let n = self.ids.len();
+        let noun = if n == 1 { "message" } else { "messages" };
+        format!("{verb} all {n} {noun} from {} in {}?", self.name, self.place)
+    }
 }
 
 /// Title, message, options and default option of a choice dialog.
@@ -348,14 +367,28 @@ impl MailApp {
             .map(|m| (m.from_name.clone(), m.from_email.clone()))
     }
 
-    /// Inbox messages from one sender (what a sender-wide action would move).
-    fn inbox_ids_from(&self, email: &str) -> Vec<MessageId> {
-        self.mailbox
-            .messages()
-            .iter()
-            .filter(|m| m.from_email.eq_ignore_ascii_case(email) && m.state == TriageState::Inbox)
-            .map(|m| m.id)
-            .collect()
+    /// The cursor's sender plus their messages in the cursor message's state:
+    /// the scope of a sender-wide action. `None` when there is no cursor.
+    fn sender_scope(&self) -> Option<SenderScope> {
+        let msg = self.cursor_id().and_then(|id| self.mailbox.get(id))?;
+        let from = msg.state;
+        let place = match from {
+            TriageState::Inbox => "Inbox".to_owned(),
+            TriageState::Snoozed => "Snoozed".to_owned(),
+            TriageState::Archived => "Archive".to_owned(),
+            TriageState::Deleted => "Trash".to_owned(),
+            TriageState::Filed(id) => self
+                .mailbox
+                .folder(id)
+                .map_or_else(|| "this folder".to_owned(), |f| f.name.clone()),
+        };
+        Some(SenderScope {
+            name: msg.from_name.clone(),
+            email: msg.from_email.clone(),
+            ids: self.mailbox.sender_ids_in(&msg.from_email, from),
+            from,
+            place,
+        })
     }
 
     /// One account's folders in tree order, children indented under their parent.
@@ -440,7 +473,7 @@ impl MailApp {
         let title = match &action {
             FileAction::Ids(ids) if ids.len() == 1 => "File to folder:".to_owned(),
             FileAction::Ids(ids) => format!("File {} messages to:", ids.len()),
-            FileAction::Sender(email) => format!("File all mail from {email} to:"),
+            FileAction::Sender(email, _) => format!("File all mail from {email} to:"),
             FileAction::AfterReply(_) => "File the original and the reply to:".to_owned(),
             FileAction::BlockSender { email, .. } => format!("File all mail from {email} to:"),
         };
@@ -491,9 +524,9 @@ impl MailApp {
                     self.mailbox.create_folder_and_file(account, name, None, ids).1
                 }
             },
-            FileAction::Sender(email) => self.mailbox.grouped(|mb| {
+            FileAction::Sender(email, from) => self.mailbox.grouped(|mb| {
                 let state = TriageState::Filed(folder_for(mb, account, &pick));
-                mb.set_state_for_sender(email, true, state)
+                mb.set_state_for_sender(email, *from, state)
             }),
             FileAction::AfterReply(original) => self.mailbox.grouped(|mb| {
                 let state = TriageState::Filed(folder_for(mb, account, &pick));
@@ -713,23 +746,23 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((name, email)) = self.cursor_sender() else {
+        let Some(scope) = self.sender_scope() else {
             return;
         };
-        let ids = self.inbox_ids_from(&email);
-        if ids.is_empty() {
+        if scope.ids.is_empty() || scope.from == state {
             return;
         }
         let verb = match state {
             TriageState::Archived => "Archive",
             TriageState::Deleted => "Delete",
-            TriageState::Inbox => "Move",
-            _ => "Mark",
+            TriageState::Inbox => "Move to Inbox",
+            _ => "Move",
         };
-        let title = format!("{verb} all {} messages from {name} in Inbox?", ids.len());
+        let title = scope.title(verb);
+        let SenderScope { name, email, from, .. } = scope;
         self.confirm(
             title,
-            move |this, window, cx| this.mark_sender(state, window, cx),
+            move |this, window, cx| this.mark_sender(&email, &name, from, state, window, cx),
             window,
             cx,
         );
@@ -737,18 +770,18 @@ impl MailApp {
 
     /// Sender-wide file: confirm, then pick a folder.
     pub(super) fn confirm_sender_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((name, email)) = self.cursor_sender() else {
+        let Some(scope) = self.sender_scope() else {
             return;
         };
-        let ids = self.inbox_ids_from(&email);
-        if ids.is_empty() {
+        if scope.ids.is_empty() {
             return;
         }
-        let title = format!("File all {} messages from {name} in Inbox?", ids.len());
+        let title = scope.title("File");
+        let SenderScope { email, from, .. } = scope;
         self.confirm(
             title,
             move |this, window, cx| {
-                this.open_folder_picker(FileAction::Sender(email.clone()), window, cx)
+                this.open_folder_picker(FileAction::Sender(email.clone(), from), window, cx)
             },
             window,
             cx,
@@ -757,14 +790,14 @@ impl MailApp {
 
     /// Sender-wide snooze: confirm, then pick a return time.
     pub(super) fn confirm_sender_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((name, email)) = self.cursor_sender() else {
+        let Some(scope) = self.sender_scope() else {
             return;
         };
-        let ids = self.inbox_ids_from(&email);
-        if ids.is_empty() {
+        if scope.ids.is_empty() || scope.from == TriageState::Snoozed {
             return;
         }
-        let title = format!("Snooze all {} messages from {name} in Inbox?", ids.len());
+        let title = scope.title("Snooze");
+        let ids = scope.ids;
         self.confirm(
             title,
             move |this, window, cx| this.open_snooze_for(Some(ids.clone()), window, cx),

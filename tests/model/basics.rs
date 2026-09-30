@@ -5,7 +5,7 @@ use mail_classifier::model::{Location, Mailbox, View};
 fn set_state_and_sender_scope_are_undoable() {
     let mut mb = sample();
     assert_eq!(
-        mb.set_state_for_sender("a@x.test", true, State::Archived),
+        mb.set_state_for_sender("a@x.test", State::Inbox, State::Archived),
         1
     );
     assert_eq!(mb.state_of(1), Some(State::Archived));
@@ -13,18 +13,16 @@ fn set_state_and_sender_scope_are_undoable() {
     assert!(mb.undo());
     assert_eq!(mb.state_of(1), Some(State::Inbox));
     assert_eq!(mb.state_of(3), Some(State::Archived));
-    assert_eq!(
-        mb.set_state_for_sender("a@x.test", false, State::Deleted),
-        2
-    );
-    assert_eq!(mb.state_of(3), Some(State::Deleted));
     assert_invariant(&mb);
 }
 #[test]
-fn sender_set_moves_only_inbox_when_requested() {
+fn sender_set_moves_only_messages_in_the_source_state() {
     let mut mb = sample();
-    assert_eq!(mb.set_state_for_sender("a@x.test", true, State::Deleted), 1);
+    assert_eq!(mb.set_state_for_sender("a@x.test", State::Inbox, State::Deleted), 1);
     assert_eq!(mb.state_of(3), Some(State::Archived));
+    assert_eq!(mb.state_of(5), Some(State::Deleted));
+    assert_eq!(mb.set_state_for_sender("a@x.test", State::Archived, State::Inbox), 1);
+    assert_eq!(mb.state_of(3), Some(State::Inbox));
     assert_eq!(mb.state_of(5), Some(State::Deleted));
 }
 #[test]

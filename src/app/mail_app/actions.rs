@@ -71,15 +71,18 @@ impl MailApp {
         cx.notify();
     }
 
-    pub(super) fn mark_sender(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((name, email)) = self
-            .cursor_id()
-            .and_then(|id| self.mailbox.get(id))
-            .map(|m| (m.from_name.clone(), m.from_email.clone()))
-        else {
-            return;
-        };
-        let n = self.mailbox.set_state_for_sender(&email, true, state);
+    /// Move the sender's mail in `from` to `state` (after the confirm dialog).
+    pub(super) fn mark_sender(
+        &mut self,
+        email: &str,
+        name: &str,
+        from: TriageState,
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (name, email) = (name.to_owned(), email.to_owned());
+        let n = self.mailbox.set_state_for_sender(&email, from, state);
         self.triage.clear_selection();
         if n > 0 {
             let msg = format!(
