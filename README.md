@@ -65,7 +65,23 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `cmd-,` | Settings | `?` | All shortcuts |
 | `]` / `[` | Next / previous message in thread | `right` / `left` | Expand / collapse thread |
 | `alt-l` | Toggle pane layout (side by side / stacked) | `alt-left` / `alt-right` | Shrink / grow the list pane |
-| `alt-r` | Reset pane sizes | | |
+| `alt-r` | Reset pane sizes | `v` | Reader mode for the open HTML message |
+| `shift-o` | Expand / collapse the other messages of the open thread | | |
+
+The reader shows no action buttons by default; the footer lists the keys. Settings → Appearance → *Reader action toolbar* adds buttons to the reader and its banners.
+
+#### HTML mail
+
+HTML mail is rendered by gpui-kit's `TextView` (`gpui_kit::component::text`), which keeps **structure only**: headings, bold/italic, links, lists, tables and images.
+
+- **Dropped:** CSS in `<style>` blocks and nearly all inline `style`, including colors, backgrounds, fonts, spacing and table widths. Branded newsletters and receipts show their layout, not their brand styling. Only two things are honored: image `width`/`height`, and the `<mark>` highlight color.
+- **Not run:** scripts. `<script>` and `<style>` are removed before rendering.
+- **Images:**
+  - `data:` images render inline.
+  - Remote `http(s)` images are blocked by `reading::safe_html` and replaced by their alt text, with a count shown under the body. There is no option to load them yet.
+- **Reader mode (`v`)** shows the message's text part instead. For HTML-only mail it shows text extracted by `reading::html_to_text`.
+
+A faithful, styled render would need an embedded web engine. This is out of scope while the app uses mock data only. See `docs/reader-spec.md`.
 
 ### Where the controls live
 
