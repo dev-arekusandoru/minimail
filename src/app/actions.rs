@@ -3,8 +3,9 @@
 use crate::app::palette::{PaletteDismiss, PaletteMoveDown, PaletteMoveUp, PaletteRun};
 use crate::app::panels::{RULES_CONTEXT, RulesClose, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{
-    SETTINGS_CONTEXT, SettingsClose, SettingsNext, SettingsPrev, SettingsThresholdDown,
-    SettingsThresholdUp, SettingsToggleMode,
+    SETTINGS_CONTEXT, SettingsClose, SettingsNext, SettingsPrev, SettingsSearch,
+    SettingsSectionNext, SettingsSectionPrev, SettingsThresholdDown, SettingsThresholdUp,
+    SettingsToggleMode,
 };
 use crate::app::snooze::{
     SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
@@ -138,11 +139,17 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("escape", SnoozeCancel, Some(SNOOZE_CONTEXT)),
         // Settings panel.
         KeyBinding::new("j", SettingsNext, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("down", SettingsNext, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("k", SettingsPrev, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("up", SettingsPrev, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("space", SettingsToggleMode, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("enter", SettingsToggleMode, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("=", SettingsThresholdUp, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("-", SettingsThresholdDown, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("escape", SettingsClose, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("/", SettingsSearch, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("ctrl-tab", SettingsSectionNext, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("ctrl-shift-tab", SettingsSectionPrev, Some(SETTINGS_CONTEXT)),
         // Rules panel.
         KeyBinding::new("j", RulesNext, Some(RULES_CONTEXT)),
         KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),
