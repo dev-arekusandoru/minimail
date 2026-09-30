@@ -1,38 +1,22 @@
 //! Stateless chrome: hint bar, help overlay, view tabs, empty state.
 
 use crate::app::actions::commands;
+use crate::app::ui::shortcut_chips;
 use crate::clock::{Timestamp, DAY};
 use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::{self, Theme};
 use gpui_kit::{
-    component::{kbd::Kbd, label::Label, separator::Separator},
+    component::{label::Label, separator::Separator},
     prelude::FluentBuilder as _,
     *,
 };
 
-fn kbd(key: &str) -> Kbd {
-    Kbd::new(Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap()))
-        .appearance(false)
-}
-
-/// One `kbd` chip per keystroke, so multi-stroke bindings like `"g i"` read as `g` then `i`.
-fn kbd_chips(t: &Theme, key: &str) -> Div {
-    let mut el = div().flex().items_center().gap_1();
-    for (i, part) in key.split_whitespace().enumerate() {
-        if i > 0 {
-            el = el.child(div().text_xs().text_color(t.text_muted).child("then"));
-        }
-        el = el.child(kbd(part));
-    }
-    el
-}
-
-fn hint(t: &Theme, key: &str, what: &str) -> impl IntoElement {
+fn hint(t: &Theme, key: &str, what: &str, cx: &App) -> impl IntoElement {
     div()
         .flex()
         .items_center()
         .gap_1()
-        .child(kbd_chips(t, key))
+        .child(shortcut_chips(key, cx))
         .child(div().text_xs().text_color(t.text_muted).child(SharedString::from(what.to_owned())))
 }
 
@@ -145,7 +129,7 @@ impl RenderOnce for HintBar {
             .when_some(selected, |el, n| {
                 el.child(div().text_xs().text_color(t.accent).child(format!("{n} selected")))
             })
-            .children(shown.iter().map(|h| hint(&t, h.key, h.label).into_any_element()))
+            .children(shown.iter().map(|h| hint(&t, h.key, h.label, cx).into_any_element()))
     }
 }
 
@@ -203,7 +187,7 @@ impl RenderOnce for HelpOverlay {
                         .text_sm()
                         .text_color(t.text)
                         .child(Label::new(c.name))
-                        .when(!c.key.is_empty(), |el| el.child(kbd_chips(&t, c.key)))
+                        .when(!c.key.is_empty(), |el| el.child(shortcut_chips(c.key, cx)))
                 }))
         });
         div()

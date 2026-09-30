@@ -10,7 +10,7 @@ use gpui_kit::*;
 
 use super::{ListMode, MailApp, MenuKind};
 use crate::app::actions::*;
-use crate::app::ui::{icon_button, primary_button, run};
+use crate::app::ui::{icon_button, primary_button, run, shortcut};
 
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -23,7 +23,7 @@ impl MailApp {
             ListMode::State => self.location_label().into(),
             ListMode::Search(_) => "Search".into(),
         };
-        let search_tip: SharedString = "Search mail (/)".into();
+        let search_tip: SharedString = "Search mail".into();
         let search = div()
             .id("search-box")
             .test_support()
@@ -43,7 +43,11 @@ impl MailApp {
             .text_size(px(11.))
             .text_color(if searching { t.text } else { t.text_muted })
             .cursor_pointer()
-            .tooltip(move |window, cx| Tooltip::new(search_tip.clone()).build(window, cx))
+            .tooltip(move |window, cx| {
+                Tooltip::new(search_tip.clone())
+                    .key_binding(Some(shortcut("/")))
+                    .build(window, cx)
+            })
             .child(search_text)
             .child(if searching {
                 div()

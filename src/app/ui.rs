@@ -1,7 +1,7 @@
 //! Shared mouse-driven widgets: buttons that dispatch the very same actions the keys do.
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{Icon, Sizable as _, tooltip::Tooltip};
+use gpui_kit::component::{kbd::Kbd, Icon, Sizable as _, tooltip::Tooltip};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -21,6 +21,32 @@ pub fn run<A: Action + Clone>(
 pub fn mono_font(cx: &App) -> SharedString {
     cx.try_global::<gpui_kit::component::theme::Theme>()
         .map_or_else(|| SharedString::from(".SystemUIFont"), |k| k.mono_font_family.clone())
+}
+
+/// Font size of keycap pills: one step down from the kit default, so a pill fits a 24–28px row.
+const KEYCAP_TEXT: f32 = 10.;
+/// Minimum width of a keycap pill, so a one-character key still reads as a key.
+const KEYCAP_MIN_W: f32 = 14.;
+
+/// The one keycap every shortcut display uses: a [`Kbd`] pill for a single keystroke
+/// (`"e"`, `"shift-e"`, `"cmd-,"`). An unparseable key falls back to `space`, as the kit does.
+pub fn shortcut(key: &str) -> Kbd {
+    let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
+    Kbd::new(stroke).text_size(px(KEYCAP_TEXT)).py_0().px(px(4.)).min_w(px(KEYCAP_MIN_W))
+}
+
+/// Keycaps for a possibly multi-stroke binding (`"g i"`): one pill per stroke, joined by
+/// `then`, in the muted text colour the hint bar and help overlay use.
+pub fn shortcut_chips(key: &str, cx: &App) -> Div {
+    let then = crate::theme::active(cx).text_muted;
+    let mut el = div().flex().items_center().gap_1();
+    for (i, part) in key.split_whitespace().enumerate() {
+        if i > 0 {
+            el = el.child(div().text_size(px(KEYCAP_TEXT)).text_color(then).child("then"));
+        }
+        el = el.child(shortcut(part));
+    }
+    el
 }
 
 /// Small clickable button. `key` (a shortcut such as `"shift-e"`, or empty) is shown in the
@@ -54,11 +80,9 @@ fn styled_button(
 ) -> Observable {
     let Fill { bg, border, fg, hover } = fill;
     let active = crate::theme::active(cx).selection;
-    let tip: SharedString = if key.is_empty() {
-        tip.to_owned().into()
-    } else {
-        format!("{tip} ({key})").into()
-    };
+    let has_tip = !tip.is_empty();
+    let tip: SharedString = tip.to_owned().into();
+    let key: SharedString = key.to_owned().into();
     let label: SharedString = label.into();
     div()
         .id(id)
@@ -76,8 +100,16 @@ fn styled_button(
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(active))
-        .when(!tip.is_empty(), |d| {
-            d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .when(has_tip, |d| {
+            d.tooltip(move |window, cx| {
+                let tooltip = Tooltip::new(tip.clone());
+                let tooltip = if key.is_empty() {
+                    tooltip
+                } else {
+                    tooltip.key_binding(Some(shortcut(&key)))
+                };
+                tooltip.build(window, cx)
+            })
         })
         .child(label)
         .test_support()

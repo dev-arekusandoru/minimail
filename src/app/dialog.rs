@@ -6,6 +6,7 @@
 //! owner decides what that index means.
 
 use crate::app::overlay::FitViewport as _;
+use crate::app::ui::shortcut;
 use crate::theme::{self, Theme};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
@@ -105,13 +106,7 @@ impl ChoiceDialog {
             .text_sm()
             .text_color(t.text)
             .hover(move |el| el.bg(hover))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(16.))
-                    .text_color(t.accent)
-                    .child(option.shortcut.clone()),
-            )
+            .child(shortcut(&option.shortcut))
             .child(div().flex_1().child(option.label.clone()))
             .when(!option.detail.is_empty(), |d| {
                 d.child(

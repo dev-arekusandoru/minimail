@@ -2,7 +2,7 @@
 
 use crate::app::overlay::FitViewport as _;
 use crate::app::mail_app::panes::Orientation;
-use crate::app::ui::button;
+use crate::app::ui::{button, shortcut};
 use crate::clock::{Timestamp, DAY};
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::theme;
@@ -590,13 +590,27 @@ fn render_days(
         .into_any_element()
 }
 
+/// One settings help line: `true` marks a keystroke, drawn as a keycap pill; `false` is text.
+fn legend(t: &theme::Theme, parts: &[(&str, bool)]) -> Div {
+    let mut row = div().flex().items_center().gap_1().text_sm().text_color(t.text_muted);
+    for &(text, is_key) in parts {
+        row = if is_key {
+            row.child(shortcut(text))
+        } else {
+            row.child(SharedString::from(text.to_owned()))
+        };
+    }
+    row
+}
+
 fn render_action(spec: SettingSpec, t: &theme::Theme) -> AnyElement {
     div().id("settings-shortcuts").test_support().flex().flex_col().gap_1()
         .child(row(t, false, spec.title, spec.description, String::new()))
-        .child(div().text_sm().text_color(t.text_muted).child("j / ↓ — next · k / ↑ — previous"))
-        .child(div().text_sm().text_color(t.text_muted).child("Space / Enter — change value"))
-        .child(div().text_sm().text_color(t.text_muted).child("Ctrl-Tab / Ctrl-Shift-Tab — switch section"))
-        .child(div().text_sm().text_color(t.text_muted).child("/ — focus search · Escape — clear, then close"))
+        .child(legend(t, &[("j", true), ("or", false), ("down", true), ("— next ·", false),
+            ("k", true), ("or", false), ("up", true), ("— previous", false)]))
+        .child(legend(t, &[("space", true), ("or", false), ("enter", true), ("— change value", false)]))
+        .child(legend(t, &[("ctrl-tab", true), ("or", false), ("ctrl-shift-tab", true), ("— switch section", false)]))
+        .child(legend(t, &[("/", true), ("— focus search ·", false), ("escape", true), ("— clear, then close", false)]))
         .into_any_element()
 }
 

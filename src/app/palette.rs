@@ -5,10 +5,7 @@ use crate::app::actions::{self, CommandSpec, PALETTE_CONTEXT};
 use crate::search::Query;
 use gpui_kit::{
     prelude::FluentBuilder as _,
-    component::{
-        input::{Input, InputEvent, InputState},
-        kbd::Kbd,
-    },
+    component::input::{Input, InputEvent, InputState},
     *,
 };
 
@@ -170,13 +167,7 @@ impl Render for CommandPalette {
                             })
                             .child(command.name)
                             .when(!command.key.is_empty(), |el| {
-                                el.child(
-                                    Kbd::new(
-                                        Keystroke::parse(command.key)
-                                            .unwrap_or_else(|_| Keystroke::parse("space").unwrap()),
-                                    )
-                                    .appearance(false),
-                                )
+                                el.child(crate::app::ui::shortcut(command.key))
                             })
                     }))
                     .into_any_element()

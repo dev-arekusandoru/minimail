@@ -4,7 +4,7 @@
 //! chosen return time leaves through [`SnoozeEvent`].
 
 use crate::app::overlay::FitViewport as _;
-use crate::app::ui::button;
+use crate::app::ui::{button, shortcut};
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use gpui_kit::{
@@ -115,8 +115,9 @@ impl SnoozePicker {
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .gap_2()
-                    .child(div().text_color(t.accent).child(SharedString::from(key.to_owned())))
+                    .child(shortcut(key))
                     .child(label),
             )
             .child(div().text_xs().text_color(t.text_muted).child(detail))

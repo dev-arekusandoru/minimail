@@ -6,7 +6,7 @@ use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
 use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
-use crate::app::ui::{button, run};
+use crate::app::ui::{button, run, shortcut};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
     component::separator::Separator,
@@ -202,7 +202,17 @@ impl RenderOnce for SessionCard {
                             secs % 60
                         ))),
                 )
-                .child(div().text_xs().text_color(t.text_muted).child("Press escape to close"))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(t.text_muted)
+                        .child("Press")
+                        .child(shortcut("escape"))
+                        .child("to close"),
+                )
                 .child(button("session-close", "Close", "Close session summary", "escape", cx).on_click(run(ClearSelection))),
             (None, progress) => {
                 let (pos, total) = progress.unwrap_or((0, 0));

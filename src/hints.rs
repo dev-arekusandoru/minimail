@@ -187,13 +187,26 @@ pub fn hints(ctx: &HintContext) -> Vec<Hint> {
     v.into_iter().map(|(hint, _)| hint).collect()
 }
 
-/// Estimated rendered width in px of one hint chip (keys, label, gap).
+/// Estimated rendered width in px of one hint (keycap pills, label, gaps).
 pub fn hint_width(hint: &Hint) -> f32 {
     const CHAR_W: f32 = 6.5;
-    const KEY_PAD: f32 = 14.;
+    /// Horizontal padding inside a keycap pill, both sides, plus its border.
+    const PILL_PAD: f32 = 10.;
+    /// Width of one "then" connector between the pills of a multi-stroke binding.
+    const THEN_W: f32 = 30.;
+    /// Gap between a hint's keycaps and its label.
     const GAP: f32 = 16.;
-    let key_chars: usize = hint.key.split_whitespace().map(|k| if k.len() > 1 && k != "?" { k.len().min(6) } else { 1 }).sum();
-    key_chars as f32 * CHAR_W + KEY_PAD + hint.label.len() as f32 * CHAR_W + GAP
+    let strokes: Vec<&str> = hint.key.split_whitespace().collect();
+    let key_chars: usize = strokes
+        .iter()
+        .map(|k| if k.chars().count() > 1 && *k != "?" { k.chars().count().min(6) } else { 1 })
+        .sum();
+    let then = THEN_W * strokes.len().saturating_sub(1) as f32;
+    key_chars as f32 * CHAR_W
+        + strokes.len() as f32 * PILL_PAD
+        + then
+        + hint.label.len() as f32 * CHAR_W
+        + GAP
 }
 
 /// [`hints`], then the lowest-ranked dropped until the bar fits `budget` px

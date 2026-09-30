@@ -83,9 +83,13 @@ impl MailApp {
             return pane
                 .items_center()
                 .justify_center()
+                .flex()
+                .gap_1()
                 .text_size(px(13.))
                 .text_color(t.text_muted)
-                .child("Click a message or press enter to open")
+                .child("Click a message or press")
+                .child(crate::app::ui::shortcut("enter"))
+                .child("to open")
                 .into_any_element();
         };
         let look = Look::new(cx);

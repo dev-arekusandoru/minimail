@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
+use crate::app::ui::shortcut;
 use crate::theme::{self, Theme};
 
 /// Key context of an open menu (arrows move, enter runs, escape dismisses).
@@ -204,8 +205,17 @@ impl Focusable for MenuPanel {
 
 impl EventEmitter<MenuEvent> for MenuPanel {}
 
-/// A menu row: label left, shortcut hint right.
+/// A menu row: label left, shortcut hint right. `left`/`right` are the ‹ Back and submenu
+/// affordances, not bindings, so they stay plain text.
 fn row(t: &Theme, label: SharedString, key: &str, selected: bool) -> Div {
+    let hint: AnyElement = match key {
+        "left" | "right" => div()
+            .text_size(px(11.))
+            .text_color(t.text_muted)
+            .child(SharedString::from(key.to_owned()))
+            .into_any_element(),
+        _ => shortcut(key).into_any_element(),
+    };
     div()
         .flex()
         .items_center()
@@ -217,13 +227,7 @@ fn row(t: &Theme, label: SharedString, key: &str, selected: bool) -> Div {
         .text_color(t.text)
         .when(selected, |d| d.bg(t.selection))
         .child(div().flex_1().truncate().child(label))
-        .child(
-            div()
-                .flex_none()
-                .text_size(px(11.))
-                .text_color(t.text_muted)
-                .child(SharedString::from(key.to_owned())),
-        )
+        .child(div().flex_none().child(hint))
 }
 
 impl Render for MenuPanel {

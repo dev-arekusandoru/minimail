@@ -2,7 +2,7 @@
 //! and the thread rail.
 
 use super::super::*;
-use crate::app::ui::{mono_font, Observable};
+use crate::app::ui::{mono_font, shortcut, Observable};
 use crate::theme::Theme;
 use gpui_kit::component::kbd::Kbd;
 use std::sync::Arc;
@@ -52,10 +52,9 @@ impl Look {
         div().font_family(self.mono.clone()).text_size(px(11.)).text_color(color).child(text.into())
     }
 
-    /// A keycap for `key` (`"e"`, `"shift-o"`), drawn like the footer hint bar's.
+    /// A keycap for `key` (`"e"`, `"shift-o"`), the same pill the footer hint bar uses.
     pub fn keycap(&self, key: &str) -> Kbd {
-        let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
-        Kbd::new(stroke).outline().font_family(self.mono.clone()).text_size(px(10.))
+        shortcut(key).font_family(self.mono.clone())
     }
 
     /// Clickable mono text such as `SHOW QUOTED TEXT`, with an optional keycap.
