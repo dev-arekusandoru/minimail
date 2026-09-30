@@ -125,6 +125,8 @@ pub fn mute_hides_thread_and_unsubscribe_hides_sender(cx: &mut TestAppContext) {
 
     h.goto(3);
     h.keys("shift-u");
+    assert!(h.read(|a| a.dialog_open()), "unsubscribe asks about the sender's mail");
+    h.keys("4");
     assert_eq!(h.read(|a| a.mailbox.unsubscribed().to_vec()), vec!["c@a.io".to_string()]);
     assert_eq!(h.read(|a| a.mailbox.hidden_count()), 2, "all of the sender's mail is hidden");
     assert_eq!(h.visible(), vec![1, 2, 5]);

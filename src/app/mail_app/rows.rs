@@ -119,6 +119,14 @@ impl MailApp {
         let lines = self.preview_lines;
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
+        let sender = row::sender_label(msg);
+        let account_dot = if row::shows_account_dot(&self.triage.view.location) {
+            self.mailbox
+                .account(&msg.account)
+                .and_then(|account| theme::parse_color(&account.color))
+        } else {
+            None
+        };
         row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, &t)
             .child(self.row_selection_target(ix, cx))
             .child(
@@ -135,10 +143,21 @@ impl MailApp {
                     .child(
                         div()
                             .h(px(18.))
-                            .truncate()
-                            .text_color(t.text)
-                            .font_weight(emphasis)
-                            .child(msg.from_name.clone()),
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .when_some(account_dot, |d, color| {
+                                d.child(div().w(px(6.)).h(px(6.)).flex_none().rounded_full().bg(color))
+                            })
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(t.text)
+                                    .font_weight(emphasis)
+                                    .child(sender),
+                            ),
                     )
                     .child(
                         div()

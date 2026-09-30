@@ -91,3 +91,30 @@ fn sent_folder_and_tag_filter_locations_select_expected_messages() {
         vec![2]
     );
 }
+
+#[test]
+fn grouped_folds_several_steps_into_one_undo() {
+    let mut mb = sample();
+    mb.grouped(|mb| {
+        mb.set_state(&[1], State::Archived);
+        mb.set_state(&[2], State::Deleted);
+    });
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert_eq!(mb.state_of(2), Some(State::Inbox));
+}
+
+#[test]
+fn creating_a_folder_and_filing_undoes_as_one_step() {
+    let mut mb = sample();
+    let (folder, moved) = mb.create_folder_and_file("personal", "Zebra", None, &[1, 2]);
+    assert_eq!(moved, 2);
+    assert_eq!(mb.state_of(1), Some(State::Filed(folder)));
+    assert_eq!(mb.folder(folder).map(|f| f.name.as_str()), Some("Zebra"));
+
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert_eq!(mb.state_of(2), Some(State::Inbox));
+    assert!(mb.folder(folder).is_none(), "the folder goes with the move");
+    assert!(!mb.undo(), "one step covered both");
+}

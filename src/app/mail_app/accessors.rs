@@ -25,8 +25,60 @@ impl MailApp {
         self.rules_panel.is_some()
     }
 
+    /// A choice dialog is open.
+    pub fn dialog_open(&self) -> bool {
+        self.dialog.is_some()
+    }
+
+    /// The folder picker is open.
+    pub fn folder_picker_open(&self) -> bool {
+        self.folder_picker.is_some()
+    }
+
+    /// Title of the open choice dialog, if any.
+    pub fn dialog_title(&self, cx: &App) -> Option<String> {
+        self.dialog.as_ref().map(|d| d.read(cx).title())
+    }
+
+    /// Option labels of the open choice dialog, top to bottom.
+    pub fn dialog_options(&self, cx: &App) -> Vec<String> {
+        self.dialog
+            .as_ref()
+            .map(|d| d.read(cx).options())
+            .unwrap_or_default()
+    }
+
+    /// Rows of the open folder picker, top to bottom.
+    pub fn folder_rows(&self, cx: &App) -> Vec<String> {
+        self.folder_picker
+            .as_ref()
+            .map(|p| p.read(cx).rows(cx))
+            .unwrap_or_default()
+    }
+
     pub fn new_senders_open(&self) -> bool {
         self.mode == ListMode::State && self.triage.view.chip == Chip::NewSenders
+    }
+
+    /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.
+    pub fn location_label(&self) -> String {
+        sidebar::view_label(&self.triage.view, &self.mailbox)
+    }
+
+    /// How many filter entries are set; shown on the Filter ▾ button.
+    pub fn filter_count(&self) -> usize {
+        let filter = &self.triage.view.filter;
+        filter.tags.len()
+            + usize::from(filter.kind.is_some())
+            + usize::from(filter.account.is_some())
+    }
+
+    /// The Filter ▾ button's label, e.g. `"Filter (2) ▾"`.
+    pub fn filter_label(&self) -> String {
+        match self.filter_count() {
+            0 => "Filter ▾".to_owned(),
+            n => format!("Filter ({n}) ▾"),
+        }
     }
 
     /// A popup menu is open.
@@ -46,7 +98,7 @@ impl MailApp {
 
     /// Whether the contextual action bar applies right now.
     pub fn context_actions(&self) -> bool {
-        if self.compose.is_some() || self.new_senders_open() || self.session_end.is_some() {
+        if self.compose.is_some() || self.session_end.is_some() {
             return false;
         }
         !self.target_ids().is_empty()
@@ -200,6 +252,8 @@ impl MailApp {
             || self.snooze.is_some()
             || self.settings.is_some()
             || self.rules_panel.is_some()
+            || self.dialog.is_some()
+            || self.folder_picker.is_some()
     }
 
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state

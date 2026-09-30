@@ -13,6 +13,15 @@ use crate::app::menu::{
 use crate::app::snooze::{
     SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
 };
+use crate::app::dialog::{
+    Choice1, Choice2, Choice3, Choice4, Choice5, DIALOG_CONTEXT, DialogCancel, DialogConfirm,
+};
+use crate::app::folder_picker::{
+    FOLDER_PICKER_CONTEXT, FolderPickerCancel, FolderPickerConfirm, FolderPickerNext,
+    FolderPickerPrev,
+};
+use crate::judge::Kind;
+use crate::model::{AccountId, FolderId, Location, TagFilter};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -27,19 +36,18 @@ gpui_kit::actions!(
         OpenMessage,
         Archive,
         Delete,
+        File,
         MoveToInbox,
         SenderArchive,
         SenderDelete,
+        SenderFile,
+        SenderSnooze,
         SenderInbox,
         Undo,
         ToggleCommandPalette,
         Reply,
         SendReply,
         CancelCompose,
-        ShowAllInboxes,
-        ShowSnoozed,
-        ShowArchive,
-        ShowTrash,
         ToggleHelp,
         HelpPageUp,
         HelpPageDown,
@@ -49,9 +57,10 @@ gpui_kit::actions!(
         AcceptRule,
         DismissRule,
         ToggleRules,
-        ShowNewSenders,
         AllowSender,
         BlockSender,
+        MarkSpam,
+        SpamBlock,
         MuteThread,
         Unsubscribe,
         SummarizeThread,
@@ -99,19 +108,32 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("o", OpenMessage, m),
         KeyBinding::new("e", Archive, m),
         KeyBinding::new("d", Delete, m),
+        // `#` (shift-3 on most layouts) is the second Delete key from the key table.
+        KeyBinding::new("#", Delete, m),
+        KeyBinding::new("f", File, m),
         KeyBinding::new("s", OpenSnoozePicker, m),
         KeyBinding::new("i", MoveToInbox, m),
         KeyBinding::new("shift-e", SenderArchive, m),
         KeyBinding::new("shift-d", SenderDelete, m),
+        KeyBinding::new("shift-f", SenderFile, m),
+        KeyBinding::new("shift-s", SenderSnooze, m),
         KeyBinding::new("shift-i", SenderInbox, m),
         KeyBinding::new("u", Undo, m),
         KeyBinding::new("cmd-z", Undo, m),
         KeyBinding::new("cmd-k", ToggleCommandPalette, m),
         KeyBinding::new("r", Reply, m),
-        KeyBinding::new("1", ShowAllInboxes, m),
-        KeyBinding::new("2", ShowSnoozed, m),
-        KeyBinding::new("3", ShowArchive, m),
-        KeyBinding::new("4", ShowTrash, m),
+        // Sidebar navigation: chips (Inbox views only) and `g`-prefix jumps.
+        KeyBinding::new("1", SelectChip1, m),
+        KeyBinding::new("2", SelectChip2, m),
+        KeyBinding::new("3", SelectChip3, m),
+        KeyBinding::new("4", SelectChip4, m),
+        KeyBinding::new("5", SelectChip5, m),
+        KeyBinding::new("6", SelectChip6, m),
+        KeyBinding::new("g i", GoInbox, m),
+        KeyBinding::new("g s", GoSnoozed, m),
+        KeyBinding::new("g t", GoSent, m),
+        KeyBinding::new("g a", GoArchive, m),
+        KeyBinding::new("g d", GoTrash, m),
         KeyBinding::new("?", ToggleHelp, m),
         KeyBinding::new("pageup", HelpPageUp, m),
         KeyBinding::new("pagedown", HelpPageDown, m),
@@ -120,9 +142,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-y", AcceptRule, m),
         KeyBinding::new("shift-n", DismissRule, m),
         KeyBinding::new("shift-r", ToggleRules, m),
-        KeyBinding::new("5", ShowNewSenders, m),
         KeyBinding::new("a", AllowSender, m),
         KeyBinding::new("b", BlockSender, m),
+        KeyBinding::new("!", MarkSpam, m),
         KeyBinding::new("m", MuteThread, m),
         KeyBinding::new("shift-u", Unsubscribe, m),
         KeyBinding::new("z", SummarizeThread, m),
@@ -146,6 +168,19 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("3", SnoozePreset3, Some("SnoozePicker && !Input")),
         KeyBinding::new("4", SnoozeCustom, Some("SnoozePicker && !Input")),
         KeyBinding::new("escape", SnoozeCancel, Some(SNOOZE_CONTEXT)),
+        // Choice dialog: one key per option, enter = default, escape = cancel.
+        KeyBinding::new("1", Choice1, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("2", Choice2, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("3", Choice3, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("4", Choice4, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("5", Choice5, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("enter", DialogConfirm, Some("ChoiceDialog && !Input")),
+        KeyBinding::new("escape", DialogCancel, Some(DIALOG_CONTEXT)),
+        // Folder picker: type to filter, arrows to move, enter to file.
+        KeyBinding::new("down", FolderPickerNext, Some(FOLDER_PICKER_CONTEXT)),
+        KeyBinding::new("up", FolderPickerPrev, Some(FOLDER_PICKER_CONTEXT)),
+        KeyBinding::new("enter", FolderPickerConfirm, Some("FolderPicker && !Input")),
+        KeyBinding::new("escape", FolderPickerCancel, Some(FOLDER_PICKER_CONTEXT)),
         // Settings panel.
         KeyBinding::new("j", SettingsNext, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("down", SettingsNext, Some(SETTINGS_CONTEXT)),
@@ -219,16 +254,15 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Open message", "enter", OpenMessage),
         cmd!("Archive", "e", Archive),
         cmd!("Delete", "d", Delete),
+        cmd!("File…", "f", File),
         cmd!("Move to inbox", "i", MoveToInbox),
-        cmd!("Archive all from sender", "shift-e", SenderArchive),
-        cmd!("Delete all from sender", "shift-d", SenderDelete),
-        cmd!("Move all from sender to inbox", "shift-i", SenderInbox),
+        cmd!("Archive all from sender…", "shift-e", SenderArchive),
+        cmd!("Delete all from sender…", "shift-d", SenderDelete),
+        cmd!("File all from sender…", "shift-f", SenderFile),
+        cmd!("Snooze all from sender…", "shift-s", SenderSnooze),
+        cmd!("Move all from sender to inbox…", "shift-i", SenderInbox),
         cmd!("Undo", "u", Undo),
         cmd!("Reply", "r", Reply),
-        cmd!("Show all inboxes", "1", ShowAllInboxes),
-        cmd!("Show snoozed", "2", ShowSnoozed),
-        cmd!("Show archive", "3", ShowArchive),
-        cmd!("Show trash", "4", ShowTrash),
         cmd!("Toggle command palette", "cmd-k", ToggleCommandPalette),
         cmd!("Toggle help", "?", ToggleHelp),
         cmd!("Snooze…", "s", OpenSnoozePicker),
@@ -237,11 +271,12 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Accept rule suggestion", "shift-y", AcceptRule),
         cmd!("Dismiss rule suggestion", "shift-n", DismissRule),
         cmd!("Toggle rules panel", "shift-r", ToggleRules),
-        cmd!("Show new senders", "5", ShowNewSenders),
         cmd!("Allow sender", "a", AllowSender),
-        cmd!("Block sender", "b", BlockSender),
+        cmd!("Block sender…", "b", BlockSender),
+        cmd!("Mark spam…", "!", MarkSpam),
+        cmd!("Block sender and delete", "", SpamBlock),
         cmd!("Mute thread", "m", MuteThread),
-        cmd!("Unsubscribe from sender", "shift-u", Unsubscribe),
+        cmd!("Unsubscribe from sender…", "shift-u", Unsubscribe),
         cmd!("Summarize thread", "z", SummarizeThread),
         cmd!("Toggle settings", "cmd-,", ToggleSettings),
         cmd!("Start triage session", "t", StartSession),
@@ -257,5 +292,73 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Shrink list pane", "alt-left", ShrinkListPane),
         cmd!("Reset pane sizes", "alt-r", ResetPanes),
         cmd!("Toggle pane layout", "alt-l", TogglePaneLayout),
+        // Sidebar navigation.
+        cmd!("Go to inbox", "g i", GoInbox),
+        cmd!("Go to snoozed", "g s", GoSnoozed),
+        cmd!("Go to sent", "g t", GoSent),
+        cmd!("Go to archive", "g a", GoArchive),
+        cmd!("Go to trash", "g d", GoTrash),
+        cmd!("Chip: all", "1", SelectChip1),
+        cmd!("Chip: needs reply", "2", SelectChip2),
+        cmd!("Chip: follow up", "3", SelectChip3),
+        cmd!("Chip: urgent", "4", SelectChip4),
+        cmd!("Chip: new senders", "5", SelectChip5),
+        cmd!("Chip: possible spam", "6", SelectChip6),
+        cmd!("Clear filters", "", ClearFilters),
     ]
+}
+
+// ---------------------------------------------------------------- Sidebar navigation
+
+gpui_kit::actions!(
+    mail,
+    [
+        GoInbox,
+        GoSnoozed,
+        GoSent,
+        GoArchive,
+        GoTrash,
+        SelectChip1,
+        SelectChip2,
+        SelectChip3,
+        SelectChip4,
+        SelectChip5,
+        SelectChip6,
+        ClearFilters
+    ]
+);
+
+/// Jump the sidebar to one location (a sidebar row click).
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ShowLocation {
+    pub location: Location,
+}
+
+/// Fold or unfold a folder's children in the sidebar.
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ToggleFolder {
+    pub folder: FolderId,
+}
+
+/// Add or remove one tag from the Filter ▾ menu's tag list.
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ToggleTagFilter {
+    pub tag: TagFilter,
+}
+
+/// Pick the Filter ▾ menu's Kind (`None` = any kind).
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetFilterKind {
+    pub kind: Option<Kind>,
+}
+
+/// Pick the Filter ▾ menu's account (`None` = every account).
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetFilterAccount {
+    pub account: Option<AccountId>,
 }

@@ -80,7 +80,7 @@ pub fn snoozed_view_lists_message_with_return_time(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     let id = h.cursor().unwrap();
     h.keys("s 2");
-    h.keys("2");
+    h.keys("g s");
     assert_eq!(h.read(|a| a.triage.view.location.clone()), mail_classifier::model::Location::Snoozed("personal".into()));
     assert_eq!(h.visible(), vec![id]);
     assert!(h.read(|a| a.mailbox.snoozed_until(id)).is_some());

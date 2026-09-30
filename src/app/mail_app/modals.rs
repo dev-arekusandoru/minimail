@@ -64,6 +64,7 @@ impl MailApp {
                         let expects_reply = crate::judge::expects_reply(&StubJudge, body);
                         this.mailbox.send_reply_at(*in_reply_to, body.clone(), expects_reply, now);
                         this.close_modals(window, cx);
+                        this.open_post_send_dialog(*in_reply_to, window, cx);
                         this.show_toast(
                             "Reply queued · u to undo send".into(),
                             window,
@@ -81,7 +82,17 @@ impl MailApp {
     }
 
     pub(super) fn open_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.in_session() {
+        self.open_snooze_for(None, window, cx);
+    }
+
+    /// Snooze picker for `ids` (sender-wide flows), or for the current targets.
+    pub(super) fn open_snooze_for(
+        &mut self,
+        ids: Option<Vec<MessageId>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.in_session() && ids.is_none() {
             let ids = self.target_ids();
             let now = self.now();
             if let Some((_, until)) = self.mailbox.snooze_presets(now).into_iter().next() {
@@ -92,7 +103,7 @@ impl MailApp {
             cx.notify();
             return;
         }
-        if self.target_ids().is_empty() {
+        if ids.clone().unwrap_or_else(|| self.target_ids()).is_empty() {
             return;
         }
         let now = self.now();
@@ -108,14 +119,14 @@ impl MailApp {
         self._modal_sub = Some(cx.subscribe_in(
             &picker,
             window,
-            |this, _, event: &SnoozeEvent, window, cx| {
+            move |this, _, event: &SnoozeEvent, window, cx| {
                 let pick = match event {
                     SnoozeEvent::Pick(ts) => Some(*ts),
                     SnoozeEvent::Cancel => None,
                 };
                 this.close_modals(window, cx);
                 if let Some(until) = pick {
-                    let ids = this.target_ids();
+                    let ids = ids.clone().unwrap_or_else(|| this.target_ids());
                     let now = this.now();
                     let n = this.mailbox.snooze(&ids, until, now);
                     this.triage.clear_selection();
@@ -153,6 +164,11 @@ impl MailApp {
                 window,
                 cx,
             )
+            .mailbox_state(
+                self.mailbox.blocked(),
+                self.mailbox.unsubscribed().to_vec(),
+                self.mailbox.follow_up_timeout(),
+            )
         });
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
@@ -175,6 +191,14 @@ impl MailApp {
                     if this.panes.orientation() != *orientation {
                         this.set_pane_layout(*orientation, window, cx);
                     }
+                }
+                SettingsEvent::FollowUp(timeout) => {
+                    this.mailbox.set_follow_up_timeout(*timeout);
+                    cx.notify();
+                }
+                SettingsEvent::Unblock(email) => {
+                    this.mailbox.unblock_sender(email);
+                    cx.notify();
                 }
                 SettingsEvent::Close => this.close_modals(window, cx),
             },
@@ -225,38 +249,24 @@ impl MailApp {
     }
 
     pub(super) fn unsubscribe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(email) = self
-            .cursor_id()
-            .and_then(|id| self.mailbox.get(id))
-            .map(|m| m.from_email.clone())
-        else {
+        let Some((name, email)) = self.cursor_sender() else {
             return;
         };
-        self.mailbox.unsubscribe(&email, None);
-        self.show_toast(format!("Unsubscribed from {email} · u to undo"), window, cx);
-        self.session_advance();
-        cx.notify();
+        self.open_block_dialog(name, email, true, window, cx);
     }
 
+    /// `a` allows the sender outright; `b` asks what to do with their Inbox mail first.
     pub(super) fn screen_sender(&mut self, allow: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.new_senders_open() {
+        let Some((name, email)) = self.cursor_sender() else {
+            return;
+        };
+        if !allow {
+            self.open_block_dialog(name, email, false, window, cx);
             return;
         }
-        let Some(email) = self
-            .cursor_id()
-            .and_then(|id| self.mailbox.get(id))
-            .map(|m| m.from_email.clone())
-        else {
-            return;
-        };
-        let text = if allow {
-            self.mailbox.allow_sender(&email);
-            format!("Allowed {email} · u to undo")
-        } else {
-            self.mailbox.block_sender(&email, None);
-            format!("Blocked {email} · u to undo")
-        };
-        self.show_toast(text, window, cx);
+        if self.mailbox.allow_sender(&email) {
+            self.show_toast(format!("Allowed {email} · u to undo"), window, cx);
+        }
         self.move_cursor(0);
         cx.notify();
     }
@@ -282,5 +292,508 @@ impl MailApp {
             self.triage.clear_selection();
         }
         cx.notify();
+    }
+}
+
+// ------------------------------------------------------------------ Choice dialogs
+
+/// What a folder picker does with the folder it returns.
+#[derive(Clone)]
+pub(super) enum FileAction {
+    /// File these messages (`f`, the reader bar).
+    Ids(Vec<MessageId>),
+    /// File every Inbox message from this sender (`shift-f`).
+    Sender(String),
+    /// Post-send: file the original and its sent replies.
+    AfterReply(MessageId),
+    /// Block (`b`) or unsubscribe (`shift-u`), then move that sender's Inbox mail.
+    BlockSender { email: String, unsubscribe: bool },
+}
+
+/// What the folder picker returned, before the folder exists.
+enum Pick {
+    File(FolderId),
+    Create(String),
+}
+
+/// Title, message, options and default option of a choice dialog.
+struct DialogSpec {
+    title: String,
+    message: String,
+    options: Vec<DialogOption>,
+    default: usize,
+}
+
+impl DialogSpec {
+    fn new(
+        title: impl Into<String>,
+        message: impl Into<String>,
+        options: Vec<DialogOption>,
+        default: usize,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            message: message.into(),
+            options,
+            default,
+        }
+    }
+}
+
+impl MailApp {
+    /// The sender of the message the actions target.
+    pub(super) fn cursor_sender(&self) -> Option<(String, String)> {
+        self.cursor_id()
+            .and_then(|id| self.mailbox.get(id))
+            .map(|m| (m.from_name.clone(), m.from_email.clone()))
+    }
+
+    /// Inbox messages from one sender (what a sender-wide action would move).
+    fn inbox_ids_from(&self, email: &str) -> Vec<MessageId> {
+        self.mailbox
+            .messages()
+            .iter()
+            .filter(|m| m.from_email.eq_ignore_ascii_case(email) && m.state == TriageState::Inbox)
+            .map(|m| m.id)
+            .collect()
+    }
+
+    /// One account's folders in tree order, children indented under their parent.
+    fn folder_options(&self, account: &str) -> Vec<FolderOption> {
+        fn walk(
+            folders: &[&Folder],
+            parent: Option<FolderId>,
+            depth: usize,
+            out: &mut Vec<FolderOption>,
+        ) {
+            for folder in folders.iter().filter(|f| f.parent == parent) {
+                out.push(FolderOption::new(
+                    folder.id,
+                    folder.name.clone(),
+                    format!("{}{}", "  ".repeat(depth), folder.name),
+                ));
+                walk(folders, Some(folder.id), depth + 1, out);
+            }
+        }
+        let folders = self.mailbox.folders(account);
+        let mut out = Vec::new();
+        walk(&folders, None, 0, &mut out);
+        out
+    }
+
+    /// Open a choice dialog; `on_choose` runs with the dialog already closed, so it may
+    /// open the next step (a folder picker, say).
+    fn open_dialog(
+        &mut self,
+        spec: DialogSpec,
+        on_choose: impl Fn(&mut MailApp, usize, &mut Window, &mut Context<MailApp>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let DialogSpec {
+            title,
+            message,
+            options,
+            default,
+        } = spec;
+        let dialog = cx.new(|cx| ChoiceDialog::new(title, message, options, default, cx));
+        self._modal_sub = Some(cx.subscribe_in(
+            &dialog,
+            window,
+            move |this, _, event: &DialogEvent, window, cx| {
+                let choice = match event {
+                    DialogEvent::Choose(ix) => Some(*ix),
+                    DialogEvent::Cancel => None,
+                };
+                this.close_modals(window, cx);
+                if let Some(ix) = choice {
+                    on_choose(this, ix, window, cx);
+                }
+                cx.notify();
+            },
+        ));
+        window.focus(&dialog.focus_handle(cx), cx);
+        self.dialog = Some(dialog);
+        cx.notify();
+    }
+
+    /// `f` and the reader's File button: file whatever the list targets.
+    pub(super) fn open_file_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.target_ids();
+        if ids.is_empty() {
+            return;
+        }
+        self.open_folder_picker(FileAction::Ids(ids), window, cx);
+    }
+
+    /// Folder picker for the cursor's account.
+    fn open_folder_picker(
+        &mut self,
+        action: FileAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(msg) = self.cursor_id().and_then(|id| self.mailbox.get(id)) else {
+            return;
+        };
+        let account = msg.account.clone();
+        let title = match &action {
+            FileAction::Ids(ids) if ids.len() == 1 => "File to folder:".to_owned(),
+            FileAction::Ids(ids) => format!("File {} messages to:", ids.len()),
+            FileAction::Sender(email) => format!("File all mail from {email} to:"),
+            FileAction::AfterReply(_) => "File the original and the reply to:".to_owned(),
+            FileAction::BlockSender { email, .. } => format!("File all mail from {email} to:"),
+        };
+        let options = self.folder_options(&account);
+        let picker = cx.new(|cx| FolderPicker::new(title, options, window, cx));
+        self._modal_sub = Some(cx.subscribe_in(
+            &picker,
+            window,
+            move |this, _, event: &FolderPickerEvent, window, cx| {
+                let pick = match event {
+                    FolderPickerEvent::File(id) => Some(Pick::File(*id)),
+                    FolderPickerEvent::Create(name) => Some(Pick::Create(name.clone())),
+                    FolderPickerEvent::Cancel => None,
+                };
+                this.close_modals(window, cx);
+                if let Some(pick) = pick {
+                    this.apply_pick(&action, &account, pick, window, cx);
+                }
+                cx.notify();
+            },
+        ));
+        let input = picker.read(cx).input_focus_handle(cx);
+        window.focus(&input, cx);
+        self.folder_picker = Some(picker);
+        cx.notify();
+    }
+
+    /// The chosen folder, creating it when the picker offered a new name.
+    /// The creation and the move are folded into one undo step by `grouped`.
+    fn apply_pick(
+        &mut self,
+        action: &FileAction,
+        account: &str,
+        pick: Pick,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        fn folder_for(mb: &mut Mailbox, account: &str, pick: &Pick) -> FolderId {
+            match pick {
+                Pick::File(id) => *id,
+                Pick::Create(name) => mb.create_folder(account, name, None),
+            }
+        }
+        let n = match action {
+            FileAction::Ids(ids) => match &pick {
+                Pick::File(id) => self.mailbox.set_state(ids, TriageState::Filed(*id)),
+                Pick::Create(name) => {
+                    self.mailbox.create_folder_and_file(account, name, None, ids).1
+                }
+            },
+            FileAction::Sender(email) => self.mailbox.grouped(|mb| {
+                let state = TriageState::Filed(folder_for(mb, account, &pick));
+                mb.set_state_for_sender(email, true, state)
+            }),
+            FileAction::AfterReply(original) => self.mailbox.grouped(|mb| {
+                let state = TriageState::Filed(folder_for(mb, account, &pick));
+                mb.file_after_reply(*original, state)
+            }),
+            FileAction::BlockSender { email, unsubscribe } => self.mailbox.grouped(|mb| {
+                let state = TriageState::Filed(folder_for(mb, account, &pick));
+                if *unsubscribe {
+                    mb.unsubscribe(email, Some(state))
+                } else {
+                    mb.block_sender(email, Some(state))
+                }
+            }),
+        };
+        self.triage.clear_selection();
+        let text = match action {
+            FileAction::BlockSender {
+                unsubscribe: true, ..
+            } => format!("Unsubscribed and filed {n} · u to undo"),
+            FileAction::BlockSender { .. } => format!("Blocked and filed {n} · u to undo"),
+            _ => format!("Filed {n} · u to undo"),
+        };
+        self.show_toast(text, window, cx);
+        self.session_advance();
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// Post-send: the original and the reply land wherever the dialog says.
+    fn open_post_send_dialog(
+        &mut self,
+        original: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let options = vec![
+            DialogOption::new("1", "Archive", "Put it away"),
+            DialogOption::new("2", "File…", "Pick a folder"),
+            DialogOption::new("3", "Delete", "Move it to Trash"),
+            DialogOption::new("4", "Keep in Inbox", "Change nothing"),
+        ];
+        self.open_dialog(
+            DialogSpec::new(
+                "Reply sent",
+                "File the original and the reply:",
+                options,
+                0,
+            ),
+            move |this, ix, window, cx| match ix {
+                0 => this.file_after_reply(original, TriageState::Archived, window, cx),
+                1 => this.open_folder_picker(FileAction::AfterReply(original), window, cx),
+                2 => this.file_after_reply(original, TriageState::Deleted, window, cx),
+                _ => {}
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn file_after_reply(
+        &mut self,
+        original: MessageId,
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let n = self.mailbox.file_after_reply(original, state);
+        let verb = match state {
+            TriageState::Deleted => "Deleted",
+            TriageState::Archived => "Archived",
+            _ => "Filed",
+        };
+        self.show_toast(format!("{verb} {n} · u to undo"), window, cx);
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// `b` / `shift-u`: block or unsubscribe, and say what happens to their Inbox mail.
+    fn open_block_dialog(
+        &mut self,
+        name: String,
+        email: String,
+        unsubscribe: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = if unsubscribe {
+            format!("Unsubscribe from {name}?")
+        } else {
+            format!("Block {name}?")
+        };
+        let message = format!("Move {email}'s Inbox mail to:");
+        let options = vec![
+            DialogOption::new("1", "Delete", "Move their Inbox mail to Trash"),
+            DialogOption::new("2", "Archive", "Put their Inbox mail away"),
+            DialogOption::new("3", "File…", "Pick a folder for it"),
+            DialogOption::new("4", "Leave", "Keep it in the Inbox"),
+        ];
+        // Leaving is the default: an accidental `b` + `enter` must not trash mail.
+        self.open_dialog(
+            DialogSpec::new(title, message, options, 3),
+            move |this, ix, window, cx| {
+                if ix == 2 {
+                    this.open_folder_picker(
+                        FileAction::BlockSender {
+                            email: email.clone(),
+                            unsubscribe,
+                        },
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+                let state = match ix {
+                    0 => Some(TriageState::Deleted),
+                    1 => Some(TriageState::Archived),
+                    _ => None,
+                };
+                this.block_or_unsubscribe(&email, unsubscribe, state, window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn block_or_unsubscribe(
+        &mut self,
+        email: &str,
+        unsubscribe: bool,
+        state: Option<TriageState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let verb = if unsubscribe { "Unsubscribed from" } else { "Blocked" };
+        let already = if unsubscribe {
+            self.mailbox
+                .unsubscribed()
+                .iter()
+                .any(|u| u.eq_ignore_ascii_case(email))
+        } else {
+            self.mailbox
+                .blocked()
+                .iter()
+                .any(|b| b.eq_ignore_ascii_case(email))
+        };
+        if already {
+            self.show_toast(format!("Already {verb} {email}"), window, cx);
+            return;
+        }
+        let n = if unsubscribe {
+            self.mailbox.unsubscribe(email, state)
+        } else {
+            self.mailbox.block_sender(email, state)
+        };
+        let tail = match state {
+            Some(_) => format!(" · moved {n} · u to undo"),
+            None => " · u to undo".to_owned(),
+        };
+        self.show_toast(format!("{verb} {email}{tail}"), window, cx);
+        self.session_advance();
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// `!`: block and delete, or just delete.
+    pub(super) fn open_spam_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.target_ids();
+        if ids.is_empty() {
+            return;
+        }
+        let name = self
+            .cursor_sender()
+            .map(|(name, _)| name)
+            .unwrap_or_default();
+        let title = format!(
+            "Mark {} message{} from {name} as spam?",
+            ids.len(),
+            if ids.len() == 1 { "" } else { "s" }
+        );
+        let options = vec![
+            DialogOption::new("1", "Block & Delete", "Trash it and block the sender"),
+            DialogOption::new("2", "Delete", "Move it to Trash"),
+        ];
+        self.open_dialog(
+            DialogSpec::new(title, String::new(), options, 0),
+            move |this, ix, window, cx| this.spam(&ids, ix == 0, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Mark `ids` as spam (optionally blocking their senders).
+    pub(super) fn spam(
+        &mut self,
+        ids: &[MessageId],
+        block: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let n = self.mailbox.mark_spam(ids, block);
+        self.triage.clear_selection();
+        let text = if block {
+            format!("Marked {n} as spam and blocked the sender · u to undo")
+        } else {
+            format!("Marked {n} as spam · u to undo")
+        };
+        self.show_toast(text, window, cx);
+        self.session_advance();
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// Sender-wide archive/delete/inbox: confirm first.
+    pub(super) fn confirm_sender(
+        &mut self,
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((name, email)) = self.cursor_sender() else {
+            return;
+        };
+        let ids = self.inbox_ids_from(&email);
+        if ids.is_empty() {
+            return;
+        }
+        let verb = match state {
+            TriageState::Archived => "Archive",
+            TriageState::Deleted => "Delete",
+            TriageState::Inbox => "Move",
+            _ => "Mark",
+        };
+        let title = format!("{verb} all {} messages from {name} in Inbox?", ids.len());
+        self.confirm(
+            title,
+            move |this, window, cx| this.mark_sender(state, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Sender-wide file: confirm, then pick a folder.
+    pub(super) fn confirm_sender_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((name, email)) = self.cursor_sender() else {
+            return;
+        };
+        let ids = self.inbox_ids_from(&email);
+        if ids.is_empty() {
+            return;
+        }
+        let title = format!("File all {} messages from {name} in Inbox?", ids.len());
+        self.confirm(
+            title,
+            move |this, window, cx| {
+                this.open_folder_picker(FileAction::Sender(email.clone()), window, cx)
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Sender-wide snooze: confirm, then pick a return time.
+    pub(super) fn confirm_sender_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((name, email)) = self.cursor_sender() else {
+            return;
+        };
+        let ids = self.inbox_ids_from(&email);
+        if ids.is_empty() {
+            return;
+        }
+        let title = format!("Snooze all {} messages from {name} in Inbox?", ids.len());
+        self.confirm(
+            title,
+            move |this, window, cx| this.open_snooze_for(Some(ids.clone()), window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Confirm/Cancel dialog; `on_confirm` runs when Confirm is chosen.
+    fn confirm(
+        &mut self,
+        title: String,
+        on_confirm: impl Fn(&mut MailApp, &mut Window, &mut Context<MailApp>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let options = vec![
+            DialogOption::new("1", "Confirm", ""),
+            DialogOption::new("2", "Cancel", ""),
+        ];
+        self.open_dialog(
+            DialogSpec::new(title, String::new(), options, 0),
+            move |this, ix, window, cx| {
+                if ix == 0 {
+                    on_confirm(this, window, cx);
+                }
+            },
+            window,
+            cx,
+        );
     }
 }

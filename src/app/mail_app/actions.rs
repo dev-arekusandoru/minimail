@@ -27,6 +27,8 @@ impl MailApp {
         self.snooze = None;
         self.settings = None;
         self.rules_panel = None;
+        self.dialog = None;
+        self.folder_picker = None;
         self.menu = None;
         self._modal_sub = None;
         self._menu_sub = None;
@@ -139,24 +141,121 @@ impl MailApp {
         cx.notify();
     }
 
-    pub(super) fn show_account_location(&mut self, location: Location, cx: &mut Context<Self>) {
-        let Some(account) = self.mailbox.accounts().first().map(|a| a.id.clone()) else {
-            return;
-        };
-        let location = match location {
-            Location::Snoozed(_) => Location::Snoozed(account),
-            Location::Archive(_) => Location::Archive(account),
-            Location::Trash(_) => Location::Trash(account),
-            _ => return,
-        };
-        self.show_view(View { location, ..View::default() }, cx);
+    /// Show a location the way the sidebar does: chip and filters reset.
+    pub(super) fn show_location(&mut self, location: Location, cx: &mut Context<Self>) {
+        self.show_view(
+            View {
+                location,
+                ..View::default()
+            },
+            cx,
+        );
     }
 
-    pub(super) fn show_new_senders(&mut self, cx: &mut Context<Self>) {
-        self.show_view(View {
-            chip: Chip::NewSenders,
-            ..View::default()
-        }, cx);
+    /// Re-point the current view without leaving the reader (chips and filters).
+    fn filter_view(&mut self, view: View, cx: &mut Context<Self>) {
+        self.end_session();
+        self.mode = ListMode::State;
+        self.triage.switch_view(view);
+        self.row_cursor = 0;
+        self.row_anchor = None;
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// Pick a chip. Chips live on Inbox views only, so elsewhere this is a no-op.
+    pub(super) fn select_chip(&mut self, chip: Chip, cx: &mut Context<Self>) {
+        if !sidebar::is_inbox_location(&self.triage.view.location) {
+            return;
+        }
+        let view = View {
+            chip,
+            ..self.triage.view.clone()
+        };
+        self.filter_view(view, cx);
+    }
+
+    /// Add or remove one tag from the Filter ▾ menu.
+    pub(super) fn toggle_tag_filter(&mut self, tag: TagFilter, cx: &mut Context<Self>) {
+        let mut view = self.triage.view.clone();
+        if let Some(ix) = view.filter.tags.iter().position(|t| *t == tag) {
+            view.filter.tags.remove(ix);
+        } else {
+            view.filter.tags.push(tag);
+        }
+        self.filter_view(view, cx);
+    }
+
+    /// Pick the Filter ▾ menu's Kind (`None` = any kind).
+    pub(super) fn set_filter_kind(&mut self, kind: Option<Kind>, cx: &mut Context<Self>) {
+        let mut view = self.triage.view.clone();
+        view.filter.kind = kind;
+        self.filter_view(view, cx);
+    }
+
+    /// Pick the Filter ▾ menu's account (`None` = every account).
+    pub(super) fn set_filter_account(
+        &mut self,
+        account: Option<AccountId>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut view = self.triage.view.clone();
+        view.filter.account = account;
+        self.filter_view(view, cx);
+    }
+
+    /// Drop every Filter ▾ entry (the chip stays as it is).
+    pub(super) fn clear_filters(&mut self, cx: &mut Context<Self>) {
+        let mut view = self.triage.view.clone();
+        view.filter = Filter::default();
+        self.filter_view(view, cx);
+    }
+
+    /// Fold or unfold a folder's children in the sidebar.
+    pub(super) fn toggle_folder(&mut self, folder: FolderId, cx: &mut Context<Self>) {
+        if !self.collapsed_folders.remove(&folder) {
+            self.collapsed_folders.insert(folder);
+        }
+        cx.notify();
+    }
+
+    /// `g i`: the current account's Inbox, or All Inboxes when already there.
+    pub(super) fn go_inbox(&mut self, cx: &mut Context<Self>) {
+        let location = match self.triage.view.location.clone() {
+            Location::AllInboxes => Location::AllInboxes,
+            _ => match self.nav_account() {
+                Some(account) => Location::Inbox(account),
+                None => return,
+            },
+        };
+        self.show_location(location, cx);
+    }
+
+    /// `g s` / `g t` / `g a` / `g d`: the current account's location.
+    fn go_account_location(
+        &mut self,
+        location: fn(AccountId) -> Location,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(account) = self.nav_account() {
+            self.show_location(location(account), cx);
+        }
+    }
+
+    pub(super) fn go_snoozed(&mut self, cx: &mut Context<Self>) {
+        self.go_account_location(Location::Snoozed, cx);
+    }
+
+    pub(super) fn go_sent(&mut self, cx: &mut Context<Self>) {
+        self.go_account_location(Location::Sent, cx);
+    }
+
+    pub(super) fn go_archive(&mut self, cx: &mut Context<Self>) {
+        self.go_account_location(Location::Archive, cx);
+    }
+
+    pub(super) fn go_trash(&mut self, cx: &mut Context<Self>) {
+        self.go_account_location(Location::Trash, cx);
     }
 
     pub(super) fn end_session(&mut self) {

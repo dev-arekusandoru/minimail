@@ -86,6 +86,21 @@ impl RowVisual {
     }
 }
 
+/// The sender line of a row: outgoing mail is labelled by its recipient instead of "You".
+pub fn sender_label(msg: &crate::model::Message) -> String {
+    if msg.outgoing {
+        format!("To: {}", msg.to)
+    } else {
+        msg.from_name.clone()
+    }
+}
+
+/// Rows carry the account color dot only in the unified `All Inboxes` view, where the
+/// account is otherwise ambiguous.
+pub fn shows_account_dot(location: &crate::model::Location) -> bool {
+    matches!(location, crate::model::Location::AllInboxes)
+}
+
 /// Apply the row geometry and the visual states of `v` to a row container. The caller sets the
 /// height, so a thread header can be shorter than the message rows around it.
 pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Observable {

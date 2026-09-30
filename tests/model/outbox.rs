@@ -81,3 +81,17 @@ fn undo_send_after_flush_removes_sent_reply_and_materialised_message() {
     assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
     assert_eq!(mb.awaiting_since(1), None);
 }
+
+#[test]
+fn undo_after_the_flush_reverts_a_reply_filed_by_post_send() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), false, T0);
+    assert_eq!(mb.file_after_reply(1, State::Archived), 1);
+    assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 1);
+    let sent = mb.messages().iter().find(|m| m.outgoing).unwrap().id;
+    assert_eq!(mb.state_of(sent), Some(State::Archived));
+
+    assert!(mb.undo(), "one step covers the original and the reply sent after it");
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert_eq!(mb.state_of(sent), Some(State::Inbox));
+}

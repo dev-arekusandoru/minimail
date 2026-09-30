@@ -18,28 +18,30 @@ pub fn rules_box() -> Mailbox {
 }
 
 /// Sender-wide archive from the Inbox cursor, then bring one message back so it can be repeated.
+/// The sender-wide keys confirm first, so `1` answers the dialog.
 pub fn repeat_sender_archive(h: &mut Harness<'_>) {
-    h.keys("shift-e 3 i 1");
+    h.keys("shift-e 1 g a i");
+    h.click("nav-all-inboxes");
 }
 
 #[gpui_kit::gpui::test]
 pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e");
+    h.keys("shift-e 1");
     assert_eq!(h.read(|a| a.pending_rule()), None, "no suggestion after the first action");
     assert_eq!(h.count(Archived), 3);
 
     repeat_sender_archive(&mut h);
     assert_eq!(h.read(|a| a.pending_rule()), None);
-    h.keys("shift-e");
+    h.keys("shift-e 1");
     let rule = h.read(|a| a.pending_rule()).expect("suggested on the 2nd identical action");
     assert_eq!(rule.sender, "sam@news.io");
     assert_eq!(rule.state, Archived);
 
     // Bring another message from the sender back, then accept: rule applies to it.
-    h.keys("3");
+    h.keys("g a");
     let id = h.cursor().unwrap();
-    h.keys("i 1");
+    h.keys("i");
     assert_eq!(h.state_of(id), Inbox);
     h.keys("shift-y");
     assert_eq!(h.read(|a| a.pending_rule()), None);
@@ -51,9 +53,9 @@ pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestA
 #[gpui_kit::gpui::test]
 pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e");
+    h.keys("shift-e 1");
     repeat_sender_archive(&mut h);
-    h.keys("shift-e");
+    h.keys("shift-e 1");
     assert!(h.read(|a| a.pending_rule()).is_some());
     h.keys("shift-n");
     assert_eq!(h.read(|a| a.pending_rule()), None);
@@ -61,7 +63,7 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
 
     for _ in 0..3 {
         repeat_sender_archive(&mut h);
-        h.keys("shift-e");
+        h.keys("shift-e 1");
         assert_eq!(h.read(|a| a.pending_rule()), None, "dismissed rules stay dismissed");
     }
     assert!(h.read(|a| a.rules.rules().is_empty()));
@@ -70,9 +72,9 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e");
+    h.keys("shift-e 1");
     repeat_sender_archive(&mut h);
-    h.keys("shift-e shift-y");
+    h.keys("shift-e 1 shift-y");
     assert_eq!(h.read(|a| a.rules.rules().len()), 1);
 
     h.keys("shift-r");
@@ -117,6 +119,8 @@ pub fn new_senders_chip_filters_all_inboxes_and_allows_or_blocks_senders(cx: &mu
     h.assert_invariant("allow sender");
 
     h.keys("b");
+    assert!(h.read(|a| a.dialog_open()), "block asks what to do with the sender's mail");
+    h.keys("4");
     assert!(h.visible().is_empty());
     assert_eq!(h.total(), 4, "blocking hides, but does not delete, mail");
     assert_eq!(h.count(Inbox), 3);

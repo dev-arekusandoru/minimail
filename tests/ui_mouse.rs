@@ -164,7 +164,9 @@ fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut Te
     h.keys("escape");
     h.click("btn-palette");
     assert!(h.read(|a| a.palette_open()));
-    let ix = commands().iter().position(|c| c.name == "Show snoozed").unwrap();
+    // Narrow to one row: a command far down the list sits below the palette's fold.
+    h.keys("s n o o z e d");
+    let ix = commands().iter().position(|c| c.name == "Go to snoozed").unwrap();
     h.click(("command", ix));
     assert!(!h.read(|a| a.palette_open()));
     assert_eq!(
@@ -237,6 +239,8 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     assert!(h.has("btn-sender-archive"), "clicking the submenu row opens its level");
     h.click("btn-sender-archive");
     assert!(!h.read(|a| a.menu_open()), "the whole menu stack closes after a choice");
+    assert!(h.read(|a| a.dialog_open()), "sender-wide actions confirm first");
+    h.keys("1");
 
     assert_eq!(h.state_of(id), Archived);
     for other in inbox.iter().filter(|other| **other != id) {

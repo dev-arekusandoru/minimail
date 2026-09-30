@@ -9,11 +9,12 @@ use mail_classifier::app::icons::{
     Glyph, GlyphInputs, glyphs_for, legend, max_icons, split_overflow,
 };
 use mail_classifier::app::row::{
-    BarState, LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, thread_preview_lines, thread_row_height,
+    BarState, LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, sender_label,
+    shows_account_dot, thread_preview_lines, thread_row_height,
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::judge::Kind;
-use mail_classifier::model::{MessageId, Tag};
+use mail_classifier::model::{Location, Mailbox, MessageId, Tag};
 
 struct Harness<'a> {
     cx: &'a mut TestAppContext,
@@ -223,6 +224,77 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
     assert!(open_deselected.open && !open_deselected.selected && !open_deselected.cursor);
     assert_eq!(open_deselected.bar_state(), BarState::Selected);
     assert!(!open_deselected.unread, "opening marks the message read without restoring the unread bar");
+}
+
+#[test]
+fn every_triage_tag_picks_its_own_badge() {
+    let cases = [
+        (Tag::NeedsReply, Glyph::NeedsReply),
+        (Tag::AwaitingReply, Glyph::AwaitingReply),
+        (Tag::FollowUp, Glyph::FollowUp),
+        (Tag::Reminder, Glyph::Reminder),
+        (Tag::PossibleSpam, Glyph::PossibleSpam),
+        (Tag::Urgent(5), Glyph::UrgentHigh),
+        (Tag::Urgent(3), Glyph::UrgentMid),
+        (Tag::Kind(Kind::Receipt), Glyph::KindReceipt),
+    ];
+    for (tag, expected) in cases {
+        let glyphs = glyphs_for(&GlyphInputs {
+            tags: std::slice::from_ref(&tag),
+            pending: &[],
+            muted: false,
+            new_sender: false,
+            snoozed: false,
+            attachment: false,
+        });
+        assert_eq!(glyphs, vec![expected], "{tag:?} shows exactly its badge");
+    }
+}
+
+#[test]
+fn new_sender_badge_is_derived_from_the_mailbox() {
+    let glyphs = glyphs_for(&GlyphInputs {
+        tags: &[],
+        pending: &[],
+        muted: false,
+        new_sender: true,
+        snoozed: false,
+        attachment: false,
+    });
+    assert_eq!(glyphs, vec![Glyph::NewSender], "New Sender is not a stored tag");
+}
+
+#[test]
+fn account_dot_shows_only_in_the_unified_inbox() {
+    assert!(shows_account_dot(&Location::AllInboxes));
+    assert!(!shows_account_dot(&Location::Inbox("personal".into())));
+    assert!(!shows_account_dot(&Location::Snoozed("personal".into())));
+    assert!(!shows_account_dot(&Location::Sent("personal".into())));
+    assert!(!shows_account_dot(&Location::Archive("personal".into())));
+    assert!(!shows_account_dot(&Location::Trash("personal".into())));
+    assert!(!shows_account_dot(&Location::Folder(1)));
+
+    let mailbox = Mailbox::load_default();
+    for account in mailbox.accounts() {
+        assert!(
+            mail_classifier::theme::parse_color(&account.color).is_some(),
+            "account {} has a parseable color dot",
+            account.id
+        );
+    }
+}
+
+#[test]
+fn outgoing_rows_are_labelled_by_recipient() {
+    let mut message = Mailbox::load_default().messages()[0].clone();
+    message.outgoing = true;
+    message.from_name = "You".into();
+    message.to = "alice@example.com".into();
+    assert_eq!(sender_label(&message), "To: alice@example.com");
+
+    message.outgoing = false;
+    message.from_name = "Alice".into();
+    assert_eq!(sender_label(&message), "Alice", "incoming mail keeps its sender");
 }
 
 #[test]

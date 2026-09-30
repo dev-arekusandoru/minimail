@@ -10,26 +10,33 @@ impl MailApp {
         let title = match &self.mode {
             ListMode::State if self.grouped() => format!(
                 "{} · {count} · {} threads",
-                view_label(&self.triage.view),
+                self.location_label(),
                 self.rows().iter().filter(|r| !matches!(r, Row::Child { .. })).count()
             ),
-            ListMode::State => format!("{} · {count}", view_label(&self.triage.view)),
+            ListMode::State => {
+                format!("{} · {count}", self.location_label())
+            }
             ListMode::Search(q) => format!("search: {q} · {count}"),
         };
+        let filter_active = self.filter_count() > 0;
+        let filter_label = self.filter_label();
+        let chips = self.render_chips(cx);
         let header = div()
-            .h(px(28.))
+            .h(px(LIST_HEADER_H))
             .flex_none()
             .flex()
             .items_center()
             .justify_between()
+            .gap_2()
             .px_3()
             .text_size(px(11.))
             .text_color(t.text_muted)
-            .child(title)
+            .child(div().flex_1().min_w_0().truncate().child(title))
             .when(selected > 0, |d| {
                 d.child(
                     div()
                         .flex()
+                        .flex_none()
                         .items_center()
                         .gap_2()
                         .text_color(t.accent)
@@ -39,10 +46,17 @@ impl MailApp {
                                 .on_click(run(ClearSelection)),
                         ),
                 )
-            });
+            })
+            .child(
+                button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
+                    .when(filter_active, |b| b.bg(t.selection).text_color(t.accent))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_menu(MenuKind::Filter, window, cx)
+                    })),
+            );
         let body = if count == 0 {
             let empty = match &self.mode {
-                ListMode::State => div().child(format!("No mail in {}", view_label(&self.triage.view))).into_any_element(),
+                ListMode::State => div().child(format!("No mail in {}", self.location_label())).into_any_element(),
                 ListMode::Search(_) => div().child("No matches").into_any_element(),
             };
             div()
@@ -72,9 +86,7 @@ impl MailApp {
             .when(stacked, |d| d.w_full().h(px(self.list_h)).min_h_0())
             .when(!stacked, |d| d.w(px(self.list_w)).h_full().min_w_0())
             .child(header)
-            .when(self.new_senders_open(), |d| {
-                d.child(NewSendersHeader::new(count))
-            })
+            .when_some(chips, |d, chips| d.child(chips))
             .child(body)
             .into_any_element()
     }

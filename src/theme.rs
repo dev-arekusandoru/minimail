@@ -50,6 +50,11 @@ fn parse_hex(token: &str, value: &str) -> Result<Hsla, ThemeError> {
     Ok(rgba(v).into())
 }
 
+/// Parse a `#rrggbb` or `#rrggbbaa` color, e.g. an [`crate::model::Account::color`].
+pub fn parse_color(value: &str) -> Option<Hsla> {
+    parse_hex("color", value).ok()
+}
+
 /// Declares the token list once: the serde palette, the runtime [`Theme`] and the conversion.
 macro_rules! tokens {
     ($($(#[$doc:meta])* $field:ident),+ $(,)?) => {

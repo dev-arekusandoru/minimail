@@ -187,6 +187,22 @@ impl Mailbox {
         self.push_undo(vec![Change::FolderPush(id)]);
         id
     }
+
+    /// Create a folder in `account` and file `ids` into it as a single undo
+    /// step (the folder creation and the moves revert together).
+    /// Returns the new folder's id and how many messages changed.
+    pub fn create_folder_and_file(
+        &mut self,
+        account: &str,
+        name: &str,
+        parent: Option<FolderId>,
+        ids: &[MessageId],
+    ) -> (FolderId, usize) {
+        self.grouped(|mb| {
+            let id = mb.create_folder(account, name, parent);
+            (id, mb.set_state(ids, TriageState::Filed(id)))
+        })
+    }
     pub fn ids_in_view(&self, view: &View) -> Vec<MessageId> {
         self.newest_first
             .iter()

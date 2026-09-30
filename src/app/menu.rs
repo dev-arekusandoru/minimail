@@ -4,12 +4,17 @@
 //! selection with the keyboard, and hands the chosen action back through
 //! [`MenuEvent`], so choosing a row runs exactly what its shortcut runs.
 
+use std::rc::Rc;
+
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::theme::{self, Theme};
 
 /// Key context of an open menu (arrows move, enter runs, escape dismisses).
 pub const MENU_CONTEXT: &str = "MailMenu";
+
+/// Width of a menu panel; its trigger anchors it, so the geometry needs the number.
+pub const MENU_W: f32 = 224.;
 
 gpui_kit::actions!(
     menu,
@@ -21,15 +26,16 @@ gpui_kit::actions!(
 pub enum MenuItem {
     /// Runs an action, exactly like its key binding.
     Action {
-        id: &'static str,
+        id: SharedString,
         label: SharedString,
         /// Shortcut hint shown right-aligned, e.g. `"shift-e"`.
         key: &'static str,
-        action: fn() -> Box<dyn Action>,
+        /// Builds the action on click; a closure so rows can carry data (a filter, an id).
+        action: Rc<dyn Fn() -> Box<dyn Action>>,
     },
     /// Opens a nested menu.
     Submenu {
-        id: &'static str,
+        id: SharedString,
         label: SharedString,
         items: Vec<MenuItem>,
     },
@@ -39,23 +45,42 @@ pub enum MenuItem {
 impl MenuItem {
     /// A row that runs `action`.
     pub fn action(
-        id: &'static str,
+        id: impl Into<SharedString>,
         label: impl Into<SharedString>,
         key: &'static str,
         action: fn() -> Box<dyn Action>,
     ) -> Self {
         MenuItem::Action {
-            id,
+            id: id.into(),
             label: label.into(),
             key,
-            action,
+            action: Rc::new(action),
+        }
+    }
+
+    /// A row whose action is built from data the row holds, e.g. a tag to toggle.
+    pub fn action_fn(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        key: &'static str,
+        action: impl Fn() -> Box<dyn Action> + 'static,
+    ) -> Self {
+        MenuItem::Action {
+            id: id.into(),
+            label: label.into(),
+            key,
+            action: Rc::new(action),
         }
     }
 
     /// A row that opens a nested menu.
-    pub fn submenu(id: &'static str, label: impl Into<SharedString>, items: Vec<MenuItem>) -> Self {
+    pub fn submenu(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        items: Vec<MenuItem>,
+    ) -> Self {
         MenuItem::Submenu {
-            id,
+            id: id.into(),
             label: label.into(),
             items,
         }
@@ -230,7 +255,7 @@ impl Render for MenuPanel {
             .on_action(cx.listener(|_, _: &MenuCancel, _, cx| {
                 cx.emit(MenuEvent::Cancel);
             }))
-            .w(px(224.))
+            .w(px(MENU_W))
             .max_h(px(360.))
             .overflow_y_scroll()
             .p_1()

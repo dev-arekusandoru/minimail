@@ -16,6 +16,8 @@ pub(super) enum MenuKind {
     Global,
     /// Secondary actions for the message under the cursor.
     Message,
+    /// The list header's Filter ▾ menu.
+    Filter,
 }
 
 /// An open menu: which one it is, and the panel that draws it.
@@ -42,6 +44,7 @@ impl MailApp {
         }
         let items = match kind {
             MenuKind::Global => global_items(),
+            MenuKind::Filter => self.filter_items(),
             MenuKind::Message => {
                 let items = self.message_items();
                 if items.is_empty() {
@@ -92,6 +95,9 @@ impl MailApp {
         let mut items = vec![
             MenuItem::action("btn-select", "Toggle select", "x", || Box::new(ToggleSelect)),
             MenuItem::separator(),
+            MenuItem::action("btn-file", "File…", "f", || Box::new(File)),
+            MenuItem::action("btn-spam", "Mark spam…", "!", || Box::new(MarkSpam)),
+            MenuItem::separator(),
             MenuItem::action(
                 "btn-summarize",
                 "Summarize thread",
@@ -122,6 +128,12 @@ impl MailApp {
                     "Delete from sender",
                     "shift-d",
                     || Box::new(SenderDelete),
+                ),
+                MenuItem::action(
+                    "btn-sender-file",
+                    "File from sender",
+                    "shift-f",
+                    || Box::new(SenderFile),
                 ),
                 MenuItem::action(
                     "btn-sender-inbox",

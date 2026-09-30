@@ -25,8 +25,8 @@ pub const STEP: f32 = 40.;
 /// Width of the band around the hairline that catches the pointer.
 pub const DIVIDER_HIT: f32 = 7.;
 
-/// The fixed view rail, which is never part of the panes.
-const SIDEBAR_W: f32 = 148.;
+/// The fixed sidebar, which is never part of the panes.
+pub const SIDEBAR_W: f32 = 148.;
 /// The toolbar and the hint bar, which the stacked panes do not get. The toolbar
 /// wraps at narrow widths, so this is an allowance: the reader pane keeps its own
 /// minimum in the flex layout and takes the hit if the allowance was too small.

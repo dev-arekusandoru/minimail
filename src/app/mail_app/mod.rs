@@ -11,21 +11,21 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
-use crate::app::chrome::{HelpOverlay, HintBar, HintMode, ViewTabs};
+use crate::app::chrome::{HelpOverlay, HintBar, HintMode};
 use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::row::{self, RowVisual};
 use crate::app::overlay::overlay;
 use crate::app::compose::{ComposeEvent, ComposeReply};
+use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
+use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
-use crate::app::menu::MenuPanel;
-use crate::app::panels::{
-    RuleBanner, RulesEvent, RulesPanel, NewSendersHeader, SessionCard, SummaryCard,
-};
+use crate::app::menu::{MENU_W, MenuPanel};
+use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
 use crate::app::settings::{SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
-use crate::judge::{JudgePolicy, Routed, StubJudge, classify};
-use crate::model::{Chip, Location, Mailbox, Message, MessageId, Triage, TriageState, View};
+use crate::judge::{JudgePolicy, Kind, Routed, StubJudge, classify};
+use crate::model::{AccountId, Chip, Filter, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, TagFilter, Triage, TriageState, View};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
@@ -34,6 +34,8 @@ use crate::threads::Row;
 
 mod accessors;
 mod actions;
+mod chips;
+mod filter_menu;
 mod grouping;
 mod help;
 mod list;
@@ -43,6 +45,7 @@ mod mouse;
 pub mod panes;
 mod reader;
 mod render;
+mod sidebar;
 mod titlebar;
 mod rows;
 use menus::{MenuKind, OpenMenu};
@@ -50,21 +53,12 @@ use panes::{Orientation as PaneLayout, Panes};
 use mouse::close_on_backdrop;
 use reader::format_when;
 
-fn view_label(view: &View) -> &'static str {
-    match &view.location {
-        Location::AllInboxes | Location::Inbox(_) => "Inbox",
-        Location::Snoozed(_) => "Snoozed",
-        Location::Archive(_) => "Archive",
-        Location::Trash(_) => "Trash",
-        Location::Sent(_) => "Sent",
-        Location::Folder(_) => "Folder",
-    }
-}
-
 /// Height of the app-owned titlebar (also anchors the global menu below it).
 const HEADER_H: f32 = 36.;
 /// Height of the contextual action bar.
 const BAR_H: f32 = 30.;
+/// Height of the list header above the rows (title, selection count, Filter ▾).
+const LIST_HEADER_H: f32 = 28.;
 const TOAST_MS: u64 = 4000;
 
 /// What the message list currently shows.
@@ -121,6 +115,10 @@ pub struct MailApp {
     row_cursor: usize,
     row_anchor: Option<usize>,
     snooze: Option<Entity<SnoozePicker>>,
+    /// Generic choice dialog (post-send, block, spam, sender-wide confirms).
+    dialog: Option<Entity<ChoiceDialog>>,
+    /// Folder picker (`f` and the dialogs' `File…`).
+    folder_picker: Option<Entity<FolderPicker>>,
     settings: Option<Entity<SettingsPanel>>,
     rules_panel: Option<Entity<RulesPanel>>,
     pending_rule: Option<Rule>,
@@ -139,6 +137,8 @@ pub struct MailApp {
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
     _menu_sub: Option<Subscription>,
+    /// Folders whose children are folded away in the sidebar.
+    collapsed_folders: HashSet<FolderId>,
 }
 
 impl MailApp {
@@ -186,6 +186,8 @@ impl MailApp {
             row_cursor: 0,
             row_anchor: None,
             snooze: None,
+            dialog: None,
+            folder_picker: None,
             settings: None,
             rules_panel: None,
             pending_rule: None,
@@ -200,6 +202,7 @@ impl MailApp {
             _modal_sub: None,
             menu: None,
             _menu_sub: None,
+            collapsed_folders: HashSet::new(),
         };
         app.classify_visible();
         app

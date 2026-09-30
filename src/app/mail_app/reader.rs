@@ -25,6 +25,8 @@ impl MailApp {
         };
         let state = self.mailbox.state_of(msg.id).unwrap_or_default();
         let newest = self.newest();
+        let new_sender = self.mailbox.is_new_sender(msg.id);
+        let spam = self.mailbox.tags(msg.id).contains(&Tag::PossibleSpam);
         let mut thread: Vec<&Message> = self
             .mailbox
             .messages()
@@ -75,6 +77,83 @@ impl MailApp {
                         Self::clock_label(&msg.received, &newest)
                     )),
             )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(button("btn-reader-archive", "Archive", "Archive", "e", cx).on_click(run(Archive)))
+                    .child(button("btn-reader-file", "File", "File into a folder", "f", cx).on_click(run(File)))
+                    .child(button("btn-reader-delete", "Delete", "Delete", "d", cx).on_click(run(Delete)))
+                    .child(
+                        button("btn-reader-snooze", "Snooze…", "Snooze", "s", cx)
+                            .on_click(run(OpenSnoozePicker)),
+                    ),
+            )
+            .when(new_sender, |d| {
+                d.child(
+                    div()
+                        .id("banner-new-sender")
+                        .test_support()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .rounded_sm()
+                        .bg(t.new_sender.opacity(0.15))
+                        .border_1()
+                        .border_color(t.new_sender.opacity(0.5))
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_xs()
+                                .child(format!("New sender · {} <{}>", msg.from_name, msg.from_email)),
+                        )
+                        .child(
+                            button("btn-banner-allow", "Allow", "Allow this sender", "a", cx)
+                                .on_click(run(AllowSender)),
+                        )
+                        .child(
+                            button("btn-banner-block", "Block", "Block this sender", "b", cx)
+                                .on_click(run(BlockSender)),
+                        ),
+                )
+            })
+            .when(spam, |d| {
+                d.child(
+                    div()
+                        .id("banner-possible-spam")
+                        .test_support()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .rounded_sm()
+                        .bg(t.possible_spam.opacity(0.15))
+                        .border_1()
+                        .border_color(t.possible_spam.opacity(0.5))
+                        .child(div().flex_1().text_xs().child("Possible spam"))
+                        .child(
+                            button(
+                                "btn-banner-spam-block",
+                                "Block & Delete",
+                                "Block the sender and delete this message",
+                                "",
+                                cx,
+                            )
+                            .on_click(run(SpamBlock)),
+                        )
+                        .child(
+                            button("btn-banner-spam-delete", "Delete", "Delete this message", "d", cx)
+                                .on_click(run(Delete)),
+                        ),
+                )
+            })
             .child(
                 div()
                     .id("reader-body")

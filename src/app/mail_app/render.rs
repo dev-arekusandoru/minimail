@@ -8,21 +8,6 @@ impl Focusable for MailApp {
 
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let account = self.mailbox.accounts().first().map(|a| a.id.clone()).unwrap_or_default();
-        let counts = [
-            self.mailbox.count_at(&Location::AllInboxes),
-            self.mailbox.count_at(&Location::Snoozed(account.clone())),
-            self.mailbox.count_at(&Location::Archive(account.clone())),
-            self.mailbox.count_at(&Location::Trash(account)),
-        ];
-        let new_senders_count = self
-            .mailbox
-            .ids_in_view(&View {
-                chip: Chip::NewSenders,
-                ..View::default()
-            })
-            .len();
-        let new_senders_active = self.new_senders_open();
         let hint = self.hint_mode();
         let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened {
@@ -52,13 +37,6 @@ impl Render for MailApp {
         let banner = self.pending_rule.clone();
         let t = theme::active(cx);
         let (bg, fg, border, muted, sidebar) = (t.background, t.text, t.border, t.text_muted, t.sidebar);
-        let active_view = match &self.triage.view.location {
-            Location::AllInboxes | Location::Inbox(_) => 0,
-            Location::Snoozed(_) => 1,
-            Location::Archive(_) => 2,
-            Location::Trash(_) => 3,
-            Location::Sent(_) | Location::Folder(_) => 0,
-        };
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -124,10 +102,28 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &Archive, w, cx| this.mark(TriageState::Archived, w, cx)))
             .on_action(cx.listener(|this, _: &Delete, w, cx| this.mark(TriageState::Deleted, w, cx)))
+            .on_action(cx.listener(|this, _: &File, w, cx| {
+                if !this.modal_open() {
+                    this.open_file_picker(w, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &MoveToInbox, w, cx| this.mark(TriageState::Inbox, w, cx)))
-            .on_action(cx.listener(|this, _: &SenderArchive, w, cx| this.mark_sender(TriageState::Archived, w, cx)))
-            .on_action(cx.listener(|this, _: &SenderDelete, w, cx| this.mark_sender(TriageState::Deleted, w, cx)))
-            .on_action(cx.listener(|this, _: &SenderInbox, w, cx| this.mark_sender(TriageState::Inbox, w, cx)))
+            .on_action(cx.listener(|this, _: &SenderArchive, w, cx| this.confirm_sender(TriageState::Archived, w, cx)))
+            .on_action(cx.listener(|this, _: &SenderDelete, w, cx| this.confirm_sender(TriageState::Deleted, w, cx)))
+            .on_action(cx.listener(|this, _: &SenderFile, w, cx| this.confirm_sender_file(w, cx)))
+            .on_action(cx.listener(|this, _: &SenderSnooze, w, cx| this.confirm_sender_snooze(w, cx)))
+            .on_action(cx.listener(|this, _: &SenderInbox, w, cx| this.confirm_sender(TriageState::Inbox, w, cx)))
+            .on_action(cx.listener(|this, _: &MarkSpam, w, cx| {
+                if !this.modal_open() {
+                    this.open_spam_dialog(w, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SpamBlock, w, cx| {
+                let ids = this.target_ids();
+                if !ids.is_empty() {
+                    this.spam(&ids, true, w, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &Undo, window, cx| this.undo(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 if this.palette.is_some() {
@@ -151,11 +147,24 @@ impl Render for MailApp {
                     this.close_modals(window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &ShowAllInboxes, _, cx| this.show_view(View::default(), cx)))
-            .on_action(cx.listener(|this, _: &ShowSnoozed, _, cx| this.show_account_location(Location::Snoozed(String::new()), cx)))
-            .on_action(cx.listener(|this, _: &ShowArchive, _, cx| this.show_account_location(Location::Archive(String::new()), cx)))
-            .on_action(cx.listener(|this, _: &ShowTrash, _, cx| this.show_account_location(Location::Trash(String::new()), cx)))
-            .on_action(cx.listener(|this, _: &ShowNewSenders, _, cx| this.show_new_senders(cx)))
+            // Sidebar navigation: locations, folder folding, chips and filters.
+            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
+            .on_action(cx.listener(|this, ev: &ToggleFolder, _, cx| this.toggle_folder(ev.folder, cx)))
+            .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
+            .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
+            .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))
+            .on_action(cx.listener(|this, _: &GoArchive, _, cx| this.go_archive(cx)))
+            .on_action(cx.listener(|this, _: &GoTrash, _, cx| this.go_trash(cx)))
+            .on_action(cx.listener(|this, _: &SelectChip1, _, cx| this.select_chip(Chip::ALL[0], cx)))
+            .on_action(cx.listener(|this, _: &SelectChip2, _, cx| this.select_chip(Chip::ALL[1], cx)))
+            .on_action(cx.listener(|this, _: &SelectChip3, _, cx| this.select_chip(Chip::ALL[2], cx)))
+            .on_action(cx.listener(|this, _: &SelectChip4, _, cx| this.select_chip(Chip::ALL[3], cx)))
+            .on_action(cx.listener(|this, _: &SelectChip5, _, cx| this.select_chip(Chip::ALL[4], cx)))
+            .on_action(cx.listener(|this, _: &SelectChip6, _, cx| this.select_chip(Chip::ALL[5], cx)))
+            .on_action(cx.listener(|this, ev: &ToggleTagFilter, _, cx| this.toggle_tag_filter(ev.tag, cx)))
+            .on_action(cx.listener(|this, ev: &SetFilterKind, _, cx| this.set_filter_kind(ev.kind, cx)))
+            .on_action(cx.listener(|this, ev: &SetFilterAccount, _, cx| this.set_filter_account(ev.account.clone(), cx)))
+            .on_action(cx.listener(|this, _: &ClearFilters, _, cx| this.clear_filters(cx)))
             .on_action(cx.listener(|this, _: &ToggleHelp, _, cx| {
                 if this.help {
                     this.close_help(cx);
@@ -220,16 +229,15 @@ impl Render for MailApp {
                     .flex()
                     .child(
                         div()
-                            .w(px(148.))
+                            .w(px(panes::SIDEBAR_W))
                             .flex_none()
                             .h_full()
                             .bg(sidebar)
                             .border_r_1()
                             .border_color(border)
-                            .child(
-                                ViewTabs::new(active_view, counts)
-                                    .new_senders(new_senders_count, new_senders_active),
-                            ),
+                            .flex()
+                            .flex_col()
+                            .child(self.render_sidebar(cx)),
                     )
                     .child(
                         div()
@@ -340,6 +348,12 @@ impl Render for MailApp {
             })
             .when_some(self.rules_panel.clone(), |d, panel| {
                 d.child(overlay(window, panel).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
+            .when_some(self.dialog.clone(), |d, dialog| {
+                d.child(overlay(window, dialog).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
+            .when_some(self.folder_picker.clone(), |d, picker| {
+                d.child(overlay(window, picker).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
             })
     }
 }

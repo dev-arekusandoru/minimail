@@ -219,6 +219,9 @@ enum Change {
     Pending(Vec<Suggestion>),
     /// Outbox reply with this seq was queued; undo removes it if still there.
     Queued(u64),
+    /// Post-send filing recorded for a queued reply: the seq, its previous value,
+    /// and the state a reply materialised after the filing should go back to.
+    PostSend(u64, Option<TriageState>, TriageState),
     SentPush,
     FolderPush(FolderId),
     Materialised(MessageId),
@@ -247,6 +250,10 @@ pub struct Mailbox {
     accounts: Vec<Account>,
     folders: Vec<Folder>,
     follow_up_timeout: Timestamp,
+    /// State a still-queued reply should materialise with (post-send filing), by outbox seq.
+    post_send: HashMap<u64, TriageState>,
+    /// Replies the outbox materialised, by the outbox entry they came from.
+    sent_ids: HashMap<u64, MessageId>,
 }
 
 impl Mailbox {
@@ -350,6 +357,8 @@ impl Mailbox {
                     .collect()
             },
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
+            post_send: HashMap::new(),
+            sent_ids: HashMap::new(),
         }
     }
 

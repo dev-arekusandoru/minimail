@@ -2,7 +2,6 @@
 
 use crate::app::actions::commands;
 use crate::clock::{Timestamp, DAY};
-use crate::model::TriageState;
 use crate::theme::{self, Theme};
 use gpui_kit::{
     component::{kbd::Kbd, label::Label, separator::Separator},
@@ -15,12 +14,24 @@ fn kbd(key: &str) -> Kbd {
         .appearance(false)
 }
 
+/// One `kbd` chip per keystroke, so multi-stroke bindings like `"g i"` read as `g` then `i`.
+fn kbd_chips(t: &Theme, key: &str) -> Div {
+    let mut el = div().flex().items_center().gap_1();
+    for (i, part) in key.split_whitespace().enumerate() {
+        if i > 0 {
+            el = el.child(div().text_xs().text_color(t.text_muted).child("then"));
+        }
+        el = el.child(kbd(part));
+    }
+    el
+}
+
 fn hint(t: &Theme, key: &str, what: &str) -> impl IntoElement {
     div()
         .flex()
         .items_center()
         .gap_1()
-        .child(kbd(key))
+        .child(kbd_chips(t, key))
         .child(div().text_xs().text_color(t.text_muted).child(SharedString::from(what.to_owned())))
 }
 
@@ -85,19 +96,26 @@ impl RenderOnce for HintBar {
             HintMode::List => &[
                 ("j", "next"),
                 ("k", "prev"),
-                ("x", "select"),
                 ("e", "archive"),
+                ("f", "file"),
                 ("d", "delete"),
                 ("s", "snooze"),
+                ("i", "inbox"),
                 ("r", "reply"),
-                ("u", "undo"),
-                ("cmd-k", "commands"),
+                ("a", "allow"),
+                ("b", "block"),
+                ("!", "spam"),
+                ("1", "chips"),
+                ("g", "go to"),
+                ("z", "summarize"),
+                ("ctrl-g", "group"),
                 ("?", "help"),
             ],
             HintMode::Selection(_) => &[
                 ("x", "toggle"),
                 ("shift-j", "extend"),
                 ("e", "archive"),
+                ("f", "file"),
                 ("d", "delete"),
                 ("s", "snooze"),
                 ("i", "inbox"),
@@ -107,8 +125,11 @@ impl RenderOnce for HintBar {
             HintMode::Reader => &[
                 ("r", "reply"),
                 ("e", "archive"),
+                ("f", "file"),
                 ("d", "delete"),
                 ("s", "snooze"),
+                ("a", "allow"),
+                ("b", "block"),
                 ("j", "next"),
                 ("u", "undo"),
             ],
@@ -116,6 +137,7 @@ impl RenderOnce for HintBar {
             HintMode::Palette => &[("enter", "run"), ("up", "prev"), ("down", "next"), ("escape", "close")],
             HintMode::Session(false) => &[
                 ("e", "archive"),
+                ("f", "file"),
                 ("d", "delete"),
                 ("s", "snooze"),
                 ("i", "inbox"),
@@ -140,6 +162,8 @@ impl RenderOnce for HintBar {
             .gap_3()
             .px_3()
             .h(px(28.))
+            .flex_none()
+            .overflow_hidden()
             .border_t_1()
             .border_color(t.border)
             .bg(t.sidebar)
@@ -215,7 +239,7 @@ impl RenderOnce for HelpOverlay {
                         .text_sm()
                         .text_color(t.text)
                         .child(Label::new(c.name))
-                        .when(!c.key.is_empty(), |el| el.child(kbd(c.key)))
+                        .when(!c.key.is_empty(), |el| el.child(kbd_chips(&t, c.key)))
                 }))
         });
         div()
@@ -267,102 +291,6 @@ impl RenderOnce for HelpOverlay {
             )
     }
 }
-
-#[derive(IntoElement)]
-pub struct ViewTabs {
-    active: usize,
-    counts: [usize; 4],
-    new_senders: Option<(usize, bool)>,
-}
-
-impl ViewTabs {
-    pub fn new(active: usize, counts: [usize; 4]) -> Self {
-        Self { active, counts, new_senders: None }
-    }
-
-    /// Adds the New Senders chip view as the fifth tab.
-    pub fn new_senders(mut self, count: usize, active: bool) -> Self {
-        self.new_senders = Some((count, active));
-        self
-    }
-}
-
-/// The action behind a location tab (the same one its number key triggers).
-fn tab_action(i: usize) -> Box<dyn Action> {
-    use crate::app::actions::{ShowAllInboxes, ShowArchive, ShowNewSenders, ShowSnoozed, ShowTrash};
-    match i {
-        0 => Box::new(ShowAllInboxes),
-        1 => Box::new(ShowSnoozed),
-        2 => Box::new(ShowArchive),
-        3 => Box::new(ShowTrash),
-        _ => Box::new(ShowNewSenders),
-    }
-}
-
-fn tab(t: &Theme, i: usize, name: &'static str, n: usize, active: bool, color: Hsla) -> impl IntoElement {
-    let hover = t.hover;
-    div()
-        .id(("view-tab", i))
-        .test_support()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_2()
-        .px_2()
-        .py_1()
-        .rounded_sm()
-        .text_sm()
-        .text_color(if active { color } else { t.text })
-        .hover(move |el| el.bg(hover))
-        .cursor_pointer()
-        .on_click(move |_, window, cx| window.dispatch_action(tab_action(i), cx))
-        .when(active, |el| el.bg(t.selection))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(color))
-                .child(kbd(&(i + 1).to_string()))
-                .child(name),
-        )
-        .child(div().text_xs().text_color(if active { color } else { t.text_muted }).child(n.to_string()))
-}
-
-impl RenderOnce for ViewTabs {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
-        let states = [
-            TriageState::Inbox,
-            TriageState::Snoozed,
-            TriageState::Archived,
-            TriageState::Deleted,
-        ];
-        let to_triage = self.counts[0];
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_2()
-            .child(
-                div()
-                    .px_2()
-                    .pb_2()
-                    .text_xs()
-                    .text_color(t.text_muted)
-                    .child(format!("{to_triage} to triage")),
-            )
-            .children(self.counts.iter().enumerate().map(|(i, &n)| {
-                let name = ["All Inboxes", "Snoozed", "Archive", "Trash"][i];
-                let state = states[i];
-                tab(&t, i, name, n, self.new_senders.is_none() && i == self.active, t.state_color(state))
-            }))
-            .when_some(self.new_senders, |el, (n, active)| {
-                el.child(tab(&t, 4, "New Senders", n, active, t.new_sender))
-            })
-    }
-}
-
 
 #[cfg(test)]
 mod tests {

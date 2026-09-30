@@ -56,6 +56,9 @@ impl Mailbox {
         let Some(m) = self.get(original).cloned() else {
             return 0;
         };
+        // What a reply materialised from the outbox would have had: the original's
+        // state before this filing.
+        let before = m.state;
         let ids: Vec<_> = self
             .messages
             .iter()
@@ -77,7 +80,25 @@ impl Mailbox {
                 });
             }
         }
-        let changed = changes.len();
+        // Replies still in the outbox materialise with this state, and the same undo
+        // step has to reach them once they are sent.
+        let queued: Vec<u64> = self
+            .outbox
+            .iter()
+            .filter(|o| {
+                self.get(o.reply.in_reply_to)
+                    .is_some_and(|x| x.thread_id == m.thread_id)
+            })
+            .map(|o| o.seq)
+            .collect();
+        for seq in queued {
+            let was = self.post_send.insert(seq, state);
+            changes.push(Change::PostSend(seq, was, before));
+        }
+        let changed = changes
+            .iter()
+            .filter(|c| matches!(c, Change::Msg(..)))
+            .count();
         self.push_undo(changes);
         changed
     }

@@ -131,7 +131,7 @@ fn state_keys_move_messages_and_undo(cx: &mut TestAppContext) {
     assert_eq!(h.count(Snoozed), start[1] + 1);
 
     // Move back to inbox from the Archive location.
-    h.keys("3");
+    h.keys("g a");
     assert_eq!(h.view(), Location::Archive("personal".into()));
     let d = h.cursor().unwrap();
     h.keys("i");
@@ -157,19 +157,23 @@ fn cmd_z_undoes(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn number_keys_switch_views(cx: &mut TestAppContext) {
+fn g_prefix_switches_locations(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert_eq!(h.view(), Location::AllInboxes);
-    h.keys("2");
+    h.keys("g s");
     assert_eq!(h.view(), Location::Snoozed("personal".into()));
-    h.keys("3");
+    h.keys("g t");
+    assert_eq!(h.view(), Location::Sent("personal".into()));
+    h.keys("g a");
     assert_eq!(h.view(), Location::Archive("personal".into()));
-    h.keys("4");
+    h.keys("g d");
     assert_eq!(h.view(), Location::Trash("personal".into()));
-    h.keys("1");
-    assert_eq!(h.view(), Location::AllInboxes);
-    h.keys("j j 3");
-    assert_eq!(h.index(), 0, "switching view resets the cursor");
+    h.keys("g i");
+    assert_eq!(h.view(), Location::Inbox("personal".into()), "`g i` keeps the account");
+    h.keys("g i");
+    assert_eq!(h.view(), Location::Inbox("personal".into()));
+    h.keys("j j g a");
+    assert_eq!(h.index(), 0, "switching location resets the cursor");
 }
 
 #[gpui_kit::gpui::test]
@@ -204,7 +208,7 @@ fn palette_filters_and_runs_command(cx: &mut TestAppContext) {
 fn palette_runs_view_switch(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.keys("cmd-k");
-    h.keys("s h o w space s n o o z e d");
+    h.keys("g o space t o space s n o o z e d");
     h.keys("enter");
     assert_eq!(h.view(), Location::Snoozed("personal".into()));
 }
@@ -236,6 +240,11 @@ fn reply_send_tracks_awaiting_reply_without_moving_message(cx: &mut TestAppConte
     assert_eq!(h.state_of(id), Inbox);
     assert!(h.read(|a| a.mailbox.tags(id).contains(&Tag::AwaitingReply)));
     assert!(!h.read(|a| a.mailbox.tags(id).contains(&Tag::NeedsReply)));
+
+    // Sending opens the post-send dialog; cancel it to keep the message where it is.
+    assert!(h.read(|a| a.dialog_open()));
+    h.keys("escape");
+    assert_eq!(h.state_of(id), Inbox);
 
     h.keys("u");
     assert!(h.read(|a| a.compose_open()));
@@ -341,6 +350,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     assert!(expected > 1, "fixture should have multiple msgs per sender");
     let start = h.counts();
     h.keys("shift-e");
+    h.keys("1");
     let remaining = h.read(|a| {
         a.mailbox
             .messages()
@@ -360,8 +370,8 @@ fn counts_always_sum_to_total(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let total = h.total();
     let seq = [
-        "e", "j j", "s escape", "shift-j", "i", "2", "j", "e", "3", "u", "4", "k", "i",
-        "1", "x", "j", "x", "s escape", "u u", "r", "t e s t", "cmd-enter", "z", "j",
+        "e", "j j", "s escape", "shift-j", "i", "g s", "j", "e", "g a", "u", "g d", "k", "i",
+        "g i", "x", "j", "x", "s escape", "u u", "r", "t e s t", "cmd-enter", "z", "j",
         "enter", "shift-i", "u", "cmd-k", "a r c h i v e", "enter", "?", "?",
     ];
     for step in seq {

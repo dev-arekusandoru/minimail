@@ -18,7 +18,7 @@ gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
         ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
-        BellOff, UserPlus, Hourglass, AlarmClock, Paperclip
+        BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock
     ]
 );
 
@@ -160,10 +160,10 @@ impl Glyph {
             Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
             Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
             Glyph::AwaitingReply => spec(IconName::Hourglass, AwaitingReply, "Awaiting reply", "A reply has been sent and an answer is expected.", "Reply status", 4, false),
-            Glyph::FollowUp => spec(IconName::Reply, FollowUp, "Follow up", "This message needs a follow-up.", "Reply status", 5, false),
-            Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A reminder was attached to this message.", "Reply status", 6, false),
+            Glyph::FollowUp => spec(IconName::CornerUpRight, FollowUp, "Follow up", "A reply is overdue: follow up with this thread.", "Reply status", 5, false),
+            Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A snoozed message woke back up in the inbox.", "Reply status", 6, false),
             Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
-            Glyph::Snoozed => spec(IconName::AlarmClock, Snoozed, "Snoozed", "Returns to the inbox at the time shown.", "Mail state", 8, false),
+            Glyph::Snoozed => spec(IconName::Clock, Snoozed, "Snoozed", "Hidden until the wake time shown on the row.", "Mail state", 8, false),
             Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 3 out of 5.", "Urgency", 7, false),
             Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
             Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),

@@ -178,7 +178,7 @@ fn split_thread_shows_only_the_panels_messages(cx: &mut TestAppContext) {
     );
     h.keys("ctrl-g");
     assert!(matches!(&h.rows()[0], Row::Header { ids, .. } if ids == &[3, 1]));
-    h.keys("3");
+    h.keys("g a");
     assert_eq!(h.rows(), vec![Row::Single(2)]);
 }
 

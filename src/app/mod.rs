@@ -6,6 +6,8 @@ pub mod actions;
 pub mod icons;
 pub mod chrome;
 pub mod compose;
+pub mod dialog;
+pub mod folder_picker;
 pub mod mail_app;
 pub mod menu;
 pub mod overlay;

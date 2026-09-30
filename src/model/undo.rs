@@ -16,6 +16,19 @@ impl Mailbox {
         }
     }
 
+    /// Run `f` and fold every undo step it pushes into one, so a compound action
+    /// (create a folder, then move mail into it) undoes in a single step.
+    pub fn grouped<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.undo.len();
+        let out = f(self);
+        let pushed: Vec<UndoStep> = self.undo.split_off(mark);
+        if !pushed.is_empty() {
+            let changes = pushed.into_iter().flat_map(|step| step.changes).collect();
+            self.undo.push(UndoStep { changes });
+        }
+        out
+    }
+
     /// Undo the last mutation. Returns false when there is nothing to undo.
     pub fn undo(&mut self) -> bool {
         let Some(step) = self.undo.pop() else {
@@ -62,9 +75,31 @@ impl Mailbox {
                     }
                     self.newest_first.retain(|mid| *mid != id);
                     self.meta.remove(&id);
+                    self.sent_ids.retain(|_, sent| *sent != id);
+                }
+                Change::PostSend(seq, was, before) => {
+                    match was {
+                        Some(state) => {
+                            self.post_send.insert(seq, state);
+                        }
+                        None => {
+                            self.post_send.remove(&seq);
+                        }
+                    }
+                    // The reply was sent after the filing: give it back the state it
+                    // would have had, so the filing undoes as a whole.
+                    if let Some(&id) = self.sent_ids.get(&seq)
+                        && let Some(&i) = self.index.get(&id)
+                    {
+                        self.messages[i].state = before;
+                    }
                 }
                 Change::Pending(p) => self.pending = p,
-                Change::Queued(seq) => self.outbox.retain(|o| o.seq != seq),
+                Change::Queued(seq) => {
+                    self.outbox.retain(|o| o.seq != seq);
+                    self.post_send.remove(&seq);
+                    self.sent_ids.remove(&seq);
+                }
                 Change::SentPush => {
                     self.sent.pop();
                 }

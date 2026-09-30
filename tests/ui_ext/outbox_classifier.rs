@@ -11,6 +11,9 @@ pub fn send_goes_to_outbox_and_undo_recalls_within_window(cx: &mut TestAppContex
     let mut h = harness_with(cx, snooze_box());
     let id = h.cursor().unwrap();
     h.send_reply("Does that work?");
+    // Sending opens the post-send dialog; cancel it to keep the original where it is.
+    assert!(h.read(|a| a.dialog_open()));
+    h.keys("escape");
     assert_eq!(h.read(|a| a.mailbox.outbox().len()), 1);
     assert_eq!(h.read(|a| a.mailbox.sent().len()), 0);
     assert_eq!(h.state_of(id), Inbox, "sending does not move the original out of the Inbox");
@@ -33,6 +36,7 @@ pub fn outbox_flushes_to_sent_after_ten_seconds(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     let id = h.cursor().unwrap();
     h.send_reply("bye");
+    h.keys("escape");
     h.advance(9);
     assert_eq!(h.read(|a| a.mailbox.sent().len()), 0);
     h.advance(1);
@@ -62,7 +66,7 @@ pub fn pending_total(h: &mut Harness<'_>) -> usize {
 
 /// Move the cursor down the current view until a message with pending suggestions is found.
 pub fn goto_pending(h: &mut Harness<'_>) -> MessageId {
-    h.keys("1");
+    h.click("nav-all-inboxes");
     for _ in 0..80 {
         let id = h.cursor().unwrap();
         if h.read(|a| !a.mailbox.pending(id).is_empty()) {

@@ -1,11 +1,11 @@
-//! Small presentational panels: rules list, session card, summary card, rule banner, New Senders header.
+//! Small presentational panels: rules list, session card, summary card, rule banner.
 
 use crate::app::overlay::FitViewport as _;
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
-use crate::app::actions::{AcceptRule, AllowSender, BlockSender, ClearSelection, DismissRule};
+use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
 use crate::app::ui::{button, run};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
@@ -311,47 +311,6 @@ impl RenderOnce for RuleBanner {
                     .gap_2()
                     .child(button("rule-accept", "Accept", "Accept rule", "shift-y", cx).on_click(run(AcceptRule)))
                     .child(button("rule-dismiss", "Dismiss", "Dismiss rule", "shift-n", cx).on_click(run(DismissRule))),
-            )
-    }
-}
-
-/// Header controls for the New Senders chip.
-#[derive(IntoElement)]
-pub struct NewSendersHeader {
-    count: usize,
-}
-
-impl NewSendersHeader {
-    pub fn new(count: usize) -> Self {
-        Self { count }
-    }
-}
-
-impl RenderOnce for NewSendersHeader {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .px_3()
-            .py_1()
-            .border_b_1()
-            .border_color(t.border)
-            .bg(t.new_sender.opacity(0.10))
-            .text_xs()
-            .text_color(t.new_sender)
-            .child(SharedString::from(format!(
-                "New Senders · {} messages",
-                self.count
-            )))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(button("new-sender-allow", "Allow", "Allow sender", "a", cx).on_click(run(AllowSender)))
-                    .child(button("new-sender-block", "Block", "Block sender", "b", cx).on_click(run(BlockSender))),
             )
     }
 }

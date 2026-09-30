@@ -106,7 +106,7 @@ impl Mailbox {
                 subject: original.subject.clone(),
                 body: outgoing.reply.body.clone(),
                 received: original.received.clone(),
-                state: original.state,
+                state: self.post_send.get(&outgoing.seq).copied().unwrap_or(original.state),
                 account: original.account.clone(),
                 outgoing: true,
                 snooze: None,
@@ -116,6 +116,7 @@ impl Mailbox {
             self.meta.insert(id, Meta::default());
             self.messages.push(sent);
             let seq = outgoing.seq;
+            self.sent_ids.insert(seq, id);
             self.sent.push(outgoing.reply);
             if let Some(step) = self.undo.iter_mut().find(|step| {
                 step.changes

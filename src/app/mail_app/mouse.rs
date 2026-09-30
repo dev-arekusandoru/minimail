@@ -4,7 +4,7 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{BAR_H, HEADER_H, ListMode, MailApp, MenuKind, PaneLayout};
+use super::{BAR_H, HEADER_H, LIST_HEADER_H, ListMode, MENU_W, MailApp, MenuKind, PaneLayout, panes};
 use crate::model::Location;
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
@@ -140,6 +140,7 @@ impl MailApp {
             .border_b_1()
             .border_color(t.border)
             .child(button("btn-archive", "Archive", "Archive", "e", cx).on_click(run(Archive)))
+            .child(button("btn-file", "File…", "File into a folder", "f", cx).on_click(run(File)))
             .child(button("btn-delete", "Delete", "Delete", "d", cx).on_click(run(Delete)))
             .when(self.triage.view.location != Location::AllInboxes, |d| {
                 d.child(button("btn-inbox", "Inbox", "Move to inbox", "i", cx).on_click(run(MoveToInbox)))
@@ -180,11 +181,14 @@ impl MailApp {
     /// tucked under the bar whose trigger opened it.
     pub(super) fn render_menu(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let panel = self.menu_panel()?;
-        let top = if self.menu_is(MenuKind::Global) {
-            HEADER_H
-        } else {
-            HEADER_H + BAR_H
+        let filter = self.menu_is(MenuKind::Filter);
+        let top = match filter {
+            true => self.list_header_bottom(),
+            false if self.menu_is(MenuKind::Global) => HEADER_H,
+            false => HEADER_H + BAR_H,
         };
+        // The filter menu hangs under the Filter ▾ button at the list header's right edge.
+        let left = panes::SIDEBAR_W + self.list_w - MENU_W - 12.;
         Some(
             div()
                 .id("menu-backdrop")
@@ -200,12 +204,18 @@ impl MailApp {
                     div()
                         .absolute()
                         .top(px(top))
-                        .right(px(12.))
+                        .when(filter, |d| d.left(px(left.max(panes::SIDEBAR_W + 8.))))
+                        .when(!filter, |d| d.right(px(12.)))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(panel),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Distance from the window top to the bottom edge of the list header.
+    fn list_header_bottom(&self) -> f32 {
+        HEADER_H + if self.context_actions() { BAR_H } else { 0. } + LIST_HEADER_H
     }
 
     /// Toolbar glyph for the pane layout button: what pressing it switches to.

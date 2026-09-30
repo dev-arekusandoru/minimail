@@ -7,7 +7,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{ListMode, MailApp, MenuKind, view_label};
+use super::{ListMode, MailApp, MenuKind};
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
@@ -19,7 +19,7 @@ impl MailApp {
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
         let moving = Rc::new(Cell::new(false));
         let view: SharedString = match &self.mode {
-            ListMode::State => view_label(&self.triage.view).into(),
+            ListMode::State => self.location_label().into(),
             ListMode::Search(_) => "Search".into(),
         };
         let search_tip: SharedString = "Search mail (/)".into();

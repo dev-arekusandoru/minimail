@@ -244,7 +244,7 @@ impl MailApp {
         let t = crate::theme::active(cx);
         let latest = self.mailbox.get(ids[0]);
         let (from, subject, date) = latest
-            .map(|m| (m.from_name.clone(), m.subject.clone(), Self::clock_label(&m.received, newest)))
+            .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), Self::clock_label(&m.received, newest)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
         let selected_count = ids.iter().filter(|id| self.triage.is_selected(**id)).count();
