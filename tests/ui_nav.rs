@@ -212,6 +212,22 @@ fn folder_rows_fold_their_children(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn account_headers_fold_their_section(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert!(h.has("nav-inbox-work") && h.has("nav-folder-4"));
+    assert!(!h.has("account-count-work"), "unfolded headers show no count");
+    h.click("account-work");
+    assert!(!h.has("nav-inbox-work"), "folding hides the account's rows");
+    assert!(!h.has("nav-folder-4"), "including its folders");
+    assert!(h.has("nav-inbox-personal"), "other accounts are untouched");
+    assert!(h.has("account-count-work"), "the work Inbox holds unread mail");
+    assert_eq!(h.location(), Location::AllInboxes, "folding does not navigate");
+    h.click("account-work");
+    assert!(h.has("nav-inbox-work") && h.has("nav-folder-4"), "unfolding restores the rows");
+    assert!(!h.has("account-count-work"));
+}
+
+#[gpui_kit::gpui::test]
 fn chips_exist_on_inbox_views_only(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert!(h.chip_row(), "All Inboxes is an Inbox view");

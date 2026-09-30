@@ -222,6 +222,14 @@ impl MailApp {
         cx.notify();
     }
 
+    /// Fold or unfold an account's section in the sidebar.
+    pub(super) fn toggle_account(&mut self, account: AccountId, cx: &mut Context<Self>) {
+        if !self.collapsed_accounts.remove(&account) {
+            self.collapsed_accounts.insert(account);
+        }
+        cx.notify();
+    }
+
     /// `g i`: the current account's Inbox, or All Inboxes when already there.
     pub(super) fn go_inbox(&mut self, cx: &mut Context<Self>) {
         let location = match self.triage.view.location.clone() {

@@ -18,7 +18,9 @@ gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
         ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
-        BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock
+        BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
+        // Sidebar locations.
+        Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders
     ]
 );
 

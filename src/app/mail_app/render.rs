@@ -150,6 +150,7 @@ impl Render for MailApp {
             // Sidebar navigation: locations, folder folding, chips and filters.
             .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
             .on_action(cx.listener(|this, ev: &ToggleFolder, _, cx| this.toggle_folder(ev.folder, cx)))
+            .on_action(cx.listener(|this, ev: &ToggleAccount, _, cx| this.toggle_account(ev.account.clone(), cx)))
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))

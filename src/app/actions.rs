@@ -342,6 +342,13 @@ pub struct ToggleFolder {
     pub folder: FolderId,
 }
 
+/// Fold or unfold an account's section in the sidebar.
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ToggleAccount {
+    pub account: AccountId,
+}
+
 /// Add or remove one tag from the Filter ▾ menu's tag list.
 #[derive(Clone, PartialEq, gpui_kit::Action)]
 #[action(namespace = mail, no_json)]
