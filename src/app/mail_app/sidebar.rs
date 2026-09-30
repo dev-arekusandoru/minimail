@@ -1,7 +1,7 @@
 //! The accounts/folders sidebar: every location the list can show, in one column.
 //!
-//! *All Inboxes*, then one foldable section per account: a small header label (colour dot,
-//! name; chevron on hover, Inbox count while folded), its Inbox / Snoozed / Sent / Archive /
+//! *All Inboxes*, then one foldable section per account: a small header label (name; chevron
+//! on hover, Inbox count while folded), its Inbox / Snoozed / Sent / Archive /
 //! Trash, and the top-level folders, all as rail-less roots. Rows dispatch
 //! [`ShowLocation`]; Inbox and Snoozed rows (and All Inboxes) carry a count when non-zero.
 //!
@@ -136,7 +136,6 @@ impl MailApp {
                 &t,
                 &account.id,
                 &account.name,
-                color,
                 folded,
                 mailbox.count_at(&inbox),
             ));
@@ -341,13 +340,12 @@ fn count_badge(t: &Theme, n: usize, highlighted: bool) -> Div {
         .child(n.to_string())
 }
 
-/// An account's section label: colour dot and name, a fold chevron that appears on hover, and
-/// — while folded — the account's Inbox count. Clicking anywhere on it folds the account.
+/// An account's section label: the name, a fold chevron that appears on hover, and — while
+/// folded — the account's Inbox count. Clicking anywhere on it folds the account.
 fn account_header(
     t: &Theme,
     id: &str,
     name: &str,
-    color: Hsla,
     folded: bool,
     inbox_count: usize,
 ) -> AnyElement {
@@ -371,15 +369,7 @@ fn account_header(
         .hover(move |d| d.bg(hover))
         .on_click(run(ToggleAccount { account }))
         .child(
-            column()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(div().size(px(8.)).rounded_full().bg(color)),
-        )
-        .child(
             div()
-                .ml(px(6.))
                 .flex_1()
                 .min_w_0()
                 .truncate()
