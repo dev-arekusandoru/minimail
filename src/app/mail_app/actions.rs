@@ -27,7 +27,9 @@ impl MailApp {
         self.snooze = None;
         self.settings = None;
         self.rules_panel = None;
+        self.menu = None;
         self._modal_sub = None;
+        self._menu_sub = None;
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }

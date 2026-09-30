@@ -134,6 +134,7 @@ impl MailApp {
 
         let search = div()
             .id("search-box")
+            .test_support()
             .flex()
             .flex_none()
             .items_center()
@@ -248,6 +249,7 @@ impl MailApp {
             div()
                 .id("menu-backdrop")
                 .test_support()
+                .absolute()
                 .inset_0()
                 .occlude()
                 .on_mouse_down(

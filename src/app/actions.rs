@@ -7,7 +7,9 @@ use crate::app::settings::{
     SettingsSectionNext, SettingsSectionPrev, SettingsThresholdDown, SettingsThresholdUp,
     SettingsToggleMode,
 };
-use crate::app::menu::{MENU_CONTEXT, MenuBack, MenuCancel, MenuNext, MenuPrev, MenuRun};
+use crate::app::menu::{
+    MENU_CONTEXT, MenuBack, MenuCancel, MenuNext, MenuOpen, MenuPrev, MenuRun,
+};
 use crate::app::snooze::{
     SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
 };
@@ -168,6 +170,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", MenuRun, Some(MENU_CONTEXT)),
         KeyBinding::new("left", MenuBack, Some(MENU_CONTEXT)),
         KeyBinding::new("backspace", MenuBack, Some(MENU_CONTEXT)),
+        KeyBinding::new("right", MenuOpen, Some(MENU_CONTEXT)),
         KeyBinding::new("escape", MenuCancel, Some(MENU_CONTEXT)),
         // Rules panel.
         KeyBinding::new("j", RulesNext, Some(RULES_CONTEXT)),

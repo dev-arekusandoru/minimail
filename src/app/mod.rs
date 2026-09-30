@@ -7,6 +7,7 @@ pub mod icons;
 pub mod chrome;
 pub mod compose;
 pub mod mail_app;
+pub mod menu;
 pub mod overlay;
 pub mod row;
 pub mod palette;
