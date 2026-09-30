@@ -15,7 +15,7 @@ impl Render for MailApp {
         }
         let viewport = window.viewport_size();
         let (pane_w, pane_h) = (
-            panes::available_width(f32::from(viewport.width)),
+            panes::available_width(f32::from(viewport.width), self.sidebar_w),
             panes::available_height(f32::from(viewport.height)),
         );
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
@@ -232,7 +232,8 @@ impl Render for MailApp {
                     .flex()
                     .child(
                         div()
-                            .w(px(panes::SIDEBAR_W))
+                            .relative()
+                            .w(px(self.sidebar_w))
                             .flex_none()
                             .h_full()
                             .bg(sidebar)
@@ -240,7 +241,8 @@ impl Render for MailApp {
                             .border_color(border)
                             .flex()
                             .flex_col()
-                            .child(self.render_sidebar(cx)),
+                            .child(self.render_sidebar(cx))
+                            .child(self.render_sidebar_handle(cx)),
                     )
                     .child(
                         div()
@@ -271,6 +273,22 @@ impl Render for MailApp {
                         }))
                         .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
                             this.end_divider_drag(cx);
+                        })),
+                )
+            })
+            .when(self.sidebar_dragging, |d| {
+                d.child(
+                    div()
+                        .id("sidebar-drag")
+                        .test_support()
+                        .absolute()
+                        .inset_0()
+                        .cursor_col_resize()
+                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, w, cx| {
+                            this.drag_sidebar(ev, w, cx);
+                        }))
+                        .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.end_sidebar_drag(cx);
                         })),
                 )
             })

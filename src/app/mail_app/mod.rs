@@ -103,6 +103,9 @@ pub struct MailApp {
     list_h: f32,
     /// How much room the list and the reader share, and how they are stacked.
     pub panes: Panes,
+    /// Width of the sidebar; dragged via its right edge.
+    sidebar_w: f32,
+    sidebar_dragging: bool,
     /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
     pub reader: ReaderView,
     /// Show action buttons in the reader (off: keyboard hints only).
@@ -184,6 +187,8 @@ impl MailApp {
             list_w: 0.,
             list_h: 0.,
             panes: Panes::default(),
+            sidebar_w: panes::SIDEBAR_W,
+            sidebar_dragging: false,
             reader: ReaderView::default(),
             reader_toolbar: false,
             policy: JudgePolicy::default(),

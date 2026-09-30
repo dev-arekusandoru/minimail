@@ -25,16 +25,19 @@ pub const STEP: f32 = 40.;
 /// Width of the band around the hairline that catches the pointer.
 pub const DIVIDER_HIT: f32 = 7.;
 
-/// The fixed sidebar, which is never part of the panes.
+/// The sidebar's default width; it is never part of the panes.
 pub const SIDEBAR_W: f32 = 148.;
+/// Sidebar drag limits.
+pub const MIN_SIDEBAR_W: f32 = 120.;
+pub const MAX_SIDEBAR_W: f32 = 320.;
 /// The toolbar and the hint bar, which the stacked panes do not get. The toolbar
 /// wraps at narrow widths, so this is an allowance: the reader pane keeps its own
 /// minimum in the flex layout and takes the hit if the allowance was too small.
 const CHROME_H: f32 = 108.;
 
 /// Room the panes share on the width axis.
-pub fn available_width(viewport_w: f32) -> f32 {
-    (viewport_w - SIDEBAR_W).max(MIN_LIST_W)
+pub fn available_width(viewport_w: f32, sidebar_w: f32) -> f32 {
+    (viewport_w - sidebar_w).max(MIN_LIST_W)
 }
 
 /// Room the panes share on the height axis.
@@ -258,9 +261,9 @@ impl RenderOnce for Divider {
 }
 
 /// Room the two panes share in a `window`, as `(width, height)`.
-fn available(window: &Window) -> (f32, f32) {
+fn available(window: &Window, sidebar_w: f32) -> (f32, f32) {
     let size = window.viewport_size();
-    (available_width(f32::from(size.width)), available_height(f32::from(size.height)))
+    (available_width(f32::from(size.width), sidebar_w), available_height(f32::from(size.height)))
 }
 
 impl MailApp {
@@ -289,7 +292,7 @@ impl MailApp {
 
     /// Move the divider along the stacking axis, keeping both panes usable.
     pub(super) fn nudge_list_pane(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window);
+        let (width, height) = available(window, self.sidebar_w);
         self.panes.nudge(self.axis_available(width, height), delta);
         cx.notify();
     }
@@ -297,7 +300,7 @@ impl MailApp {
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.panes.reset();
-        let (width, height) = available(window);
+        let (width, height) = available(window, self.sidebar_w);
         self.panes.list_size(self.axis_available(width, height));
         self.show_toast("Pane sizes reset".into(), window, cx);
     }
@@ -310,20 +313,20 @@ impl MailApp {
 
     pub(super) fn set_pane_layout(&mut self, orientation: Orientation, window: &mut Window, cx: &mut Context<Self>) {
         self.panes.set_orientation(orientation);
-        let (width, height) = available(window);
+        let (width, height) = available(window, self.sidebar_w);
         self.panes.list_size(self.axis_available(width, height));
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
     /// Press on the divider: remember where in the pane the pointer grabbed it.
     pub(super) fn begin_divider_drag(&mut self, ev: &MouseDownEvent, window: &Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window);
+        let (width, height) = available(window, self.sidebar_w);
         self.panes.begin_drag(self.pointer_along(ev.position), self.axis_available(width, height));
         cx.notify();
     }
 
     pub(super) fn drag_divider(&mut self, ev: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window);
+        let (width, height) = available(window, self.sidebar_w);
         self.panes.drag_to(self.pointer_along(ev.position), self.axis_available(width, height));
         cx.notify();
     }
@@ -366,5 +369,51 @@ impl MailApp {
             Orientation::SideBySide => f32::from(position.x),
             Orientation::Stacked => f32::from(position.y),
         }
+    }
+}
+
+impl MailApp {
+    /// Current sidebar width in pixels.
+    pub fn sidebar_width(&self) -> f32 {
+        self.sidebar_w
+    }
+
+    /// Drag the sidebar edge to `x` (window coordinates; the sidebar starts at 0),
+    /// leaving the list and reader their minimum widths.
+    pub(super) fn drag_sidebar(&mut self, ev: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
+        let viewport_w = f32::from(window.viewport_size().width);
+        let max = (viewport_w - MIN_LIST_W - MIN_READER_W).clamp(MIN_SIDEBAR_W, MAX_SIDEBAR_W);
+        self.sidebar_w = f32::from(ev.position.x).clamp(MIN_SIDEBAR_W, max);
+        cx.notify();
+    }
+
+    pub(super) fn end_sidebar_drag(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_dragging = false;
+        cx.notify();
+    }
+
+    /// Pointer band over the sidebar's right border; double-click restores the default width.
+    pub(super) fn render_sidebar_handle(&self, cx: &Context<Self>) -> impl IntoElement {
+        let highlight = crate::theme::active(cx).accent.opacity(0.28);
+        div()
+            .id("sidebar-divider")
+            .test_support()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(px(-DIVIDER_HIT / 2.))
+            .w(px(DIVIDER_HIT))
+            .cursor_col_resize()
+            .hover(move |d| d.bg(highlight))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.sidebar_dragging = true;
+                cx.notify();
+            }))
+            .on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
+                if ev.click_count() == 2 {
+                    this.sidebar_w = SIDEBAR_W;
+                    cx.notify();
+                }
+            }))
     }
 }

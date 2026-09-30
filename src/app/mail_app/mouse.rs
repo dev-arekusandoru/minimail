@@ -4,7 +4,7 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{BAR_H, HEADER_H, LIST_HEADER_H, ListMode, MENU_W, MailApp, MenuKind, PaneLayout, panes};
+use super::{BAR_H, HEADER_H, LIST_HEADER_H, ListMode, MENU_W, MailApp, MenuKind, PaneLayout};
 use crate::model::Location;
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
@@ -188,7 +188,7 @@ impl MailApp {
             false => HEADER_H + BAR_H,
         };
         // The filter menu hangs under the Filter ▾ button at the list header's right edge.
-        let left = panes::SIDEBAR_W + self.list_w - MENU_W - 12.;
+        let left = self.sidebar_w + self.list_w - MENU_W - 12.;
         Some(
             div()
                 .id("menu-backdrop")
@@ -204,7 +204,7 @@ impl MailApp {
                     div()
                         .absolute()
                         .top(px(top))
-                        .when(filter, |d| d.left(px(left.max(panes::SIDEBAR_W + 8.))))
+                        .when(filter, |d| d.left(px(left.max(self.sidebar_w + 8.))))
                         .when(!filter, |d| d.right(px(12.)))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(panel),

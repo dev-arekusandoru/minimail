@@ -8,7 +8,7 @@ use gpui_kit::{
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
-use mail_classifier::app::mail_app::panes::{MIN_LIST_W, MIN_READER_W, Orientation, available_width};
+use mail_classifier::app::mail_app::panes::{MIN_LIST_W, MIN_READER_W, MAX_SIDEBAR_W, MIN_SIDEBAR_W, Orientation, SIDEBAR_W, available_width};
 use mail_classifier::model::{Mailbox, MessageId};
 
 struct Harness<'a> {
@@ -124,7 +124,7 @@ fn drag_is_clamped_to_usable_panes(cx: &mut TestAppContext) {
     assert_eq!(h.list_size(), MIN_LIST_W, "the list pane never collapses");
 
     let (viewport_w, _) = h.viewport();
-    let max = available_width(viewport_w) - MIN_READER_W;
+    let max = available_width(viewport_w, SIDEBAR_W) - MIN_READER_W;
     h.drag_divider(4000., 0.);
     let stretched = h.list_size();
     assert!(stretched > MIN_LIST_W && stretched <= max, "{stretched} must stay under {max}");
@@ -169,7 +169,7 @@ fn keyboard_shrink_stops_at_the_minimum(cx: &mut TestAppContext) {
 fn a_narrow_window_clamps_the_panes(cx: &mut TestAppContext) {
     let mut h = harness(cx, 900., 700.);
     let (viewport_w, _) = h.viewport();
-    let available = available_width(viewport_w);
+    let available = available_width(viewport_w, SIDEBAR_W);
     let list = h.list_size();
     assert!(list >= MIN_LIST_W, "the list keeps a usable width: {list}");
     assert!(available - list >= MIN_READER_W - 0.5, "the reader keeps a usable width: {}", available - list);
@@ -235,7 +235,7 @@ fn rows_span_the_pane_in_both_orientations(cx: &mut TestAppContext) {
     h.keys("alt-l");
     let stacked = f32::from(h.bounds(("row", id as usize)).size.width);
     assert!(
-        (stacked - available_width(1400.)).abs() < 2.,
+        (stacked - available_width(1400., SIDEBAR_W)).abs() < 2.,
         "stacked rows use the full pane width: {stacked}"
     );
     assert!(stacked > side_by_side);
@@ -252,4 +252,27 @@ fn settings_pane_layout_entry_switches_the_orientation(cx: &mut TestAppContext) 
     assert_eq!(h.orientation(), Orientation::Stacked);
     h.click("pane-layout-row");
     assert_eq!(h.orientation(), Orientation::SideBySide);
+}
+#[gpui_kit::gpui::test]
+fn sidebar_drag_resizes_within_limits(cx: &mut TestAppContext) {
+    let mut h = harness(cx, 1400., 900.);
+    let width = |h: &mut Harness| h.read(|a| a.sidebar_width());
+    assert_eq!(width(&mut h), SIDEBAR_W);
+
+    let drag = |h: &mut Harness, dx: f32| {
+        let b = h.bounds("sidebar-divider");
+        let from = point(
+            px(f32::from(b.origin.x) + f32::from(b.size.width) / 2.),
+            px(f32::from(b.origin.y) + f32::from(b.size.height) / 2.),
+        );
+        let to = point(px(f32::from(from.x) + dx), from.y);
+        h.cx.update_window(h.window, |_, window, cx| window.drag(from, to, cx)).expect("window alive");
+        h.cx.run_until_parked();
+    };
+    drag(&mut h, 60.);
+    assert!((width(&mut h) - (SIDEBAR_W + 60.)).abs() < 8., "drag right widens: {}", width(&mut h));
+    drag(&mut h, 2000.);
+    assert_eq!(width(&mut h), MAX_SIDEBAR_W);
+    drag(&mut h, -2000.);
+    assert_eq!(width(&mut h), MIN_SIDEBAR_W);
 }
