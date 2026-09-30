@@ -10,7 +10,7 @@ use gpui_kit::component::{Selectable as _, Sizable as _};
 
 impl MailApp {
     /// The bar of the active tab, when its find is open (and no session hides the tabs).
-    pub(super) fn find_bar(&self, look: &Look) -> Option<AnyElement> {
+    pub(super) fn find_bar(&self, look: &Look<'_>) -> Option<AnyElement> {
         let thread = self.tabs.active()?.thread;
         let ft = self.finds.get(&thread)?;
         let t = &look.t;

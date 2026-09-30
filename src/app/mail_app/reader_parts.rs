@@ -19,14 +19,14 @@ pub(super) enum Role {
 }
 
 /// Per-frame look shared by every reader piece: theme and mono family.
-pub(super) struct Look {
-    pub t: ThemeColor,
+pub(super) struct Look<'a> {
+    pub t: &'a ThemeColor,
     pub mono: SharedString,
 }
 
-impl Look {
-    pub fn new(cx: &App) -> Self {
-        Self { t: cx.theme().colors, mono: mono_font(cx) }
+impl<'a> Look<'a> {
+    pub fn new(cx: &'a App) -> Self {
+        Self { t: &cx.theme().colors, mono: mono_font(cx) }
     }
 
     /// The sender's monogram (initials in a bordered rounded square) at `size` px: the one
@@ -97,7 +97,7 @@ impl Look {
             .text_color(color)
             .font_family(self.mono.clone())
             .text_size(px(10.5))
-            .when_some(glyph, |d, g| d.child(icons::icon(g, &self.t, 11.)))
+            .when_some(glyph, |d, g| d.child(icons::icon(g, self.t, 11.)))
             .child(label.into())
     }
 

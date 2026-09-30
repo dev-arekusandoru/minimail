@@ -14,7 +14,7 @@ const TITLE_MAX: usize = 28;
 const AVATAR: f32 = 16.;
 
 impl MailApp {
-    pub(super) fn tab_bar(&self, look: &Look, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn tab_bar(&self, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
         let messages = self.mailbox.messages();
         let children = self.tabs.tabs().iter().enumerate().map(|(ix, tab)| {
             // The thread's latest message names it and sends its avatar, like its list header.

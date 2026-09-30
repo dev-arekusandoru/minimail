@@ -15,11 +15,11 @@ use crate::app::ui::{icon_button, primary_button, run, shortcut};
 
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let t = cx.theme().colors;
+        let moving = window.use_keyed_state("titlebar-moving", cx, |_, _| Rc::new(Cell::new(false))).read(cx).clone();
+        let t = cx.theme();
         let searching = matches!(self.mode, ListMode::Search(_));
         let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
-        let moving = window.use_keyed_state("titlebar-moving", cx, |_, _| Rc::new(Cell::new(false))).read(cx).clone();
         let view: SharedString = match &self.mode {
             ListMode::State => self.location_label().into(),
             ListMode::Search(_) => "Search".into(),

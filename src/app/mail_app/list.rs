@@ -4,7 +4,6 @@ use gpui_kit::assets::IconName;
 
 impl MailApp {
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let t = cx.theme().colors;
         let count = self.visible_ids().len();
         let row_count = if self.grouped() { self.rows().len() } else { count };
         self.sync_list(row_count, cx);
@@ -23,6 +22,7 @@ impl MailApp {
         let filter_active = self.filter_count() > 0;
         let filter_label = self.filter_label();
         let chips = self.render_chips(cx);
+        let t = cx.theme();
         let header = div()
             .h(px(LIST_HEADER_H))
             .flex_none()

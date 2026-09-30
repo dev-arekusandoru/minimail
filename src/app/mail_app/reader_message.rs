@@ -46,7 +46,7 @@ impl MailApp {
         &self,
         m: &Message,
         role: Role,
-        look: &Look,
+        look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
         let t = &look.t;
@@ -189,7 +189,7 @@ impl MailApp {
     }
 
     /// State badge (with snooze wake time or folder name), tag badges, category and sender label.
-    fn labels_row(&self, m: &Message, look: &Look) -> Div {
+    fn labels_row(&self, m: &Message, look: &Look<'_>) -> Div {
         let t = &look.t;
         let state_text = match m.state {
             TriageState::Snoozed => match self.mailbox.snoozed_until(m.id) {
@@ -233,7 +233,7 @@ impl MailApp {
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.
-    fn recipient_rows(&self, m: &Message, look: &Look) -> Div {
+    fn recipient_rows(&self, m: &Message, look: &Look<'_>) -> Div {
         let t = &look.t;
         let fields = [("To:", &m.to), ("Cc:", &m.cc), ("Bcc:", &m.bcc)];
         div()
@@ -266,7 +266,7 @@ impl MailApp {
     }
 
     /// New-sender and possible-spam banners, with their action buttons.
-    fn banners(&self, m: &Message, look: &Look, cx: &Context<Self>) -> Vec<AnyElement> {
+    fn banners(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Vec<AnyElement> {
         let t = &look.t;
         let banner = |id: &'static str, color: Hsla| {
             div()
@@ -355,7 +355,7 @@ impl MailApp {
 
     /// `Suggested: Needs reply 87% · Newsletter 92%` with Accept / Reject buttons (`y` / `n`).
     /// `None` when nothing is pending.
-    fn suggestion_strip(&self, m: &Message, look: &Look, cx: &Context<Self>) -> Option<AnyElement> {
+    fn suggestion_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
         let t = &look.t;
         let pending = self.mailbox.pending(m.id);
         if pending.is_empty() {
@@ -431,7 +431,7 @@ impl MailApp {
         &self,
         m: &Message,
         role: Role,
-        look: &Look,
+        look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
         let t = &look.t;
@@ -499,7 +499,7 @@ impl MailApp {
 
     /// Plain-text body: the text part (or text extracted from the HTML), quoted history folded
     /// under `SHOW QUOTED TEXT`.
-    fn text_content(&self, m: &Message, look: &Look, cx: &Context<Self>) -> AnyElement {
+    fn text_content(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
         let t = &look.t;
         let (id, mid) = (m.id as usize, m.id);
         let text = reading::reader_text(m);
@@ -540,7 +540,7 @@ impl MailApp {
     }
 
     /// Attachment chips: paperclip, file name, mono size.
-    fn attachment_chips(m: &Message, look: &Look) -> Div {
+    fn attachment_chips(m: &Message, look: &Look<'_>) -> Div {
         let t = &look.t;
         div().flex().flex_wrap().gap_2().children(m.attachments.iter().map(|a| {
             div()

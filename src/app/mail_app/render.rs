@@ -29,8 +29,9 @@ impl Render for MailApp {
             window.request_animation_frame();
         }
         let banner = self.pending_rule.clone();
-        let t = cx.theme().colors;
+        let t = cx.theme();
         let (bg, fg, muted) = (t.background, t.foreground, t.muted_foreground);
+        let (success, on_primary) = (t.success, t.primary_foreground);
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -259,8 +260,8 @@ impl Render for MailApp {
                                 .px_3()
                                 .py_1()
                                 .rounded_md()
-                                .bg(t.success)
-                                .text_color(t.primary_foreground)
+                                .bg(success)
+                                .text_color(on_primary)
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(text.clone())
