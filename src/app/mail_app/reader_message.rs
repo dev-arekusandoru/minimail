@@ -3,10 +3,12 @@
 
 use super::super::*;
 use super::parts::{stamp, Look, Role};
+use crate::app::chrome::humanize_time;
 use crate::judge::QuestionKey;
 use crate::reading;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::text::TextView;
+use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
     /// Reply and the `⋯` menu of one expanded message. Both act on that message, whichever one
@@ -66,14 +68,29 @@ impl MailApp {
                 d.cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
             })
-            .child(look.mono(format!("MSG {pos:02} / {total:02}"), t.text_muted))
+            // The label stays an (empty) child for lone messages so `justify_between` keeps the
+            // right cluster at the far edge.
+            .child(look.mono(
+                if total > 1 { format!("MSG {pos:02} / {total:02}") } else { String::new() },
+                t.text_muted,
+            ))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
                     .when(!opened, |d| d.child(look.mono("COLLAPSE", t.text_muted)))
-                    .child(look.mono(stamp(&m.received), t.text_muted))
+                    .child({
+                        let absolute = stamp(&m.received);
+                        let label = m
+                            .received_at()
+                            .map_or_else(|| absolute.clone(), |ts| humanize_time(ts, self.now()));
+                        look.mono(label, t.text_muted)
+                            .id(("reader-msg-stamp", id))
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(absolute.clone()).build(window, cx)
+                            })
+                    })
                     .child(self.message_buttons(m.id, cx)),
             );
 

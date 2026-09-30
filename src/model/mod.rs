@@ -85,6 +85,13 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
 }
 
+impl Message {
+    /// Whole seconds since the Unix epoch for `received`, or `None` if unparseable.
+    pub fn received_at(&self) -> Option<Timestamp> {
+        parse_rfc3339(&self.received)
+    }
+}
+
 /// A file attached to a message; `size` is in bytes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attachment {

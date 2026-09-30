@@ -96,7 +96,6 @@ impl MailApp {
         self.menu.as_ref().map(|m| m.panel.clone())
     }
 
-
     pub fn opened(&self) -> Option<MessageId> {
         self.opened
     }
