@@ -70,11 +70,11 @@ const HELP: Ranked = h("?", "help", 0);
 const ESC_CLOSE: Ranked = h("escape", "close", 0);
 const ESC_CANCEL: Ranked = h("escape", "cancel", 0);
 
-/// Triage verbs in display order, with their drop ranks (archive > delete > snooze > summarize > reply).
+/// Triage verbs in display order, with their drop ranks (archive > delete > snooze > reply; summarize drops first).
 fn verbs(reply: bool) -> impl Iterator<Item = Ranked> {
     [h("e", "archive", 4), h("s", "snooze", 6), h("d", "delete", 5)]
         .into_iter()
-        .chain(reply.then(|| h("r", "reply", 8)))
+        .chain(reply.then(|| h("r", "reply", 7)))
 }
 
 fn contextual(ctx: &HintContext, out: &mut Vec<Ranked>) {
@@ -102,7 +102,7 @@ fn ranked(ctx: &HintContext) -> Vec<Ranked> {
             contextual(ctx, &mut v);
             v.extend(verbs(true));
             if ctx.multi_message {
-                v.push(h("z", "summarize", 7));
+                v.push(h("z", "summarize", 8));
             }
             v.push(HELP);
         }
@@ -113,10 +113,10 @@ fn ranked(ctx: &HintContext) -> Vec<Ranked> {
         }
         HintMode::Reader => {
             contextual(ctx, &mut v);
-            v.push(h("r", "reply", 8));
+            v.push(h("r", "reply", 7));
             v.extend(verbs(false));
             if ctx.multi_message {
-                v.push(h("z", "summarize", 7));
+                v.push(h("z", "summarize", 8));
             }
             v.push(HELP);
         }
@@ -255,7 +255,7 @@ mod tests {
         let away = keys(&HintContext { outside_inbox: true, ..list() });
         assert_eq!(away[0], "i");
         let multi = keys(&HintContext { multi_message: true, ..list() });
-        assert!(multi.contains(&"z"));
+        assert!(multi.contains(&"r") && !multi.contains(&"z"), "summarize is the first verb dropped");
     }
 
     #[test]
