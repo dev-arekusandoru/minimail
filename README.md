@@ -26,6 +26,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | ⌨️ **Keyboard-first** | Every action has a key. `cmd-k` opens a command palette and `?` shows every shortcut. |
 | ✅ **Inbox as a to-do list** | Every message is in exactly one of Inbox, Waiting, Later or Done. Every action can be undone. |
 | 📦 **Batch triage** | Multi-select with `shift-j`/`shift-k` or `x`, or act on everything from one sender at once. |
+| ✉️ **Row states** | Unread rows have a yellow left bar (urgent unread is red); selected and open rows share a blue bar, while the cursor has its own ring and background. Click the left edge to select without opening; cmd-click toggles and shift-click range-selects. |
 | 🧠 **System 1 classifier** | Labels spam, needs-reply, urgency, kind and a suggested state. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. The interface mirrors [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). |
 | 📝 **Thread summaries** | Opt-in. Shows the summary, action items and dates above the thread. |
 | ⏰ **Snooze with a return time** | Tonight, tomorrow, Monday or a custom time (`3h`, `2d`). The message returns to the Inbox when it's due. |

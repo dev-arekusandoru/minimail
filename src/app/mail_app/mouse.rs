@@ -1,6 +1,5 @@
-//! Mouse entry points of the root view: row clicks, checkboxes, suggestion badges, the
-//! quiet header and the contextual action bar. Buttons dispatch the same actions the keys
-//! do; row clicks reuse the cursor and selection primitives behind `j`/`k`/`shift-j`/`x`.
+//! Mouse entry points for row clicks, left-edge selection, suggestion badges, the quiet
+//! header and the contextual action bar.
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -54,7 +53,7 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Click on the row checkbox: like moving there and pressing `x`.
+    /// Click on the row's left edge: like moving there and pressing `x`.
     pub(super) fn toggle_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.cursor_to(ix);
         if self.mode == ListMode::State && !self.in_session() {
@@ -98,28 +97,25 @@ impl MailApp {
         window.focus(&self.focus_handle, cx);
     }
 
-    /// Selection checkbox for row `ix`. Sits beside (not inside) the clickable row body.
-    pub(super) fn row_checkbox(&self, ix: usize, selected: bool, cx: &Context<Self>) -> crate::app::ui::Observable {
+    /// Full-height selection hit target at the row's left edge.
+    pub(super) fn row_selection_target(&self, ix: usize, cx: &Context<Self>) -> crate::app::ui::Observable {
         let t = crate::theme::active(cx);
+        let hover = t.selected.opacity(0.2);
         div()
-            .id(("row-check", ix))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .w(px(14.))
-            .h(px(14.))
-            .rounded_sm()
-            .border_1()
-            .border_color(if selected { t.accent } else { t.border })
-            .when(selected, |d| d.bg(t.accent))
-            .text_color(t.on_accent)
-            .text_size(px(10.))
+            .id(("row-select", ix))
+            .absolute()
+            .left_0()
+            .top_0()
+            .bottom_0()
+            .w(px(10.))
             .cursor_pointer()
+            .hover(move |d| d.bg(hover))
             .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new("Select (x)").build(window, cx)
+                gpui_kit::component::tooltip::Tooltip::new(
+                    "Select (click) · cmd-click / shift-click on row",
+                )
+                .build(window, cx)
             })
-            .child(if selected { "✓" } else { "" })
             .test_support()
             .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)))
     }
