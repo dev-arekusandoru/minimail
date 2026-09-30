@@ -11,7 +11,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
-use crate::app::chrome::{HelpOverlay, HintBar, HintMode};
+use crate::app::chrome::{HelpOverlay, HintBar};
+use crate::hints::{HintContext, HintMode};
 use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::row::{self, RowVisual};
 use crate::app::overlay::overlay;

@@ -8,7 +8,7 @@ impl Focusable for MailApp {
 
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let hint = self.hint_mode();
+        let hint = self.hint_context();
         let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened {
             self.read.insert(id);

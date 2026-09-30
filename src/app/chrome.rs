@@ -2,6 +2,7 @@
 
 use crate::app::actions::commands;
 use crate::clock::{Timestamp, DAY};
+use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::{self, Theme};
 use gpui_kit::{
     component::{kbd::Kbd, label::Label, separator::Separator},
@@ -61,125 +62,32 @@ pub fn format_time(ts: Timestamp) -> String {
     )
 }
 
-/// Footer keys while a message is open.
-const READER_HINTS: &[(&str, &str)] = &[
-    ("r", "reply"),
-    ("e", "archive"),
-    ("f", "file"),
-    ("d", "delete"),
-    ("s", "snooze"),
-    ("]", "next"),
-    ("[", "prev"),
-    ("v", "reader"),
-    ("shift-o", "thread"),
-    ("u", "undo"),
-    ("?", "help"),
-];
-
-/// [`READER_HINTS`] led by accept/reject for the pending AI suggestions.
-const READER_SUGGESTION_HINTS: &[(&str, &str)] = &[
-    ("y", "accept"),
-    ("n", "reject"),
-    ("r", "reply"),
-    ("e", "archive"),
-    ("f", "file"),
-    ("d", "delete"),
-    ("s", "snooze"),
-    ("]", "next"),
-    ("[", "prev"),
-    ("v", "reader"),
-    ("shift-o", "thread"),
-    ("u", "undo"),
-    ("?", "help"),
-];
-
-/// Which keys the bottom bar advertises.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HintMode {
-    List,
-    /// Number of selected messages.
-    Selection(usize),
-    /// A message is open; `suggestions` adds accept/reject keys for pending AI suggestions.
-    Reader { suggestions: bool },
-    Compose,
-    Palette,
-    /// Triage session; `true` once the end card is showing.
-    Session(bool),
-    NewSenders,
-    Settings,
-    Rules,
-    Snooze,
-}
-
 #[derive(IntoElement)]
 pub struct HintBar {
-    mode: HintMode,
+    ctx: HintContext,
 }
 
 impl HintBar {
-    pub fn new(mode: HintMode) -> Self {
-        Self { mode }
+    pub fn new(ctx: HintContext) -> Self {
+        Self { ctx }
     }
 }
 
+/// Horizontal padding (both sides) and gap before the first hint, in px.
+const BAR_PAD: f32 = 24.;
+/// Estimated width of the "N selected" label, in px.
+const SELECTED_LABEL_W: f32 = 80.;
+
 impl RenderOnce for HintBar {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme::active(cx);
-        let hints: &[(&str, &str)] = match self.mode {
-            HintMode::List => &[
-                ("j", "next"),
-                ("k", "prev"),
-                ("e", "archive"),
-                ("f", "file"),
-                ("d", "delete"),
-                ("s", "snooze"),
-                ("i", "inbox"),
-                ("r", "reply"),
-                ("a", "allow"),
-                ("b", "block"),
-                ("!", "spam"),
-                ("1", "chips"),
-                ("g", "go to"),
-                ("z", "summarize"),
-                ("ctrl-g", "group"),
-                ("?", "help"),
-            ],
-            HintMode::Selection(_) => &[
-                ("x", "toggle"),
-                ("shift-j", "extend"),
-                ("e", "archive"),
-                ("f", "file"),
-                ("d", "delete"),
-                ("s", "snooze"),
-                ("i", "inbox"),
-                ("escape", "clear"),
-                ("u", "undo"),
-            ],
-            HintMode::Reader { suggestions: false } => READER_HINTS,
-            HintMode::Reader { suggestions: true } => READER_SUGGESTION_HINTS,
-            HintMode::Compose => &[("cmd-enter", "send"), ("escape", "cancel")],
-            HintMode::Palette => &[("enter", "run"), ("up", "prev"), ("down", "next"), ("escape", "close")],
-            HintMode::Session(false) => &[
-                ("e", "archive"),
-                ("f", "file"),
-                ("d", "delete"),
-                ("s", "snooze"),
-                ("i", "inbox"),
-                ("escape", "end"),
-            ],
-            HintMode::Session(true) => &[("escape", "close")],
-            HintMode::NewSenders => &[("a", "allow"), ("b", "block"), ("j", "next"), ("k", "prev"), ("u", "undo")],
-            HintMode::Settings => &[
-                ("j", "next"),
-                ("k", "prev"),
-                ("space", "auto/review"),
-                ("=", "threshold +"),
-                ("-", "threshold -"),
-                ("escape", "close"),
-            ],
-            HintMode::Rules => &[("j", "next"), ("k", "prev"), ("backspace", "revoke"), ("escape", "close")],
-            HintMode::Snooze => &[("1", "tonight"), ("2", "tomorrow"), ("3", "monday"), ("4", "custom"), ("escape", "cancel")],
+        let selected = match self.ctx.mode {
+            HintMode::Selection(n) => Some(n),
+            _ => None,
         };
+        let budget = f32::from(window.viewport_size().width) - BAR_PAD;
+        let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. };
+        let shown = fit_hints(&self.ctx, budget, reserved);
         div()
             .flex()
             .items_center()
@@ -191,21 +99,10 @@ impl RenderOnce for HintBar {
             .border_t_1()
             .border_color(t.border)
             .bg(t.sidebar)
-            .when_some(
-                match self.mode {
-                    HintMode::Selection(n) => Some(n),
-                    _ => None,
-                },
-                |el, n| {
-                    el.child(
-                        div()
-                            .text_xs()
-                            .text_color(t.accent)
-                            .child(format!("{n} selected")),
-                    )
-                },
-            )
-            .children(hints.iter().map(|(k, w)| hint(&t, k, w).into_any_element()))
+            .when_some(selected, |el, n| {
+                el.child(div().text_xs().text_color(t.accent).child(format!("{n} selected")))
+            })
+            .children(shown.iter().map(|h| hint(&t, h.key, h.label).into_any_element()))
     }
 }
 

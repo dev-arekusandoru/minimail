@@ -1,7 +1,7 @@
 use super::*;
 
 impl MailApp {
-    /// Which keys the footer advertises right now.
+    /// Which surface the footer sits under right now.
     pub fn hint_mode(&self) -> HintMode {
         if self.compose.is_some() {
             HintMode::Compose
@@ -17,15 +17,32 @@ impl MailApp {
             HintMode::NewSenders
         } else {
             match self.triage.selected().len() {
-                0 => match self.opened {
-                    Some(id) => HintMode::Reader {
-                        suggestions: !self.mailbox.pending(id).is_empty(),
-                    },
-                    None => HintMode::List,
-                },
+                0 if self.opened.is_some() => HintMode::Reader,
+                0 => HintMode::List,
                 n => HintMode::Selection(n),
             }
         }
+    }
+
+    /// The mode plus the facts about the focused message that decide which keys apply.
+    pub fn hint_context(&self) -> HintContext {
+        let mut ctx = HintContext::new(self.hint_mode());
+        let focused = self.opened.or_else(|| self.cursor_id());
+        ctx.empty = focused.is_none();
+        ctx.outside_inbox = !matches!(
+            self.triage.view.location,
+            Location::AllInboxes | Location::Inbox(_)
+        );
+        if let Some(id) = focused {
+            ctx.new_sender = self.mailbox.is_new_sender(id);
+            ctx.suggestions = !self.mailbox.pending(id).is_empty();
+            if let Some(m) = self.mailbox.get(id) {
+                let tid = m.thread_id;
+                ctx.multi_message =
+                    self.mailbox.messages().iter().filter(|x| x.thread_id == tid).take(2).count() > 1;
+            }
+        }
+        ctx
     }
 
     pub(super) fn clock_label(received: &str, newest: &str) -> String {

@@ -4,7 +4,7 @@
 
 use gpui_kit::{AppContext, TestAppContext};
 use gpui_kit::test::TestWindowExt;
-use mail_classifier::app::chrome::HintMode;
+use mail_classifier::hints::{HintContext, HintMode};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{Mailbox, MessageId};
 
@@ -50,8 +50,8 @@ impl Harness<'_> {
         self.read(|a| a.opened()).expect("a message is open")
     }
 
-    fn hint(&mut self) -> HintMode {
-        self.read(|a| a.hint_mode())
+    fn hint(&mut self) -> HintContext {
+        self.read(|a| a.hint_context())
     }
 
     /// Settings ▸ Appearance ▸ Reader action toolbar, then close the panel.
@@ -166,14 +166,17 @@ fn reader_hints_follow_the_open_message_and_pending_suggestions(cx: &mut TestApp
         answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
     }]);
     let mut h = harness_with(cx, mb);
-    assert_eq!(h.hint(), HintMode::List, "nothing open, nothing selected");
+    let c = h.hint();
+    assert_eq!((c.mode, c.suggestions), (HintMode::List, true), "the list sees the cursor's suggestions");
 
     h.keys("enter");
-    assert_eq!(h.hint(), HintMode::Reader { suggestions: true }, "pending suggestions add accept/reject");
+    let c = h.hint();
+    assert_eq!((c.mode, c.suggestions), (HintMode::Reader, true), "pending suggestions add accept/reject");
 
     h.keys("n");
-    assert_eq!(h.hint(), HintMode::Reader { suggestions: false }, "rejecting clears the suggestion hints");
+    let c = h.hint();
+    assert_eq!((c.mode, c.suggestions), (HintMode::Reader, false), "rejecting clears the suggestion hints");
 
     h.keys("x");
-    assert_eq!(h.hint(), HintMode::Selection(1), "a selection takes the footer over from the reader");
+    assert_eq!(h.hint().mode, HintMode::Selection(1), "a selection takes the footer over from the reader");
 }

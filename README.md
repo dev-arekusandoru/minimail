@@ -68,7 +68,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `alt-r` | Reset pane sizes | `v` | Reader mode for the open HTML message |
 | `shift-o` | Expand / collapse the other messages of the open thread | | |
 
-The reader shows no action buttons by default; the footer lists the keys. Settings → Appearance → *Reader action toolbar* adds buttons to the reader and its banners.
+The reader shows no action buttons by default; the footer lists up to five keys that apply to the current message (`?` shows the rest); `u` undo appears on the toast after an action. Settings → Appearance → *Reader action toolbar* adds buttons to the reader and its banners.
 
 #### HTML mail
 

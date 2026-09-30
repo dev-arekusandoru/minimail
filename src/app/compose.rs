@@ -1,7 +1,8 @@
 //! Reply composer: read-only To/Subject header plus a multiline body.
 
 use crate::app::actions::{CancelCompose, COMPOSE_CONTEXT, SendReply};
-use crate::app::chrome::{HintBar, HintMode};
+use crate::app::chrome::HintBar;
+use crate::hints::{HintContext, HintMode};
 use crate::app::ui::button;
 use crate::model::{Message, MessageId};
 use gpui_kit::{
@@ -127,6 +128,6 @@ impl Render for ComposeReply {
                             .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
                     ),
             )
-            .child(HintBar::new(HintMode::Compose))
+            .child(HintBar::new(HintContext::new(HintMode::Compose)))
     }
 }

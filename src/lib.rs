@@ -1,6 +1,7 @@
 pub mod app;
 pub mod preview;
 pub mod clock;
+pub mod hints;
 pub mod contacts;
 pub mod judge;
 pub mod model;
