@@ -173,3 +173,25 @@ fn the_current_match_wraps_and_clamps() {
     f.set_options(Options { regex: true, ..Options::default() });
     assert_eq!(f.current(3), 0, "new options start over");
 }
+
+#[test]
+fn seek_picks_the_first_match_at_or_after_a_message_and_the_first_enter_stays_there() {
+    let hit = |msg| Match { msg, segment: Segment::Main, range: 0..1 };
+    let matches = [hit(1), hit(2), hit(2), hit(4)];
+    let order = [1, 2, 3, 4];
+    let mut f = Find::default();
+    f.seek(&matches, &order, 2);
+    assert_eq!(f.current(4), 1, "skips the match before message 2");
+    f.seek(&matches, &order, 3);
+    assert_eq!(f.current(4), 3, "message 3 has none: the next message's");
+    f.seek(&matches[..3], &order, 3);
+    assert_eq!(f.current(3), 0, "nothing at or after: back to the first");
+    f.seek(&matches, &order, 2);
+    f.step(4, 1);
+    assert_eq!(f.current(4), 1, "the first enter lands on the chosen match");
+    f.step(4, 1);
+    assert_eq!(f.current(4), 2, "later steps move on");
+    f.seek(&matches, &order, 2);
+    f.step(4, -1);
+    assert_eq!(f.current(4), 0, "going back first steps before the chosen match");
+}

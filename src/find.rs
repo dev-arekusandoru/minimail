@@ -137,11 +137,16 @@ pub fn highlights(matches: &[Match], current: usize, msg: MessageId, segment: Se
 }
 
 /// One tab's find state: the query, its options and which match is current.
+///
+/// The current match is where the next `enter` goes. Until something has landed on it (typing,
+/// toggling an option and [`Find::seek`] only choose it), the first forward step lands on the
+/// current match itself instead of moving past it.
 #[derive(Clone, Debug, Default)]
 pub struct Find {
     pub query: String,
     pub options: Options,
     current: usize,
+    landed: bool,
 }
 
 impl Find {
@@ -155,6 +160,7 @@ impl Find {
         if self.query != query {
             self.query = query.to_owned();
             self.current = 0;
+            self.landed = false;
         }
     }
 
@@ -163,13 +169,27 @@ impl Find {
         if self.options != options {
             self.options = options;
             self.current = 0;
+            self.landed = false;
         }
     }
 
-    /// Move the current match by `delta` among `total`, wrapping at both ends.
+    /// Point the current match at the first one at or after message `from` in `order` (the
+    /// thread's messages, oldest first; a message's subject counts as that message), or the
+    /// first match when none is. Nothing has landed on it yet.
+    pub fn seek(&mut self, matches: &[Match], order: &[MessageId], from: MessageId) {
+        let index = |id: MessageId| order.iter().position(|&m| m == id);
+        let start = index(from).unwrap_or(0);
+        self.current = matches.iter().position(|m| index(m.msg).is_some_and(|i| i >= start)).unwrap_or(0);
+        self.landed = false;
+    }
+
+    /// Move the current match by `delta` among `total`, wrapping at both ends. The first
+    /// forward step after the current match was only chosen lands on it without moving.
     pub fn step(&mut self, total: usize, delta: isize) {
-        self.current = if total == 0 {
-            0
+        let stay = !self.landed && delta > 0;
+        self.landed = true;
+        self.current = if total == 0 || stay {
+            self.current(total)
         } else {
             (self.current(total) as isize + delta).rem_euclid(total as isize) as usize
         };
