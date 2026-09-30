@@ -104,15 +104,13 @@ impl MailApp {
             .flex_1()
             .into_any_element()
         };
-        let stacked = self.panes.orientation() == PaneLayout::Stacked;
+        // The resizable panel owns the list's size; it just fills it.
         div()
-            .flex_none()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
             .flex()
             .flex_col()
-            // Side by side the divider owns the width, stacked it owns the height;
-            // the hairline between the panes is the divider's own.
-            .when(stacked, |d| d.w_full().h(px(self.list_h)).min_h_0())
-            .when(!stacked, |d| d.w(px(self.list_w)).h_full().min_w_0())
             .child(header)
             .when_some(chips, |d, chips| d.child(chips))
             .child(body)

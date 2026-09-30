@@ -1,16 +1,15 @@
-//! Pane geometry: how much room the inbox list and the reader share, and the
-//! draggable divider between them.
+//! Pane geometry: the sidebar, the inbox list and the reader, laid out with gpui-kit's
+//! resizable panel groups.
 //!
-//! Two orientations stack the same two panes along different axes — `SideBySide`
-//! puts the list left of the reader, `Stacked` puts it above. Each remembers its
-//! own list size, and both clamp it against the room actually available so that
-//! neither pane can be dragged out of existence.
+//! The sidebar sits in an outer horizontal group; the list and the reader share a nested
+//! group whose axis follows the [`Orientation`] — `SideBySide` puts the list left of the
+//! reader, `Stacked` puts it above. Every group owns a [`ResizableState`], and each
+//! orientation has its own, so each remembers its list size. Minimums are per-panel size
+//! ranges; the flex layout copes when a window is too small for all of them.
 
 use super::*;
 
-use std::sync::Arc;
-
-use crate::theme::Theme;
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 
 /// Smallest list pane that still shows a sender, a subject and an icon cluster.
 pub const MIN_LIST_W: f32 = 320.;
@@ -22,16 +21,16 @@ pub const MIN_LIST_H: f32 = 180.;
 pub const MIN_READER_H: f32 = 220.;
 /// How much a grow / shrink action moves the divider.
 pub const STEP: f32 = 40.;
-/// Width of the band around the hairline that catches the pointer.
+/// Width of the double-click target centred on each divider.
 pub const DIVIDER_HIT: f32 = 7.;
 
-/// The sidebar's default width; it is never part of the panes.
+/// The sidebar's default width.
 pub const SIDEBAR_W: f32 = 148.;
 /// Sidebar drag limits.
 pub const MIN_SIDEBAR_W: f32 = 120.;
 pub const MAX_SIDEBAR_W: f32 = 320.;
-/// The titlebar and the hint bar, which the stacked panes do not get. An allowance: the
-/// reader pane keeps its own minimum in the flex layout and takes the hit if it was too small.
+/// The titlebar and the hint bar, which the stacked panes do not get. Only used to size the
+/// stacked list before the first layout has measured the real container.
 const CHROME_H: f32 = 78.;
 
 /// Room the panes share on the width axis.
@@ -73,196 +72,81 @@ impl Orientation {
             Self::Stacked => "Stacked",
         }
     }
+
+    /// The size the list starts from, for `available` room along the stacking axis: the
+    /// classic 42% list, and 45% of the height when the panes are stacked.
+    fn default_list(self, available: f32) -> f32 {
+        match self {
+            Self::SideBySide => crate::app::row::list_width(available),
+            Self::Stacked => available * 0.45,
+        }
+    }
+
+    /// `(list, reader)` minimums along the stacking axis.
+    fn minimums(self) -> (f32, f32) {
+        match self {
+            Self::SideBySide => (MIN_LIST_W, MIN_READER_W),
+            Self::Stacked => (MIN_LIST_H, MIN_READER_H),
+        }
+    }
 }
 
-/// How much room the list pane gets, in pixels along the stacking axis.
-#[derive(Clone, Copy, Debug, Default)]
+/// The pane layout: orientation, sidebar visibility and one [`ResizableState`] per group.
+/// Hiding the sidebar keeps its state, so the width comes back when it is shown again.
 pub struct Panes {
     orientation: Orientation,
-    /// Remembered list width for `SideBySide`, if the user ever moved the divider.
-    width: Option<f32>,
-    /// Remembered list height for `Stacked`.
-    height: Option<f32>,
-    /// Room the panes had when the width was last remembered, so that a resized
-    /// window keeps the proportion instead of pinning a pane to its minimum.
-    fitted_width: f32,
-    /// The same, for the height of the stacked layout.
-    fitted_height: f32,
-    /// Where the current divider drag started, mapped onto the stacking axis.
-    drag: Option<f32>,
+    sidebar_visible: bool,
+    /// Sidebar | content.
+    main: Entity<ResizableState>,
+    /// List | reader when side by side.
+    side_by_side: Entity<ResizableState>,
+    /// List / reader when stacked.
+    stacked: Entity<ResizableState>,
 }
 
 impl Panes {
+    pub fn new(cx: &mut App) -> Self {
+        Self {
+            orientation: Orientation::default(),
+            sidebar_visible: true,
+            main: cx.new(|_| ResizableState::default()),
+            side_by_side: cx.new(|_| ResizableState::default()),
+            stacked: cx.new(|_| ResizableState::default()),
+        }
+    }
+
     pub fn orientation(&self) -> Orientation {
         self.orientation
     }
 
-    pub fn dragging(&self) -> bool {
-        self.drag.is_some()
+    pub fn sidebar_visible(&self) -> bool {
+        self.sidebar_visible
     }
 
-    /// Size of the list pane for `available` room along the current axis, clamped
-    /// to what both panes can use. Resizes the window by keeping the proportion.
-    pub fn list_size(&mut self, available: f32) -> f32 {
-        let (min, max) = Self::limits(self.orientation, available);
-        let fitted = self.fitted();
-        if available > 0. && (fitted - available).abs() > f32::EPSILON {
-            // The window changed: scale what was asked for by how much room is
-            // left, then let the clamps have the last word.
-            if let Some(size) = self.remembered().map(|size| size * available / fitted.max(1.)) {
-                self.remember(size);
-            }
-            self.set_fitted(available);
-        }
-        self.remembered().unwrap_or_else(|| Self::default(self.orientation, available)).clamp(min, max)
-    }
-
-    /// The list size as it was last laid out, without touching the state.
-    pub fn current_size(&self) -> f32 {
-        let fitted = self.fitted();
-        if fitted <= 0. {
-            return 0.;
-        }
-        let (min, max) = Self::limits(self.orientation, fitted);
-        self.remembered().unwrap_or_else(|| Self::default(self.orientation, fitted)).clamp(min, max)
-    }
-
-    /// Move the divider by `delta` pixels along the stacking axis.
-    pub fn nudge(&mut self, available: f32, delta: f32) {
-        let size = self.list_size(available) + delta;
-        self.remember(size);
-    }
-
-    /// Forget both remembered sizes: the next [`Panes::list_size`] is the default.
-    pub fn reset(&mut self) {
-        self.width = None;
-        self.height = None;
-    }
-
-    pub fn set_orientation(&mut self, orientation: Orientation) {
-        self.orientation = orientation;
-    }
-
-    /// Begin a drag with the pointer `along_axis` pixels into the pane region.
-    pub fn begin_drag(&mut self, along_axis: f32, available: f32) {
-        self.drag = Some(along_axis - self.list_size(available));
-    }
-
-    /// Drag to the pointer `along_axis` pixels into the pane region.
-    pub fn drag_to(&mut self, along_axis: f32, available: f32) -> Option<f32> {
-        let origin = self.drag?;
-        let size = along_axis - origin;
-        self.remember(size);
-        Some(self.list_size(available))
-    }
-
-    pub fn end_drag(&mut self) {
-        self.drag = None;
-    }
-
-    fn remembered(&self) -> Option<f32> {
+    /// The state of the list / reader group in the current orientation.
+    fn list_state(&self) -> &Entity<ResizableState> {
         match self.orientation {
-            Orientation::SideBySide => self.width,
-            Orientation::Stacked => self.height,
+            Orientation::SideBySide => &self.side_by_side,
+            Orientation::Stacked => &self.stacked,
         }
     }
 
-    fn remember(&mut self, size: f32) {
-        match self.orientation {
-            Orientation::SideBySide => self.width = Some(size),
-            Orientation::Stacked => self.height = Some(size),
-        }
+    /// Every group state, so the app can repaint when one of them moves.
+    pub fn states(&self) -> [&Entity<ResizableState>; 3] {
+        [&self.main, &self.side_by_side, &self.stacked]
     }
 
-    /// Room the current orientation was last fitted to.
-    fn fitted(&self) -> f32 {
-        match self.orientation {
-            Orientation::SideBySide => self.fitted_width,
-            Orientation::Stacked => self.fitted_height,
-        }
+    /// The list pane as last laid out, along the stacking axis.
+    fn measured_list(&self, cx: &App) -> Option<f32> {
+        let state = self.list_state().read(cx);
+        (state.container_size() > px(0.)).then(|| state.sizes().first().map_or(0., |s| f32::from(*s)))
     }
 
-    fn set_fitted(&mut self, available: f32) {
-        match self.orientation {
-            Orientation::SideBySide => self.fitted_width = available,
-            Orientation::Stacked => self.fitted_height = available,
-        }
+    /// The sidebar as last laid out (or as it was when hidden).
+    fn measured_sidebar(&self, cx: &App) -> f32 {
+        let state = self.main.read(cx);
+        state.sizes().first().filter(|_| state.container_size() > px(0.)).map_or(SIDEBAR_W, |s| f32::from(*s))
     }
-
-    /// `(min, max)` list size for `available` room. A window too small to hold
-    /// both minimums splits what there is and lets the flex layout cope.
-    fn limits(orientation: Orientation, available: f32) -> (f32, f32) {
-        let (min, reader) = match orientation {
-            Orientation::SideBySide => (MIN_LIST_W, MIN_READER_W),
-            Orientation::Stacked => (MIN_LIST_H, MIN_READER_H),
-        };
-        let max = (available - reader).max(min);
-        (min.min(available.max(1.)), max.min(available.max(1.)))
-    }
-
-    /// The size both orientations start from: the classic 42% list, and 45% of the
-    /// height when the panes are stacked.
-    fn default(orientation: Orientation, available: f32) -> f32 {
-        match orientation {
-            Orientation::SideBySide => crate::app::row::list_width(available),
-            Orientation::Stacked => available * 0.45,
-        }
-    }
-}
-
-type DragHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-
-/// The hairline between the panes: a pointer band that highlights on hover, drags
-/// on press and resets on double-click.
-#[derive(IntoElement)]
-pub struct Divider {
-    orientation: Orientation,
-    theme: Arc<Theme>,
-    on_drag: DragHandler,
-    on_reset: ClickHandler,
-}
-
-impl Divider {
-    pub fn new(
-        orientation: Orientation,
-        theme: Arc<Theme>,
-        on_drag: DragHandler,
-        on_reset: ClickHandler,
-    ) -> Self {
-        Self { orientation, theme, on_drag, on_reset }
-    }
-}
-
-impl RenderOnce for Divider {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let side_by_side = self.orientation == Orientation::SideBySide;
-        let (line, highlight) = (self.theme.border, self.theme.accent.opacity(0.28));
-        div()
-            .id("pane-divider")
-            .test_support()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(side_by_side, |d| d.w(px(DIVIDER_HIT)).h_full().cursor_col_resize())
-            .when(!side_by_side, |d| d.h(px(DIVIDER_HIT)).w_full().cursor_row_resize())
-            .hover(move |d| d.bg(highlight))
-            .on_mouse_down(MouseButton::Left, self.on_drag)
-            .on_click(self.on_reset)
-            .child(
-                div()
-                    .when(side_by_side, |d| d.w(px(1.)).h_full())
-                    .when(!side_by_side, |d| d.h(px(1.)).w_full())
-                    .bg(line),
-            )
-    }
-}
-
-/// Room the two panes share in a `window`, as `(width, height)`.
-fn available(window: &Window, sidebar_w: f32) -> (f32, f32) {
-    let size = window.viewport_size();
-    (available_width(f32::from(size.width), sidebar_w), available_height(f32::from(size.height)))
 }
 
 impl MailApp {
@@ -272,13 +156,28 @@ impl MailApp {
     }
 
     /// Size of the list pane as last laid out, in pixels along the stacking axis.
-    pub fn list_pane_size(&self) -> f32 {
-        self.panes.current_size()
+    pub fn list_pane_size(&self, cx: &App) -> f32 {
+        self.panes.measured_list(cx).unwrap_or(0.)
     }
 
-    /// Whether the divider is being dragged right now.
-    pub fn pane_dragging(&self) -> bool {
-        self.panes.dragging()
+    /// Whether the sidebar is shown.
+    pub fn sidebar_visible(&self) -> bool {
+        self.panes.sidebar_visible()
+    }
+
+    /// Current sidebar width in pixels; a hidden sidebar keeps the width it will come back with.
+    pub fn sidebar_width(&self, cx: &App) -> f32 {
+        self.panes.measured_sidebar(cx)
+    }
+
+    /// Width the list rows get: the list pane side by side, the whole pane region when stacked.
+    pub(super) fn list_width(&self, viewport_w: f32, cx: &App) -> f32 {
+        let sidebar = if self.panes.sidebar_visible { self.panes.measured_sidebar(cx) } else { 0. };
+        let available = available_width(viewport_w, sidebar);
+        match self.panes.orientation {
+            Orientation::Stacked => available,
+            Orientation::SideBySide => self.panes.measured_list(cx).unwrap_or_else(|| Orientation::SideBySide.default_list(available)),
+        }
     }
 
     pub(super) fn grow_list_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -289,130 +188,137 @@ impl MailApp {
         self.nudge_list_pane(-STEP, window, cx);
     }
 
-    /// Move the divider along the stacking axis, keeping both panes usable.
+    /// Move the divider along the stacking axis; the panel ranges keep both panes usable.
     pub(super) fn nudge_list_pane(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window, self.sidebar_w);
-        self.panes.nudge(self.axis_available(width, height), delta);
-        cx.notify();
+        let Some(size) = self.panes.measured_list(cx) else { return };
+        let state = self.panes.list_state().clone();
+        state.update(cx, |state, cx| state.resize_panel(0, px(size + delta), window, cx));
     }
 
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.panes.reset();
-        let (width, height) = available(window, self.sidebar_w);
-        self.panes.list_size(self.axis_available(width, height));
+        for (orientation, state) in
+            [(Orientation::SideBySide, &self.panes.side_by_side), (Orientation::Stacked, &self.panes.stacked)]
+        {
+            let container = f32::from(state.read(cx).container_size());
+            if container > 0. {
+                let size = orientation.default_list(container);
+                state.clone().update(cx, |state, cx| state.resize_panel(0, px(size), window, cx));
+            }
+        }
         self.show_toast("Pane sizes reset".into(), window, cx);
+    }
+
+    /// Back to the default sidebar width.
+    pub(super) fn reset_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let main = self.panes.main.clone();
+        main.update(cx, |state, cx| state.resize_panel(0, px(SIDEBAR_W), window, cx));
     }
 
     /// Stack the panes the other way round: list left, or list on top.
     pub(super) fn toggle_pane_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let next = self.panes.orientation().toggled();
+        let next = self.panes.orientation.toggled();
         self.set_pane_layout(next, window, cx);
     }
 
     pub(super) fn set_pane_layout(&mut self, orientation: Orientation, window: &mut Window, cx: &mut Context<Self>) {
-        self.panes.set_orientation(orientation);
-        let (width, height) = available(window, self.sidebar_w);
-        self.panes.list_size(self.axis_available(width, height));
+        self.panes.orientation = orientation;
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
-    /// Press on the divider: remember where in the pane the pointer grabbed it.
-    pub(super) fn begin_divider_drag(&mut self, ev: &MouseDownEvent, window: &Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window, self.sidebar_w);
-        self.panes.begin_drag(self.pointer_along(ev.position), self.axis_available(width, height));
+    /// Hide or show the sidebar. Its state outlives the panel, so the width is kept.
+    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.panes.sidebar_visible = !self.panes.sidebar_visible;
         cx.notify();
     }
 
-    pub(super) fn drag_divider(&mut self, ev: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
-        let (width, height) = available(window, self.sidebar_w);
-        self.panes.drag_to(self.pointer_along(ev.position), self.axis_available(width, height));
-        cx.notify();
+    /// The invisible band over a divider that turns a double-click into a reset. The resize
+    /// handle underneath keeps the drag, the cursor and the highlight.
+    fn divider_target(
+        &self,
+        id: &'static str,
+        cx: &Context<Self>,
+        place: impl FnOnce(Div) -> Div,
+        reset: fn(&mut Self, &mut Window, &mut Context<Self>),
+    ) -> impl IntoElement {
+        place(div().absolute()).id(id).test_support().on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+            if ev.click_count() == 2 {
+                reset(this, window, cx);
+            }
+        }))
     }
 
-    pub(super) fn end_divider_drag(&mut self, cx: &mut Context<Self>) {
-        self.panes.end_drag();
-        cx.notify();
-    }
+    /// The three panes: sidebar | list | reader in nested resizable groups, with the
+    /// double-click targets over their dividers. `list` is `None` during a triage session,
+    /// which leaves the reader alone.
+    pub(super) fn render_panes(
+        &self,
+        list: Option<AnyElement>,
+        reader: AnyElement,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let t = theme::active(cx);
+        let orientation = self.panes.orientation;
+        let stacked = orientation == Orientation::Stacked;
+        let viewport = window.viewport_size();
+        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
+        let shown = self.panes.sidebar_visible;
+        let sidebar_w = self.panes.measured_sidebar(cx);
+        let reader = div().size_full().min_w_0().min_h_0().flex().flex_col().child(reader);
 
-    /// Double-clicking the divider is the shortcut back to the default size.
-    pub(super) fn reset_from_divider(&mut self, ev: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if ev.click_count() == 2 {
-            self.reset_panes(window, cx);
+        let content = match list {
+            None => reader.into_any_element(),
+            Some(list) => {
+                let available = if stacked { available_height(vh) } else { available_width(vw, if shown { sidebar_w } else { 0. }) };
+                let (min_list, min_reader) = orientation.minimums();
+                let group = if stacked { v_resizable("panes-stacked") } else { h_resizable("panes-side-by-side") };
+                group
+                    .with_state(self.panes.list_state())
+                    .child(resizable_panel().size(px(orientation.default_list(available))).size_range(px(min_list)..Pixels::MAX).child(list))
+                    .child(resizable_panel().size_range(px(min_reader)..Pixels::MAX).child(reader))
+                    .into_any_element()
+            }
+        };
+
+        let panes = if shown {
+            h_resizable("mail-main")
+                .with_state(&self.panes.main)
+                .child(
+                    resizable_panel()
+                        .size(px(SIDEBAR_W))
+                        .size_range(px(MIN_SIDEBAR_W)..px(MAX_SIDEBAR_W))
+                        .flex_none()
+                        .bg(t.sidebar)
+                        .child(div().size_full().flex().flex_col().child(self.render_sidebar(cx))),
+                )
+                .child(resizable_panel().size_range(px(MIN_LIST_W + MIN_READER_W)..Pixels::MAX).child(content))
+                .into_any_element()
+        } else {
+            content
+        };
+
+        // Double-click targets sit over the dividers, at the boundaries the groups last laid out.
+        let body_w = f32::from(self.panes.main.read(cx).container_size());
+        let mut targets = Vec::new();
+        if body_w > 0. {
+            let half = DIVIDER_HIT / 2.;
+            if shown {
+                let place = |d: Div| d.top_0().bottom_0().left(px(sidebar_w - half)).w(px(DIVIDER_HIT));
+                targets.push(self.divider_target("sidebar-divider", cx, place, Self::reset_sidebar).into_any_element());
+            }
+            if let (Some(list), false) = (self.panes.measured_list(cx), self.in_session() || self.session_end.is_some()) {
+                let origin = if shown { sidebar_w } else { 0. };
+                let place = move |d: Div| {
+                    if stacked {
+                        d.left(px(origin)).right_0().top(px(list - half)).h(px(DIVIDER_HIT))
+                    } else {
+                        d.top_0().bottom_0().left(px(origin + list - half)).w(px(DIVIDER_HIT))
+                    }
+                };
+                targets.push(self.divider_target("pane-divider", cx, place, Self::reset_panes).into_any_element());
+            }
         }
-    }
-
-    /// The hairline between the list and the reader.
-    pub(super) fn render_divider(&self, cx: &Context<Self>) -> impl IntoElement {
-        let orientation = self.panes.orientation();
-        Divider::new(
-            orientation,
-            crate::theme::active(cx),
-            Box::new(cx.listener(|this, ev, window, cx| this.begin_divider_drag(ev, window, cx))),
-            Box::new(cx.listener(|this, ev, window, cx| this.reset_from_divider(ev, window, cx))),
-        )
-    }
-
-    /// Room the divider moves in, along the axis the panes are stacked on.
-    fn axis_available(&self, width: f32, height: f32) -> f32 {
-        match self.panes.orientation() {
-            Orientation::SideBySide => width,
-            Orientation::Stacked => height,
-        }
-    }
-
-    /// Pointer position along the stacking axis. Window coordinates are fine:
-    /// the drag origin absorbs where the pane region starts.
-    fn pointer_along(&self, position: Point<Pixels>) -> f32 {
-        match self.panes.orientation() {
-            Orientation::SideBySide => f32::from(position.x),
-            Orientation::Stacked => f32::from(position.y),
-        }
-    }
-}
-
-impl MailApp {
-    /// Current sidebar width in pixels.
-    pub fn sidebar_width(&self) -> f32 {
-        self.sidebar_w
-    }
-
-    /// Drag the sidebar edge to `x` (window coordinates; the sidebar starts at 0),
-    /// leaving the list and reader their minimum widths.
-    pub(super) fn drag_sidebar(&mut self, ev: &MouseMoveEvent, window: &Window, cx: &mut Context<Self>) {
-        let viewport_w = f32::from(window.viewport_size().width);
-        let max = (viewport_w - MIN_LIST_W - MIN_READER_W).clamp(MIN_SIDEBAR_W, MAX_SIDEBAR_W);
-        self.sidebar_w = f32::from(ev.position.x).clamp(MIN_SIDEBAR_W, max);
-        cx.notify();
-    }
-
-    pub(super) fn end_sidebar_drag(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_dragging = false;
-        cx.notify();
-    }
-
-    /// Pointer band over the sidebar's right border; double-click restores the default width.
-    pub(super) fn render_sidebar_handle(&self, cx: &Context<Self>) -> impl IntoElement {
-        let highlight = crate::theme::active(cx).accent.opacity(0.28);
-        div()
-            .id("sidebar-divider")
-            .test_support()
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .right(px(-DIVIDER_HIT / 2.))
-            .w(px(DIVIDER_HIT))
-            .cursor_col_resize()
-            .hover(move |d| d.bg(highlight))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                this.sidebar_dragging = true;
-                cx.notify();
-            }))
-            .on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
-                if ev.click_count() == 2 {
-                    this.sidebar_w = SIDEBAR_W;
-                    cx.notify();
-                }
-            }))
+        div().relative().flex_1().min_h_0().child(panes).children(targets).into_any_element()
     }
 }

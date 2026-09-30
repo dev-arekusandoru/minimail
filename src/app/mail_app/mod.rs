@@ -106,13 +106,9 @@ pub struct MailApp {
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
-    /// Height of the message list panel in pixels when the panes are stacked.
-    list_h: f32,
-    /// How much room the list and the reader share, and how they are stacked.
+    /// The sidebar, list and reader layout and its resizable group states.
     pub panes: Panes,
-    /// Width of the sidebar; dragged via its right edge.
-    sidebar_w: f32,
-    sidebar_dragging: bool,
+    _pane_subs: Vec<Subscription>,
     /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
     pub reader: ReaderView,
     /// Messages the next dispatched menu action applies to, instead of the cursor's. Set
@@ -194,6 +190,9 @@ impl MailApp {
             }
         })
         .detach();
+        let panes = Panes::new(cx);
+        // Rows size themselves from the list pane, so a drag repaints the app as it moves.
+        let pane_subs = panes.states().into_iter().map(|state| cx.observe(state, |_, _, cx| cx.notify())).collect();
         let mut app = Self {
             mailbox,
             triage: Triage::new(View::default()),
@@ -207,10 +206,8 @@ impl MailApp {
             preview_lines: crate::preview::DEFAULT_LINES,
             read: HashSet::new(),
             list_w: 0.,
-            list_h: 0.,
-            panes: Panes::default(),
-            sidebar_w: panes::SIDEBAR_W,
-            sidebar_dragging: false,
+            panes,
+            _pane_subs: pane_subs,
             reader: ReaderView::default(),
             menu_target: None,
             anchors: Rc::default(),

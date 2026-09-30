@@ -16,25 +16,12 @@ impl Render for MailApp {
         if let Some(id) = self.opened() {
             self.read.insert(id);
         }
-        let viewport = window.viewport_size();
-        let (pane_w, pane_h) = (
-            panes::available_width(f32::from(viewport.width), self.sidebar_w),
-            panes::available_height(f32::from(viewport.height)),
-        );
-        let stacked = self.panes.orientation() == PaneLayout::Stacked;
-        // Rows size themselves from the real pane: the divider's width side by
-        // side, the whole region when the panes are stacked.
-        self.list_w = if stacked { pane_w } else { self.panes.list_size(pane_w) };
-        self.list_h = if stacked { self.panes.list_size(pane_h) } else { 0. };
+        // Rows size themselves from the real pane: the list pane side by side, the whole
+        // region when the panes are stacked.
+        self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);
         let list = (!in_session).then(|| self.render_list(cx));
         let reader = match &self.compose {
-            Some(compose) => div()
-                .flex_1()
-                .min_w_0()
-                .min_h_0()
-                .when(!stacked, |d| d.h_full())
-                .child(compose.clone())
-                .into_any_element(),
+            Some(compose) => div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element(),
             None => self.render_reader(cx),
         };
         if self.find_placement_pending() {
@@ -42,7 +29,7 @@ impl Render for MailApp {
         }
         let banner = self.pending_rule.clone();
         let t = theme::active(cx);
-        let (bg, fg, border, muted, sidebar) = (t.background, t.text, t.border, t.text_muted, t.sidebar);
+        let (bg, fg, muted) = (t.background, t.text, t.text_muted);
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -247,74 +234,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .child(self.render_titlebar(window, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .child(
-                        div()
-                            .relative()
-                            .w(px(self.sidebar_w))
-                            .flex_none()
-                            .h_full()
-                            .bg(sidebar)
-                            .border_r_1()
-                            .border_color(border)
-                            .flex()
-                            .flex_col()
-                            .child(self.render_sidebar(cx))
-                            .child(self.render_sidebar_handle(cx)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .flex()
-                            .when(stacked, |d| d.flex_col())
-                            .when(!stacked, |d| d.flex_row())
-                            .children(list)
-                            .child(self.render_divider(cx))
-                            .child(reader),
-                    )
-            )
-            // While the divider is held, a transparent sheet over the whole
-            // window keeps receiving the moves once the pointer leaves the band.
-            .when(self.panes.dragging(), |d| {
-                d.child(
-                    div()
-                        .id("pane-drag")
-                        .test_support()
-                        .absolute()
-                        .inset_0()
-                        .when(stacked, |el| el.cursor_row_resize())
-                        .when(!stacked, |el| el.cursor_col_resize())
-                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, w, cx| {
-                            this.drag_divider(ev, w, cx);
-                        }))
-                        .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                            this.end_divider_drag(cx);
-                        })),
-                )
-            })
-            .when(self.sidebar_dragging, |d| {
-                d.child(
-                    div()
-                        .id("sidebar-drag")
-                        .test_support()
-                        .absolute()
-                        .inset_0()
-                        .cursor_col_resize()
-                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, w, cx| {
-                            this.drag_sidebar(ev, w, cx);
-                        }))
-                        .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                            this.end_sidebar_drag(cx);
-                        })),
-                )
-            })
+            .child(self.render_panes(list, reader, window, cx))
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
