@@ -61,13 +61,46 @@ pub fn format_time(ts: Timestamp) -> String {
     )
 }
 
+/// Footer keys while a message is open.
+const READER_HINTS: &[(&str, &str)] = &[
+    ("r", "reply"),
+    ("e", "archive"),
+    ("f", "file"),
+    ("d", "delete"),
+    ("s", "snooze"),
+    ("]", "next"),
+    ("[", "prev"),
+    ("v", "reader"),
+    ("shift-o", "thread"),
+    ("u", "undo"),
+    ("?", "help"),
+];
+
+/// [`READER_HINTS`] led by accept/reject for the pending AI suggestions.
+const READER_SUGGESTION_HINTS: &[(&str, &str)] = &[
+    ("y", "accept"),
+    ("n", "reject"),
+    ("r", "reply"),
+    ("e", "archive"),
+    ("f", "file"),
+    ("d", "delete"),
+    ("s", "snooze"),
+    ("]", "next"),
+    ("[", "prev"),
+    ("v", "reader"),
+    ("shift-o", "thread"),
+    ("u", "undo"),
+    ("?", "help"),
+];
+
 /// Which keys the bottom bar advertises.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HintMode {
     List,
     /// Number of selected messages.
     Selection(usize),
-    Reader,
+    /// A message is open; `suggestions` adds accept/reject keys for pending AI suggestions.
+    Reader { suggestions: bool },
     Compose,
     Palette,
     /// Triage session; `true` once the end card is showing.
@@ -122,17 +155,8 @@ impl RenderOnce for HintBar {
                 ("escape", "clear"),
                 ("u", "undo"),
             ],
-            HintMode::Reader => &[
-                ("r", "reply"),
-                ("e", "archive"),
-                ("f", "file"),
-                ("d", "delete"),
-                ("s", "snooze"),
-                ("a", "allow"),
-                ("b", "block"),
-                ("j", "next"),
-                ("u", "undo"),
-            ],
+            HintMode::Reader { suggestions: false } => READER_HINTS,
+            HintMode::Reader { suggestions: true } => READER_SUGGESTION_HINTS,
             HintMode::Compose => &[("cmd-enter", "send"), ("escape", "cancel")],
             HintMode::Palette => &[("enter", "run"), ("up", "prev"), ("down", "next"), ("escape", "close")],
             HintMode::Session(false) => &[

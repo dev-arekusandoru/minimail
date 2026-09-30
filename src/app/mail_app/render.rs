@@ -217,6 +217,8 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &NextInThread, w, cx| this.step_thread(1, w, cx)))
             .on_action(cx.listener(|this, _: &PrevInThread, w, cx| this.step_thread(-1, w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleReaderMode, _, cx| this.toggle_opened_reader_mode(cx)))
+            .on_action(cx.listener(|this, _: &ToggleThreadExpansion, _, cx| this.toggle_thread_expansion(cx)))
             .on_action(cx.listener(|this, _: &GrowListPane, w, cx| this.grow_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))

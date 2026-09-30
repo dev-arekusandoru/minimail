@@ -1,7 +1,8 @@
 use super::*;
 
 impl MailApp {
-    pub(super) fn hint_mode(&self) -> HintMode {
+    /// Which keys the footer advertises right now.
+    pub fn hint_mode(&self) -> HintMode {
         if self.compose.is_some() {
             HintMode::Compose
         } else if self.snooze.is_some() {
@@ -16,7 +17,12 @@ impl MailApp {
             HintMode::NewSenders
         } else {
             match self.triage.selected().len() {
-                0 => HintMode::List,
+                0 => match self.opened {
+                    Some(id) => HintMode::Reader {
+                        suggestions: !self.mailbox.pending(id).is_empty(),
+                    },
+                    None => HintMode::List,
+                },
                 n => HintMode::Selection(n),
             }
         }

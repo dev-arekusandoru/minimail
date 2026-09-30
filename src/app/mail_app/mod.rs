@@ -26,6 +26,7 @@ use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::judge::{JudgePolicy, Kind, Routed, StubJudge, classify};
 use crate::model::{AccountId, Chip, Filter, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, TagFilter, Triage, TriageState, View};
+use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
@@ -45,6 +46,7 @@ mod mouse;
 pub mod panes;
 mod reader;
 mod render;
+mod reader_state;
 mod sidebar;
 mod titlebar;
 mod rows;
@@ -101,6 +103,10 @@ pub struct MailApp {
     list_h: f32,
     /// How much room the list and the reader share, and how they are stacked.
     pub panes: Panes,
+    /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
+    pub reader: ReaderView,
+    /// Show action buttons in the reader (off: keyboard hints only).
+    pub reader_toolbar: bool,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -178,6 +184,8 @@ impl MailApp {
             list_w: 0.,
             list_h: 0.,
             panes: Panes::default(),
+            reader: ReaderView::default(),
+            reader_toolbar: false,
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,
