@@ -21,6 +21,9 @@ impl MailApp {
 
     /// The list rows when grouped (empty otherwise): threads collapsed or expanded.
     pub fn rows(&self) -> Vec<Row> {
+        if !self.grouped() {
+            return Vec::new();
+        }
         let ids = self.mailbox.ids_in(self.triage.view);
         let groups = threads::group(&ids, |id| self.mailbox.get(id));
         threads::rows(&groups, &self.expanded)
