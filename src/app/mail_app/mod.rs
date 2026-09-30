@@ -160,6 +160,8 @@ pub struct MailApp {
     /// field, and that frame counter (see `place_find_match`).
     find_layout: RefCell<Option<reader_find::FindLayout>>,
     find_gen: std::cell::Cell<u64>,
+    /// Frames until a reopened find bar selects its text (see `place_find_match`).
+    find_select: std::cell::Cell<u8>,
     _modal_sub: Option<Subscription>,
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
@@ -238,6 +240,7 @@ impl MailApp {
             finds: HashMap::new(),
             find_layout: RefCell::new(None),
             find_gen: std::cell::Cell::new(0),
+            find_select: std::cell::Cell::new(0),
             _modal_sub: None,
             menu: None,
             _menu_sub: None,

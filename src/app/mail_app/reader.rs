@@ -61,7 +61,7 @@ impl MailApp {
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full())
             .child(self.tab_bar(&Look::new(cx), cx))
-            .children(self.find_bar(&Look::new(cx)))
+            .children(if self.find_open() { self.find_bar(&Look::new(cx)) } else { None })
             .child(pane)
             .into_any_element()
     }

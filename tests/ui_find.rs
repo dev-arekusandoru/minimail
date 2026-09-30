@@ -78,16 +78,34 @@ fn cmd_f_opens_the_bar_and_typing_counts_matches(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn enter_steps_through_matches_expanding_collapsed_messages_and_quotes(cx: &mut TestAppContext) {
+fn typing_only_counts_and_highlights_and_enter_lands(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
     h.find("budget");
+    assert_eq!(h.found(), Some((1, 4)));
+    assert!(!h.read(|a| a.reader_expanded(1) || a.reader_expanded(2)), "typing expands nothing");
+    assert!(!h.read(|a| a.reader_quoted_open(2)), "and reveals no quote");
+    assert!(!h.read(|a| a.tabs.tabs()[0].pinned), "and does not pin");
+    h.type_text("x");
+    h.keys("backspace");
+    assert_eq!(h.found(), Some((1, 4)));
     assert!(!h.read(|a| a.tabs.tabs()[0].pinned));
-    assert!(!h.read(|a| a.reader_expanded(1)));
 
+    // The first enter lands on the match typing chose (the opened message's subject).
+    h.keys("enter");
+    assert_eq!(h.found(), Some((1, 4)));
+    assert!(!h.read(|a| a.tabs.tabs()[0].pinned), "that match needs nothing revealed");
     h.keys("enter");
     assert_eq!(h.found(), Some((2, 4)), "now in message 1's body");
     assert!(h.read(|a| a.reader_expanded(1)), "landing expands the collapsed message");
     assert!(h.read(|a| a.tabs.tabs()[0].pinned), "which pins the tab");
+}
+
+#[gpui_kit::gpui::test]
+fn enter_steps_through_matches_expanding_collapsed_messages_and_quotes(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.find("budget");
+    h.keys("enter enter");
+    assert_eq!(h.found(), Some((2, 4)));
 
     h.keys("enter");
     assert_eq!(h.found(), Some((3, 4)));
@@ -152,17 +170,41 @@ fn escape_closes_the_bar_and_returns_focus_to_the_app(cx: &mut TestAppContext) {
     h.keys("escape");
     assert!(!h.read(|a| a.find_open()));
     assert!(!h.exists("find-bar"));
-    assert_eq!(h.found(), None, "the query is dropped with its highlights");
+    assert_eq!(h.found(), None, "no count and no highlights while the bar is closed");
     let before = h.read(|a| a.triage.cursor_index());
     h.keys("k");
     assert_ne!(h.read(|a| a.triage.cursor_index()), before, "list keys work again");
 }
 
 #[gpui_kit::gpui::test]
+fn reopening_shows_the_previous_query_selected(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.find("budget");
+    h.keys("alt-c");
+    h.keys("escape");
+    h.keys("cmd-f");
+    // The selection happens a couple of frames after the bar is painted (a real window keeps
+    // drawing; the test window only draws on request).
+    for _ in 0..3 {
+        h.exists("find-bar");
+        h.cx.run_until_parked();
+    }
+    assert!(h.read(|a| a.find_open()));
+    assert_eq!(h.app.read_with(h.cx, |a, cx| a.find_query(cx)), Some("budget".to_owned()));
+    assert_eq!(h.found(), Some((1, 3)), "the options came back too (case-sensitive)");
+    h.type_text("lunch");
+    assert_eq!(
+        h.app.read_with(h.cx, |a, cx| a.find_query(cx)),
+        Some("lunch".to_owned()),
+        "the old query was selected, so typing replaced it"
+    );
+}
+
+#[gpui_kit::gpui::test]
 fn each_tab_keeps_its_own_find_and_closing_the_tab_drops_it(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
     h.find("budget");
-    h.keys("enter");
+    h.keys("enter enter");
     assert_eq!(h.found(), Some((2, 4)));
     assert!(h.read(|a| a.tabs.tabs()[0].pinned), "landing pinned the tab");
 

@@ -5,11 +5,14 @@
 use super::reader::FindReveal;
 use super::*;
 use crate::find::{self, Find, Match, Options, Segment};
-use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState, SelectAll};
 use std::ops::Range;
 
-/// One tab's find bar.
+/// One tab's find: the bar's input and query state. It outlives the bar (`esc` only hides it),
+/// so reopening shows the last query; closing the tab drops it.
 pub(super) struct FindTab {
+    /// The bar is showing; highlights and the match count exist only then.
+    pub open: bool,
     pub find: Find,
     pub input: Entity<InputState>,
     /// Matches of the current query over the tab's thread; refreshed every frame.
@@ -44,6 +47,12 @@ impl MailApp {
         self.find_thread().and_then(|t| self.finds.get(&t)).is_some_and(|ft| ft.invalid)
     }
 
+    /// Text in the active tab's find input.
+    pub fn find_query(&self, cx: &App) -> Option<String> {
+        let ft = self.finds.get(&self.find_thread()?)?;
+        Some(ft.input.read(cx).value().to_string())
+    }
+
     /// The active tab's find options.
     pub fn find_options(&self) -> Option<Options> {
         self.finds.get(&self.find_thread()?).map(|ft| ft.find.options)
@@ -52,12 +61,12 @@ impl MailApp {
     /// Thread of the active tab when its find bar is open.
     fn find_thread(&self) -> Option<u32> {
         let thread = self.tabs.active()?.thread;
-        self.finds.contains_key(&thread).then_some(thread)
+        self.finds.get(&thread).is_some_and(|ft| ft.open).then_some(thread)
     }
 
     /// The current match of `thread`'s find.
     pub(super) fn find_current(&self, thread: u32) -> Option<&Match> {
-        let ft = self.finds.get(&thread)?;
+        let ft = self.finds.get(&thread).filter(|ft| ft.open)?;
         ft.matches.get(ft.find.current(ft.matches.len()))
     }
 
@@ -75,24 +84,35 @@ impl MailApp {
                     this.set_find_query(thread, &text, cx);
                 }
             });
-            slot.insert(FindTab { find: Find::default(), input, matches: Vec::new(), invalid: false, _sub: sub });
+            slot.insert(FindTab { open: true, find: Find::default(), input, matches: Vec::new(), invalid: false, _sub: sub });
         }
-        if let Some(ft) = self.finds.get(&thread) {
+        if let Some(ft) = self.finds.get_mut(&thread) {
+            ft.open = true;
             window.focus(&ft.input.focus_handle(cx), cx);
+        }
+        // Once the bar is painted and focused, select the old query so typing replaces it.
+        if self.finds.get(&thread).is_some_and(|ft| !ft.find.query.is_empty()) {
+            self.find_select.set(2);
         }
         cx.notify();
     }
 
-    /// `esc`: close the bar, drop the query and its highlights, and give focus back.
+    /// `esc`: hide the bar and its highlights, keeping the query and options for the next
+    /// `cmd-f`, and give focus back.
     pub(super) fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(thread) = self.find_thread() {
-            self.drop_find(thread);
+            if let Some(ft) = self.finds.get_mut(&thread) {
+                ft.open = false;
+            }
+            if let Some(pane) = self.reader_panes.borrow_mut().get_mut(&thread) {
+                pane.find_reveal = FindReveal::Idle;
+            }
         }
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
-    /// Forget a thread's find (its tab closed, or the bar was closed).
+    /// Forget a thread's find entirely (its tab closed or the preview was replaced).
     pub(super) fn drop_find(&mut self, thread: u32) {
         self.finds.remove(&thread);
         if let Some(pane) = self.reader_panes.borrow_mut().get_mut(&thread) {
@@ -104,7 +124,7 @@ impl MailApp {
         let Some(ft) = self.finds.get_mut(&thread) else { return };
         ft.find.set_query(text);
         self.recompute_find(thread);
-        self.land_find(thread);
+        self.seek_find(thread);
         cx.notify();
     }
 
@@ -138,8 +158,18 @@ impl MailApp {
             window.focus(&ft.input.focus_handle(cx), cx);
         }
         self.recompute_find(thread);
-        self.land_find(thread);
+        self.seek_find(thread);
         cx.notify();
+    }
+
+    /// Point the current match at the first one at or after the reader's position (the opened
+    /// message), without landing on it: typing and toggling never expand, reveal or scroll.
+    fn seek_find(&mut self, thread: u32) {
+        let Some(opened) = self.tabs.tab_for(thread).map(|t| t.msg) else { return };
+        let order = crate::threads::thread_order(self.mailbox.messages(), thread);
+        if let Some(ft) = self.finds.get_mut(&thread) {
+            ft.find.seek(&ft.matches, &order, opened);
+        }
     }
 
     /// Search `thread` again: the thread's text or the opened message may have changed.
@@ -192,7 +222,7 @@ impl MailApp {
         if self.in_session() {
             return None;
         }
-        let ft = self.finds.get(&thread)?;
+        let ft = self.finds.get(&thread).filter(|ft| ft.open)?;
         let current = ft.find.current(ft.matches.len());
         let spans = find::highlights(&ft.matches, current, msg, segment);
         if spans.is_empty() {
@@ -237,14 +267,26 @@ impl MailApp {
     pub(super) fn find_forces_plain(&self, m: &Message) -> bool {
         !self.in_session()
             && self.finds.get(&m.thread_id).is_some_and(|ft| {
-                ft.matches.iter().any(|x| x.msg == m.id && x.segment != Segment::Subject)
+                ft.open && ft.matches.iter().any(|x| x.msg == m.id && x.segment != Segment::Subject)
             })
     }
 
     /// Second step of scrolling to the current match, once the frame holding its text is
     /// painted: nudge the match's line into the viewport. Runs at the start of a render.
-    pub(super) fn place_find_match(&mut self, window: &mut Window) {
+    pub(super) fn place_find_match(&mut self, window: &mut Window, cx: &mut App) {
         self.find_gen.set(self.find_gen.get() + 1);
+        // A reopened bar selects its old query, from the frame after the bar was first painted.
+        match self.find_select.get() {
+            0 => {}
+            1 => {
+                self.find_select.set(0);
+                window.dispatch_action(Box::new(SelectAll), cx);
+            }
+            n => {
+                self.find_select.set(n - 1);
+                window.request_animation_frame();
+            }
+        }
         let Some(thread) = self.find_thread() else { return };
         let mut panes = self.reader_panes.borrow_mut();
         let Some(pane) = panes.get_mut(&thread) else { return };
