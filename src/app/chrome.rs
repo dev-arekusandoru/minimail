@@ -2,8 +2,7 @@
 
 use crate::app::actions::commands;
 use crate::clock::{Timestamp, DAY};
-use crate::judge::{QuestionKey, Suggestion};
-use crate::model::{Tag, TriageState};
+use crate::model::TriageState;
 use crate::theme::{self, Theme};
 use gpui_kit::{
     component::{kbd::Kbd, label::Label, separator::Separator},
@@ -49,115 +48,6 @@ pub fn format_time(ts: Timestamp) -> String {
         secs / 3600,
         secs % 3600 / 60
     )
-}
-
-fn tag_label(tag: &Tag) -> String {
-    match tag {
-        Tag::NoReply => "no reply".into(),
-        Tag::NeedsReply => "needs reply".into(),
-        Tag::Spam => "spam".into(),
-        Tag::Urgent(n) => format!("urgent {n}"),
-        Tag::Kind(k) => k.label().into(),
-    }
-}
-
-/// Label of a not-yet-accepted suggestion, always ending in `?`.
-fn suggestion_label(s: &Suggestion) -> String {
-    match s.key {
-        QuestionKey::Spam => "spam?".into(),
-        QuestionKey::NeedsReply => "reply?".into(),
-        QuestionKey::SuggestedState => {
-            s.state().map_or("→ state?".into(), |st| format!("→ {}?", st.label().to_lowercase()))
-        }
-        QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
-        QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
-    }
-}
-
-/// Inline badge strip for a message row: accepted tags tinted solid, pending suggestions dimmed
-/// and outlined with a trailing `?`.
-pub fn badges(tags: &[Tag], pending: &[&Suggestion]) -> Badges {
-    let mut items: Vec<(String, BadgeTone, bool)> = tags
-        .iter()
-        .map(|t| (tag_label(t), tag_tone(t), false))
-        .collect();
-    items.extend(pending.iter().map(|s| (suggestion_label(s), suggestion_tone(s), true)));
-    Badges { items }
-}
-
-/// Which theme token colors a badge.
-#[derive(Clone, Copy)]
-enum BadgeTone {
-    Muted,
-    Spam,
-    NeedsReply,
-    Urgent,
-    Kind,
-    State(TriageState),
-    Accent,
-}
-
-impl BadgeTone {
-    fn color(self, t: &Theme) -> Hsla {
-        match self {
-            BadgeTone::Muted => t.text_muted,
-            BadgeTone::Spam => t.spam,
-            BadgeTone::NeedsReply => t.needs_reply,
-            BadgeTone::Urgent => t.urgent,
-            BadgeTone::Kind => t.kind,
-            BadgeTone::State(s) => t.state_color(s),
-            BadgeTone::Accent => t.accent,
-        }
-    }
-}
-
-fn tag_tone(tag: &Tag) -> BadgeTone {
-    match tag {
-        Tag::NoReply => BadgeTone::Muted,
-        Tag::NeedsReply => BadgeTone::NeedsReply,
-        Tag::Spam => BadgeTone::Spam,
-        Tag::Urgent(_) => BadgeTone::Urgent,
-        Tag::Kind(_) => BadgeTone::Kind,
-    }
-}
-
-fn suggestion_tone(s: &Suggestion) -> BadgeTone {
-    match s.key {
-        QuestionKey::Spam => BadgeTone::Spam,
-        QuestionKey::NeedsReply => BadgeTone::NeedsReply,
-        QuestionKey::SuggestedState => s.state().map_or(BadgeTone::Accent, BadgeTone::State),
-        QuestionKey::Urgency => BadgeTone::Urgent,
-        QuestionKey::Kind => BadgeTone::Kind,
-    }
-}
-
-#[derive(IntoElement)]
-pub struct Badges {
-    items: Vec<(String, BadgeTone, bool)>,
-}
-
-impl RenderOnce for Badges {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .children(self.items.into_iter().map(|(label, tone, pending)| {
-                let color = tone.color(&t);
-                div()
-                    .px_1()
-                    .rounded_sm()
-                    .text_size(px(11.))
-                    .border_1()
-                    .border_color(color.opacity(if pending { 0.6 } else { 0.0 }))
-                    .text_color(color)
-                    .when(!pending, |el| el.bg(color.opacity(0.16)))
-                    .when(pending, |el| el.opacity(0.7))
-                    .child(SharedString::from(label))
-                    .into_any_element()
-            }))
-    }
 }
 
 /// Which keys the bottom bar advertises.
@@ -362,12 +252,16 @@ impl RenderOnce for HelpOverlay {
                 div()
                     .id("help-body")
                     .flex()
-                    .gap_4()
+                    .flex_col()
+                    .gap_3()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .children(columns),
+                    .child(div().flex().gap_4().children(columns))
+                    .child(div().flex_none().child(Separator::horizontal()))
+                    .child(div().text_sm().text_color(t.accent).child("Icon legend"))
+                    .child(crate::app::icons::legend_view(&t)),
             )
     }
 }

@@ -3,10 +3,12 @@
 //! `gpui-kit` re-exports GPUI at its root, so `use gpui_kit::*` *is* GPUI.
 
 pub mod actions;
+pub mod icons;
 pub mod chrome;
 pub mod compose;
 pub mod mail_app;
 pub mod overlay;
+pub mod row;
 pub mod palette;
 pub mod panels;
 pub mod settings;

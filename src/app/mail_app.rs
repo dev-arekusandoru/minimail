@@ -11,7 +11,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
-use crate::app::chrome::{EmptyState, HelpOverlay, HintBar, HintMode, ViewTabs, badges};
+use crate::app::chrome::{EmptyState, HelpOverlay, HintBar, HintMode, ViewTabs};
+use crate::app::icons::{self, Glyph, GlyphInputs};
+use crate::app::row::{self, RowVisual};
 use crate::app::overlay::overlay;
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::palette::{CommandPalette, PaletteEvent};
@@ -33,7 +35,6 @@ mod grouping;
 mod mouse;
 use mouse::close_on_backdrop;
 
-const ROW_H: f32 = 26.0;
 const TOAST_MS: u64 = 4000;
 
 /// What the message list currently shows.
@@ -70,6 +71,8 @@ pub struct MailApp {
     pub preview_lines: u8,
     /// Messages that have been shown in the reader (everything else is unread).
     read: HashSet<MessageId>,
+    /// Width of the message list panel in pixels (drives how many row icons fit).
+    list_w: f32,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -129,6 +132,7 @@ impl MailApp {
             summaries_enabled: false,
             preview_lines: crate::preview::DEFAULT_LINES,
             read: HashSet::new(),
+            list_w: row::list_width(1200.),
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,
@@ -724,7 +728,17 @@ impl MailApp {
             return;
         }
         let group = self.group_threads;
-        let panel = cx.new(|cx| SettingsPanel::new(self.policy.clone(), self.summaries_enabled, group, cx));
+        let preview = self.preview_lines;
+        let panel = cx.new(|cx| {
+            SettingsPanel::new(
+                self.policy.clone(),
+                self.summaries_enabled,
+                group,
+                preview,
+                window,
+                cx,
+            )
+        });
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
             window,
@@ -736,6 +750,10 @@ impl MailApp {
                 }
                 SettingsEvent::Grouping(on) => {
                     this.set_grouping(*on);
+                    cx.notify();
+                }
+                SettingsEvent::PreviewLines(n) => {
+                    this.preview_lines = (*n).min(5);
                     cx.notify();
                 }
                 SettingsEvent::Close => this.close_modals(window, cx),
@@ -1159,7 +1177,7 @@ impl MailApp {
             .into_any_element()
         };
         div()
-            .w(px(460.))
+            .w(px(self.list_w))
             .flex_none()
             .h_full()
             .flex()
@@ -1356,6 +1374,10 @@ impl Render for MailApp {
         let screener_active = self.mode == ListMode::Screener;
         let hint = self.hint_mode();
         let in_session = self.in_session() || self.session_end.is_some();
+        if let Some(id) = self.opened {
+            self.read.insert(id);
+        }
+        self.list_w = row::list_width(f32::from(window.viewport_size().width));
         let list = (!in_session).then(|| self.render_list(cx));
         let reader = match &self.compose {
             Some(compose) => div()
@@ -1500,6 +1522,12 @@ impl Render for MailApp {
                 this.show_toast(format!("{auto} auto-applied · {review} to review"), w, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
+            .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
+                this.preview_lines = crate::preview::cycle_lines(this.preview_lines);
+                let text = format!("Preview: {}", crate::preview::lines_label(this.preview_lines));
+                this.show_toast(text, w, cx);
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &ExpandThread, _, cx| {
                 this.set_expanded(true);
                 this.scroll_to_cursor();

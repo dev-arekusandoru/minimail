@@ -84,6 +84,10 @@ tokens! {
     /// Selected / cursor row background.
     selection,
     hover,
+    /// Background of the row under the keyboard cursor / mouse focus.
+    row_cursor,
+    /// Persistent tint of the row whose message is open in the reader.
+    row_open,
     spam,
     needs_reply,
     urgent,

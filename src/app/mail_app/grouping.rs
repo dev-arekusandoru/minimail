@@ -231,7 +231,6 @@ impl MailApp {
         newest: &str,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
-        use gpui_kit::prelude::FluentBuilder as _;
         let Row::Header { thread_id, ids, expanded } = row else {
             unreachable!("render_group_header takes header rows")
         };
@@ -241,25 +240,19 @@ impl MailApp {
             .map(|m| (m.from_name.clone(), m.subject.clone(), Self::clock_label(&m.received, newest)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
-        let is_cursor = ix == self.cursor_ix();
-        let selected = self.row_selected(row);
-        let hover = t.hover;
+        let visual = crate::app::row::RowVisual {
+            cursor: ix == self.cursor_ix(),
+            open: !*expanded && self.opened.is_some_and(|id| ids.contains(&id)),
+            checked: self.row_selected(row),
+        };
+        let selected = visual.checked;
         let thread = *thread_id;
-        div()
-            .id(("thread-row", thread as usize))
-            .h(px(super::ROW_H))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .text_size(px(13.))
-            .border_l_2()
-            .border_color(if is_cursor { t.accent } else { transparent_black() })
-            .when(selected, |d| d.bg(t.accent.opacity(0.16)))
-            .when(is_cursor && !selected, |d| d.bg(t.selection))
-            .cursor_pointer()
-            .hover(move |s| s.bg(hover))
+        crate::app::row::frame(
+            div().id(("thread-row", thread as usize)),
+            visual,
+            &t,
+            self.row_h(),
+        )
             .child(self.row_checkbox(ix, selected, cx))
             .child(
                 div()

@@ -23,6 +23,8 @@
     "success": "#9ece6a",
     "warning": "#e0af68",
     "error": "#f7768e",
-    "info": "#7aa2f7"
+    "info": "#7aa2f7",
+    "row_cursor": "#283457",
+    "row_open": "#1f3352"
   }
 }

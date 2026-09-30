@@ -39,6 +39,9 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🔕 **Mute & unsubscribe** | One key each. |
 | 🧵 **Group by thread** | `g` (or Settings, or the palette) shows one row per conversation: latest sender and subject, message count, participants and newest date. `right`/`enter` or the chevron expands it inline, `left` collapses. Actions (`e` `w` `i` `l`, `x`, shift-selection) on a thread row apply to every message of that thread *in the current panel* and undo as one step; sender-wide actions and mute are unchanged. A thread split across panels shows only that panel's messages in each. `]` / `[` step through the thread in date order in either mode (also clickable in the reader). |
 | 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, last row: space or `=`/`-` by keyboard, click by mouse). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
+| 👁️ **Readable rows** | Each row is sender + date on the first line, the **full-width subject** on the second, then an optional muted preview. Labels are icons, not text badges: at most a few fit (fewer in narrow windows) and the rest fold into a `+N` chip whose tooltip lists them. Hover any icon for its name; the `?` help ends with an **icon legend**. Unread mail is bold with a closed-envelope icon; an unaccepted AI suggestion is a single sparkle icon (click or `y` accepts, right-click or `n` rejects). Return times stay as text (`↩ Mon 5 Oct 08:00`). |
+| 🔎 **Preview lines** | Settings → *Preview lines* (or palette → *Cycle preview lines*): Off, 1–5 lines of plain-text snippet under the subject, like Apple Mail. Quoted text (`>`), signatures and reply headers are stripped. Every row has the same height for a given setting, so scrolling stays smooth. Default 2. |
+| 📍 **Open vs. cursor** | The row under the cursor has a ring and a highlight; the row open in the reader keeps a tint, a solid accent bar on its left edge and an open-envelope icon; both cues combine when they coincide. Both stay distinct from checked rows (accent wash + filled checkbox). A collapsed thread row shows the open indicator when the open message is inside it. |
 
 ### Keys at a glance
 
@@ -55,6 +58,27 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `cmd-,` | Settings | `?` | All shortcuts |
 | `g` | Group by thread on/off | `]` / `[` | Next / previous message in thread |
 | `right` / `left` | Expand / collapse thread | | |
+
+### Icon legend
+
+Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, description) and shown at the end of the `?` help. Lucide icons, tinted with theme tokens.
+
+| Icon | Meaning | Token |
+|---|---|---|
+| Mail / MailOpen | Unread / open in the reader | accent |
+| SquareCheck | Checked for a bulk action | accent |
+| Sparkles | Pending AI suggestion (`y` accept, `n` reject) | accent |
+| ShieldAlert | Spam | spam |
+| Reply | Needs reply | needs_reply |
+| Siren / Flame / Zap | Urgency 4–5 / 3 / 1–2 (1–2 only in `+N`) | urgent / muted |
+| UserPlus | New sender (screener) | state_screener |
+| AlarmClock | Snoozed (return time shown as text in Later) | state_later |
+| Hourglass | No reply yet, follow up | state_waiting |
+| BellOff | Muted thread | muted |
+| Paperclip | Subject or opening lines mention an attachment | muted |
+| User / Receipt / Newspaper / Bell / Tag | Kind: person / receipt / newsletter / notification / other (other only in `+N`) | kind |
+
+To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`.
 
 ## 🛠️ Development
 
@@ -79,7 +103,8 @@ src/
 ├── rules.rs      # rule suggestions
 ├── clock.rs      # injectable clock
 ├── theme.rs      # semantic color tokens, theme registry, JSON loader, active theme
-└── app/          # GPUI views: main window, palette, compose, panels
+├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
+└── app/          # GPUI views: main window, palette, compose, panels; icons.rs is the icon language table, row.rs the row frame
 fixtures/         # mock mailbox + known contacts
 themes/           # built-in themes (JSON, embedded at build time)
 tests/            # integration and headless UI tests
@@ -87,7 +112,7 @@ tests/            # integration and headless UI tests
 
 ### Adding a theme
 
-A theme is a JSON file: `{ "name": "My Theme", "colors": { "<token>": "#rrggbb", … } }` with every token from `themes/one-dark-pro.json` (background, surface, sidebar, border, text, text_muted, accent, on_accent, selection, hover, spam, needs_reply, urgent, kind, state_*, success, warning, error, info).
+A theme is a JSON file: `{ "name": "My Theme", "colors": { "<token>": "#rrggbb", … } }` with every token from `themes/one-dark-pro.json` (background, surface, sidebar, border, text, text_muted, accent, on_accent, selection, hover, row_cursor, row_open, spam, needs_reply, urgent, kind, state_*, success, warning, error, info).
 
 - **Built-in:** add `themes/<name>.json` and list it in `BUILTIN` in `src/theme.rs`.
 - **User:** put the file in `~/.config/mail-classifier/themes/`; it appears in the Settings picker. A theme with an existing name replaces it; an unknown theme name falls back to One Dark Pro.

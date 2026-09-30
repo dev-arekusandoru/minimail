@@ -5,7 +5,7 @@ use mail_classifier::model::Mailbox;
 use mail_classifier::theme;
 
 fn main() {
-    gpui_kit::application().run(|cx| {
+    gpui_kit::application().with_assets(mail_classifier::app::icons::AppAssets).run(|cx| {
         gpui_kit::init(cx);
         Theme::change(ThemeMode::Dark, None, cx);
         let mut registry = theme::ThemeRegistry::builtin();
