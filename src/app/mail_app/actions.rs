@@ -55,7 +55,7 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        let n = self.mailbox.set_state_at(&ids, state, self.now());
+        let n = self.mailbox.set_state(&ids, state);
         self.triage.clear_selection();
         if n > 0 {
             let msg = match state {
@@ -77,14 +77,7 @@ impl MailApp {
         else {
             return;
         };
-        let ids: Vec<MessageId> = self
-            .mailbox
-            .messages()
-            .iter()
-            .filter(|m| m.from_email == email)
-            .map(|m| m.id)
-            .collect();
-        let n = self.mailbox.set_state_at(&ids, state, self.now());
+        let n = self.mailbox.set_state_for_sender(&email, true, state);
         self.triage.clear_selection();
         if n > 0 {
             let msg = format!(
@@ -106,7 +99,7 @@ impl MailApp {
         self.rules.accept(rule.clone());
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_in(TriageState::Inbox)
+            .ids_in_view(&View::default())
             .into_iter()
             .filter(|id| {
                 self.mailbox
@@ -114,7 +107,7 @@ impl MailApp {
                     .is_some_and(|m| m.from_email == rule.sender)
             })
             .collect();
-        let n = self.mailbox.set_state_at(&ids, rule.state, self.now());
+        let n = self.mailbox.set_state(&ids, rule.state);
         self.show_toast(
             format!(
                 "Rule saved: {} → {} ({n} moved)",
@@ -135,7 +128,7 @@ impl MailApp {
         }
     }
 
-    pub(super) fn show_view(&mut self, view: TriageState, cx: &mut Context<Self>) {
+    pub(super) fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.end_session();
         self.mode = ListMode::State;
         self.triage.switch_view(view);
@@ -146,12 +139,24 @@ impl MailApp {
         cx.notify();
     }
 
-    pub(super) fn show_screener(&mut self, cx: &mut Context<Self>) {
-        self.end_session();
-        self.mode = ListMode::Screener;
-        self.alt_cursor = 0;
-        self.opened = None;
-        cx.notify();
+    pub(super) fn show_account_location(&mut self, location: Location, cx: &mut Context<Self>) {
+        let Some(account) = self.mailbox.accounts().first().map(|a| a.id.clone()) else {
+            return;
+        };
+        let location = match location {
+            Location::Snoozed(_) => Location::Snoozed(account),
+            Location::Archive(_) => Location::Archive(account),
+            Location::Trash(_) => Location::Trash(account),
+            _ => return,
+        };
+        self.show_view(View { location, ..View::default() }, cx);
+    }
+
+    pub(super) fn show_new_senders(&mut self, cx: &mut Context<Self>) {
+        self.show_view(View {
+            chip: Chip::NewSenders,
+            ..View::default()
+        }, cx);
     }
 
     pub(super) fn end_session(&mut self) {
@@ -160,12 +165,12 @@ impl MailApp {
     }
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
-        let ids = self.mailbox.ids_in(TriageState::Inbox);
+        let ids = self.mailbox.ids_in_view(&View::default());
         if ids.is_empty() {
             return;
         }
         self.mode = ListMode::State;
-        self.triage.switch_view(TriageState::Inbox);
+        self.triage.switch_view(View::default());
         self.opened = ids.first().copied();
         self.session_end = None;
         self.session = Some(Session {
@@ -181,7 +186,7 @@ impl MailApp {
     pub(super) fn classify_visible(&mut self) -> (usize, usize) {
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_in(TriageState::Inbox)
+            .ids_in_view(&View::default())
             .into_iter()
             .filter(|id| self.mailbox.pending(*id).is_empty())
             .collect();

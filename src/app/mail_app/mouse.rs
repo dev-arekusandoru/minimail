@@ -5,7 +5,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{BAR_H, HEADER_H, ListMode, MailApp, MenuKind, PaneLayout};
-use crate::model::TriageState;
+use crate::model::Location;
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
@@ -139,12 +139,12 @@ impl MailApp {
             .bg(t.sidebar)
             .border_b_1()
             .border_color(t.border)
-            .child(button("btn-done", "Done", "Mark done", "e", cx).on_click(run(MarkDone)))
-            .child(button("btn-waiting", "Waiting", "Mark waiting", "w", cx).on_click(run(MarkWaiting)))
-            .when(self.triage.view != TriageState::Inbox, |d| {
+            .child(button("btn-archive", "Archive", "Archive", "e", cx).on_click(run(Archive)))
+            .child(button("btn-delete", "Delete", "Delete", "d", cx).on_click(run(Delete)))
+            .when(self.triage.view.location != Location::AllInboxes, |d| {
                 d.child(button("btn-inbox", "Inbox", "Move to inbox", "i", cx).on_click(run(MoveToInbox)))
             })
-            .child(button("btn-later", "Later…", "Later, with a return time", "l", cx).on_click(run(OpenSnoozePicker)))
+            .child(button("btn-snooze", "Snooze…", "Snooze", "s", cx).on_click(run(OpenSnoozePicker)))
             .when(selected > 0, |d| {
                 d.child(
                     div()

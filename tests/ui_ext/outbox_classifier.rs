@@ -1,8 +1,8 @@
 use gpui_kit::{TestAppContext};
-use mail_classifier::model::{MessageId};
+use mail_classifier::model::{MessageId, Tag};
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness, harness_with};
-use crate::waiting_snooze::{snooze_box};
+use crate::snooze::snooze_box;
 
 // ---------------------------------------------------------------- Undo send / outbox
 
@@ -10,10 +10,12 @@ use crate::waiting_snooze::{snooze_box};
 pub fn send_goes_to_outbox_and_undo_recalls_within_window(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     let id = h.cursor().unwrap();
-    h.send_reply("hello there");
+    h.send_reply("Does that work?");
     assert_eq!(h.read(|a| a.mailbox.outbox().len()), 1);
     assert_eq!(h.read(|a| a.mailbox.sent().len()), 0);
-    assert_eq!(h.state_of(id), Waiting, "original moves to Waiting immediately");
+    assert_eq!(h.state_of(id), Inbox, "sending does not move the original out of the Inbox");
+    assert!(h.has_tag(id, Tag::AwaitingReply));
+    assert!(!h.has_tag(id, Tag::NeedsReply));
 
     h.advance(9);
     assert_eq!(h.read(|a| a.mailbox.outbox().len()), 1, "still recallable at 9s");
@@ -40,11 +42,12 @@ pub fn outbox_flushes_to_sent_after_ten_seconds(cx: &mut TestAppContext) {
     assert_eq!(sent[0].in_reply_to, id);
     assert!(sent[0].body.contains("bye"));
 
-    // Too late to recall: undo only reverts state.
+    // Undo cancels the originating send, including the materialised sent message.
     h.keys("u");
     assert!(!h.read(|a| a.compose_open()));
     assert_eq!(h.state_of(id), Inbox);
-    assert_eq!(h.read(|a| a.mailbox.sent().len()), 1);
+    assert!(h.read(|a| a.mailbox.sent().is_empty()));
+    assert!(h.read(|a| a.mailbox.messages().iter().all(|m| !m.outgoing)));
 }
 
 // ---------------------------------------------------------------- Classifier

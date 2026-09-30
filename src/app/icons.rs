@@ -47,13 +47,15 @@ impl AssetSource for AppAssets {
 pub enum Token {
     Accent,
     Muted,
-    Spam,
     NeedsReply,
+    AwaitingReply,
+    FollowUp,
+    Reminder,
+    PossibleSpam,
+    NewSender,
+    Snoozed,
     Urgent,
     Kind,
-    Screener,
-    Waiting,
-    Later,
 }
 
 impl Token {
@@ -61,13 +63,15 @@ impl Token {
         match self {
             Token::Accent => t.accent,
             Token::Muted => t.text_muted,
-            Token::Spam => t.spam,
             Token::NeedsReply => t.needs_reply,
+            Token::AwaitingReply => t.awaiting,
+            Token::FollowUp => t.follow_up,
+            Token::Reminder => t.reminder,
+            Token::PossibleSpam => t.possible_spam,
+            Token::NewSender => t.new_sender,
+            Token::Snoozed => t.state_snoozed,
             Token::Urgent => t.urgent,
             Token::Kind => t.kind,
-            Token::Screener => t.state_screener,
-            Token::Waiting => t.state_waiting,
-            Token::Later => t.state_later,
         }
     }
 }
@@ -76,12 +80,14 @@ impl Token {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Glyph {
     Suggestion,
-    Spam,
+    PossibleSpam,
     UrgentHigh,
     NeedsReply,
+    AwaitingReply,
+    FollowUp,
+    Reminder,
     NewSender,
     Snoozed,
-    Waiting,
     UrgentMid,
     Muted,
     Attachment,
@@ -92,6 +98,7 @@ pub enum Glyph {
     UrgentLow,
     KindOther,
 }
+
 
 /// Everything the UI needs to draw and explain a [`Glyph`].
 #[derive(Clone, Copy, Debug)]
@@ -123,14 +130,16 @@ const fn spec(
 }
 
 impl Glyph {
-    pub const ALL: [Glyph; 16] = [
+    pub const ALL: [Glyph; 18] = [
         Glyph::Suggestion,
-        Glyph::Spam,
+        Glyph::PossibleSpam,
         Glyph::UrgentHigh,
         Glyph::NeedsReply,
+        Glyph::AwaitingReply,
+        Glyph::FollowUp,
+        Glyph::Reminder,
         Glyph::NewSender,
         Glyph::Snoozed,
-        Glyph::Waiting,
         Glyph::UrgentMid,
         Glyph::Muted,
         Glyph::Attachment,
@@ -147,12 +156,14 @@ impl Glyph {
         use Token::*;
         match self {
             Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
-            Glyph::Spam => spec(IconName::ShieldAlert, Spam, "Spam", "Classified as spam.", "Classifier labels", 1, false),
+            Glyph::PossibleSpam => spec(IconName::ShieldAlert, PossibleSpam, "Possible spam", "Classified as possible spam.", "Classifier labels", 1, false),
             Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
             Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
-            Glyph::NewSender => spec(IconName::UserPlus, Screener, "New sender", "First mail from this sender; waiting in the screener.", "Mail state", 4, false),
-            Glyph::Snoozed => spec(IconName::AlarmClock, Later, "Snoozed", "Returns to the inbox at the time shown.", "Mail state", 5, false),
-            Glyph::Waiting => spec(IconName::Hourglass, Waiting, "No reply yet", "You waited for an answer that never came; follow up.", "Mail state", 6, false),
+            Glyph::AwaitingReply => spec(IconName::Hourglass, AwaitingReply, "Awaiting reply", "A reply has been sent and an answer is expected.", "Reply status", 4, false),
+            Glyph::FollowUp => spec(IconName::Reply, FollowUp, "Follow up", "This message needs a follow-up.", "Reply status", 5, false),
+            Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A reminder was attached to this message.", "Reply status", 6, false),
+            Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
+            Glyph::Snoozed => spec(IconName::AlarmClock, Snoozed, "Snoozed", "Returns to the inbox at the time shown.", "Mail state", 8, false),
             Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 3 out of 5.", "Urgency", 7, false),
             Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
             Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),
@@ -215,9 +226,11 @@ pub fn glyphs_for(input: &GlyphInputs) -> Vec<Glyph> {
     }
     for tag in input.tags {
         out.push(match tag {
-            Tag::NoReply => Glyph::Waiting,
             Tag::NeedsReply => Glyph::NeedsReply,
-            Tag::Spam => Glyph::Spam,
+            Tag::AwaitingReply => Glyph::AwaitingReply,
+            Tag::FollowUp => Glyph::FollowUp,
+            Tag::Reminder => Glyph::Reminder,
+            Tag::PossibleSpam => Glyph::PossibleSpam,
             Tag::Urgent(n) => Glyph::of_urgency(*n),
             Tag::Kind(k) => Glyph::of_kind(*k),
         });
@@ -266,9 +279,7 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
         .map(|s| match s.key {
             QuestionKey::Spam => "spam?".to_owned(),
             QuestionKey::NeedsReply => "needs reply?".to_owned(),
-            QuestionKey::SuggestedState => {
-                s.state().map_or("move?".into(), |st| format!("→ {}?", st.label().to_lowercase()))
-            }
+            QuestionKey::ExpectsReply => "expects reply?".to_owned(),
             QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
             QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
         })

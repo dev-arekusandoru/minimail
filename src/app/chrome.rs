@@ -61,7 +61,7 @@ pub enum HintMode {
     Palette,
     /// Triage session; `true` once the end card is showing.
     Session(bool),
-    Screener,
+    NewSenders,
     Settings,
     Rules,
     Snooze,
@@ -86,9 +86,9 @@ impl RenderOnce for HintBar {
                 ("j", "next"),
                 ("k", "prev"),
                 ("x", "select"),
-                ("e", "done"),
-                ("w", "waiting"),
-                ("l", "later"),
+                ("e", "archive"),
+                ("d", "delete"),
+                ("s", "snooze"),
                 ("r", "reply"),
                 ("u", "undo"),
                 ("cmd-k", "commands"),
@@ -97,32 +97,32 @@ impl RenderOnce for HintBar {
             HintMode::Selection(_) => &[
                 ("x", "toggle"),
                 ("shift-j", "extend"),
-                ("e", "done"),
-                ("w", "waiting"),
-                ("l", "later"),
+                ("e", "archive"),
+                ("d", "delete"),
+                ("s", "snooze"),
                 ("i", "inbox"),
                 ("escape", "clear"),
                 ("u", "undo"),
             ],
             HintMode::Reader => &[
                 ("r", "reply"),
-                ("e", "done"),
-                ("w", "waiting"),
-                ("l", "later"),
+                ("e", "archive"),
+                ("d", "delete"),
+                ("s", "snooze"),
                 ("j", "next"),
                 ("u", "undo"),
             ],
             HintMode::Compose => &[("cmd-enter", "send"), ("escape", "cancel")],
             HintMode::Palette => &[("enter", "run"), ("up", "prev"), ("down", "next"), ("escape", "close")],
             HintMode::Session(false) => &[
-                ("e", "done"),
-                ("w", "waiting"),
-                ("l", "later"),
+                ("e", "archive"),
+                ("d", "delete"),
+                ("s", "snooze"),
                 ("i", "inbox"),
                 ("escape", "end"),
             ],
             HintMode::Session(true) => &[("escape", "close")],
-            HintMode::Screener => &[("a", "allow"), ("b", "block"), ("j", "next"), ("k", "prev"), ("u", "undo")],
+            HintMode::NewSenders => &[("a", "allow"), ("b", "block"), ("j", "next"), ("k", "prev"), ("u", "undo")],
             HintMode::Settings => &[
                 ("j", "next"),
                 ("k", "prev"),
@@ -270,32 +270,32 @@ impl RenderOnce for HelpOverlay {
 
 #[derive(IntoElement)]
 pub struct ViewTabs {
-    active: TriageState,
-    counts: [(TriageState, usize); 4],
-    screener: Option<(usize, bool)>,
+    active: usize,
+    counts: [usize; 4],
+    new_senders: Option<(usize, bool)>,
 }
 
 impl ViewTabs {
-    pub fn new(active: TriageState, counts: [(TriageState, usize); 4]) -> Self {
-        Self { active, counts, screener: None }
+    pub fn new(active: usize, counts: [usize; 4]) -> Self {
+        Self { active, counts, new_senders: None }
     }
 
-    /// Adds the fifth "Screener" tab; when `active`, no state tab is highlighted.
-    pub fn screener(mut self, count: usize, active: bool) -> Self {
-        self.screener = Some((count, active));
+    /// Adds the New Senders chip view as the fifth tab.
+    pub fn new_senders(mut self, count: usize, active: bool) -> Self {
+        self.new_senders = Some((count, active));
         self
     }
 }
 
-/// The action behind tab `i` (the same one its number key triggers).
+/// The action behind a location tab (the same one its number key triggers).
 fn tab_action(i: usize) -> Box<dyn Action> {
-    use crate::app::actions::{ShowDone, ShowInbox, ShowLater, ShowScreener, ShowWaiting};
+    use crate::app::actions::{ShowAllInboxes, ShowArchive, ShowNewSenders, ShowSnoozed, ShowTrash};
     match i {
-        0 => Box::new(ShowInbox),
-        1 => Box::new(ShowWaiting),
-        2 => Box::new(ShowLater),
-        3 => Box::new(ShowDone),
-        _ => Box::new(ShowScreener),
+        0 => Box::new(ShowAllInboxes),
+        1 => Box::new(ShowSnoozed),
+        2 => Box::new(ShowArchive),
+        3 => Box::new(ShowTrash),
+        _ => Box::new(ShowNewSenders),
     }
 }
 
@@ -332,11 +332,13 @@ fn tab(t: &Theme, i: usize, name: &'static str, n: usize, active: bool, color: H
 impl RenderOnce for ViewTabs {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme::active(cx);
-        let to_triage = self
-            .counts
-            .iter()
-            .find(|(s, _)| *s == TriageState::Inbox)
-            .map_or(0, |(_, n)| *n);
+        let states = [
+            TriageState::Inbox,
+            TriageState::Snoozed,
+            TriageState::Archived,
+            TriageState::Deleted,
+        ];
+        let to_triage = self.counts[0];
         div()
             .flex()
             .flex_col()
@@ -350,50 +352,17 @@ impl RenderOnce for ViewTabs {
                     .text_color(t.text_muted)
                     .child(format!("{to_triage} to triage")),
             )
-            .children(self.counts.iter().enumerate().map(|(i, &(state, n))| {
-                let name = match state {
-                    TriageState::Inbox => "To triage",
-                    other => other.label(),
-                };
-                tab(&t, i, name, n, self.screener.is_none() && state == self.active, t.state_color(state))
+            .children(self.counts.iter().enumerate().map(|(i, &n)| {
+                let name = ["All Inboxes", "Snoozed", "Archive", "Trash"][i];
+                let state = states[i];
+                tab(&t, i, name, n, self.new_senders.is_none() && i == self.active, t.state_color(state))
             }))
-            .when_some(self.screener, |el, (n, active)| {
-                el.child(tab(&t, 4, "Screener", n, active, t.state_screener))
+            .when_some(self.new_senders, |el, (n, active)| {
+                el.child(tab(&t, 4, "New Senders", n, active, t.new_sender))
             })
     }
 }
 
-#[derive(IntoElement)]
-pub struct EmptyState {
-    view: TriageState,
-}
-
-impl EmptyState {
-    pub fn new(view: TriageState) -> Self {
-        Self { view }
-    }
-}
-
-impl RenderOnce for EmptyState {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
-        let (title, sub) = match self.view {
-            TriageState::Inbox => ("Inbox zero", "Everything is triaged."),
-            TriageState::Waiting => ("Nothing waiting", "Replies you send land here."),
-            TriageState::Later => ("Nothing for later", "Press l to defer a message."),
-            TriageState::Done => ("Nothing done yet", "Press e to finish a message."),
-        };
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_1()
-            .child(div().text_color(t.state_color(self.view)).child(title))
-            .child(div().text_xs().text_color(t.text_muted).child(sub))
-    }
-}
 
 #[cfg(test)]
 mod tests {

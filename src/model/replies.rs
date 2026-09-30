@@ -1,27 +1,43 @@
 use super::*;
 
 impl Mailbox {
-    /// Record a reply to `to` and move the original to `Waiting`, sent
-    /// immediately. Exactly one undo entry, which also retracts the sent
-    /// reply. A no-op (no entry, no sent reply) if `to` is unknown.
     pub fn send_reply(&mut self, to: MessageId, body: String) {
-        let Some(mut changes) = self.enter_waiting(to, None) else {
-            return;
-        };
-        self.sent.push(Reply {
-            in_reply_to: to,
-            body,
-        });
-        changes.push(Change::SentPush);
-        self.push_undo(changes);
+        self.send_reply_at(to, body, false, 0);
     }
-
-    /// Queue a reply in the outbox (due in `OUTBOX_DELAY`s) and move the
-    /// original to Waiting now. One undo entry.
-    pub fn send_reply_at(&mut self, to: MessageId, body: String, now: Timestamp) {
-        let Some(mut changes) = self.enter_waiting(to, Some(now)) else {
+    pub fn send_reply_at(
+        &mut self,
+        to: MessageId,
+        body: String,
+        awaiting_reply: bool,
+        now: Timestamp,
+    ) {
+        let Some(&i) = self.index.get(&to) else {
             return;
         };
+        let original = self.messages[i].clone();
+        let mut changes = vec![self.snapshot(to)];
+        for m in &self.messages {
+            if m.thread_id == original.thread_id
+                && self
+                    .meta
+                    .get(&m.id)
+                    .is_some_and(|meta| meta.tags.contains(&Tag::NeedsReply))
+            {
+                changes.push(self.snapshot(m.id));
+                self.meta
+                    .entry(m.id)
+                    .or_default()
+                    .tags
+                    .retain(|t| *t != Tag::NeedsReply);
+            }
+        }
+        let meta = self.meta.entry(to).or_default();
+        meta.tags.retain(|t| *t != Tag::AwaitingReply);
+        meta.awaiting_since = None;
+        if awaiting_reply {
+            meta.tags.push(Tag::AwaitingReply);
+            meta.awaiting_since = Some(now);
+        }
         let seq = self.next_seq;
         self.next_seq += 1;
         self.outbox.push(Outgoing {
@@ -35,36 +51,49 @@ impl Mailbox {
         changes.push(Change::Queued(seq));
         self.push_undo(changes);
     }
-
-    /// Move `to` to Waiting; returns the undo changes, `None` if unknown id.
-    pub(super) fn enter_waiting(&mut self, to: MessageId, now: Option<Timestamp>) -> Option<Vec<Change>> {
-        let &i = self.index.get(&to)?;
-        let changes = vec![self.snapshot(to)];
-        self.messages[i].state = TriageState::Waiting;
-        let meta = self.meta.entry(to).or_default();
-        meta.waiting_since = now;
-        meta.snoozed_until = None;
-        meta.tags.retain(|t| *t != Tag::NoReply);
-        Some(changes)
+    pub fn file_after_reply(&mut self, original: MessageId, state: TriageState) -> usize {
+        assert_ne!(state, TriageState::Snoozed, "use snooze");
+        let Some(m) = self.get(original).cloned() else {
+            return 0;
+        };
+        let ids: Vec<_> = self
+            .messages
+            .iter()
+            .filter(|x| x.id == original || (x.outgoing && x.thread_id == m.thread_id))
+            .map(|x| x.id)
+            .collect();
+        let mut changes = Vec::new();
+        for id in &ids {
+            if let Some(&i) = self.index.get(id)
+                && self.messages[i].state != state
+            {
+                changes.push(self.snapshot(*id));
+                self.messages[i].state = state;
+                let meta = self.meta.entry(*id).or_default();
+                meta.snoozed_until = None;
+                meta.awaiting_since = None;
+                meta.tags.retain(|t| {
+                    !matches!(t, Tag::Reminder | Tag::FollowUp | Tag::PossibleSpam)
+                });
+            }
+        }
+        let changed = changes.len();
+        self.push_undo(changes);
+        changed
     }
-
     pub fn sent(&self) -> &[Reply] {
         &self.sent
     }
-
     pub fn outbox(&self) -> &[Outgoing] {
         &self.outbox
     }
-
-    /// Pull the newest reply back out of the outbox, undoing the send that
-    /// queued it (original's prior state restored). `None` if the outbox is
-    /// empty.
     pub fn recall_last(&mut self, _now: Timestamp) -> Option<Reply> {
         let seq = self.outbox.last()?.seq;
-        let pos = self
-            .undo
-            .iter()
-            .rposition(|s| s.changes.iter().any(|c| matches!(c, Change::Queued(q) if *q == seq)))?;
+        let pos = self.undo.iter().rposition(|s| {
+            s.changes
+                .iter()
+                .any(|c| matches!(c, Change::Queued(q) if *q == seq))
+        })?;
         let step = self.undo.remove(pos);
         let reply = self.outbox.last().map(|o| o.reply.clone());
         self.revert(step);

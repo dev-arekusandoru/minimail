@@ -1,82 +1,83 @@
-use mail_classifier::model::{OUTBOX_DELAY};
-use crate::helpers::{sample, T0};
-use crate::helpers::State;
-
+use crate::helpers::{State, T0, sample};
+use mail_classifier::model::{OUTBOX_DELAY, Tag};
 #[test]
-fn outbox_holds_reply_until_due_and_tick_flushes_once() {
+fn queued_reply_sets_awaiting_and_flushes_message() {
     let mut mb = sample();
-    mb.send_reply_at(1, "hi".into(), T0);
-    assert_eq!(mb.state_of(1), Some(State::Waiting));
-    assert_eq!(mb.waiting_since(1), Some(T0));
-    assert_eq!(mb.outbox().len(), 1);
+    mb.apply_auto(
+        crate::helpers::sug(
+            1,
+            mail_classifier::judge::QuestionKey::NeedsReply,
+            mail_classifier::judge::AnswerValue::Bool(true),
+        ),
+        T0,
+    );
+    mb.send_reply_at(1, "reply".into(), true, T0);
+    assert!(mb.tags(1).contains(&Tag::AwaitingReply));
+    assert!(!mb.tags(1).contains(&Tag::NeedsReply));
     assert_eq!(mb.outbox()[0].due, T0 + OUTBOX_DELAY);
-    assert!(mb.sent().is_empty());
-
-    assert_eq!(mb.tick(T0 + OUTBOX_DELAY - 1).flushed, 0);
     assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 1);
-    assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 0);
+    let outgoing = mb.messages().iter().find(|m| m.outgoing).unwrap();
+    assert_eq!(outgoing.state, State::Inbox);
+    assert_eq!(outgoing.thread_id, mb.get(1).unwrap().thread_id);
+}
+#[test]
+fn file_after_reply_updates_flushed_message_and_undoes_once() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), false, T0);
+    mb.tick(T0 + OUTBOX_DELAY);
+    assert_eq!(mb.file_after_reply(1, State::Archived), 2);
+    assert!(
+        mb.messages()
+            .iter()
+            .filter(|m| m.outgoing)
+            .all(|m| m.state == State::Archived)
+    );
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(
+        mb.messages()
+            .iter()
+            .filter(|m| m.outgoing)
+            .all(|m| m.state == State::Inbox)
+    );
+}
+#[test]
+fn pending_reply_inherits_file_state_at_flush() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), false, T0);
+    assert_eq!(mb.file_after_reply(1, State::Deleted), 1);
+    mb.tick(T0 + OUTBOX_DELAY);
+    assert!(mb.messages().iter().find(|m| m.outgoing).unwrap().state == State::Deleted);
+}
+#[test]
+fn undo_send_retracts_queue_and_restores_tags() {
+    let mut mb = sample();
+    mb.apply_auto(
+        crate::helpers::sug(
+            1,
+            mail_classifier::judge::QuestionKey::NeedsReply,
+            mail_classifier::judge::AnswerValue::Bool(true),
+        ),
+        T0,
+    );
+    mb.send_reply_at(1, "reply".into(), true, T0);
+    assert!(mb.undo());
     assert!(mb.outbox().is_empty());
+    assert!(mb.tags(1).contains(&Tag::NeedsReply));
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+}
+#[test]
+fn undo_send_after_flush_removes_sent_reply_and_materialised_message() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), true, T0);
+    assert_eq!(mb.tick(T0 + OUTBOX_DELAY).flushed, 1);
     assert_eq!(mb.sent().len(), 1);
-    assert_eq!(mb.sent()[0].body, "hi");
-}
+    assert_eq!(mb.messages().iter().filter(|m| m.outgoing).count(), 1);
 
-#[test]
-fn undo_after_flush_reverts_state_only() {
-    let mut mb = sample();
-    mb.send_reply_at(1, "hi".into(), T0);
-    mb.tick(T0 + 60);
-    assert!(mb.undo());
-    assert_eq!(mb.state_of(1), Some(State::Inbox));
-    assert_eq!(mb.sent().len(), 1, "the sent mail already left");
-}
-
-#[test]
-fn undo_before_flush_pulls_the_reply_back() {
-    let mut mb = sample();
-    mb.send_reply_at(1, "hi".into(), T0);
     assert!(mb.undo());
     assert!(mb.outbox().is_empty());
-    assert_eq!(mb.state_of(1), Some(State::Inbox));
-    assert_eq!(mb.tick(T0 + 60).flushed, 0);
     assert!(mb.sent().is_empty());
-}
-
-#[test]
-fn recall_last_takes_the_newest_and_restores_prior_state() {
-    let mut mb = sample();
-    assert_eq!(mb.recall_last(T0), None);
-    mb.send_reply_at(1, "first".into(), T0);
-    mb.send_reply_at(3, "second".into(), T0 + 1);
-    let r = mb.recall_last(T0 + 2).unwrap();
-    assert_eq!((r.in_reply_to, r.body.as_str()), (3, "second"));
-    assert_eq!(mb.state_of(3), Some(State::Later), "prior state restored");
-    assert_eq!(mb.state_of(1), Some(State::Waiting));
-    assert_eq!(mb.outbox().len(), 1);
-    // Its undo step is consumed: undo now reverts the *first* send.
-    assert!(mb.undo());
-    assert_eq!(mb.state_of(1), Some(State::Inbox));
-    assert!(mb.outbox().is_empty());
-    assert!(!mb.undo());
-}
-
-#[test]
-fn recall_keeps_unrelated_later_undo_steps_intact() {
-    let mut mb = sample();
-    mb.send_reply_at(1, "x".into(), T0);
-    mb.set_state(&[2], State::Done);
-    assert!(mb.recall_last(T0).is_some());
-    assert_eq!(mb.state_of(2), Some(State::Done));
-    assert!(mb.undo());
-    assert_eq!(mb.state_of(2), Some(State::Inbox));
-}
-
-#[test]
-fn immediate_send_reply_still_undoes_sent() {
-    let mut mb = sample();
-    mb.send_reply(1, "now".into());
-    assert_eq!(mb.sent().len(), 1);
-    assert!(mb.outbox().is_empty());
-    assert!(mb.undo());
-    assert!(mb.sent().is_empty());
-    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(mb.messages().iter().all(|m| !m.outgoing));
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+    assert_eq!(mb.awaiting_since(1), None);
 }

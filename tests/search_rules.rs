@@ -1,4 +1,5 @@
-use mail_classifier::model::{Message, TriageState};
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
+use mail_classifier::model::{Mailbox, Message, TriageState};
 use mail_classifier::rules::{Rule, RuleBook};
 use mail_classifier::search::Query;
 
@@ -13,6 +14,9 @@ fn msg(name: &str, email: &str, subject: &str, body: &str, received: &str) -> Me
         body: body.into(),
         received: received.into(),
         state: TriageState::Inbox,
+        account: "personal".into(),
+        outgoing: false,
+        snooze: None,
     }
 }
 
@@ -26,8 +30,13 @@ fn m() -> Message {
     )
 }
 
+fn mailbox(mut message: Message, state: TriageState) -> Mailbox {
+    message.state = state;
+    Mailbox::from_json(&serde_json::to_string(&[message]).unwrap()).unwrap()
+}
 fn hit(q: &str) -> bool {
-    Query::parse(q).matches(&m(), TriageState::Inbox, true)
+    let message = m();
+    Query::parse(q).matches(&message, &mailbox(message.clone(), TriageState::Inbox))
 }
 
 #[test]
@@ -46,16 +55,58 @@ fn subject_only_searches_subject() {
 }
 
 #[test]
-fn is_operators_by_state_and_screener() {
+fn new_state_operators_and_removed_operators() {
     let q = |s: &str| Query::parse(s);
-    let mm = m();
-    assert!(q("is:inbox").matches(&mm, TriageState::Inbox, true));
-    assert!(!q("is:inbox").matches(&mm, TriageState::Done, true));
-    assert!(q("is:waiting").matches(&mm, TriageState::Waiting, true));
-    assert!(q("is:later").matches(&mm, TriageState::Later, true));
-    assert!(q("is:done").matches(&mm, TriageState::Done, true));
-    assert!(q("is:screener").matches(&mm, TriageState::Inbox, false));
-    assert!(!q("is:screener").matches(&mm, TriageState::Inbox, true));
+    for (query, state) in [
+        ("is:inbox", TriageState::Inbox),
+        ("is:archived", TriageState::Archived),
+        ("is:filed", TriageState::Filed(4)),
+        ("is:deleted", TriageState::Deleted),
+    ] {
+        let message = m();
+        assert!(q(query).matches(&message, &mailbox(message.clone(), state)));
+    }
+    let message = m();
+    let mut snoozed = mailbox(message.clone(), TriageState::Inbox);
+    snoozed.snooze(&[message.id], 30, 0);
+    assert!(q("is:snoozed").matches(&message, &snoozed));
+    let message = m();
+    assert!(!q("is:waiting").matches(&message, &mailbox(message.clone(), TriageState::Inbox)));
+    assert!(!q("is:later").matches(&message, &mailbox(message.clone(), TriageState::Inbox)));
+    assert!(!q("is:done").matches(&message, &mailbox(message.clone(), TriageState::Inbox)));
+    assert!(!q("is:screener").matches(&message, &mailbox(message.clone(), TriageState::Inbox)));
+}
+
+#[test]
+fn sent_operator_uses_outgoing_status() {
+    let mut sent = m();
+    sent.outgoing = true;
+    assert!(Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox)));
+    let ordinary = m();
+    assert!(
+        !Query::parse("is:sent").matches(&ordinary, &mailbox(ordinary.clone(), TriageState::Inbox))
+    );
+    assert!(!Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Deleted)));
+}
+
+#[test]
+fn tag_operators_match_mailbox_tags() {
+    let m = m();
+    let mut mailbox = mailbox(m.clone(), TriageState::Inbox);
+    mailbox.apply_auto(
+        Suggestion {
+            message: m.id,
+            key: QuestionKey::Spam,
+            answer: Answer {
+                probabilities: vec![0.01, 0.99],
+                value: AnswerValue::Bool(true),
+                confidence: 0.99,
+            },
+        },
+        0,
+    );
+    assert!(Query::parse("tag:spam").matches(&m, &mailbox));
+    assert!(!Query::parse("tag:needs-reply").matches(&m, &mailbox));
 }
 
 #[test]
@@ -97,7 +148,7 @@ fn unknown_or_malformed_keys_are_free_text() {
         "see foo:bar here",
         "2026-01-01T00:00:00Z",
     );
-    assert!(Query::parse("foo:bar").matches(&mm, TriageState::Inbox, true));
+    assert!(Query::parse("foo:bar").matches(&mm, &mailbox(mm.clone(), TriageState::Inbox)));
 }
 
 #[test]
@@ -129,71 +180,66 @@ fn r(s: &str, st: TriageState) -> Rule {
 #[test]
 fn suggests_on_second_identical_action_only() {
     let mut b = RuleBook::new();
-    assert_eq!(b.record("a@x.com", TriageState::Done), None);
+    assert_eq!(b.record("a@x.com", TriageState::Archived), None);
     assert_eq!(
-        b.record("A@X.com", TriageState::Done),
-        Some(r("a@x.com", TriageState::Done))
+        b.record("A@X.com", TriageState::Archived),
+        Some(r("a@x.com", TriageState::Archived))
     );
     assert_eq!(
-        b.record("a@x.com", TriageState::Done),
+        b.record("a@x.com", TriageState::Archived),
         None,
         "third does not re-suggest"
     );
 }
-
 #[test]
 fn differing_action_resets_streak() {
     let mut b = RuleBook::new();
-    b.record("a@x.com", TriageState::Done);
-    assert_eq!(b.record("a@x.com", TriageState::Later), None);
+    b.record("a@x.com", TriageState::Archived);
+    assert_eq!(b.record("a@x.com", TriageState::Snoozed), None);
     assert_eq!(
-        b.record("a@x.com", TriageState::Later),
-        Some(r("a@x.com", TriageState::Later))
+        b.record("a@x.com", TriageState::Snoozed),
+        Some(r("a@x.com", TriageState::Snoozed))
     );
 }
-
 #[test]
 fn senders_are_independent() {
     let mut b = RuleBook::new();
-    b.record("a@x.com", TriageState::Done);
-    assert_eq!(b.record("b@x.com", TriageState::Done), None);
+    b.record("a@x.com", TriageState::Archived);
+    assert_eq!(b.record("b@x.com", TriageState::Archived), None);
 }
-
 #[test]
 fn dismissed_rule_never_resuggested_but_other_state_can() {
     let mut b = RuleBook::new();
-    b.record("a@x.com", TriageState::Done);
-    let s = b.record("a@x.com", TriageState::Done).unwrap();
+    b.record("a@x.com", TriageState::Archived);
+    let s = b.record("a@x.com", TriageState::Archived).unwrap();
     b.dismiss(s);
-    b.record("a@x.com", TriageState::Later);
-    b.record("a@x.com", TriageState::Done);
-    assert_eq!(b.record("a@x.com", TriageState::Done), None);
-    b.record("a@x.com", TriageState::Later);
-    assert!(b.record("a@x.com", TriageState::Later).is_some());
+    b.record("a@x.com", TriageState::Snoozed);
+    b.record("a@x.com", TriageState::Archived);
+    assert_eq!(b.record("a@x.com", TriageState::Archived), None);
+    b.record("a@x.com", TriageState::Snoozed);
+    assert!(b.record("a@x.com", TriageState::Snoozed).is_some());
 }
-
 #[test]
 fn existing_rule_blocks_suggestion_and_lookup_is_case_insensitive() {
     let mut b = RuleBook::new();
-    b.accept(r("A@x.com", TriageState::Done));
-    assert_eq!(b.rule_for("a@X.COM"), Some(TriageState::Done));
+    b.accept(r("A@x.com", TriageState::Archived));
+    assert_eq!(b.rule_for("a@X.COM"), Some(TriageState::Archived));
     assert_eq!(b.rule_for("other@x.com"), None);
-    b.record("a@x.com", TriageState::Later);
-    assert_eq!(b.record("a@x.com", TriageState::Later), None);
-    b.accept(r("a@x.com", TriageState::Later));
+    b.record("a@x.com", TriageState::Snoozed);
+    assert_eq!(b.record("a@x.com", TriageState::Snoozed), None);
+    b.accept(r("a@x.com", TriageState::Snoozed));
     assert_eq!(b.rules().len(), 1);
-    assert_eq!(b.rule_for("a@x.com"), Some(TriageState::Later));
+    assert_eq!(b.rule_for("a@x.com"), Some(TriageState::Snoozed));
 }
-
 #[test]
 fn revoke_by_index_removes_and_allows_resuggestion() {
     let mut b = RuleBook::new();
-    b.accept(r("a@x.com", TriageState::Done));
-    b.accept(r("b@x.com", TriageState::Later));
+    b.accept(r("a@x.com", TriageState::Archived));
+    b.accept(r("b@x.com", TriageState::Snoozed));
     assert_eq!(b.revoke(5), None);
-    assert_eq!(b.revoke(0), Some(r("a@x.com", TriageState::Done)));
-    assert_eq!(b.rules(), &[r("b@x.com", TriageState::Later)]);
+    assert_eq!(b.revoke(0), Some(r("a@x.com", TriageState::Archived)));
+    assert_eq!(b.rules(), &[r("b@x.com", TriageState::Snoozed)]);
     assert_eq!(b.rule_for("a@x.com"), None);
-    b.record("a@x.com", TriageState::Done);
-    assert!(b.record("a@x.com", TriageState::Done).is_some());
+    b.record("a@x.com", TriageState::Archived);
+    assert!(b.record("a@x.com", TriageState::Archived).is_some());
 }

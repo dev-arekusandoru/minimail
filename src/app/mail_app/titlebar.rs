@@ -4,11 +4,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::InteractiveElementExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{ListMode, MailApp, MenuKind};
+use super::{ListMode, MailApp, MenuKind, view_label};
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
@@ -20,8 +19,7 @@ impl MailApp {
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
         let moving = Rc::new(Cell::new(false));
         let view: SharedString = match &self.mode {
-            ListMode::State => self.triage.view.label().into(),
-            ListMode::Screener => "Screener".into(),
+            ListMode::State => view_label(&self.triage.view).into(),
             ListMode::Search(_) => "Search".into(),
         };
         let search_tip: SharedString = "Search mail (/)".into();
@@ -113,14 +111,17 @@ fn drag_region(region: Div, moving: &Rc<Cell<bool>>) -> Div {
     let (down, up, motion, out) = (moving.clone(), moving.clone(), moving.clone(), moving.clone());
     region
         .when(cfg!(target_os = "macos"), |d| d.window_control_area(WindowControlArea::Drag))
-        .on_double_click(|_, window, _| {
-            #[cfg(target_os = "macos")]
-            window.titlebar_double_click();
-            #[cfg(not(target_os = "macos"))]
-            window.zoom_window();
-        })
         .on_mouse_down_out(move |_, _, _| out.set(false))
-        .on_mouse_down(MouseButton::Left, move |_, _, _| down.set(true))
+        .on_mouse_down(MouseButton::Left, move |event, window, _| {
+            if event.click_count == 2 {
+                #[cfg(target_os = "macos")]
+                window.titlebar_double_click();
+                #[cfg(not(target_os = "macos"))]
+                window.zoom_window();
+                return;
+            }
+            down.set(true);
+        })
         .on_mouse_up(MouseButton::Left, move |_, _, _| up.set(false))
         .on_mouse_move(move |_, window, _| {
             if motion.replace(false) {

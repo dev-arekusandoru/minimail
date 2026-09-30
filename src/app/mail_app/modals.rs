@@ -61,10 +61,11 @@ impl MailApp {
                 match event {
                     ComposeEvent::Send { in_reply_to, body } => {
                         let now = this.now();
-                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), now);
+                        let expects_reply = crate::judge::expects_reply(&StubJudge, body);
+                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), expects_reply, now);
                         this.close_modals(window, cx);
                         this.show_toast(
-                            "Reply queued · moved to waiting · u to undo send".into(),
+                            "Reply queued · u to undo send".into(),
                             window,
                             cx,
                         );
@@ -81,7 +82,14 @@ impl MailApp {
 
     pub(super) fn open_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.in_session() {
-            self.mark(TriageState::Later, window, cx);
+            let ids = self.target_ids();
+            let now = self.now();
+            if let Some((_, until)) = self.mailbox.snooze_presets(now).into_iter().next() {
+                self.mailbox.snooze(&ids, until, now);
+                self.triage.clear_selection();
+                self.session_advance();
+            }
+            cx.notify();
             return;
         }
         if self.target_ids().is_empty() {
@@ -224,14 +232,14 @@ impl MailApp {
         else {
             return;
         };
-        self.mailbox.unsubscribe(&email);
+        self.mailbox.unsubscribe(&email, None);
         self.show_toast(format!("Unsubscribed from {email} · u to undo"), window, cx);
         self.session_advance();
         cx.notify();
     }
 
     pub(super) fn screen_sender(&mut self, allow: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.mode != ListMode::Screener {
+        if !self.new_senders_open() {
             return;
         }
         let Some(email) = self
@@ -245,7 +253,7 @@ impl MailApp {
             self.mailbox.allow_sender(&email);
             format!("Allowed {email} · u to undo")
         } else {
-            self.mailbox.block_sender(&email);
+            self.mailbox.block_sender(&email, None);
             format!("Blocked {email} · u to undo")
         };
         self.show_toast(text, window, cx);

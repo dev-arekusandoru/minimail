@@ -22,6 +22,7 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod policy;
@@ -30,7 +31,7 @@ mod stub;
 pub use policy::*;
 pub use stub::StubJudge;
 
-use crate::model::{Message, MessageId, TriageState};
+use crate::model::{Message, MessageId};
 
 /// Maximum characters of message body sent to a judge.
 pub const MAX_BODY_CHARS: usize = 1500;
@@ -81,7 +82,7 @@ pub struct Answer {
 pub enum QuestionKey {
     Spam,
     NeedsReply,
-    SuggestedState,
+    ExpectsReply,
     Urgency,
     Kind,
 }
@@ -90,7 +91,7 @@ impl QuestionKey {
     pub const ALL: [QuestionKey; 5] = [
         QuestionKey::Spam,
         QuestionKey::NeedsReply,
-        QuestionKey::SuggestedState,
+        QuestionKey::ExpectsReply,
         QuestionKey::Urgency,
         QuestionKey::Kind,
     ];
@@ -99,14 +100,14 @@ impl QuestionKey {
         match self {
             QuestionKey::Spam => "Spam",
             QuestionKey::NeedsReply => "Needs reply",
-            QuestionKey::SuggestedState => "Suggested state",
+            QuestionKey::ExpectsReply => "Expects reply",
             QuestionKey::Urgency => "Urgency",
             QuestionKey::Kind => "Kind",
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum Kind {
     Person,
     Receipt,
@@ -168,14 +169,6 @@ pub trait Judge {
     ) -> Result<Vec<(QuestionKey, Answer)>, JudgeError>;
 }
 
-/// Options of the SuggestedState question, in `TriageState::ALL` order.
-fn state_options() -> Vec<String> {
-    TriageState::ALL
-        .iter()
-        .map(|s| s.label().to_string())
-        .collect()
-}
-
 /// The five triage questions with literal one-sentence criteria.
 pub fn triage_questions() -> Vec<(QuestionKey, Question)> {
     vec![
@@ -192,10 +185,9 @@ pub fn triage_questions() -> Vec<(QuestionKey, Question)> {
             },
         ),
         (
-            QuestionKey::SuggestedState,
-            Question::Choice {
-                criteria: "Which triage state fits this email best: needs attention now (Inbox), awaiting others (Waiting), can be read later (Later), or needs nothing more (Done)?".into(),
-                options: state_options(),
+            QuestionKey::ExpectsReply,
+            Question::Bool {
+                criteria: "Does this outgoing reply ask the recipient for a response?".into(),
             },
         ),
         (
@@ -213,6 +205,27 @@ pub fn triage_questions() -> Vec<(QuestionKey, Question)> {
             },
         ),
     ]
+}
+
+/// Determines whether an outgoing reply asks for a response.
+pub fn expects_reply(judge: &dyn Judge, body: &str) -> bool {
+    let state = json!({"sender": "", "subject": "", "body": body.trim()});
+    let question = Question::Bool {
+        criteria: "Does this outgoing reply ask the recipient for a response?".into(),
+    };
+    judge
+        .judge(&state, &[(QuestionKey::ExpectsReply, question)])
+        .ok()
+        .and_then(|answers| {
+            answers
+                .into_iter()
+                .find(|(key, _)| *key == QuestionKey::ExpectsReply)
+        })
+        .and_then(|(_, answer)| match answer.value {
+            AnswerValue::Bool(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 /// The JSON state a judge sees: sender, subject and a trimmed body only.

@@ -5,11 +5,11 @@
 //! [`BUILTIN`]. User themes are loaded from a directory of `*.json` files (see
 //! [`user_themes_dir`]). Views read colors only through [`active`].
 
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
 use gpui_kit::component::theme::Theme as KitTheme;
 use gpui_kit::{App, Global, Hsla, rgba};
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 /// Name of the theme used when none (or an unknown one) is requested.
 pub const DEFAULT_THEME: &str = "One Dark Pro";
@@ -32,13 +32,21 @@ impl std::fmt::Display for ThemeError {
 impl std::error::Error for ThemeError {}
 
 fn parse_hex(token: &str, value: &str) -> Result<Hsla, ThemeError> {
-    let bad = || ThemeError(format!("color `{token}`: `{value}` is not #rrggbb or #rrggbbaa"));
+    let bad = || {
+        ThemeError(format!(
+            "color `{token}`: `{value}` is not #rrggbb or #rrggbbaa"
+        ))
+    };
     let digits = value.strip_prefix('#').ok_or_else(bad)?;
     if !digits.is_ascii() || !matches!(digits.len(), 6 | 8) {
         return Err(bad());
     }
     let v = u32::from_str_radix(digits, 16).map_err(|_| bad())?;
-    let v = if digits.len() == 6 { (v << 8) | 0xff } else { v };
+    let v = if digits.len() == 6 {
+        (v << 8) | 0xff
+    } else {
+        v
+    };
     Ok(rgba(v).into())
 }
 
@@ -92,13 +100,18 @@ tokens! {
     unread,
     spam,
     needs_reply,
+    awaiting,
+    follow_up,
+    reminder,
+    possible_spam,
+    new_sender,
     urgent,
     kind,
     state_inbox,
-    state_waiting,
-    state_later,
-    state_done,
-    state_screener,
+    state_snoozed,
+    state_archived,
+    state_filed,
+    state_deleted,
     success,
     warning,
     error,
@@ -124,9 +137,10 @@ impl Theme {
         use crate::model::TriageState::*;
         match state {
             Inbox => self.state_inbox,
-            Waiting => self.state_waiting,
-            Later => self.state_later,
-            Done => self.state_done,
+            Snoozed => self.state_snoozed,
+            Archived => self.state_archived,
+            Filed(_) => self.state_filed,
+            Deleted => self.state_deleted,
         }
     }
 }
@@ -150,7 +164,11 @@ impl ThemeRegistry {
     /// Add a theme, replacing any with the same (case-insensitive) name.
     pub fn add(&mut self, theme: Theme) {
         let theme = Arc::new(theme);
-        match self.themes.iter().position(|t| t.name.eq_ignore_ascii_case(&theme.name)) {
+        match self
+            .themes
+            .iter()
+            .position(|t| t.name.eq_ignore_ascii_case(&theme.name))
+        {
             Some(i) => self.themes[i] = theme,
             None => self.themes.push(theme),
         }
@@ -185,7 +203,10 @@ impl ThemeRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<Theme>> {
-        self.themes.iter().find(|t| t.name.eq_ignore_ascii_case(name)).cloned()
+        self.themes
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .cloned()
     }
 
     /// The named theme, else the default theme, else the first registered one.
@@ -204,7 +225,9 @@ impl ThemeRegistry {
 /// The built-in default theme.
 pub fn default_theme() -> Arc<Theme> {
     static DEFAULT: LazyLock<Arc<Theme>> = LazyLock::new(|| {
-        ThemeRegistry::builtin().get(DEFAULT_THEME).expect("default theme is built in")
+        ThemeRegistry::builtin()
+            .get(DEFAULT_THEME)
+            .expect("default theme is built in")
     });
     DEFAULT.clone()
 }
@@ -241,7 +264,8 @@ pub fn ensure_installed(cx: &mut App) {
 
 /// The active theme (the default one before anything is installed).
 pub fn active(cx: &App) -> Arc<Theme> {
-    cx.try_global::<ThemeState>().map_or_else(default_theme, |s| s.active.clone())
+    cx.try_global::<ThemeState>()
+        .map_or_else(default_theme, |s| s.active.clone())
 }
 
 /// Names of all registered themes.

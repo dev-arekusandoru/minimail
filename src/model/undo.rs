@@ -41,7 +41,8 @@ impl Mailbox {
                 }
                 Change::Known(e, was, created) => {
                     set_membership(&mut self.known, e.clone(), was);
-                    if !was && created
+                    if !was
+                        && created
                         && let Some(store) = &self.contacts
                     {
                         let _ = store.forget_address(&e);
@@ -50,6 +51,18 @@ impl Mailbox {
                 Change::Muted(t, was) => set_membership(&mut self.muted, t, was),
                 Change::Blocked(e, was) => set_membership(&mut self.blocked, e, was),
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
+                Change::FolderPush(id) => self.folders.retain(|f| f.id != id),
+                Change::Materialised(id) => {
+                    if let Some(&i) = self.index.get(&id) {
+                        self.messages.remove(i);
+                    }
+                    self.index.clear();
+                    for (i, m) in self.messages.iter().enumerate() {
+                        self.index.insert(m.id, i);
+                    }
+                    self.newest_first.retain(|mid| *mid != id);
+                    self.meta.remove(&id);
+                }
                 Change::Pending(p) => self.pending = p,
                 Change::Queued(seq) => self.outbox.retain(|o| o.seq != seq),
                 Change::SentPush => {

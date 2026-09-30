@@ -28,27 +28,31 @@ pub type MessageId = u32;
 pub enum TriageState {
     #[default]
     Inbox,
-    Waiting,
-    Later,
-    Done,
+    Snoozed,
+    Archived,
+    Filed(FolderId),
+    Deleted,
 }
 
 impl TriageState {
-    pub const ALL: [TriageState; 4] = [
-        TriageState::Inbox,
-        TriageState::Waiting,
-        TriageState::Later,
-        TriageState::Done,
-    ];
-
     pub fn label(self) -> &'static str {
         match self {
             TriageState::Inbox => "Inbox",
-            TriageState::Waiting => "Waiting",
-            TriageState::Later => "Later",
-            TriageState::Done => "Done",
+            TriageState::Snoozed => "Snoozed",
+            TriageState::Archived => "Archived",
+            TriageState::Filed(_) => "Filed",
+            TriageState::Deleted => "Deleted",
         }
     }
+}
+impl TriageState {
+    pub const ALL: [TriageState; 5] = [
+        Self::Inbox,
+        Self::Snoozed,
+        Self::Archived,
+        Self::Filed(0),
+        Self::Deleted,
+    ];
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -60,10 +64,99 @@ pub struct Message {
     pub to: String,
     pub subject: String,
     pub body: String,
-    /// RFC3339 timestamp, e.g. `2026-09-14T08:12:00Z`.
     pub received: String,
     #[serde(default)]
     pub state: TriageState,
+    #[serde(default = "personal_account")]
+    pub account: AccountId,
+    #[serde(default)]
+    pub outgoing: bool,
+    #[serde(default)]
+    pub snooze: Option<String>,
+}
+
+fn personal_account() -> AccountId {
+    "personal".to_owned()
+}
+pub type AccountId = String;
+pub type FolderId = u32;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Account {
+    pub id: AccountId,
+    pub name: String,
+    pub email: String,
+    pub color: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Folder {
+    pub id: FolderId,
+    pub account: AccountId,
+    pub name: String,
+    pub parent: Option<FolderId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Location {
+    #[default]
+    AllInboxes,
+    Inbox(AccountId),
+    Snoozed(AccountId),
+    Sent(AccountId),
+    Archive(AccountId),
+    Trash(AccountId),
+    Folder(FolderId),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Chip {
+    #[default]
+    All,
+    NeedsReply,
+    FollowUp,
+    Urgent,
+    NewSenders,
+    PossibleSpam,
+}
+impl Chip {
+    pub const ALL: [Chip; 6] = [
+        Self::All,
+        Self::NeedsReply,
+        Self::FollowUp,
+        Self::Urgent,
+        Self::NewSenders,
+        Self::PossibleSpam,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::NeedsReply => "Needs Reply",
+            Self::FollowUp => "Follow Up",
+            Self::Urgent => "Urgent",
+            Self::NewSenders => "New Senders",
+            Self::PossibleSpam => "Possible Spam",
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagFilter {
+    NeedsReply,
+    AwaitingReply,
+    FollowUp,
+    Reminder,
+    NewSender,
+    PossibleSpam,
+    Urgent,
+}
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Filter {
+    pub tags: Vec<TagFilter>,
+    pub kind: Option<Kind>,
+    pub account: Option<AccountId>,
+}
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct View {
+    pub location: Location,
+    pub chip: Chip,
+    pub filter: Filter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,15 +175,16 @@ pub struct Outgoing {
 
 /// Seconds a reply waits in the outbox before `tick` sends it.
 pub const OUTBOX_DELAY: Timestamp = 10;
-/// Waiting mail with no newer reply resurfaces after this long.
-pub const WAITING_TIMEOUT: Timestamp = 3 * DAY;
+pub const DEFAULT_FOLLOW_UP_TIMEOUT: Timestamp = 3 * DAY;
 
 /// Badge attached to a message (accepted AI labels and resurfacing notes).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tag {
-    NoReply,
     NeedsReply,
-    Spam,
+    AwaitingReply,
+    FollowUp,
+    Reminder,
+    PossibleSpam,
     Urgent(u8),
     Kind(Kind),
 }
@@ -98,18 +192,14 @@ pub enum Tag {
 /// What `tick` changed. All-empty on an idempotent repeat.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TickReport {
-    /// Waiting messages returned to the Inbox as `Tag::NoReply`.
-    pub resurfaced: Vec<MessageId>,
-    /// Snoozed messages woken into the Inbox.
     pub woken: Vec<MessageId>,
-    /// Replies moved from the outbox to `sent()`.
+    pub followed_up: Vec<MessageId>,
     pub flushed: usize,
 }
 
-/// Per-message metadata beside the triage state.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Meta {
-    waiting_since: Option<Timestamp>,
+    awaiting_since: Option<Timestamp>,
     snoozed_until: Option<Timestamp>,
     tags: Vec<Tag>,
 }
@@ -129,8 +219,9 @@ enum Change {
     Pending(Vec<Suggestion>),
     /// Outbox reply with this seq was queued; undo removes it if still there.
     Queued(u64),
-    /// A reply was pushed straight to `sent`.
     SentPush,
+    FolderPush(FolderId),
+    Materialised(MessageId),
 }
 
 #[derive(Clone, Debug)]
@@ -140,36 +231,31 @@ struct UndoStep {
 
 pub struct Mailbox {
     messages: Vec<Message>,
-    /// Message id -> index into `messages`, for O(1) lookup.
     index: HashMap<MessageId, usize>,
-    /// Every id ordered newest-first by `received`; `ids_in` filters this.
     newest_first: Vec<MessageId>,
     undo: Vec<UndoStep>,
     sent: Vec<Reply>,
     outbox: Vec<Outgoing>,
     next_seq: u64,
     meta: HashMap<MessageId, Meta>,
-    /// Lowercased emails that skip the Screener.
     known: HashSet<String>,
-    /// The address book; `None` for a mailbox built without one.
     contacts: Option<Rc<ContactStore>>,
     blocked: HashSet<String>,
     unsubscribed: Vec<String>,
     muted: HashSet<u32>,
     pending: Vec<Suggestion>,
+    accounts: Vec<Account>,
+    folders: Vec<Folder>,
+    follow_up_timeout: Timestamp,
 }
 
 impl Mailbox {
-    /// Load messages; every sender counts as known (nothing is screened).
+    /// Load messages; without a contact store, senders are not assumed known.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        let mut mb = Self::build(serde_json::from_str(json)?, HashSet::new());
-        mb.known = mb.messages.iter().map(|m| lower(&m.from_email)).collect();
-        Ok(mb)
+        Ok(Self::build(serde_json::from_str(json)?, HashSet::new()))
     }
 
-    /// Load messages plus the addresses of `store`; every other sender lands
-    /// in the Screener. Later `allow_sender` calls are written back to the
-    /// store, so they survive a restart.
+    /// Load messages plus the known addresses in `store`.
     pub fn from_json_with_contacts(
         json: &str,
         store: Rc<ContactStore>,
@@ -180,7 +266,14 @@ impl Mailbox {
         Ok(mb)
     }
 
-    fn build(messages: Vec<Message>, known: HashSet<String>) -> Self {
+    fn build(mut messages: Vec<Message>, known: HashSet<String>) -> Self {
+        for message in &mut messages {
+            if message.state == TriageState::Snoozed
+                && message.snooze.as_deref().and_then(parse_rfc3339).is_none()
+            {
+                message.state = TriageState::Inbox;
+            }
+        }
         let mut index = HashMap::with_capacity(messages.len());
         for (i, m) in messages.iter().enumerate() {
             index.entry(m.id).or_insert(i);
@@ -194,6 +287,24 @@ impl Mailbox {
             };
             stamp(b).cmp(&stamp(a)).then_with(|| b.cmp(a))
         });
+        let meta = messages
+            .iter()
+            .filter_map(|m| {
+                (m.state == TriageState::Snoozed)
+                    .then(|| {
+                        m.snooze.as_deref().and_then(parse_rfc3339).map(|until| {
+                            (
+                                m.id,
+                                Meta {
+                                    snoozed_until: Some(until),
+                                    ..Meta::default()
+                                },
+                            )
+                        })
+                    })
+                    .flatten()
+            })
+            .collect();
         Self {
             messages,
             index,
@@ -202,13 +313,43 @@ impl Mailbox {
             sent: Vec::new(),
             outbox: Vec::new(),
             next_seq: 0,
-            meta: HashMap::new(),
+            meta,
             known,
             blocked: HashSet::new(),
             contacts: None,
             unsubscribed: Vec::new(),
             muted: HashSet::new(),
             pending: Vec::new(),
+            accounts: {
+                let data: Vec<serde_json::Value> =
+                    serde_json::from_str(include_str!("../../fixtures/accounts.json"))
+                        .expect("account fixture");
+                data.iter()
+                    .map(|v| serde_json::from_value(v.clone()).expect("account"))
+                    .collect()
+            },
+            folders: {
+                let data: Vec<serde_json::Value> =
+                    serde_json::from_str(include_str!("../../fixtures/accounts.json"))
+                        .expect("account fixture");
+                data.iter()
+                    .flat_map(|v| {
+                        let account = v["id"].as_str().unwrap_or_default().to_owned();
+                        v["folders"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(move |f| Folder {
+                                id: f["id"].as_u64().unwrap_or_default() as FolderId,
+                                account: account.clone(),
+                                name: f["name"].as_str().unwrap_or_default().to_owned(),
+                                parent: f["parent"].as_u64().map(|n| n as FolderId),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            },
+            follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
         }
     }
 

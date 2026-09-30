@@ -2,7 +2,7 @@ use gpui_kit::{TestAppContext};
 use mail_classifier::model::{Mailbox, MessageId};
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness_with, mailbox, msg};
-use crate::waiting_snooze::{snooze_box};
+use crate::snooze::snooze_box;
 
 // ---------------------------------------------------------------- Triage session
 
@@ -21,11 +21,11 @@ pub fn triage_session_auto_advances_and_ends_with_summary(cx: &mut TestAppContex
     assert_eq!(h.read(|a| a.opened()), Some(1), "session shows the current message");
 
     h.keys("e");
-    assert_eq!(h.state_of(1), Done);
+    assert_eq!(h.state_of(1), Archived);
     assert_eq!(h.read(|a| a.session_progress()), Some((2, 3)));
     h.clock.advance(65);
-    h.keys("w");
-    assert_eq!(h.state_of(2), Waiting);
+    h.keys("e");
+    assert_eq!(h.state_of(2), Archived);
     assert_eq!(h.read(|a| a.session_progress()), Some((3, 3)));
     h.keys("i");
     assert_eq!(h.state_of(3), Inbox);
@@ -45,7 +45,7 @@ pub fn triage_session_escape_ends_early(cx: &mut TestAppContext) {
     assert_eq!(h.read(|a| a.session_progress()), Some((2, 3)));
     h.keys("escape");
     assert_eq!(h.read(|a| a.session_progress()), None);
-    assert_eq!(h.state_of(1), Done);
+    assert_eq!(h.state_of(1), Archived);
     assert_eq!(h.state_of(2), Inbox);
     assert_eq!(h.read(|a| a.session_end()), Some((1, 0)), "escape after handling shows the end card");
     h.keys("escape");
@@ -60,8 +60,8 @@ pub fn search_box() -> Mailbox {
     mailbox(&[
         msg(1, 1, "dana@x.io", "Invoice for lunch", 25, "Inbox"),
         msg(2, 2, "dana@x.io", "Roadmap", 10, "Inbox"),
-        msg(3, 3, "omar@x.io", "Invoice overdue", 12, "Waiting"),
-        msg(4, 4, "omar@x.io", "Team offsite", 5, "Done"),
+        msg(3, 3, "omar@x.io", "Invoice overdue", 12, "Snoozed"),
+        msg(4, 4, "omar@x.io", "Team offsite", 5, "Archived"),
     ])
 }
 
@@ -88,8 +88,8 @@ pub fn search_operators(cx: &mut TestAppContext) {
     assert_eq!(sorted(&mut h, "from:dana"), vec![1, 2]);
     assert_eq!(sorted(&mut h, "from:OMAR@x.io"), vec![3, 4], "case-insensitive");
     assert_eq!(sorted(&mut h, "subject:invoice"), vec![1, 3]);
-    assert_eq!(sorted(&mut h, "is:waiting"), vec![3]);
-    assert_eq!(sorted(&mut h, "is:done"), vec![4]);
+    assert_eq!(sorted(&mut h, "is:snoozed"), vec![3]);
+    assert_eq!(sorted(&mut h, "is:archived"), vec![4]);
     assert_eq!(sorted(&mut h, "before:2026-09-11"), vec![2, 4]);
     assert_eq!(sorted(&mut h, "after:2026-09-11"), vec![1, 3]);
     assert_eq!(sorted(&mut h, "lunch"), vec![1]);

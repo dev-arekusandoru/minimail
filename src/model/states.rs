@@ -5,21 +5,7 @@ impl Mailbox {
     /// and ids already in `state` are skipped. Returns the number changed.
     /// Records no time metadata; see `set_state_at`.
     pub fn set_state(&mut self, ids: &[MessageId], state: TriageState) -> usize {
-        self.set_state_inner(ids, state, None)
-    }
-
-    /// Like `set_state`, but stamps `waiting_since = now` on messages entering
-    /// Waiting so `tick` can resurface them.
-    pub fn set_state_at(&mut self, ids: &[MessageId], state: TriageState, now: Timestamp) -> usize {
-        self.set_state_inner(ids, state, Some(now))
-    }
-
-    pub(super) fn set_state_inner(
-        &mut self,
-        ids: &[MessageId],
-        state: TriageState,
-        now: Option<Timestamp>,
-    ) -> usize {
+        assert_ne!(state, TriageState::Snoozed, "use snooze");
         let mut changes = Vec::new();
         for id in ids {
             let Some(&i) = self.index.get(id) else {
@@ -31,24 +17,66 @@ impl Mailbox {
             changes.push(self.snapshot(*id));
             self.messages[i].state = state;
             let meta = self.meta.entry(*id).or_default();
-            meta.waiting_since = if state == TriageState::Waiting { now } else { None };
             meta.snoozed_until = None;
-            meta.tags.retain(|t| *t != Tag::NoReply);
+            meta.awaiting_since = None;
+            meta.tags
+                .retain(|tag| !matches!(tag, Tag::Reminder | Tag::FollowUp | Tag::PossibleSpam));
         }
         let changed = changes.len();
         self.push_undo(changes);
         changed
     }
 
-    /// Set `state` on every message from `from_email`, whatever state it is in
-    /// now. One undo entry per call; returns the number changed.
-    pub fn set_state_for_sender(&mut self, from_email: &str, state: TriageState) -> usize {
-        let ids: Vec<MessageId> = self
+    pub fn set_state_for_sender(
+        &mut self,
+        email: &str,
+        only_inbox: bool,
+        state: TriageState,
+    ) -> usize {
+        let ids: Vec<_> = self
             .messages
             .iter()
-            .filter(|m| m.from_email.eq_ignore_ascii_case(from_email))
+            .filter(|m| {
+                m.from_email.eq_ignore_ascii_case(email)
+                    && (!only_inbox || m.state == TriageState::Inbox)
+            })
             .map(|m| m.id)
             .collect();
         self.set_state(&ids, state)
+    }
+
+    pub fn mark_spam(&mut self, ids: &[MessageId], block: bool) -> usize {
+        let mut changes = Vec::new();
+        let mut senders = HashSet::new();
+        for id in ids {
+            let Some(m) = self.get(*id).cloned() else {
+                continue;
+            };
+            if block {
+                senders.insert(lower(&m.from_email));
+            }
+            if m.state != TriageState::Deleted {
+                changes.push(self.snapshot(*id));
+                if let Some(&i) = self.index.get(id) {
+                    self.messages[i].state = TriageState::Deleted;
+                }
+                let meta = self.meta.entry(*id).or_default();
+                meta.snoozed_until = None;
+                meta.awaiting_since = None;
+                meta.tags
+                    .retain(|t| !matches!(t, Tag::Reminder | Tag::FollowUp | Tag::PossibleSpam));
+            }
+        }
+        for email in senders {
+            if self.blocked.insert(email.clone()) {
+                changes.push(Change::Blocked(email, false));
+            }
+        }
+        let changed = changes
+            .iter()
+            .filter(|c| matches!(c, Change::Msg(..)))
+            .count();
+        self.push_undo(changes);
+        changed
     }
 }

@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn substring_is_case_insensitive() {
-        let n = names("MARK DONE");
-        assert!(n.contains(&"Mark done"));
+        let n = names("ARCHIVE");
+        assert!(n.contains(&"Archive"));
         assert!(!n.contains(&"Undo"));
     }
 
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn subsequence_matches_and_gibberish_does_not() {
-        assert!(names("mkdn").contains(&"Mark done"));
+        assert!(names("archv").contains(&"Archive"));
         assert!(filter_commands("zzzqqq").is_empty());
     }
 }

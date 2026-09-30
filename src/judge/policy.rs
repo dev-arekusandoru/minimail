@@ -22,8 +22,8 @@ impl Default for JudgePolicy {
     fn default() -> Self {
         let defaults = [
             (QuestionKey::Spam, Mode::Auto { threshold: 0.9 }),
-            (QuestionKey::SuggestedState, Mode::Review),
             (QuestionKey::NeedsReply, Mode::Auto { threshold: 0.8 }),
+            (QuestionKey::ExpectsReply, Mode::Review),
             (QuestionKey::Urgency, Mode::Auto { threshold: 0.7 }),
             (QuestionKey::Kind, Mode::Auto { threshold: 0.6 }),
         ];
@@ -111,16 +111,6 @@ impl Suggestion {
         }
     }
 
-    /// Triage state carried by a SuggestedState answer.
-    pub fn state(&self) -> Option<TriageState> {
-        match (self.key, &self.answer.value) {
-            (QuestionKey::SuggestedState, AnswerValue::Choice(i)) => {
-                TriageState::ALL.get(*i).copied()
-            }
-            _ => None,
-        }
-    }
-
     /// Rounded urgency level (1..=5) carried by an Urgency answer.
     pub fn urgency(&self) -> Option<u8> {
         match (self.key, &self.answer.value) {
@@ -137,13 +127,12 @@ pub enum Routed {
     Drop,
 }
 
-/// True when applying this answer would change nothing.
-fn is_noop(m: &Message, s: &Suggestion) -> bool {
+fn is_noop(_m: &Message, s: &Suggestion) -> bool {
     match (&s.key, &s.answer.value) {
-        (QuestionKey::Spam | QuestionKey::NeedsReply, AnswerValue::Bool(b)) => !*b,
-        (QuestionKey::SuggestedState, AnswerValue::Choice(i)) => {
-            TriageState::ALL.get(*i).is_none_or(|st| *st == m.state)
-        }
+        (
+            QuestionKey::Spam | QuestionKey::NeedsReply | QuestionKey::ExpectsReply,
+            AnswerValue::Bool(b),
+        ) => !*b,
         (QuestionKey::Urgency, _) => s.urgency().is_none_or(|u| u <= 1),
         (QuestionKey::Kind, AnswerValue::Choice(i)) => {
             Kind::from_index(*i).is_none_or(|k| k == Kind::Other)
@@ -184,4 +173,3 @@ pub fn classify(judge: &dyn Judge, policy: &JudgePolicy, msgs: &[&Message]) -> V
     }
     out
 }
-

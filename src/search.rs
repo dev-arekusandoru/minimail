@@ -1,21 +1,29 @@
 //! Search query parsing and matching for the palette.
 //!
-//! Syntax (terms are ANDed, everything case-insensitive):
-//! `from:x` (name or email substring), `subject:x`, `is:inbox|waiting|later|done|screener`,
-//! `before:YYYY-MM-DD` (exclusive), `after:YYYY-MM-DD` (inclusive), `"quoted phrase"`,
-//! and free text over subject + body + sender. Values may be quoted (`subject:"a b"`).
-//! Unknown keys, empty values and malformed dates degrade to free text.
-//! Dates are compared against the date part of the RFC3339 `received` field
-//! (no timezone conversion). A leading `/` is ignored.
+//! Syntax (terms are ANDed, everything case-insensitive): `from:x`, `subject:x`,
+//! `is:inbox|snoozed|archived|filed|deleted|sent|new`,
+//! `tag:needs-reply|awaiting|follow-up|reminder|spam|urgent`, dates, quoted phrases,
+//! and free text over subject + body + sender. A leading `/` is ignored.
 
-use crate::model::{Message, TriageState};
+use crate::model::{Mailbox, Message, Tag, TriageState};
 
-const KEYS: [&str; 5] = ["from", "subject", "is", "before", "after"];
+const KEYS: [&str; 6] = ["from", "subject", "is", "tag", "before", "after"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Is {
     State(TriageState),
-    Screener,
+    Filed,
+    Sent,
+    New,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TagQuery {
+    NeedsReply,
+    Awaiting,
+    FollowUp,
+    Reminder,
+    Spam,
+    Urgent,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -23,6 +31,7 @@ pub struct Query {
     from: Vec<String>,
     subject: Vec<String>,
     is: Vec<Is>,
+    tags: Vec<TagQuery>,
     before: Vec<String>,
     after: Vec<String>,
     text: Vec<String>,
@@ -58,17 +67,17 @@ fn tokenize(input: &str) -> Vec<String> {
 }
 
 fn valid_date(s: &str) -> bool {
-    let b = s.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+    if s.len() != 10 || s.as_bytes()[4] != b'-' || s.as_bytes()[7] != b'-' {
         return false;
     }
-    let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
-    if !(digits(0..4) && digits(5..7) && digits(8..10)) {
+    let (Ok(year), Ok(month), Ok(day)) = (
+        s[..4].parse::<u32>(),
+        s[5..7].parse::<u32>(),
+        s[8..10].parse::<u32>(),
+    ) else {
         return false;
-    }
-    let month: u32 = s[5..7].parse().unwrap_or(0);
-    let day: u32 = s[8..10].parse().unwrap_or(0);
-    (1..=12).contains(&month) && (1..=31).contains(&day)
+    };
+    year > 0 && (1..=12).contains(&month) && (1..=31).contains(&day)
 }
 
 fn is_key(token: &str) -> Option<(&'static str, &str)> {
@@ -94,10 +103,21 @@ impl Query {
                 "subject" => q.subject.push(value),
                 "is" => match value.as_str() {
                     "inbox" => q.is.push(Is::State(TriageState::Inbox)),
-                    "waiting" => q.is.push(Is::State(TriageState::Waiting)),
-                    "later" => q.is.push(Is::State(TriageState::Later)),
-                    "done" => q.is.push(Is::State(TriageState::Done)),
-                    "screener" => q.is.push(Is::Screener),
+                    "snoozed" => q.is.push(Is::State(TriageState::Snoozed)),
+                    "archived" => q.is.push(Is::State(TriageState::Archived)),
+                    "filed" => q.is.push(Is::Filed),
+                    "deleted" => q.is.push(Is::State(TriageState::Deleted)),
+                    "sent" => q.is.push(Is::Sent),
+                    "new" => q.is.push(Is::New),
+                    _ => q.text.push(lower),
+                },
+                "tag" => match value.as_str() {
+                    "needs-reply" => q.tags.push(TagQuery::NeedsReply),
+                    "awaiting" => q.tags.push(TagQuery::Awaiting),
+                    "follow-up" => q.tags.push(TagQuery::FollowUp),
+                    "reminder" => q.tags.push(TagQuery::Reminder),
+                    "spam" => q.tags.push(TagQuery::Spam),
+                    "urgent" => q.tags.push(TagQuery::Urgent),
                     _ => q.text.push(lower),
                 },
                 "before" if valid_date(&value) => q.before.push(value),
@@ -108,8 +128,6 @@ impl Query {
         q
     }
 
-    /// True if the input should be treated as a search: starts with `/` or
-    /// contains a known `key:` token.
     pub fn is_search(input: &str) -> bool {
         let input = input.trim_start();
         input.starts_with('/')
@@ -118,22 +136,35 @@ impl Query {
                 .any(|t| is_key(t).is_some_and(|(_, v)| !v.is_empty()))
     }
 
-    /// `screened` is true when the sender has been allowed (is a known
-    /// contact); `is:screener` matches messages with `screened == false`.
-    pub fn matches(&self, m: &Message, state: TriageState, screened: bool) -> bool {
+    /// Match using mailbox state, tags, new-sender status, and outgoing status.
+    pub fn matches(&self, m: &Message, mailbox: &Mailbox) -> bool {
+        let Some(state) = mailbox.state_of(m.id) else {
+            return false;
+        };
+        let new_sender = mailbox.is_new_sender(m.id);
+        let tags = mailbox.tags(m.id);
         let name = m.from_name.to_lowercase();
         let email = m.from_email.to_lowercase();
         let subject = m.subject.to_lowercase();
         let body = m.body.to_lowercase();
         let date = m.received.get(..10).unwrap_or(&m.received);
-
         self.from
             .iter()
             .all(|f| name.contains(f) || email.contains(f))
             && self.subject.iter().all(|s| subject.contains(s))
             && self.is.iter().all(|i| match i {
                 Is::State(s) => *s == state,
-                Is::Screener => !screened,
+                Is::Filed => matches!(state, TriageState::Filed(_)),
+                Is::Sent => m.outgoing && state != TriageState::Deleted,
+                Is::New => new_sender,
+            })
+            && self.tags.iter().all(|t| match t {
+                TagQuery::NeedsReply => tags.contains(&Tag::NeedsReply),
+                TagQuery::Awaiting => tags.contains(&Tag::AwaitingReply),
+                TagQuery::FollowUp => tags.contains(&Tag::FollowUp),
+                TagQuery::Reminder => tags.contains(&Tag::Reminder),
+                TagQuery::Spam => tags.contains(&Tag::PossibleSpam),
+                TagQuery::Urgent => tags.iter().any(|x| matches!(x, Tag::Urgent(_))),
             })
             && self.before.iter().all(|d| date < d.as_str())
             && self.after.iter().all(|d| date >= d.as_str())
@@ -142,17 +173,29 @@ impl Query {
             })
     }
 
-    /// Human-readable summary of the parsed terms, for the palette hint row.
     pub fn describe(&self) -> String {
         let mut parts = Vec::new();
         parts.extend(self.from.iter().map(|v| format!("from:{v}")));
         parts.extend(self.subject.iter().map(|v| format!("subject:{v}")));
-        for i in &self.is {
-            parts.push(match i {
-                Is::State(s) => format!("is:{}", s.label().to_lowercase()),
-                Is::Screener => "is:screener".into(),
-            });
-        }
+        parts.extend(self.is.iter().map(|i| match i {
+            Is::State(s) => format!("is:{}", s.label().to_lowercase()),
+            Is::Filed => "is:filed".into(),
+            Is::Sent => "is:sent".into(),
+            Is::New => "is:new".into(),
+        }));
+        parts.extend(self.tags.iter().map(|t| {
+            format!(
+                "tag:{}",
+                match t {
+                    TagQuery::NeedsReply => "needs-reply",
+                    TagQuery::Awaiting => "awaiting",
+                    TagQuery::FollowUp => "follow-up",
+                    TagQuery::Reminder => "reminder",
+                    TagQuery::Spam => "spam",
+                    TagQuery::Urgent => "urgent",
+                }
+            )
+        }));
         parts.extend(self.after.iter().map(|v| format!("after:{v}")));
         parts.extend(self.before.iter().map(|v| format!("before:{v}")));
         parts.extend(self.text.iter().map(|v| format!("\"{v}\"")));

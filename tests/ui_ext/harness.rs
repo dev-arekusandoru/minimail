@@ -56,8 +56,13 @@ pub fn harness(cx: &mut TestAppContext) -> Harness<'_> {
 
 /// One JSON message. `day` is the day of September 2026 it was received.
 pub fn msg(id: u32, thread: u32, email: &str, subject: &str, day: u32, state: &str) -> String {
+    let snooze = if state == "Snoozed" {
+        r#""2099-12-31T00:00:00Z""#
+    } else {
+        "null"
+    };
     format!(
-        r#"{{"id":{id},"thread_id":{thread},"from_name":"{name}","from_email":"{email}","to":"you@example.com","subject":"{subject}","body":"Just checking in about this.","received":"2026-09-{day:02}T09:00:00Z","state":"{state}"}}"#,
+        r#"{{"id":{id},"thread_id":{thread},"from_name":"{name}","from_email":"{email}","to":"you@example.com","subject":"{subject}","body":"Just checking in about this.","received":"2026-09-{day:02}T09:00:00Z","state":"{state}","snooze":{snooze}}}"#,
         name = email.split('@').next().unwrap()
     )
 }
@@ -123,17 +128,20 @@ impl Harness<'_> {
     pub fn toast(&mut self) -> String {
         self.read(|a| a.toast.as_ref().map(|t| t.to_string()).unwrap_or_default())
     }
-    /// sum(counts) + screener + hidden == total
+    /// Visible plus hidden messages account for the full mailbox, including all filed folders.
     pub fn assert_invariant(&mut self, ctx: &str) {
-        let (sum, screener, hidden, total) = self.read(|a| {
+        let (visible, hidden, total) = self.read(|a| {
             (
-                TriageState::ALL.iter().map(|s| a.mailbox.count(*s)).sum::<usize>(),
-                a.mailbox.screener_ids().len(),
+                a.mailbox
+                    .messages()
+                    .iter()
+                    .filter(|message| !a.mailbox.is_hidden(message.id))
+                    .count(),
                 a.mailbox.hidden_count(),
                 a.mailbox.messages().len(),
             )
         });
-        assert_eq!(sum + screener + hidden, total, "invariant broken after {ctx}");
+        assert_eq!(visible + hidden, total, "invariant broken after {ctx}");
     }
     /// Move the cursor with `j` until it reaches `id` (current view).
     pub fn goto(&mut self, id: MessageId) {
@@ -154,11 +162,6 @@ impl Harness<'_> {
     }
 }
 
-impl Harness<'_> {
-    pub fn view_state(&mut self) -> TriageState {
-        self.read(|a| a.triage.view)
-    }
-}
 impl Harness<'_> {
     pub fn palette_rows(&mut self) -> Vec<String> {
         self.app.read_with(self.cx, |a, cx| a.palette_rows(cx))

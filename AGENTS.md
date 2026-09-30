@@ -4,7 +4,7 @@ Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0
 
 - Verify with: `cargo build`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. All must pass before committing.
 - Pure logic lives in `src/*.rs` (no GPUI); views live in `src/app/`. Keep business logic out of views.
-- Invariant: every message has exactly one `TriageState`. Hidden (muted/blocked/unsubscribed) and screener mail is excluded from counts: `sum(counts) + screener + hidden == total`.
+- Invariant: every message has exactly one `TriageState`; `Snoozed` iff it has a wake time; muted threads are excluded from visible state counts.
 - Every user action is one undo step. `tick(now)` never pushes undo.
 - Never read the system clock in logic: take `now: Timestamp` and use `clock::FakeClock` in tests.
 - `gpui-kit` re-exports GPUI (`use gpui_kit::*`). Verify APIs against `~/.cargo/registry/src/*/gpui-{kit,pre}-*`, not memory.

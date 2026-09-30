@@ -25,8 +25,8 @@ impl MailApp {
         self.rules_panel.is_some()
     }
 
-    pub fn screener_open(&self) -> bool {
-        self.mode == ListMode::Screener
+    pub fn new_senders_open(&self) -> bool {
+        self.mode == ListMode::State && self.triage.view.chip == Chip::NewSenders
     }
 
     /// A popup menu is open.
@@ -44,11 +44,9 @@ impl MailApp {
         self.menu.as_ref().map(|m| m.panel.clone())
     }
 
-    /// Whether the contextual action bar applies right now: a message to act on, in a
-    /// view that is not the screener (it has its own controls), the composer or a
-    /// finished session.
+    /// Whether the contextual action bar applies right now.
     pub fn context_actions(&self) -> bool {
-        if self.compose.is_some() || self.mode == ListMode::Screener || self.session_end.is_some() {
+        if self.compose.is_some() || self.new_senders_open() || self.session_end.is_some() {
             return false;
         }
         !self.target_ids().is_empty()
@@ -113,8 +111,7 @@ impl MailApp {
     /// Exactly the message ids the list shows, top to bottom.
     pub fn visible_ids(&self) -> Vec<MessageId> {
         match &self.mode {
-            ListMode::State => self.mailbox.ids_in(self.triage.view),
-            ListMode::Screener => self.mailbox.screener_ids(),
+            ListMode::State => self.mailbox.ids_in_view(&self.triage.view),
             ListMode::Search(q) => self.search_ids(q),
         }
     }
@@ -131,10 +128,7 @@ impl MailApp {
             .messages()
             .iter()
             .filter(|m| !self.mailbox.is_hidden(m.id))
-            .filter(|m| {
-                let state = self.mailbox.state_of(m.id).unwrap_or_default();
-                query.matches(m, state, !self.mailbox.is_screened(m.id))
-            })
+            .filter(|m| query.matches(m, &self.mailbox))
             .collect();
         found.sort_by(|a, b| b.received.cmp(&a.received).then(b.id.cmp(&a.id)));
         found.into_iter().map(|m| m.id).collect()

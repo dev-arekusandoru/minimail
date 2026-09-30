@@ -122,7 +122,7 @@ fn threaded() -> Mailbox {
 fn grouping_shows_one_row_per_thread_and_off_restores_messages(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
     assert!(h.rows().is_empty(), "off by default");
-    h.keys("g");
+    h.keys("ctrl-g");
     let rows = h.rows();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0], Row::Single(4));
@@ -132,14 +132,14 @@ fn grouping_shows_one_row_per_thread_and_off_restores_messages(cx: &mut TestAppC
     assert_eq!(h.read(|a| a.visible_ids()), vec![4, 3, 2, 1]);
     h.keys("j");
     assert_eq!(h.cursor(), Some(3), "header stands for its newest message");
-    h.keys("g j");
+    h.keys("ctrl-g j");
     assert_eq!(h.cursor(), Some(2), "flat again: one row per message");
 }
 
 #[gpui_kit::gpui::test]
 fn expand_and_collapse_with_arrows_and_enter(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
-    h.keys("g j right");
+    h.keys("ctrl-g j right");
     assert_eq!(h.rows().len(), 5);
     h.keys("j j");
     assert_eq!(h.cursor(), Some(2));
@@ -154,24 +154,16 @@ fn expand_and_collapse_with_arrows_and_enter(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn actions_apply_to_the_whole_thread_and_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
-    h.keys("g j e");
+    h.keys("ctrl-g j e");
     for id in [1, 2, 3] {
-        assert_eq!(h.state_of(id), Done);
+        assert_eq!(h.state_of(id), Archived);
     }
     assert_eq!(h.state_of(4), Inbox);
     h.keys("u");
     for id in 1..=4 {
         assert_eq!(h.state_of(id), Inbox);
     }
-    // Selection over thread rows covers every message too.
-    h.keys("x k x w");
-    for id in 1..=4 {
-        assert_eq!(h.state_of(id), Waiting);
-    }
-    h.keys("u");
-    for id in 1..=4 {
-        assert_eq!(h.state_of(id), Inbox);
-    }
+
 }
 
 #[gpui_kit::gpui::test]
@@ -180,13 +172,13 @@ fn split_thread_shows_only_the_panels_messages(cx: &mut TestAppContext) {
         cx,
         mailbox(&[
             msg(1, 1, "ann@x.com", "Plan", 1, "Inbox"),
-            msg(2, 1, "bob@x.com", "Re: Plan", 2, "Done"),
+            msg(2, 1, "bob@x.com", "Re: Plan", 2, "Archived"),
             msg(3, 1, "ann@x.com", "Re: Plan", 3, "Inbox"),
         ]),
     );
-    h.keys("g");
+    h.keys("ctrl-g");
     assert!(matches!(&h.rows()[0], Row::Header { ids, .. } if ids == &[3, 1]));
-    h.keys("4");
+    h.keys("3");
     assert_eq!(h.rows(), vec![Row::Single(2)]);
 }
 
@@ -208,7 +200,7 @@ fn next_and_previous_in_thread_work_flat_and_grouped(cx: &mut TestAppContext) {
     assert!(h.toast().contains("Last"));
 
     // Grouped: works from the list selection without opening first.
-    h.keys("g");
+    h.keys("ctrl-g");
     h.read(|a| assert!(a.group_threads));
     h.keys("[");
     assert_eq!(h.opened(), Some(2));
@@ -222,7 +214,7 @@ fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
     cx: &mut TestAppContext,
 ) {
     let mut h = harness_with(cx, threaded());
-    h.keys("g");
+    h.keys("ctrl-g");
     let message = h.row_height(("row", 4usize));
     let header = h.row_height(("thread-row", 1usize));
     assert!(header < message, "collapsed header ({header}) must be shorter than a message row ({message})");

@@ -5,7 +5,7 @@ use gpui_kit::{
     base::Root, px, size,
 };
 use mail_classifier::app::{MailApp, actions::bind_keys};
-use mail_classifier::model::{MessageId, TriageState, TriageState::*};
+use mail_classifier::model::{Location, MessageId, Tag, TriageState, TriageState::*};
 
 struct Harness<'a> {
     cx: &'a mut TestAppContext,
@@ -57,7 +57,7 @@ impl Harness<'_> {
     fn count(&mut self, s: TriageState) -> usize {
         self.read(|a| a.mailbox.count(s))
     }
-    fn counts(&mut self) -> [usize; 4] {
+    fn counts(&mut self) -> [usize; 5] {
         TriageState::ALL.map(|s| self.count(s))
     }
     fn cursor(&mut self) -> Option<MessageId> {
@@ -66,8 +66,8 @@ impl Harness<'_> {
     fn index(&mut self) -> usize {
         self.read(|a| a.triage.cursor_index())
     }
-    fn view(&mut self) -> TriageState {
-        self.read(|a| a.triage.view)
+    fn view(&mut self) -> Location {
+        self.read(|a| a.triage.view.location.clone())
     }
     fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -75,11 +75,14 @@ impl Harness<'_> {
     fn total(&mut self) -> usize {
         self.read(|a| a.mailbox.messages().len())
     }
-    /// Visible counts + screener + hidden: every message is in exactly one bucket.
+    /// Visible plus hidden messages account for the full mailbox, including all filed folders.
     fn accounted(&mut self) -> usize {
         self.read(|a| {
-            TriageState::ALL.iter().map(|s| a.mailbox.count(*s)).sum::<usize>()
-                + a.mailbox.screener_ids().len()
+            a.mailbox
+                .messages()
+                .iter()
+                .filter(|message| !a.mailbox.is_hidden(message.id))
+                .count()
                 + a.mailbox.hidden_count()
         })
     }
@@ -117,35 +120,28 @@ fn state_keys_move_messages_and_undo(cx: &mut TestAppContext) {
 
     let a = h.cursor().unwrap();
     h.keys("e");
-    assert_eq!(h.state_of(a), Done);
+    assert_eq!(h.state_of(a), Archived);
     assert_eq!(h.count(Inbox), start[0] - 1);
-    assert_eq!(h.count(Done), start[3] + 1);
+    assert_eq!(h.count(Archived), start[2] + 1);
 
-    let b = h.cursor().unwrap();
-    assert_ne!(a, b);
-    h.keys("w");
-    assert_eq!(h.state_of(b), Waiting);
     let c = h.cursor().unwrap();
-    h.keys("l 1"); // `l` opens the snooze picker; 1 = Tonight
-    assert_eq!(h.state_of(c), Later);
-    assert_eq!(h.count(Inbox), start[0] - 3);
-    assert_eq!(h.count(Waiting), start[1] + 1);
-    assert_eq!(h.count(Later), start[2] + 1);
+    h.keys("s 1"); // `s` opens the snooze picker; 1 = Tonight
+    assert_eq!(h.state_of(c), Snoozed);
+    assert_eq!(h.count(Inbox), start[0] - 2);
+    assert_eq!(h.count(Snoozed), start[1] + 1);
 
-    // Move back to inbox from the Done view.
-    h.keys("4");
-    assert_eq!(h.cursor(), h.read(|a| a.mailbox.ids_in(Done).first().copied()));
+    // Move back to inbox from the Archive location.
+    h.keys("3");
+    assert_eq!(h.view(), Location::Archive("personal".into()));
     let d = h.cursor().unwrap();
     h.keys("i");
     assert_eq!(h.state_of(d), Inbox);
 
-    // Undo everything, one step at a time.
     h.keys("u");
-    assert_eq!(h.state_of(d), Done);
-    h.keys("u u u");
+    assert_eq!(h.state_of(d), Archived);
+    h.keys("u u");
     assert_eq!(h.counts(), start);
     assert_eq!(h.accounted(), total);
-    // Extra undo is harmless.
     h.keys("u");
     assert_eq!(h.counts(), start);
 }
@@ -163,15 +159,15 @@ fn cmd_z_undoes(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn number_keys_switch_views(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert_eq!(h.view(), Inbox);
+    assert_eq!(h.view(), Location::AllInboxes);
     h.keys("2");
-    assert_eq!(h.view(), Waiting);
+    assert_eq!(h.view(), Location::Snoozed("personal".into()));
     h.keys("3");
-    assert_eq!(h.view(), Later);
+    assert_eq!(h.view(), Location::Archive("personal".into()));
     h.keys("4");
-    assert_eq!(h.view(), Done);
+    assert_eq!(h.view(), Location::Trash("personal".into()));
     h.keys("1");
-    assert_eq!(h.view(), Inbox);
+    assert_eq!(h.view(), Location::AllInboxes);
     h.keys("j j 3");
     assert_eq!(h.index(), 0, "switching view resets the cursor");
 }
@@ -186,13 +182,13 @@ fn palette_filters_and_runs_command(cx: &mut TestAppContext) {
     h.keys("cmd-k");
     assert!(h.read(|a| a.palette_open()));
     // Letters here are also single-key bindings (e, r, o...): they must go to the input.
-    h.keys("m a r k space d o n e");
+    h.keys("a r c h i v e");
     assert_eq!(h.counts(), start, "typing must not trigger bindings");
     assert!(h.read(|a| a.palette_open()));
     h.keys("enter");
     assert!(!h.read(|a| a.palette_open()), "palette closes after running");
-    assert_eq!(h.state_of(target), Done);
-    assert_eq!(h.count(Done), start[3] + 1);
+    assert_eq!(h.state_of(target), Archived);
+    assert_eq!(h.count(Archived), start[2] + 1);
 
     // Escape dismisses without effect.
     h.keys("cmd-k");
@@ -208,13 +204,13 @@ fn palette_filters_and_runs_command(cx: &mut TestAppContext) {
 fn palette_runs_view_switch(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.keys("cmd-k");
-    h.keys("s h o w space l a t e r");
+    h.keys("s h o w space s n o o z e d");
     h.keys("enter");
-    assert_eq!(h.view(), Later);
+    assert_eq!(h.view(), Location::Snoozed("personal".into()));
 }
 
 #[gpui_kit::gpui::test]
-fn reply_send_moves_to_waiting(cx: &mut TestAppContext) {
+fn reply_send_tracks_awaiting_reply_without_moving_message(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let id = h.cursor().unwrap();
     let start = h.counts();
@@ -222,8 +218,7 @@ fn reply_send_moves_to_waiting(cx: &mut TestAppContext) {
 
     h.keys("r");
     assert!(h.read(|a| a.compose_open()));
-    // 'e', 'j', 'x', 'u' etc. must be typed into the body, not trigger actions.
-    h.keys("t h a n k s space j e x");
+    h.keys("t h a n k s space j e space ?");
     assert_eq!(h.counts(), start);
     h.keys("cmd-enter");
     assert!(!h.read(|a| a.compose_open()));
@@ -238,17 +233,17 @@ fn reply_send_moves_to_waiting(cx: &mut TestAppContext) {
     let (to, body) = reply.unwrap();
     assert_eq!(to, id);
     assert!(body.contains("thanks je"), "body was {body:?}");
-    assert_eq!(h.state_of(id), Waiting);
-    assert_eq!(h.count(Waiting), start[1] + 1);
-    assert_eq!(h.count(Inbox), start[0] - 1);
+    assert_eq!(h.state_of(id), Inbox);
+    assert!(h.read(|a| a.mailbox.tags(id).contains(&Tag::AwaitingReply)));
+    assert!(!h.read(|a| a.mailbox.tags(id).contains(&Tag::NeedsReply)));
 
-    // Undo recalls the pending reply and reopens compose.
     h.keys("u");
     assert!(h.read(|a| a.compose_open()));
     assert_eq!(h.read(|a| a.mailbox.outbox().len()), 0);
     assert_eq!(h.state_of(id), Inbox);
     h.keys("escape");
 }
+
 
 #[gpui_kit::gpui::test]
 fn reply_escape_cancels(cx: &mut TestAppContext) {
@@ -279,7 +274,7 @@ fn question_mark_toggles_help(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn multi_select_then_mark_done(cx: &mut TestAppContext) {
+fn multi_select_then_archive(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let start = h.counts();
     let ids = h.read(|a| a.mailbox.ids_in(Inbox));
@@ -291,7 +286,7 @@ fn multi_select_then_mark_done(cx: &mut TestAppContext) {
     assert!(sel.iter().all(|s| ids[..3].contains(s)));
     h.keys("e");
     for id in &ids[..3] {
-        assert_eq!(h.state_of(*id), Done);
+        assert_eq!(h.state_of(*id), Archived);
     }
     assert_eq!(h.count(Inbox), start[0] - 3);
     assert!(h.read(|a| a.triage.selected().is_empty()));
@@ -308,7 +303,7 @@ fn multi_select_then_mark_done(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn x_toggles_selection_then_mark_done(cx: &mut TestAppContext) {
+fn x_toggles_selection_then_archive(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let start = h.counts();
     let ids = h.read(|a| a.mailbox.ids_in(Inbox));
@@ -319,14 +314,14 @@ fn x_toggles_selection_then_mark_done(cx: &mut TestAppContext) {
     want.sort();
     assert_eq!(sel, want);
     h.keys("e");
-    assert_eq!(h.state_of(ids[0]), Done);
-    assert_eq!(h.state_of(ids[2]), Done);
+    assert_eq!(h.state_of(ids[0]), Archived);
+    assert_eq!(h.state_of(ids[2]), Archived);
     assert_eq!(h.state_of(ids[1]), Inbox);
-    assert_eq!(h.count(Done), start[3] + 2);
+    assert_eq!(h.count(Archived), start[2] + 2);
 }
 
 #[gpui_kit::gpui::test]
-fn shift_e_marks_all_from_sender_done(cx: &mut TestAppContext) {
+fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     // Move the cursor (via keys) to a message whose sender has several messages.
     let multi = |h: &mut Harness| {
@@ -350,11 +345,11 @@ fn shift_e_marks_all_from_sender_done(cx: &mut TestAppContext) {
         a.mailbox
             .messages()
             .iter()
-            .filter(|m| m.from_email == email && m.state != Done)
+            .filter(|m| m.from_email == email && m.state != Archived)
             .count()
     });
     assert_eq!(remaining, 0);
-    assert!(h.count(Done) > start[3]);
+    assert!(h.count(Archived) > start[2]);
     assert_eq!(h.accounted(), h.total());
     h.keys("u");
     assert_eq!(h.counts(), start);
@@ -365,10 +360,9 @@ fn counts_always_sum_to_total(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let total = h.total();
     let seq = [
-        "e", "j", "w", "j j", "l escape", "shift-j", "i", "2", "j", "e", "3", "w", "u", "4", "k", "i",
-        "1", "x", "j", "x", "l escape", "shift-w", "u u", "r", "a b", "cmd-enter", "shift-l", "j", "enter",
-        "shift-i", "u", "cmd-k", "m a r k space d o n e", "enter", "?", "?", "e", "shift-e",
-        "u u u", "2", "e", "x", "shift-k", "w", "escape",
+        "e", "j j", "s escape", "shift-j", "i", "2", "j", "e", "3", "u", "4", "k", "i",
+        "1", "x", "j", "x", "s escape", "u u", "r", "t e s t", "cmd-enter", "z", "j",
+        "enter", "shift-i", "u", "cmd-k", "a r c h i v e", "enter", "?", "?",
     ];
     for step in seq {
         h.keys(step);

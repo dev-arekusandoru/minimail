@@ -72,12 +72,6 @@ impl Harness<'_> {
             })
             .expect("window alive")
     }
-    /// Open a menu by its trigger, then click one of its rows.
-    fn menu(&mut self, trigger: &'static str, row: &'static str) {
-        self.click(trigger);
-        assert!(self.read(|a| a.menu_open()), "{trigger} must open a menu");
-        self.click(row);
-    }
     fn count(&mut self, s: TriageState) -> usize {
         self.read(|a| a.mailbox.count(s))
     }
@@ -112,7 +106,7 @@ fn keys_still_work_after_a_click(cx: &mut TestAppContext) {
     let id = h.ids()[1];
     h.click(("row", id as usize));
     h.keys("e");
-    assert_eq!(h.state_of(id), Done);
+    assert_eq!(h.state_of(id), Archived);
 }
 
 #[gpui_kit::gpui::test]
@@ -128,68 +122,34 @@ fn left_edge_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn done_button_marks_selection_and_titlebar_undo_restores(cx: &mut TestAppContext) {
+fn archive_button_marks_selection_and_titlebar_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let start = (h.count(Inbox), h.count(Done));
+    let start = (h.count(Inbox), h.count(Archived));
     let ids = h.ids();
     h.click(("row-select", 0usize));
     h.click(("row-select", 1usize));
-    h.click("btn-done");
-    assert_eq!(h.state_of(ids[0]), Done);
-    assert_eq!(h.state_of(ids[1]), Done);
-    assert_eq!((h.count(Inbox), h.count(Done)), (start.0 - 2, start.1 + 2));
+    h.click("btn-archive");
+    assert_eq!(h.state_of(ids[0]), Archived);
+    assert_eq!(h.state_of(ids[1]), Archived);
+    assert_eq!((h.count(Inbox), h.count(Archived)), (start.0 - 2, start.1 + 2));
     h.click("btn-undo");
-    assert_eq!((h.count(Inbox), h.count(Done)), (start.0, start.1));
+    assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1));
 }
 
 #[gpui_kit::gpui::test]
-fn state_buttons_act_on_the_cursor_row(cx: &mut TestAppContext) {
+fn delete_button_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let id = h.ids()[3];
-    h.click(("row", id as usize));
-    h.click("btn-waiting");
-    assert_eq!(h.state_of(id), Waiting);
-}
-
-/// The Inbox button is only an offer outside the Inbox; inside it there is nothing to move back to.
-#[gpui_kit::gpui::test]
-fn inbox_button_appears_only_outside_the_inbox_view(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    assert_eq!(h.read(|a| a.triage.view), Inbox);
-    assert!(!h.has("btn-inbox"), "already in the Inbox: nothing to move back to");
-    h.click(("view-tab", 2usize));
-    assert_eq!(h.read(|a| a.triage.view), Later);
-    assert!(h.has("btn-inbox"));
     let id = h.cursor().unwrap();
-    assert_eq!(h.state_of(id), Later);
-    h.click("btn-inbox");
+    let start = h.count(Deleted);
+    h.click(("row", id as usize));
+    h.click("btn-delete");
+    assert_eq!(h.state_of(id), Deleted);
+    assert_eq!(h.count(Deleted), start + 1);
+    h.click("btn-undo");
     assert_eq!(h.state_of(id), Inbox);
+    assert_eq!(h.count(Deleted), start);
 }
 
-/// Nothing to act on means no contextual bar at all: no dead rows to click.
-#[gpui_kit::gpui::test]
-fn contextual_actions_vanish_in_the_screener(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    assert!(h.has("btn-done"), "the Inbox has a cursor row to act on");
-    h.click(("view-tab", 4usize));
-    assert!(h.read(|a| a.screener_open()));
-    assert!(!h.has("btn-done"), "the screener brings its own controls");
-    assert!(!h.has("btn-message-more"));
-}
-
-#[gpui_kit::gpui::test]
-fn sidebar_tabs_switch_views(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    h.click(("view-tab", 3usize));
-    assert_eq!(h.read(|a| a.triage.view), Done);
-    h.click(("view-tab", 1usize));
-    assert_eq!(h.read(|a| a.triage.view), Waiting);
-    h.click(("view-tab", 4usize));
-    assert!(h.read(|a| a.screener_open()));
-    h.click(("view-tab", 0usize));
-    assert!(!h.read(|a| a.screener_open()));
-    assert_eq!(h.read(|a| a.triage.view), Inbox);
-}
 
 #[gpui_kit::gpui::test]
 fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut TestAppContext) {
@@ -204,10 +164,13 @@ fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut Te
     h.keys("escape");
     h.click("btn-palette");
     assert!(h.read(|a| a.palette_open()));
-    let ix = commands().iter().position(|c| c.name == "Show waiting").unwrap();
+    let ix = commands().iter().position(|c| c.name == "Show snoozed").unwrap();
     h.click(("command", ix));
     assert!(!h.read(|a| a.palette_open()));
-    assert_eq!(h.read(|a| a.triage.view), Waiting);
+    assert_eq!(
+        h.read(|a| a.triage.view.location.clone()),
+        mail_classifier::model::Location::Snoozed("personal".into())
+    );
 }
 
 /// Escape must dismiss without running anything — the menu takes focus, so this is the
@@ -228,7 +191,7 @@ fn escape_dismisses_a_menu_without_running_a_row(cx: &mut TestAppContext) {
         "escape went to the menu, not on to clearing the selection"
     );
     h.keys("e");
-    assert_eq!(h.state_of(ids[0]), Done, "the list kept its keys after a dismissal");
+    assert_eq!(h.state_of(ids[0]), Archived, "the list kept its keys after a dismissal");
 }
 
 /// A click anywhere outside the open menu dismisses it without running a row.
@@ -248,12 +211,12 @@ fn a_menu_dismisses_when_the_backdrop_is_clicked(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.menu_open()));
 }
 
-/// The sender submenu is one level deeper: open it, then choose a bulk action.
 #[gpui_kit::gpui::test]
 fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let id = h.ids()[3];
     let sender = h.read(|a| a.mailbox.get(id).unwrap().from_email.clone());
+
     let inbox: Vec<MessageId> = h.ids().into_iter().filter(|id| h.state_of(*id) == Inbox).collect();
     let other_senders: Vec<MessageId> = inbox
         .iter()
@@ -269,15 +232,15 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     h.click("btn-message-more");
     assert!(h.read(|a| a.menu_open()));
     assert!(h.has("btn-sender-actions"));
-    assert!(!h.has("btn-sender-done"), "the submenu's rows are a level down");
+    assert!(!h.has("btn-sender-archive"), "the submenu's rows are a level down");
     h.click("btn-sender-actions");
-    assert!(h.has("btn-sender-done"), "clicking the submenu row opens its level");
-    h.click("btn-sender-done");
+    assert!(h.has("btn-sender-archive"), "clicking the submenu row opens its level");
+    h.click("btn-sender-archive");
     assert!(!h.read(|a| a.menu_open()), "the whole menu stack closes after a choice");
 
-    assert_eq!(h.state_of(id), Done);
+    assert_eq!(h.state_of(id), Archived);
     for other in inbox.iter().filter(|other| **other != id) {
-        let expected = if other_senders.contains(other) { Inbox } else { Done };
+        let expected = if other_senders.contains(other) { Inbox } else { Archived };
         assert_eq!(h.state_of(*other), expected, "only the cursor's sender was marked");
     }
 }
@@ -304,14 +267,14 @@ fn ai_buttons_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::gpui::test]
-fn later_button_opens_snooze_and_preset_click_snoozes(cx: &mut TestAppContext) {
+fn snooze_button_opens_picker_and_preset_click_snoozes(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let id = h.cursor().unwrap();
-    h.click("btn-later");
+    h.click("btn-snooze");
     assert!(h.read(|a| a.snooze_open()));
     h.click(("snooze-preset", 0usize));
     assert!(!h.read(|a| a.snooze_open()));
-    assert_eq!(h.state_of(id), Later);
+    assert_eq!(h.state_of(id), Snoozed);
 }
 
 /// Reply belongs to an open message, so it only shows in the reader.

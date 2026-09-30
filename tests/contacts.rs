@@ -1,5 +1,4 @@
-//! Contact store: CRUD, normalization, search, groups, migrations, seeding and
-//! the Screener's persistence of an allowed sender.
+//! Contact store: CRUD, normalization, search, groups, migrations, and seeding.
 
 use std::rc::Rc;
 
@@ -244,39 +243,42 @@ fn groups_are_created_renamed_and_membership_toggled() {
 fn upsert_from_email_creates_minimal_contact() {
     let store = store();
     let (contact, created) = store
-        .upsert_from_email("New@Sender.example", Some("New Sender"), ContactSource::Screener)
+        .upsert_from_email("New@Sender.example", Some("New Sender"), ContactSource::Manual)
         .expect("upsert");
     assert!(created);
     assert_eq!(contact.display_name, "New Sender");
     assert_eq!(contact.emails[0].address, "new@sender.example");
-    assert_eq!(contact.source, ContactSource::Screener);
+    assert_eq!(contact.source, ContactSource::Manual);
 
     let (again, created) = store
-        .upsert_from_email("new@sender.example", Some("Renamed"), ContactSource::Screener)
+        .upsert_from_email("new@sender.example", Some("Renamed"), ContactSource::Manual)
         .expect("upsert again");
     assert!(!created, "an existing address is never re-created");
     assert_eq!(again.id, contact.id);
     assert_eq!(again.display_name, "New Sender");
 
     let (nameless, created) = store
-        .upsert_from_email("bare@sender.example", None, ContactSource::Screener)
+        .upsert_from_email("bare@sender.example", None, ContactSource::Manual)
         .expect("upsert without a name");
     assert!(created);
     assert_eq!(nameless.display_name, "bare", "falls back to the local part");
 }
 
 #[test]
-fn forget_address_removes_a_screener_contact() {
+fn forget_address_removes_a_manual_contact_address() {
     let store = store();
     let seeded = store.create(NewContact::from_email("ada@typefoundry.example", "Ada").source(ContactSource::Seed)).expect("create");
-    let screened = store
-        .upsert_from_email("new@sender.example", Some("New"), ContactSource::Screener)
+    let contact = store
+        .upsert_from_email("new@sender.example", Some("New"), ContactSource::Manual)
         .expect("upsert")
         .0;
 
     assert!(store.forget_address("new@sender.example").expect("forget"));
     assert!(!store.is_known("new@sender.example").expect("known"));
-    assert!(store.get(screened.id).unwrap().is_none(), "a Screener contact goes with its address");
+    assert!(
+        store.get(contact.id).unwrap().unwrap().emails.is_empty(),
+        "manual contacts remain after an address is forgotten"
+    );
 
     assert!(store.forget_address("ada@typefoundry.example").expect("forget"));
     assert!(store.get(seeded.id).unwrap().is_some(), "an existing contact only loses the address");
@@ -361,36 +363,33 @@ fn seeding_is_idempotent() {
 }
 
 #[test]
-fn allowing_a_screener_sender_is_persisted_and_undo_removes_it() {
-    let store = ContactStore::open_in_memory().expect("in-memory");
+fn allowing_a_new_sender_is_persisted_and_undo_removes_it() {
+    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory"));
     let messages = serde_json::json!([
         {"id": 1, "thread_id": 1, "from_name": "Known Sender", "from_email": "known@a.test",
          "to": "you@example.com", "subject": "s1", "body": "b", "received": "2026-09-01T00:00:00Z"},
         {"id": 2, "thread_id": 2, "from_name": "New Sender", "from_email": "New@a.test",
          "to": "you@example.com", "subject": "s2", "body": "b", "received": "2026-09-02T00:00:00Z"},
     ]);
-    let store = Rc::new(store);
     store.create(NewContact::from_email("known@a.test", "Known Sender")).expect("seed one contact");
 
     let json = serde_json::to_string(&messages).unwrap();
     let mut mb = Mailbox::from_json_with_contacts(&json, store.clone()).expect("mailbox");
-    assert_eq!(mb.screener_ids(), vec![2]);
+    assert!(mb.is_new_sender(2));
 
     assert!(mb.allow_sender("new@a.test"));
     assert!(!mb.allow_sender("new@a.test"), "already known");
-    assert!(mb.screener_ids().is_empty());
+    assert!(!mb.is_new_sender(2));
     assert!(store.is_known("new@a.test").expect("known"), "the decision is in the address book");
     let contact = store.get_by_email("new@a.test").unwrap().expect("contact");
     assert_eq!(contact.display_name, "New Sender", "the sender name carries over");
-    assert_eq!(contact.source, ContactSource::Screener);
 
-    // A restart reads the same store and no longer screens the sender.
     let restarted = Mailbox::from_json_with_contacts(&json, store.clone()).expect("mailbox");
-    assert!(restarted.screener_ids().is_empty());
+    assert!(!restarted.is_new_sender(2));
     assert_eq!(restarted.ids_in(mail_classifier::model::TriageState::Inbox), vec![2, 1]);
 
     assert!(mb.undo());
-    assert_eq!(mb.screener_ids(), vec![2], "undo puts the sender back in the Screener");
+    assert!(mb.is_new_sender(2), "undo restores the new sender classification");
     assert!(!store.is_known("new@a.test").expect("known"), "undo also rewinds the address book");
-    assert_eq!(store.search(&ContactQuery::new()).expect("all").len(), 1, "the Screener's contact is gone");
+    assert_eq!(store.search(&ContactQuery::new()).expect("all").len(), 1);
 }

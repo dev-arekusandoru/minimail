@@ -1,6 +1,6 @@
 use mail_classifier::judge::{
     Answer, AnswerValue, Judge, JudgeError, JudgePolicy, Kind, Mode, Question, QuestionKey, Routed,
-    StubJudge, classify, message_state, triage_questions,
+    StubJudge, classify, expects_reply, message_state, triage_questions,
 };
 use mail_classifier::model::{Message, TriageState};
 use mail_classifier::summary::{StubSummarizer, Summarizer, SummaryError};
@@ -20,6 +20,9 @@ fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
         body: body.into(),
         received: "2026-09-28T08:00:00Z".into(),
         state: TriageState::Inbox,
+        account: "personal".into(),
+        outgoing: false,
+        snooze: None,
     }
 }
 
@@ -181,27 +184,19 @@ fn noop_answers_drop_even_in_auto() {
 }
 
 #[test]
-fn suggested_state_equal_to_current_drops() {
-    let mut m = msg(1, "a@b.io", "Meeting?", "Can you make it?");
-    let a = answers(&m);
-    let st = get(&a, QuestionKey::SuggestedState);
-    let AnswerValue::Choice(i) = st.value else {
-        panic!()
-    };
-    let suggested = TriageState::ALL[i];
-    let idx = 2; // SuggestedState position
-    m.state = suggested;
-    let mut p = JudgePolicy::default();
-    p.set_mode(QuestionKey::SuggestedState, Mode::Auto { threshold: 0.0 });
-    assert!(matches!(
-        classify(&StubJudge, &p, &[&m])[idx],
-        Routed::Drop
-    ));
-    m.state = TriageState::ALL[(i + 1) % 4];
-    assert!(matches!(
-        classify(&StubJudge, &p, &[&m])[idx],
-        Routed::Auto(_)
-    ));
+fn expects_reply_heuristic_and_api() {
+    assert!(expects_reply(&StubJudge, "Let me know what you think."));
+    assert!(expects_reply(&StubJudge, "Can you send this today?"));
+    assert!(expects_reply(&StubJudge, "Thoughts"));
+    assert!(!expects_reply(&StubJudge, "Thanks, received."));
+    assert_eq!(
+        get(
+            &answers(&msg(1, "a@b.io", "s", "Could you?")),
+            QuestionKey::ExpectsReply
+        )
+        .value,
+        AnswerValue::Bool(true)
+    );
 }
 
 #[test]
@@ -214,19 +209,34 @@ fn judge_error_drops_every_question() {
 
 #[test]
 fn spam_kind_urgency_examples() {
-    let spam = msg(1, "aisha@talentloop.com", "2-minute fit check", "Hi, hiring roles.");
+    let spam = msg(
+        1,
+        "aisha@talentloop.com",
+        "2-minute fit check",
+        "Hi, hiring roles.",
+    );
     let a = answers(&spam);
     assert_eq!(get(&a, QuestionKey::Spam).value, AnswerValue::Bool(true));
     assert!(get(&a, QuestionKey::Spam).confidence >= 0.9);
 
-    let receipt = msg(2, "receipts@stripe.com", "Receipt from X", "Payment received.");
+    let receipt = msg(
+        2,
+        "receipts@stripe.com",
+        "Receipt from X",
+        "Payment received.",
+    );
     let a = answers(&receipt);
     assert_eq!(get(&a, QuestionKey::Spam).value, AnswerValue::Bool(false));
     let kind = get(&a, QuestionKey::Kind).value;
     assert_eq!(kind, AnswerValue::Choice(1));
     assert_eq!(Kind::from_index(1), Some(Kind::Receipt));
 
-    let fail = msg(3, "notifications@vercel.com", "Deployment failed", "Build failed.");
+    let fail = msg(
+        3,
+        "notifications@vercel.com",
+        "Deployment failed",
+        "Build failed.",
+    );
     let AnswerValue::Score(s) = get(&answers(&fail), QuestionKey::Urgency).value else {
         panic!()
     };
@@ -240,8 +250,11 @@ fn spam_kind_urgency_examples() {
 fn policy_defaults_setters_and_toggle() {
     let mut p = JudgePolicy::default();
     assert_eq!(p.mode(QuestionKey::Spam), Mode::Auto { threshold: 0.9 });
-    assert_eq!(p.mode(QuestionKey::SuggestedState), Mode::Review);
-    assert_eq!(p.mode(QuestionKey::NeedsReply), Mode::Auto { threshold: 0.8 });
+    assert_eq!(p.mode(QuestionKey::ExpectsReply), Mode::Review);
+    assert_eq!(
+        p.mode(QuestionKey::NeedsReply),
+        Mode::Auto { threshold: 0.8 }
+    );
     assert_eq!(p.mode(QuestionKey::Urgency), Mode::Auto { threshold: 0.7 });
     assert_eq!(p.mode(QuestionKey::Kind), Mode::Auto { threshold: 0.6 });
 

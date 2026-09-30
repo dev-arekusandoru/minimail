@@ -37,7 +37,7 @@ pub fn spam_box() -> Mailbox {
 /// Undo startup auto-labels until message 1 is a plain Inbox message again.
 pub fn reset_spam(h: &mut Harness<'_>) {
     for _ in 0..20 {
-        if h.state_of(1) == Inbox && !h.has_tag(1, Tag::Spam) {
+        if h.state_of(1) == Inbox && !h.has_tag(1, Tag::PossibleSpam) {
             return;
         }
         h.keys("u");
@@ -48,13 +48,13 @@ pub fn reset_spam(h: &mut Harness<'_>) {
 #[gpui_kit::gpui::test]
 pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
-    assert!(h.has_tag(1, Tag::Spam), "startup auto-applies the spam label");
-    assert_eq!(h.state_of(1), Done);
+    assert!(h.has_tag(1, Tag::PossibleSpam), "startup auto-applies the spam label");
+    assert_eq!(h.state_of(1), Inbox);
     reset_spam(&mut h);
     assert!(h.read(|a| a.mailbox.pending(1).iter().all(|s| s.key != QuestionKey::Spam)));
     h.keys("c");
-    assert!(h.has_tag(1, Tag::Spam), "Auto: c applies Tag::Spam");
-    assert_eq!(h.state_of(1), Done);
+    assert!(h.has_tag(1, Tag::PossibleSpam), "Auto: c applies the PossibleSpam tag");
+    assert_eq!(h.state_of(1), Inbox);
 }
 
 #[gpui_kit::gpui::test]
@@ -64,7 +64,7 @@ pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     h.keys("cmd-, space escape");
     assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
     h.keys("c");
-    assert!(!h.has_tag(1, Tag::Spam), "Review: no auto-applied label");
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "Review: no auto-applied label");
     assert_eq!(h.state_of(1), Inbox);
     assert!(
         h.read(|a| a.mailbox.pending(1).iter().any(|s| s.key == QuestionKey::Spam)),
@@ -72,8 +72,8 @@ pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     );
     // Accepting it applies the label.
     h.keys("y");
-    assert!(h.has_tag(1, Tag::Spam));
-    assert_eq!(h.state_of(1), Done);
+    assert!(h.has_tag(1, Tag::PossibleSpam));
+    assert_eq!(h.state_of(1), Inbox);
 }
 
 #[gpui_kit::gpui::test]
@@ -91,7 +91,7 @@ pub fn search_excludes_muted_threads(cx: &mut TestAppContext) {
 pub fn summary_is_opt_in(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert!(!h.read(|a| a.summaries_enabled));
-    h.keys("s");
+    h.keys("z");
     assert!(h.toast().contains("Enable summaries"), "toast was {:?}", h.toast());
     assert!(h.read(|a| a.summary_shown()).is_none());
 
@@ -101,7 +101,7 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.summaries_enabled));
     h.keys("escape");
     assert!(!h.read(|a| a.settings_open()));
-    h.keys("s");
+    h.keys("z");
     let summary = h.read(|a| a.summary_shown()).expect("summary shown after enabling");
     assert!(!summary.summary.is_empty());
 }
@@ -109,9 +109,9 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------- Palette / help
 
 /// Keys introduced by the v2 features.
-pub const NEW_KEYS: [&str; 14] = [
-    "l", "y", "n", "shift-y", "shift-n", "shift-r", "5", "m", "shift-u", "s", "cmd-,", "t", "/",
-    "c",
+pub const NEW_KEYS: [&str; 21] = [
+    "e", "d", "i", "shift-e", "shift-d", "shift-i", "s", "z", "ctrl-g", "y", "n",
+    "shift-y", "shift-n", "shift-r", "5", "m", "shift-u", "cmd-,", "t", "/", "c",
 ];
 
 #[gpui_kit::gpui::test]
@@ -149,20 +149,16 @@ pub fn every_new_command_is_in_palette_search_and_help(cx: &mut TestAppContext) 
 // ---------------------------------------------------------------- Invariant
 
 #[gpui_kit::gpui::test]
-pub fn counts_plus_screener_plus_hidden_equal_total_over_mixed_sequence(cx: &mut TestAppContext) {
+pub fn counts_plus_hidden_equal_total_over_mixed_sequence(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.assert_invariant("start");
     let steps = [
-        "e", "w", "j j x j x e", "shift-e", "u", "l 1", "shift-w", "m", "5", "a", "b", "1",
-        "j shift-u", "u u", "r", "t", "e w i e", "escape", "c", "y", "n", "2", "i", "3", "4",
-        "shift-i", "shift-l", "1", "u u u u", "cmd-z",
+        "e", "j j x j x e", "shift-e", "u", "s 1", "m", "1",
+        "j shift-u", "u u", "e i e", "escape", "c", "y", "n", "2", "i",
+        "shift-i", "1", "u u u u", "cmd-z",
     ];
     for step in steps {
-        if step == "r" {
-            h.send_reply("ok");
-        } else {
-            h.keys(step);
-        }
+        h.keys(step);
         // Panels/pickers left open by a step must not leak into the next.
         h.keys("escape");
         h.assert_invariant(step);

@@ -2,6 +2,6 @@ mod harness;
 
 mod misc;
 mod outbox_classifier;
-mod rules_screener;
+mod rules_new_senders;
 mod session_search;
-mod waiting_snooze;
+mod snooze;

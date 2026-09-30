@@ -1,4 +1,4 @@
-//! Small presentational panels: rules list, session card, summary card, rule banner, screener header.
+//! Small presentational panels: rules list, session card, summary card, rule banner, New Senders header.
 
 use crate::app::overlay::FitViewport as _;
 use crate::app::chrome::format_time;
@@ -315,19 +315,19 @@ impl RenderOnce for RuleBanner {
     }
 }
 
-/// Header of the screener view.
+/// Header controls for the New Senders chip.
 #[derive(IntoElement)]
-pub struct ScreenerHeader {
+pub struct NewSendersHeader {
     count: usize,
 }
 
-impl ScreenerHeader {
+impl NewSendersHeader {
     pub fn new(count: usize) -> Self {
         Self { count }
     }
 }
 
-impl RenderOnce for ScreenerHeader {
+impl RenderOnce for NewSendersHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme::active(cx);
         div()
@@ -338,11 +338,11 @@ impl RenderOnce for ScreenerHeader {
             .py_1()
             .border_b_1()
             .border_color(t.border)
-            .bg(t.state_screener.opacity(0.10))
+            .bg(t.new_sender.opacity(0.10))
             .text_xs()
-            .text_color(t.state_screener)
+            .text_color(t.new_sender)
             .child(SharedString::from(format!(
-                "Screener · {} from new senders",
+                "New Senders · {} messages",
                 self.count
             )))
             .child(
@@ -350,8 +350,8 @@ impl RenderOnce for ScreenerHeader {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(button("screener-allow", "Allow", "Allow sender", "a", cx).on_click(run(AllowSender)))
-                    .child(button("screener-block", "Block", "Block sender", "b", cx).on_click(run(BlockSender))),
+                    .child(button("new-sender-allow", "Allow", "Allow sender", "a", cx).on_click(run(AllowSender)))
+                    .child(button("new-sender-block", "Block", "Block sender", "b", cx).on_click(run(BlockSender))),
             )
     }
 }

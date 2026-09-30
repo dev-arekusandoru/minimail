@@ -1,4 +1,3 @@
-use mail_classifier::model::TriageState;
 use mail_classifier::theme::{DEFAULT_THEME, Theme, ThemeRegistry, default_theme};
 
 fn custom(name: &str, background: &str) -> String {
@@ -69,7 +68,7 @@ fn load_dir_skips_invalid_files_and_missing_dir_is_fine() {
 #[test]
 fn state_colors_are_distinct_per_state() {
     let t = default_theme();
-    let all = [TriageState::Inbox, TriageState::Waiting, TriageState::Later, TriageState::Done];
+    let all = mail_classifier::model::TriageState::ALL;
     for (i, a) in all.iter().enumerate() {
         for b in &all[i + 1..] {
             assert_ne!(t.state_color(*a), t.state_color(*b));

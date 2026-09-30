@@ -14,10 +14,10 @@ pub struct StubJudge;
 /// Signals extracted once per message.
 struct Features {
     text: String,
+    body: String,
     kind: Kind,
     spam_p: f32,
 }
-
 const AUTOMATED_LOCALS: [&str; 12] = [
     "no-reply",
     "noreply",
@@ -49,7 +49,8 @@ impl Features {
         let field = |k: &str| state.get(k).and_then(Value::as_str).unwrap_or("");
         let email = sender_email(field("sender"));
         let subject = field("subject").to_lowercase();
-        let text = format!("{subject}\n{}", field("body").to_lowercase());
+        let body = field("body").to_owned();
+        let text = format!("{subject}\n{}", body.to_lowercase());
         let (local, domain) = email.split_once('@').unwrap_or((email.as_str(), ""));
 
         let spam_p = if domain == "talentloop.com" {
@@ -87,6 +88,7 @@ impl Features {
 
         Features {
             text,
+            body,
             kind,
             spam_p,
         }
@@ -120,7 +122,14 @@ impl Features {
         }
         if has_any(
             &self.text,
-            &["asap", "urgent", "failed", "deadline", "due friday", "new sign-in"],
+            &[
+                "asap",
+                "urgent",
+                "failed",
+                "deadline",
+                "due friday",
+                "new sign-in",
+            ],
         ) {
             return (4, 0.2);
         }
@@ -136,23 +145,6 @@ impl Features {
             }
             Kind::Person if needs_reply => (3, 0.3),
             _ => (2, 0.35),
-        }
-    }
-
-    /// (state, confidence)
-    fn suggested_state(&self, needs_reply: bool) -> (TriageState, f32) {
-        if self.spam_p >= 0.5 {
-            return (TriageState::Done, 0.8);
-        }
-        match self.kind {
-            Kind::Newsletter => (TriageState::Later, 0.7),
-            Kind::Receipt => (TriageState::Done, 0.65),
-            Kind::Notification if has_any(&self.text, &["failed", "new sign-in", "tomorrow"]) => {
-                (TriageState::Inbox, 0.75)
-            }
-            Kind::Notification => (TriageState::Done, 0.55),
-            Kind::Person if needs_reply => (TriageState::Inbox, 0.85),
-            _ => (TriageState::Later, 0.45),
         }
     }
 }
@@ -220,14 +212,17 @@ impl StubJudge {
         let answer = match (key, q) {
             (QuestionKey::Spam, Question::Bool { .. }) => bool_answer(f.spam_p),
             (QuestionKey::NeedsReply, Question::Bool { .. }) => bool_answer(f.needs_reply_p()),
-            (QuestionKey::SuggestedState, Question::Choice { options, .. }) => {
-                let (state, conf) = f.suggested_state(needs_reply);
-                let idx = TriageState::ALL
-                    .iter()
-                    .position(|s| *s == state)
-                    .filter(|i| *i < options.len())
-                    .ok_or_else(|| JudgeError::Malformed("state options".into()))?;
-                choice_answer(peaked(options.len(), idx, conf))
+            (QuestionKey::ExpectsReply, Question::Bool { .. }) => {
+                let body = f.body.to_lowercase();
+                bool_answer(
+                    if body.contains('?')
+                        || has_any(&body, &["let me know", "can you", "could you", "thoughts"])
+                    {
+                        0.95
+                    } else {
+                        0.05
+                    },
+                )
             }
             (QuestionKey::Urgency, Question::Score { levels, .. }) if *levels >= 2 => {
                 let (level, sharp) = f.urgency(needs_reply);
@@ -262,7 +257,10 @@ impl Judge for StubJudge {
         let f = Features::from_state(state);
         questions
             .iter()
-            .map(|(k, q)| Ok((*k, Self::answer(&f, *k, q)?)))
+            .map(|(k, q)| {
+                // Spam answers are interpreted by the model as Tag::PossibleSpam, never a state change.
+                Ok((*k, Self::answer(&f, *k, q)?))
+            })
             .collect()
     }
 }

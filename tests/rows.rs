@@ -108,7 +108,7 @@ fn thread_header_sizes_to_its_own_content_and_never_matches_a_message_row() {
 
 #[test]
 fn overflow_keeps_top_priority_icons_and_lists_the_rest() {
-    let tags = [Tag::Spam, Tag::NeedsReply, Tag::Urgent(5), Tag::Kind(Kind::Receipt), Tag::Urgent(1)];
+    let tags = [Tag::PossibleSpam, Tag::NeedsReply, Tag::Urgent(5), Tag::Kind(Kind::Receipt), Tag::Urgent(1)];
     let glyphs = glyphs_for(&GlyphInputs {
         tags: &tags,
         pending: &[],
@@ -117,9 +117,9 @@ fn overflow_keeps_top_priority_icons_and_lists_the_rest() {
         snoozed: false,
         attachment: true,
     });
-    assert_eq!(glyphs[0], Glyph::Spam, "most important first");
+    assert_eq!(glyphs[0], Glyph::PossibleSpam, "most important first");
     let (shown, hidden) = split_overflow(&glyphs, 3);
-    assert_eq!(shown, [Glyph::Spam, Glyph::UrgentHigh, Glyph::NeedsReply]);
+    assert_eq!(shown, [Glyph::PossibleSpam, Glyph::UrgentHigh, Glyph::NeedsReply]);
     assert!(hidden.contains(&Glyph::UrgentLow), "low-signal glyphs only appear in +N");
     assert!(hidden.contains(&Glyph::KindReceipt));
     assert_eq!(shown.len() + hidden.len(), glyphs.len());
@@ -133,9 +133,9 @@ fn narrower_panels_show_fewer_icons() {
 
 #[test]
 fn suggestion_is_first_and_low_signal_never_takes_a_slot() {
-    let glyphs = [Glyph::UrgentLow, Glyph::KindOther, Glyph::Spam];
+    let glyphs = [Glyph::UrgentLow, Glyph::KindOther, Glyph::PossibleSpam];
     let (shown, hidden) = split_overflow(&glyphs, 4);
-    assert_eq!(shown, [Glyph::Spam]);
+    assert_eq!(shown, [Glyph::PossibleSpam]);
     assert_eq!(hidden, [Glyph::UrgentLow, Glyph::KindOther]);
     assert_eq!(Glyph::Suggestion.spec().priority, 0);
 }

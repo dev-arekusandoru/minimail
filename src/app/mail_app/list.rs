@@ -10,11 +10,10 @@ impl MailApp {
         let title = match &self.mode {
             ListMode::State if self.grouped() => format!(
                 "{} · {count} · {} threads",
-                self.triage.view.label().to_uppercase(),
+                view_label(&self.triage.view),
                 self.rows().iter().filter(|r| !matches!(r, Row::Child { .. })).count()
             ),
-            ListMode::State => format!("{} · {count}", self.triage.view.label().to_uppercase()),
-            ListMode::Screener => format!("SCREENER · {count}"),
+            ListMode::State => format!("{} · {count}", view_label(&self.triage.view)),
             ListMode::Search(q) => format!("search: {q} · {count}"),
         };
         let header = div()
@@ -42,10 +41,8 @@ impl MailApp {
                 )
             });
         let body = if count == 0 {
-            let view = self.triage.view;
             let empty = match &self.mode {
-                ListMode::State => EmptyState::new(view).into_any_element(),
-                ListMode::Screener => div().child("No new senders").into_any_element(),
+                ListMode::State => div().child(format!("No mail in {}", view_label(&self.triage.view))).into_any_element(),
                 ListMode::Search(_) => div().child("No matches").into_any_element(),
             };
             div()
@@ -75,8 +72,8 @@ impl MailApp {
             .when(stacked, |d| d.w_full().h(px(self.list_h)).min_h_0())
             .when(!stacked, |d| d.w(px(self.list_w)).h_full().min_w_0())
             .child(header)
-            .when(self.mode == ListMode::Screener, |d| {
-                d.child(ScreenerHeader::new(count))
+            .when(self.new_senders_open(), |d| {
+                d.child(NewSendersHeader::new(count))
             })
             .child(body)
             .into_any_element()

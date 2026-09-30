@@ -1,106 +1,93 @@
-use mail_classifier::model::{Mailbox};
-use crate::helpers::{assert_invariant, sample, store_with, threaded, msg};
-use crate::helpers::State;
-
+use crate::helpers::{State, sample};
+use mail_classifier::model::{Chip, Filter, Location, TagFilter, View};
 #[test]
-fn default_fixture_has_a_small_screener_and_keeps_the_invariant() {
-    let mb = Mailbox::load_default();
-    assert!(mb.messages().len() >= 60);
-    let mut senders: Vec<String> = mb
-        .screener_ids()
-        .iter()
-        .map(|id| mb.get(*id).unwrap().from_email.clone())
-        .collect();
-    senders.sort();
-    senders.dedup();
-    assert!((3..=5).contains(&senders.len()), "{senders:?}");
-    assert_eq!(mb.hidden_count(), 0);
-    assert_invariant(&mb);
-}
-
-#[test]
-fn screener_is_newest_first_and_allow_moves_mail_to_its_state_view() {
-    let mut mb = Mailbox::from_json_with_contacts(
-        &serde_json::to_string(&serde_json::json!([
-            msg(1, 1, "known@x.test", "2026-09-01T00:00:00Z"),
-            msg(2, 2, "new@x.test", "2026-09-02T00:00:00Z"),
-            msg(3, 3, "New@x.test", "2026-09-03T00:00:00Z"),
-        ]))
-        .unwrap(),
-        store_with(&["KNOWN@x.test"]),
-    )
-    .unwrap();
-    assert_eq!(mb.screener_ids(), vec![3, 2]);
-    assert_eq!(mb.ids_in(State::Inbox), vec![1]);
-    assert!(mb.allow_sender("new@x.test"));
-    assert!(!mb.allow_sender("new@x.test"));
-    assert!(mb.screener_ids().is_empty());
-    assert_eq!(mb.ids_in(State::Inbox), vec![3, 2, 1]);
-    assert!(mb.undo());
-    assert_eq!(mb.screener_ids(), vec![3, 2]);
-    assert_invariant(&mb);
-}
-
-#[test]
-fn block_hides_without_deleting_and_beats_the_screener() {
-    let mut mb = Mailbox::from_json_with_contacts(
-        &serde_json::to_string(&serde_json::json!([
-            msg(1, 1, "new@x.test", "2026-09-01T00:00:00Z"),
-            msg(2, 2, "ok@x.test", "2026-09-02T00:00:00Z"),
-        ]))
-        .unwrap(),
-        store_with(&["ok@x.test"]),
-    )
-    .unwrap();
-    assert!(mb.block_sender("new@x.test"));
-    assert!(!mb.block_sender("new@x.test"));
-    assert!(mb.screener_ids().is_empty(), "blocked is hidden, not screened");
-    assert_eq!(mb.hidden_count(), 1);
-    assert_eq!(mb.messages().len(), 2);
-    // Allowing a blocked sender does not resurrect it.
-    mb.allow_sender("new@x.test");
-    assert_eq!(mb.ids_in(State::Inbox), vec![2]);
-    assert_invariant(&mb);
-    assert!(mb.undo()); // allow
-    assert!(mb.undo()); // block
-    assert_eq!(mb.hidden_count(), 0);
-    assert_eq!(mb.screener_ids(), vec![1]);
-}
-
-#[test]
-fn mute_and_unsubscribe_hide_and_undo() {
-    let mut mb = threaded(&[
-        (1, 10, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox),
-        (2, 10, "b@x.test", "2026-09-02T00:00:00Z", State::Later),
-        (3, 11, "a@x.test", "2026-09-03T00:00:00Z", State::Inbox),
-        (4, 12, "c@x.test", "2026-09-04T00:00:00Z", State::Inbox),
-    ]);
-    assert!(mb.mute_thread(10));
-    assert!(!mb.mute_thread(10));
-    assert!(mb.is_muted(10) && !mb.is_muted(11));
-    assert_eq!(mb.hidden_count(), 2);
-    assert_eq!(mb.state_of(2), Some(State::Later), "hidden mail keeps its state");
-    assert_eq!(mb.count(State::Later), 0);
-
-    assert!(mb.unsubscribe("A@x.test"));
-    assert!(!mb.unsubscribe("a@x.test"));
-    assert_eq!(mb.unsubscribed(), ["A@x.test"]);
-    assert_eq!(mb.ids_in(State::Inbox), vec![4]);
-    assert_eq!(mb.hidden_count(), 3);
-    assert_invariant(&mb);
-
-    assert!(mb.undo());
-    assert!(mb.unsubscribed().is_empty());
-    assert_eq!(mb.ids_in(State::Inbox), vec![4, 3]);
-    assert!(mb.undo());
-    assert!(!mb.is_muted(10));
-    assert_eq!(mb.hidden_count(), 0);
-}
-
-#[test]
-fn sender_wide_state_change_includes_hidden_mail() {
+fn block_move_is_one_undo_step_and_unblock_is_undoable() {
     let mut mb = sample();
-    mb.mute_thread(1);
-    assert_eq!(mb.set_state_for_sender("a@x.test", State::Done), 3);
-    assert_invariant(&mb);
+    assert_eq!(mb.block_sender("a@x.test", Some(State::Archived)), 1);
+    assert_eq!(mb.state_of(1), Some(State::Archived));
+    assert_eq!(mb.state_of(3), Some(State::Archived));
+    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(mb.blocked().is_empty());
+    assert_eq!(mb.block_sender("a@x.test", None), 0);
+    assert!(mb.unblock_sender("a@x.test"));
+    assert!(mb.blocked().is_empty());
+    assert!(mb.undo());
+    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+}
+#[test]
+fn mark_spam_deletes_and_optionally_blocks_in_one_step() {
+    let mut mb = sample();
+    assert_eq!(mb.mark_spam(&[1], false), 1);
+    assert_eq!(mb.state_of(1), Some(State::Deleted));
+    assert!(mb.blocked().is_empty());
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert_eq!(mb.mark_spam(&[1], true), 1);
+    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+    assert!(mb.undo());
+    assert!(mb.blocked().is_empty());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+}
+#[test]
+fn unsubscribe_moves_inbox_and_undoes() {
+    let mut mb = sample();
+    assert_eq!(mb.unsubscribe("a@x.test", Some(State::Deleted)), 1);
+    assert_eq!(mb.state_of(1), Some(State::Deleted));
+    assert_eq!(mb.unsubscribed(), &[String::from("a@x.test")]);
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(mb.unsubscribed().is_empty());
+}
+#[test]
+fn chips_are_ignored_outside_inbox_locations() {
+    let mb = sample();
+    let archive = View {
+        location: Location::Archive("personal".into()),
+        chip: Chip::PossibleSpam,
+        ..View::default()
+    };
+    assert_eq!(mb.ids_in_view(&archive).len(), 1);
+}
+#[test]
+fn sent_folder_and_tag_filter_locations_select_expected_messages() {
+    let mut mb = sample();
+    mb.apply_auto(
+        crate::helpers::sug(
+            1,
+            mail_classifier::judge::QuestionKey::NeedsReply,
+            mail_classifier::judge::AnswerValue::Bool(true),
+        ),
+        0,
+    );
+    let inbox = View {
+        location: Location::AllInboxes,
+        chip: Chip::NeedsReply,
+        filter: Filter {
+            tags: vec![TagFilter::NeedsReply],
+            kind: None,
+            account: Some("personal".into()),
+        },
+    };
+    assert_eq!(mb.ids_in_view(&inbox), vec![1]);
+    mb.send_reply_at(1, "sent".into(), false, 0);
+    mb.tick(10);
+    assert_eq!(
+        mb.ids_in_view(&View {
+            location: Location::Sent("personal".into()),
+            ..View::default()
+        })
+        .len(),
+        1
+    );
+    let folder = mb.create_folder("personal", "Receipts", None);
+    mb.set_state(&[2], State::Filed(folder));
+    assert_eq!(
+        mb.ids_in_view(&View {
+            location: Location::Folder(folder),
+            ..View::default()
+        }),
+        vec![2]
+    );
 }

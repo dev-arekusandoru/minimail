@@ -1,0 +1,4 @@
+[
+  {"id":"personal","name":"Personal","email":"you@example.com","color":"#61afef","folders":[{"id":1,"name":"Receipts"},{"id":2,"name":"Travel"},{"id":3,"name":"Family"}]},
+  {"id":"work","name":"Work","email":"you@acme.co","color":"#c678dd","folders":[{"id":4,"name":"Projects"},{"id":5,"name":"Northwind","parent":4},{"id":6,"name":"Recruiting"}]}
+]

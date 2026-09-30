@@ -1,6 +1,6 @@
 //! Root view: rail + message list + reader, hint bar, help overlay, toast,
 //! command palette, reply composer, snooze picker, settings/rules panels,
-//! screener, search and triage-session modes.
+//! search and triage-session modes.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
-use crate::app::chrome::{EmptyState, HelpOverlay, HintBar, HintMode, ViewTabs};
+use crate::app::chrome::{HelpOverlay, HintBar, HintMode, ViewTabs};
 use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::row::{self, RowVisual};
 use crate::app::overlay::overlay;
@@ -19,13 +19,13 @@ use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::menu::MenuPanel;
 use crate::app::panels::{
-    RuleBanner, RulesEvent, RulesPanel, ScreenerHeader, SessionCard, SummaryCard,
+    RuleBanner, RulesEvent, RulesPanel, NewSendersHeader, SessionCard, SummaryCard,
 };
 use crate::app::settings::{SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::judge::{JudgePolicy, Routed, StubJudge, classify};
-use crate::model::{Mailbox, Message, MessageId, Triage, TriageState};
+use crate::model::{Chip, Location, Mailbox, Message, MessageId, Triage, TriageState, View};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
@@ -50,6 +50,17 @@ use panes::{Orientation as PaneLayout, Panes};
 use mouse::close_on_backdrop;
 use reader::format_when;
 
+fn view_label(view: &View) -> &'static str {
+    match &view.location {
+        Location::AllInboxes | Location::Inbox(_) => "Inbox",
+        Location::Snoozed(_) => "Snoozed",
+        Location::Archive(_) => "Archive",
+        Location::Trash(_) => "Trash",
+        Location::Sent(_) => "Sent",
+        Location::Folder(_) => "Folder",
+    }
+}
+
 /// Height of the app-owned titlebar (also anchors the global menu below it).
 const HEADER_H: f32 = 36.;
 /// Height of the contextual action bar.
@@ -61,7 +72,6 @@ const TOAST_MS: u64 = 4000;
 enum ListMode {
     /// One of the four triage states (`Triage::view`).
     State,
-    Screener,
     /// Search results for the (already stripped) query text.
     Search(String),
 }
@@ -142,7 +152,7 @@ impl MailApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Real-time heartbeat: wakes snoozed mail, resurfaces Waiting, flushes the outbox.
+        // Real-time heartbeat wakes snoozed mail and flushes the outbox.
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -154,7 +164,7 @@ impl MailApp {
         .detach();
         let mut app = Self {
             mailbox,
-            triage: Triage::new(TriageState::Inbox),
+            triage: Triage::new(View::default()),
             opened: None,
             palette: None,
             compose: None,
@@ -195,7 +205,7 @@ impl MailApp {
         app
     }
 
-    /// Advance time-based mailbox behavior (snooze wake-up, Waiting resurfacing, outbox flush).
+    /// Advance time-based mailbox behavior, including snooze wake-up and outbox flush.
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         let now = self.now();
         self.mailbox.tick(now);

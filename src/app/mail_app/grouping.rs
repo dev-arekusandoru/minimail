@@ -26,7 +26,7 @@ impl MailApp {
         if !self.grouped() {
             return Vec::new();
         }
-        let ids = self.mailbox.ids_in(self.triage.view);
+        let ids = self.mailbox.ids_in_view(&self.triage.view);
         let groups = threads::group(&ids, |id| self.mailbox.get(id));
         threads::rows(&groups, &self.expanded)
     }
@@ -153,7 +153,7 @@ impl MailApp {
         }
         if self.grouped() {
             let thread = self.mailbox.get(id).map(|m| m.thread_id);
-            let in_panel = self.mailbox.ids_in(self.triage.view).contains(&id);
+            let in_panel = self.mailbox.ids_in_view(&self.triage.view).contains(&id);
             if reveal && in_panel && let Some(t) = thread {
                 self.expanded.insert(t);
             }

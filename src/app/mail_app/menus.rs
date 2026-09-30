@@ -95,7 +95,7 @@ impl MailApp {
             MenuItem::action(
                 "btn-summarize",
                 "Summarize thread",
-                "s",
+                "z",
                 || Box::new(SummarizeThread),
             ),
             MenuItem::action("btn-mute", "Mute thread", "m", || Box::new(MuteThread)),
@@ -112,28 +112,22 @@ impl MailApp {
             "Sender actions",
             vec![
                 MenuItem::action(
-                    "btn-sender-done",
-                    "All done",
+                    "btn-sender-archive",
+                    "Archive from sender",
                     "shift-e",
-                    || Box::new(SenderDone),
+                    || Box::new(SenderArchive),
                 ),
                 MenuItem::action(
-                    "btn-sender-waiting",
-                    "All waiting",
-                    "shift-w",
-                    || Box::new(SenderWaiting),
+                    "btn-sender-delete",
+                    "Delete from sender",
+                    "shift-d",
+                    || Box::new(SenderDelete),
                 ),
                 MenuItem::action(
                     "btn-sender-inbox",
-                    "All to inbox",
+                    "Move sender to inbox",
                     "shift-i",
                     || Box::new(SenderInbox),
-                ),
-                MenuItem::action(
-                    "btn-sender-later",
-                    "All later",
-                    "shift-l",
-                    || Box::new(SenderLater),
                 ),
             ],
         ));

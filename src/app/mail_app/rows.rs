@@ -12,8 +12,8 @@ impl MailApp {
             HintMode::Rules
         } else if self.in_session() || self.session_end.is_some() {
             HintMode::Session(self.session_end.is_some())
-        } else if self.mode == ListMode::Screener {
-            HintMode::Screener
+        } else if self.new_senders_open() {
+            HintMode::NewSenders
         } else {
             match self.triage.selected().len() {
                 0 => HintMode::List,
@@ -82,12 +82,12 @@ impl MailApp {
             return (Vec::new(), Vec::new());
         };
         let pending = self.mailbox.pending(id);
-        let return_time_shown = self.triage.view == TriageState::Later && self.mode == ListMode::State;
+        let return_time_shown = matches!(&self.triage.view.location, Location::Snoozed(_)) && self.mode == ListMode::State;
         let glyphs = icons::glyphs_for(&GlyphInputs {
             tags: self.mailbox.tags(id),
             pending: &pending,
             muted: self.mailbox.is_muted(msg.thread_id),
-            new_sender: self.mailbox.is_screened(id),
+            new_sender: self.mailbox.is_new_sender(id),
             snoozed: self.mailbox.snoozed_until(id).is_some() && !return_time_shown,
             attachment: crate::preview::mentions_attachment(&msg.subject, &msg.body),
         });
@@ -107,7 +107,7 @@ impl MailApp {
         let mut visual = self.row_visual(msg.id);
         visual.cursor = ix == self.cursor_ix();
         let date = match self.mailbox.snoozed_until(msg.id) {
-            Some(until) if self.triage.view == TriageState::Later && self.mode == ListMode::State => {
+            Some(until) if matches!(&self.triage.view.location, Location::Snoozed(_)) && self.mode == ListMode::State => {
                 format!("↩ {}", format_when(until))
             }
             _ => Self::clock_label(&msg.received, newest),

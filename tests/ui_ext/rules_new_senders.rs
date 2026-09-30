@@ -1,5 +1,5 @@
-use gpui_kit::{TestAppContext};
-use mail_classifier::model::{Mailbox};
+use gpui_kit::TestAppContext;
+use mail_classifier::model::{Chip, Location, Mailbox};
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness_with, json, mailbox, msg};
 use mail_classifier::contacts::{ContactStore, NewContact};
@@ -17,9 +17,9 @@ pub fn rules_box() -> Mailbox {
     ])
 }
 
-/// Sender-wide Done from the Inbox cursor, then bring one message back so it can be repeated.
-pub fn repeat_sender_done(h: &mut Harness<'_>) {
-    h.keys("shift-e 4 i 1");
+/// Sender-wide archive from the Inbox cursor, then bring one message back so it can be repeated.
+pub fn repeat_sender_archive(h: &mut Harness<'_>) {
+    h.keys("shift-e 3 i 1");
 }
 
 #[gpui_kit::gpui::test]
@@ -27,24 +27,24 @@ pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestA
     let mut h = harness_with(cx, rules_box());
     h.keys("shift-e");
     assert_eq!(h.read(|a| a.pending_rule()), None, "no suggestion after the first action");
-    assert_eq!(h.count(Done), 3);
+    assert_eq!(h.count(Archived), 3);
 
-    repeat_sender_done(&mut h);
+    repeat_sender_archive(&mut h);
     assert_eq!(h.read(|a| a.pending_rule()), None);
     h.keys("shift-e");
     let rule = h.read(|a| a.pending_rule()).expect("suggested on the 2nd identical action");
     assert_eq!(rule.sender, "sam@news.io");
-    assert_eq!(rule.state, Done);
+    assert_eq!(rule.state, Archived);
 
     // Bring another message from the sender back, then accept: rule applies to it.
-    h.keys("4");
+    h.keys("3");
     let id = h.cursor().unwrap();
     h.keys("i 1");
     assert_eq!(h.state_of(id), Inbox);
     h.keys("shift-y");
     assert_eq!(h.read(|a| a.pending_rule()), None);
-    assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), Some(Done));
-    assert_eq!(h.state_of(id), Done, "accepted rule is applied to the sender's inbox mail");
+    assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), Some(Archived));
+    assert_eq!(h.state_of(id), Archived, "accepted rule is applied to the sender's inbox mail");
     h.assert_invariant("accept rule");
 }
 
@@ -52,7 +52,7 @@ pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestA
 pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
     h.keys("shift-e");
-    repeat_sender_done(&mut h);
+    repeat_sender_archive(&mut h);
     h.keys("shift-e");
     assert!(h.read(|a| a.pending_rule()).is_some());
     h.keys("shift-n");
@@ -60,7 +60,7 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
     assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), None);
 
     for _ in 0..3 {
-        repeat_sender_done(&mut h);
+        repeat_sender_archive(&mut h);
         h.keys("shift-e");
         assert_eq!(h.read(|a| a.pending_rule()), None, "dismissed rules stay dismissed");
     }
@@ -71,7 +71,7 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
 pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
     h.keys("shift-e");
-    repeat_sender_done(&mut h);
+    repeat_sender_archive(&mut h);
     h.keys("shift-e shift-y");
     assert_eq!(h.read(|a| a.rules.rules().len()), 1);
 
@@ -84,9 +84,9 @@ pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.rules_open()));
 }
 
-// ---------------------------------------------------------------- Screener
+// ---------------------------------------------------------------- New-sender chip
 
-pub fn screener_box() -> Mailbox {
+pub fn new_sender_box() -> Mailbox {
     let msgs = json(&[
         msg(1, 1, "known@a.io", "k1", 25, "Inbox"),
         msg(2, 2, "new1@a.io", "n1a", 24, "Inbox"),
@@ -99,31 +99,31 @@ pub fn screener_box() -> Mailbox {
 }
 
 #[gpui_kit::gpui::test]
-pub fn screener_allow_and_block(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, screener_box());
-    assert_eq!(h.count(Inbox), 1, "unscreened mail is not in the inbox");
-    h.assert_invariant("start");
+pub fn new_senders_chip_filters_all_inboxes_and_allows_or_blocks_senders(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, new_sender_box());
+    assert_eq!(h.visible(), vec![1, 2, 3, 4]);
 
     h.keys("5");
-    assert!(h.read(|a| a.screener_open()));
+    assert_eq!(h.read(|a| a.triage.view.location.clone()), Location::AllInboxes);
+    assert_eq!(h.read(|a| a.triage.view.chip), Chip::NewSenders);
     assert_eq!(h.visible(), vec![2, 3, 4]);
 
-    // Allow: the whole sender moves to the inbox.
     h.keys("a");
     assert_eq!(h.visible(), vec![4]);
-    assert_eq!(h.count(Inbox), 3);
-    h.assert_invariant("allow");
+    assert_eq!(h.state_of(2), Inbox);
+    assert_eq!(h.state_of(3), Inbox);
+    assert!(!h.read(|a| a.mailbox.is_new_sender(2)));
+    assert_eq!(h.count(Inbox), 4);
+    h.assert_invariant("allow sender");
 
-    // Block: hidden, not deleted.
     h.keys("b");
     assert!(h.visible().is_empty());
-    assert_eq!(h.total(), 4);
-    assert_eq!(h.read(|a| a.mailbox.hidden_count()), 1);
+    assert_eq!(h.total(), 4, "blocking hides, but does not delete, mail");
     assert_eq!(h.count(Inbox), 3);
-    h.assert_invariant("block");
+    assert_eq!(h.read(|a| a.mailbox.hidden_count()), 1);
+    h.assert_invariant("block sender");
 
-    // Undo restores the blocked sender to the screener.
     h.keys("u");
-    assert_eq!(h.visible(), vec![4]);
+    assert_eq!(h.visible(), vec![4], "undo restores the blocked new sender");
     h.assert_invariant("undo block");
 }
