@@ -1,98 +1,94 @@
-use mail_classifier::theme::{DEFAULT_THEME, Theme, ThemeRegistry, default_theme};
+use gpui_kit::TestAppContext;
+use gpui_kit::component::ActiveTheme as _;
+use mail_classifier::model::TriageState;
+use mail_classifier::theme::{self, DEFAULT_THEME};
 
-fn custom(name: &str, background: &str) -> String {
-    let mut v: serde_json::Value =
-        serde_json::from_str(include_str!("../themes/one-dark-pro.json")).unwrap();
-    v["name"] = name.into();
-    v["colors"]["background"] = background.into();
-    v.to_string()
-}
-
-#[test]
-fn default_theme_is_atom_one_dark_pro() {
-    let t = default_theme();
-    assert_eq!(t.name, DEFAULT_THEME);
-    assert_eq!(t.background, gpui_kit::rgb(0x282c34).into());
-    assert_eq!(t.text, gpui_kit::rgb(0xabb2bf).into());
-}
-
-#[test]
-fn builtin_registry_has_one_dark_and_tokyo_night() {
-    let names = ThemeRegistry::builtin().names();
-    assert!(names.contains(&"One Dark Pro".to_owned()));
-    assert!(names.contains(&"Tokyo Night".to_owned()));
-}
-
-#[test]
-fn lookup_is_case_insensitive_and_unknown_falls_back() {
-    let r = ThemeRegistry::builtin();
-    assert_eq!(r.get("tokyo night").unwrap().name, "Tokyo Night");
-    assert!(r.get("nope").is_none());
-    assert_eq!(r.get_or_default("nope").name, DEFAULT_THEME);
-}
-
-#[test]
-fn rejects_bad_json_and_bad_colors() {
-    assert!(Theme::from_json("not json").is_err());
-    assert!(Theme::from_json(&custom("Bad", "#12345")).is_err());
-    assert!(Theme::from_json(&custom("Bad", "red")).is_err());
-    assert!(Theme::from_json(r#"{"name":"x","colors":{}}"#).is_err());
-}
-
-#[test]
-fn user_theme_replaces_same_name_and_extends_registry() {
-    let mut r = ThemeRegistry::builtin();
-    let before = r.names().len();
-    r.add_json(&custom("Mine", "#010203")).unwrap();
-    assert_eq!(r.names().len(), before + 1);
-    r.add_json(&custom("mine", "#040506")).unwrap();
-    assert_eq!(r.names().len(), before + 1);
-    assert_eq!(r.get("Mine").unwrap().background, gpui_kit::rgb(0x040506).into());
-}
-
-#[test]
-fn load_dir_skips_invalid_files_and_missing_dir_is_fine() {
-    let dir = std::env::temp_dir().join(format!("mc-themes-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("good.json"), custom("Good", "#0a0b0c")).unwrap();
-    std::fs::write(dir.join("bad.json"), "{").unwrap();
-    std::fs::write(dir.join("ignored.txt"), "x").unwrap();
-    let mut r = ThemeRegistry::builtin();
-    let errors = r.load_dir(&dir);
-    std::fs::remove_dir_all(&dir).unwrap();
-    assert_eq!(errors.len(), 1);
-    assert!(r.get("Good").is_some());
-    assert!(ThemeRegistry::builtin().load_dir(&dir).is_empty());
-}
-
-#[test]
-fn state_colors_are_distinct_per_state() {
-    let t = default_theme();
-    let all = mail_classifier::model::TriageState::ALL;
-    for (i, a) in all.iter().enumerate() {
-        for b in &all[i + 1..] {
-            assert_ne!(t.state_color(*a), t.state_color(*b));
-        }
-    }
-}
-
-/// The kit resolves its own palette for any token `sync_kit` leaves alone. Switching theme must
-/// repaint the kit's tab tokens from ours, or the reader tabs fall back to the default palette.
-#[gpui_kit::gpui::test]
-fn switching_theme_syncs_kit_tab_colors(cx: &mut gpui_kit::TestAppContext) {
+fn boot(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
-        let tokyo = mail_classifier::theme::set_active(cx, "Tokyo Night");
-        let kit = gpui_kit::component::theme::Theme::global(cx);
-        assert_eq!(kit.tab_bar, tokyo.surface);
-        assert_eq!(kit.tab_active, tokyo.background);
-        assert_eq!(kit.tab_active_foreground, tokyo.text);
-        assert_eq!(kit.tab_foreground, tokyo.text_muted);
-
-        let one_dark = mail_classifier::theme::set_active(cx, DEFAULT_THEME);
-        let kit = gpui_kit::component::theme::Theme::global(cx);
-        assert_eq!(kit.tab_active, one_dark.background);
-        assert_eq!(kit.tab_bar, one_dark.surface);
-        assert_ne!(one_dark.surface, tokyo.surface, "themes differ, so the assert proves a repaint");
+        theme::init(cx);
     });
+}
+
+#[gpui_kit::gpui::test]
+fn built_in_themes_load_and_default_is_active(cx: &mut TestAppContext) {
+    boot(cx);
+    cx.update(|cx| {
+        let names = theme::names(cx);
+        assert_eq!(names[0], DEFAULT_THEME, "the default theme leads the picker");
+        assert!(names.iter().any(|n| n == "Tokyo Night"));
+        assert_eq!(cx.theme().theme_name(), DEFAULT_THEME);
+        assert!(cx.theme().is_dark());
+    });
+}
+
+#[gpui_kit::gpui::test]
+fn switching_theme_repaints_kit_colors(cx: &mut TestAppContext) {
+    boot(cx);
+    cx.update(|cx| {
+        let one_dark = cx.theme().colors;
+        assert!(theme::apply(cx, "Tokyo Night"));
+        let tokyo = cx.theme().colors;
+        assert_eq!(cx.theme().theme_name(), "Tokyo Night");
+        assert_ne!(one_dark.background, tokyo.background);
+        assert_ne!(one_dark.secondary, tokyo.secondary);
+        // The kit's own tab tokens come from the theme file, not the kit's default palette.
+        assert_eq!(tokyo.tab_active, tokyo.background);
+        assert_eq!(tokyo.tab_bar, tokyo.secondary);
+        assert_eq!(tokyo.tab_active_foreground, tokyo.foreground);
+
+        assert!(theme::apply(cx, DEFAULT_THEME));
+        assert_eq!(cx.theme().colors.background, one_dark.background);
+    });
+}
+
+#[gpui_kit::gpui::test]
+fn unknown_theme_changes_nothing(cx: &mut TestAppContext) {
+    boot(cx);
+    cx.update(|cx| {
+        assert!(!theme::apply(cx, "No Such Theme"));
+        assert_eq!(cx.theme().theme_name(), DEFAULT_THEME);
+    });
+}
+
+#[gpui_kit::gpui::test]
+fn domain_colors_stay_distinct_in_every_built_in_theme(cx: &mut TestAppContext) {
+    boot(cx);
+    cx.update(|cx| {
+        for name in [DEFAULT_THEME, "Tokyo Night"] {
+            theme::apply(cx, name);
+            let c = &cx.theme().colors;
+
+            let all = TriageState::ALL;
+            for (i, a) in all.iter().enumerate() {
+                for b in &all[i + 1..] {
+                    assert_ne!(theme::state_color(c, *a), theme::state_color(c, *b), "{name}: {a:?} vs {b:?}");
+                }
+            }
+
+            let tags = [
+                ("needs_reply", theme::needs_reply(c)),
+                ("follow_up", theme::follow_up(c)),
+                ("reminder", theme::reminder(c)),
+                ("new_sender", theme::new_sender(c)),
+                ("urgent", theme::urgent(c)),
+                ("spam", theme::spam(c)),
+                ("awaiting", theme::awaiting(c)),
+            ];
+            for (i, (a, ca)) in tags.iter().enumerate() {
+                for (b, cb) in &tags[i + 1..] {
+                    assert_ne!(ca, cb, "{name}: {a} vs {b}");
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn parse_color_accepts_hex_only() {
+    assert!(theme::parse_color("#61afef").is_some());
+    assert!(theme::parse_color("#61afef80").is_some());
+    assert!(theme::parse_color("61afef").is_none());
+    assert!(theme::parse_color("#12345").is_none());
+    assert!(theme::parse_color("red").is_none());
 }

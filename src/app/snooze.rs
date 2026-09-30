@@ -2,6 +2,7 @@
 //!
 //! Holds no business logic: presets and the duration parser are injected, the
 //! chosen return time leaves through [`SnoozeEvent`].
+use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::overlay::FitViewport as _;
 use crate::app::ui::{button, shortcut};
@@ -16,7 +17,7 @@ use gpui_kit::{
 /// Key context of the picker (bind `1`/`2`/`3`/`4` under `SnoozePicker && !Input`, escape under `SnoozePicker`).
 pub const SNOOZE_CONTEXT: &str = "SnoozePicker";
 
-use crate::theme::{self, Theme};
+use crate::theme::ThemeColor;
 
 gpui_kit::actions!(
     snooze,
@@ -100,8 +101,8 @@ impl SnoozePicker {
         }
     }
 
-    fn row(t: &Theme, key: &str, label: impl IntoElement, detail: impl IntoElement) -> Div {
-        let hover = t.hover;
+    fn row(t: &ThemeColor, key: &str, label: impl IntoElement, detail: impl IntoElement) -> Div {
+        let hover = t.list_hover;
         div()
             .flex()
             .items_center()
@@ -109,7 +110,7 @@ impl SnoozePicker {
             .px_2()
             .py_1()
             .text_sm()
-            .text_color(t.text)
+            .text_color(t.foreground)
             .rounded_sm()
             .hover(move |el| el.bg(hover))
             .child(
@@ -120,7 +121,7 @@ impl SnoozePicker {
                     .child(shortcut(key))
                     .child(label),
             )
-            .child(div().text_xs().text_color(t.text_muted).child(detail))
+            .child(div().text_xs().text_color(t.muted_foreground).child(detail))
     }
 }
 
@@ -134,7 +135,7 @@ impl EventEmitter<SnoozeEvent> for SnoozePicker {}
 
 impl Render for SnoozePicker {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let invalid = self.invalid;
         div()
             .key_context(SNOOZE_CONTEXT)
@@ -149,13 +150,13 @@ impl Render for SnoozePicker {
             .fit_viewport(window, 320.)
             .p_2()
             .gap_1()
-            .bg(t.surface)
+            .bg(t.secondary)
             .border_1()
             .border_color(t.border)
             .rounded_md()
             .id("snooze-panel")
             .overflow_y_scroll()
-            .child(div().px_2().text_xs().text_color(t.text_muted).child("Snooze until…"))
+            .child(div().px_2().text_xs().text_color(t.muted_foreground).child("Snooze until…"))
             .children(self.presets.iter().enumerate().map(|(i, (label, ts))| {
                 Self::row(
                     &t,
@@ -187,7 +188,7 @@ impl Render for SnoozePicker {
                             div()
                                 .px_2()
                                 .text_xs()
-                                .text_color(t.error)
+                                .text_color(t.danger)
                                 .child("Try 30m, 3h or 2d"),
                         )
                     })

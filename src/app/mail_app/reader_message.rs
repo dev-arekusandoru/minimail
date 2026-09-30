@@ -1,5 +1,6 @@
 //! One message surface of the reader: header, recipients, banners, suggestion strip, body and
 //! attachments. The opened message and every expanded thread message share it.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::super::*;
 use super::parts::{stamp, Look, Role};
@@ -17,7 +18,7 @@ impl MailApp {
     fn message_buttons(&self, mid: MessageId, cx: &Context<Self>) -> Div {
         let id = mid as usize;
         let kind = MenuKind::Message(mid);
-        let selection = theme::active(cx).selection;
+        let selection = cx.theme().list_active;
         div()
             .flex()
             .flex_none()
@@ -73,20 +74,20 @@ impl MailApp {
             // right cluster at the far edge.
             .child(look.mono(
                 if total > 1 { format!("MSG {pos:02} / {total:02}") } else { String::new() },
-                t.text_muted,
+                t.muted_foreground,
             ))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
-                    .when(!opened, |d| d.child(look.mono("COLLAPSE", t.text_muted)))
+                    .when(!opened, |d| d.child(look.mono("COLLAPSE", t.muted_foreground)))
                     .child({
                         let absolute = stamp(&m.received);
                         let label = m
                             .received_at()
                             .map_or_else(|| absolute.clone(), |ts| humanize_time(ts, self.now()));
-                        look.mono(label, t.text_muted)
+                        look.mono(label, t.muted_foreground)
                             .id(("reader-msg-stamp", id))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(absolute.clone()).build(window, cx)
@@ -105,7 +106,7 @@ impl MailApp {
             .text_size(px(22.))
             .line_height(relative(1.25))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(t.text)
+            .text_color(t.foreground)
             .child(subject);
 
         let sender = div()
@@ -127,15 +128,15 @@ impl MailApp {
                             .truncate()
                             .text_size(px(13.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(t.text)
+                            .text_color(t.foreground)
                             .child(m.from_name.clone()),
                     )
                     .child(
-                        look.mono(m.from_email.clone(), t.text_muted).flex_1().min_w_0().truncate(),
+                        look.mono(m.from_email.clone(), t.muted_foreground).flex_1().min_w_0().truncate(),
                     ),
             );
 
-        let hover = t.text;
+        let hover = t.foreground;
         let recipient_toggle = div()
             .id(("reader-recipients", id))
             .test_support()
@@ -147,7 +148,7 @@ impl MailApp {
             .cursor_pointer()
             .font_family(look.mono.clone())
             .text_size(px(11.))
-            .text_color(t.text_muted)
+            .text_color(t.muted_foreground)
             .hover(move |s| s.text_color(hover))
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_recipients(mid, cx)))
             .child(format!(
@@ -177,7 +178,7 @@ impl MailApp {
             .rounded_md()
             .border_1()
             .border_color(t.border)
-            .bg(t.surface)
+            .bg(t.secondary)
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m, look)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
@@ -206,7 +207,7 @@ impl MailApp {
             .flex_wrap()
             .items_center()
             .gap_1()
-            .child(look.badge(state_text, t.state_color(m.state), None));
+            .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
             let inputs = icons::GlyphInputs {
                 tags: std::slice::from_ref(tag),
@@ -258,7 +259,7 @@ impl MailApp {
                         .flex()
                         .items_start()
                         .gap_2()
-                        .child(look.mono(label, t.text_muted).w(px(32.)).flex_none())
+                        .child(look.mono(label, t.muted_foreground).w(px(32.)).flex_none())
                         .child(div().flex_1().min_w_0().text_size(px(12.)).child(text)),
                 )
             }))
@@ -285,7 +286,7 @@ impl MailApp {
         let mut out = Vec::new();
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             out.push(
-                banner("banner-new-sender", t.new_sender)
+                banner("banner-new-sender", theme::new_sender(t))
                     .child(
                         div()
                             .flex_1()
@@ -321,7 +322,7 @@ impl MailApp {
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
             out.push(
-                banner("banner-possible-spam", t.possible_spam)
+                banner("banner-possible-spam", theme::spam(t))
                     .child(div().flex_1().min_w_0().text_size(px(12.)).child("Possible spam"))
                     .child(
                         div()
@@ -389,11 +390,11 @@ impl MailApp {
                 .py_2()
                 .rounded_sm()
                 .border_1()
-                .border_color(t.accent.opacity(0.4))
-                .bg(t.accent.opacity(0.08))
+                .border_color(t.primary.opacity(0.4))
+                .bg(t.primary.opacity(0.08))
                 .child(icons::icon(Glyph::Suggestion, t, 12.))
                 .child(
-                    look.mono(format!("Suggested: {}", parts.join(" · ")), t.text)
+                    look.mono(format!("Suggested: {}", parts.join(" · ")), t.foreground)
                         .flex_1()
                         .min_w_0(),
                 )
@@ -449,7 +450,7 @@ impl MailApp {
             .min_w_0()
             .text_size(px(13.5))
             .line_height(relative(1.55))
-            .text_color(t.text);
+            .text_color(t.foreground);
 
         let mut blocked = 0;
         let content = match html {
@@ -478,7 +479,7 @@ impl MailApp {
                                 "{blocked} REMOTE IMAGE{} BLOCKED",
                                 if blocked == 1 { "" } else { "S" }
                             ),
-                            t.text_muted,
+                            t.muted_foreground,
                         )
                     } else {
                         div()
@@ -505,7 +506,7 @@ impl MailApp {
         let split = reading::split_quoted(&text);
         let quoted_open = self.reader.quoted_open(m.thread_id, m.id);
         let main = if split.main.trim().is_empty() {
-            div().text_color(t.text_muted).child("(no text)")
+            div().text_color(t.muted_foreground).child("(no text)")
         } else {
             div().child(self.find_text(m.thread_id, m.id, Segment::Main, split.main, cx))
         };
@@ -530,7 +531,7 @@ impl MailApp {
                             .pl_3()
                             .border_l_2()
                             .border_color(t.border)
-                            .text_color(t.text_muted)
+                            .text_color(t.muted_foreground)
                             .child(self.find_text(m.thread_id, m.id, Segment::Quoted, quoted, cx)),
                     )
                 })
@@ -553,7 +554,7 @@ impl MailApp {
                 .border_color(t.border)
                 .child(icons::icon(Glyph::Attachment, t, 12.))
                 .child(div().text_size(px(12.)).child(a.name.clone()))
-                .child(look.mono(reading::format_size(a.size), t.text_muted))
+                .child(look.mono(reading::format_size(a.size), t.muted_foreground))
         }))
     }
 }

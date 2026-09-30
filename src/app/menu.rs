@@ -3,13 +3,14 @@
 //! A menu holds no business logic: it renders a list of [`MenuItem`]s, moves a
 //! selection with the keyboard, and hands the chosen action back through
 //! [`MenuEvent`], so choosing a row runs exactly what its shortcut runs.
+use gpui_kit::component::ActiveTheme as _;
 
 use std::rc::Rc;
 
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::app::ui::shortcut;
-use crate::theme::{self, Theme};
+use crate::theme::ThemeColor;
 
 /// Key context of an open menu (arrows move, enter runs, escape dismisses).
 pub const MENU_CONTEXT: &str = "MailMenu";
@@ -207,11 +208,11 @@ impl EventEmitter<MenuEvent> for MenuPanel {}
 
 /// A menu row: label left, shortcut hint right. `left`/`right` are the ‹ Back and submenu
 /// affordances, not bindings, so they stay plain text.
-fn row(t: &Theme, label: SharedString, key: &str, selected: bool) -> Div {
+fn row(t: &ThemeColor, label: SharedString, key: &str, selected: bool) -> Div {
     let hint: AnyElement = match key {
         "left" | "right" => div()
             .text_size(px(11.))
-            .text_color(t.text_muted)
+            .text_color(t.muted_foreground)
             .child(SharedString::from(key.to_owned()))
             .into_any_element(),
         _ => shortcut(key).into_any_element(),
@@ -224,21 +225,21 @@ fn row(t: &Theme, label: SharedString, key: &str, selected: bool) -> Div {
         .px_2()
         .rounded_sm()
         .text_size(px(12.))
-        .text_color(t.text)
-        .when(selected, |d| d.bg(t.selection))
+        .text_color(t.foreground)
+        .when(selected, |d| d.bg(t.list_active))
         .child(div().flex_1().truncate().child(label))
         .child(div().flex_none().child(hint))
 }
 
 impl Render for MenuPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let selected = self.selected;
         let rows = self.level().items.clone();
         let title = self.level().title.clone();
         let nested = self.nested();
-        let hover = t.hover;
-        let muted = t.text_muted;
+        let hover = t.list_hover;
+        let muted = t.muted_foreground;
         let border = t.border;
         div()
             .id("menu-panel")
@@ -265,7 +266,7 @@ impl Render for MenuPanel {
             .p_1()
             .flex()
             .flex_col()
-            .bg(t.surface)
+            .bg(t.secondary)
             .border_1()
             .border_color(border)
             .rounded_md()

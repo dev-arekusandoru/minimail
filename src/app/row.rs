@@ -2,7 +2,7 @@
 //! and cursor / open / selection visual states.
 //! [`frame`] keeps those states consistent across message rows and thread headers.
 
-use crate::theme::Theme;
+use crate::theme::{self, ThemeColor};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 /// Height of the sender line and of the subject line.
@@ -103,14 +103,14 @@ pub fn shows_account_dot(location: &crate::model::Location) -> bool {
 
 /// Apply the row geometry and the visual states of `v` to a row container. The caller sets the
 /// height, so a thread header can be shorter than the message rows around it.
-pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Observable {
-    let hover = t.hover;
+pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui::Observable {
+    let hover = t.list_hover;
     let bar = match v.bar_state() {
         BarState::None => None,
-        BarState::Unread => Some(t.unread),
-        BarState::Urgent => Some(t.urgent),
-        BarState::Selected => Some(t.selected),
-        BarState::Partial => Some(t.selected.opacity(0.45)),
+        BarState::Unread => Some(theme::unread(t)),
+        BarState::Urgent => Some(theme::urgent(t)),
+        BarState::Selected => Some(t.primary),
+        BarState::Partial => Some(t.primary.opacity(0.45)),
     };
     row.test_support().relative()
         .w_full()
@@ -120,17 +120,17 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Obs
         .pl(px(10.))
         .pr_2()
         .border_1()
-        .border_color(if v.cursor { t.selected.opacity(0.8) } else { transparent_black() })
+        .border_color(if v.cursor { t.primary.opacity(0.8) } else { transparent_black() })
         .when_some(bar, |d, color| {
             d.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).bg(color))
         })
-        .when(v.cursor, |d| d.bg(t.row_cursor))
-        .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.selected.opacity(0.14)))
+        .when(v.cursor, |d| d.bg(t.list_active))
+        .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.primary.opacity(0.14)))
         .hover(move |s| {
             s.bg(if v.cursor {
-                t.row_cursor
+                t.list_active
             } else if v.selected || v.open {
-                t.selected.opacity(0.14)
+                t.primary.opacity(0.14)
             } else {
                 hover
             })

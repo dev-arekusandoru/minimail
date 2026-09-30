@@ -4,11 +4,11 @@
 //! The kit's `Command`, hosted in a dialog by the owner. Like [`crate::app::dialog`], it holds
 //! no business logic: the choice leaves through [`FolderPickerEvent`] and the owner creates
 //! folders and files mail. Filtering is ours; `Command` renders the pre-filtered rows.
+use gpui_kit::component::ActiveTheme as _;
 
 use std::rc::Rc;
 
 use crate::model::FolderId;
-use crate::theme;
 use gpui_kit::{
     base::IndexPath,
     component::command::{Command, CommandItem, CommandState},
@@ -143,14 +143,14 @@ impl Render for FolderPicker {
                     .pt_3()
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::active(cx).text)
+                    .text_color(cx.theme().foreground)
                     .child(title.clone())
             })
             .empty(|_, _, cx| {
                 div()
                     .p_4()
                     .text_xs()
-                    .text_color(theme::active(cx).text_muted)
+                    .text_color(cx.theme().muted_foreground)
                     .child("No folders in this account yet.")
             })
             .items(labels.into_iter().map(|label| CommandItem::new().label(label)))

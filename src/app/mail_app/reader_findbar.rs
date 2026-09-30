@@ -60,7 +60,7 @@ impl MailApp {
                 .gap_1()
                 .px_3()
                 .py_1()
-                .bg(t.surface)
+                .bg(t.secondary)
                 .border_b_1()
                 .border_color(t.border)
                 .child(
@@ -69,7 +69,7 @@ impl MailApp {
                         .min_w_0()
                         .rounded_sm()
                         .border_1()
-                        .border_color(if ft.invalid { t.error } else { t.border })
+                        .border_color(if ft.invalid { t.danger } else { t.border })
                         .child(Input::new(&ft.input).appearance(false).cleanable(false)),
                 )
                 .child(
@@ -78,7 +78,7 @@ impl MailApp {
                         .flex_none()
                         .min_w(px(72.))
                         .px_1()
-                        .child(look.mono(count, if problem { t.error } else { t.text_muted })),
+                        .child(look.mono(count, if problem { t.danger } else { t.muted_foreground })),
                 )
                 .child(button("find-case", IconName::CaseSensitive, "Match case", "alt-c", options.case_sensitive, Box::new(ToggleFindCase)))
                 .child(button("find-word", IconName::WholeWord, "Whole word", "alt-w", options.whole_word, Box::new(ToggleFindWord)))

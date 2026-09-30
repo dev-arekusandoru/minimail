@@ -1,6 +1,7 @@
 //! Settings panel: gpui-kit's `Settings` component (sidebar pages with search, grouped setting
 //! items) hosted in a modal. The panel entity owns the settings state and emits
 //! [`SettingsEvent`]s; the component's field getters/setters reach it through a `WeakEntity`.
+use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::mail_app::panes::Orientation;
 use crate::app::overlay::{fit_height, fit_width, top_offset};
@@ -205,17 +206,14 @@ impl SettingsPanel {
     }
 
     fn appearance_page(&self, weak: &Weak, cx: &App) -> SettingPage {
-        let themes = theme::names(cx)
-            .into_iter()
-            .map(|name| (SharedString::from(name.clone()), SharedString::from(name)))
-            .collect();
+        let themes = theme::names(cx).into_iter().map(|name| (name.clone(), name)).collect();
         let theme_field = {
             let weak = weak.clone();
             SettingField::dropdown(
                 themes,
-                |cx| SharedString::from(theme::active(cx).name.clone()),
+                |cx| cx.theme().theme_name().clone(),
                 move |name: SharedString, cx| {
-                    theme::set_active(cx, &name);
+                    theme::apply(cx, &name);
                     weak.update(cx, |this, cx| this.changed(cx)).ok();
                 },
             )
@@ -328,7 +326,7 @@ impl SettingsPanel {
             blocked = blocked.item(
                 SettingItem::render(move |_, _, cx| {
                     let (weak, email) = (weak.clone(), email.clone());
-                    let t = theme::active(cx);
+                    let t = cx.theme();
                     div()
                         .id(("blocked-row", index))
                         .flex()
@@ -337,7 +335,7 @@ impl SettingsPanel {
                         .gap_2()
                         .text_sm()
                         .child(div().flex().flex_col().child(email.clone()).child(
-                            div().text_xs().text_color(t.text_muted).child("Blocked sender"),
+                            div().text_xs().text_color(t.muted_foreground).child("Blocked sender"),
                         ))
                         .child(
                             button(("blocked-unblock", index), "Unblock", "Allow mail from this sender again", "", cx)
@@ -438,7 +436,7 @@ fn pick(pairs: &[(&'static str, &'static str)], index: usize) -> SharedString {
 /// A muted one-line placeholder row.
 fn note(id: &'static str, text: &'static str) -> SettingItem {
     SettingItem::render(move |_, _, cx| {
-        div().id(id).text_sm().text_color(theme::active(cx).text_muted).child(text)
+        div().id(id).text_sm().text_color(cx.theme().muted_foreground).child(text)
     })
 }
 
@@ -452,7 +450,7 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
         let height = fit_height(window, top_offset(window));
@@ -466,7 +464,7 @@ impl Render for SettingsPanel {
             .h(px(height))
             .p_3()
             .gap_2()
-            .bg(t.surface)
+            .bg(t.secondary)
             .border_1()
             .border_color(t.border)
             .rounded_md()
@@ -475,7 +473,7 @@ impl Render for SettingsPanel {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().text_color(t.accent).child("Settings"))
+                    .child(div().text_sm().text_color(t.primary).child("Settings"))
                     .child(
                         button("settings-close", "Close", "Close", "escape", cx)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close))),

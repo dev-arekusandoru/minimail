@@ -1,10 +1,11 @@
 //! Stateless chrome: hint bar, help overlay, view tabs, empty state.
+use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::actions::commands;
 use crate::app::ui::shortcut_chips;
 use crate::clock::{Timestamp, DAY};
 use crate::hints::{fit_hints, HintContext, HintMode};
-use crate::theme::{self, Theme};
+use crate::theme::ThemeColor;
 use gpui_kit::{
     assets::IconName,
     component::{button::{Button, ButtonVariants as _}, label::Label, separator::Separator, status_bar::StatusBar, Sizable as _},
@@ -12,13 +13,13 @@ use gpui_kit::{
     *,
 };
 
-fn hint(t: &Theme, key: &str, what: &str, cx: &App) -> impl IntoElement {
+fn hint(t: &ThemeColor, key: &str, what: &str, cx: &App) -> impl IntoElement {
     div()
         .flex()
         .items_center()
         .gap_1()
         .child(shortcut_chips(key, cx))
-        .child(div().text_xs().text_color(t.text_muted).child(SharedString::from(what.to_owned())))
+        .child(div().text_xs().text_color(t.muted_foreground).child(SharedString::from(what.to_owned())))
 }
 
 /// Weekday names indexed by `days.rem_euclid(7)` for a Unix-epoch day count (0 = Thursday).
@@ -109,7 +110,7 @@ const SELECTED_LABEL_W: f32 = 80.;
 
 impl RenderOnce for HintBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let selected = match self.ctx.mode {
             HintMode::Selection(n) => Some(n),
             _ => None,
@@ -133,7 +134,7 @@ impl RenderOnce for HintBar {
             .bg(t.sidebar)
             .left(hints)
             .when_some(selected, |bar, n| {
-                bar.right(div().text_xs().text_color(t.accent).child(format!("{n} selected")))
+                bar.right(div().text_xs().text_color(t.primary).child(format!("{n} selected")))
             })
     }
 }
@@ -169,7 +170,7 @@ impl HelpOverlay {
 
 impl RenderOnce for HelpOverlay {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let size = window.viewport_size();
         let (vw, vh) = (f32::from(size.width), f32::from(size.height));
         let width = (vw * 0.9).min(HELP_MAX_W);
@@ -190,7 +191,7 @@ impl RenderOnce for HelpOverlay {
                         .justify_between()
                         .gap_2()
                         .text_sm()
-                        .text_color(t.text)
+                        .text_color(t.foreground)
                         .child(Label::new(c.name))
                         .when(!c.key.is_empty(), |el| el.child(shortcut_chips(c.key, cx)))
                 }))
@@ -203,7 +204,7 @@ impl RenderOnce for HelpOverlay {
             .max_h(px(vh * 0.9))
             .p(px(HELP_PAD))
             .gap_1()
-            .bg(t.surface)
+            .bg(t.secondary)
             .border_1()
             .border_color(t.border)
             .rounded_md()
@@ -214,7 +215,7 @@ impl RenderOnce for HelpOverlay {
                     .flex_none()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().text_color(t.accent).child("Keyboard"))
+                    .child(div().text_sm().text_color(t.primary).child("Keyboard"))
                     .child(
                         Button::new("help-close")
                             .icon(IconName::Close)
@@ -236,7 +237,7 @@ impl RenderOnce for HelpOverlay {
                     .track_scroll(&self.scroll)
                     .child(div().flex().gap_4().children(columns))
                     .child(div().flex_none().child(Separator::horizontal()))
-                    .child(div().text_sm().text_color(t.accent).child("Icon legend"))
+                    .child(div().text_sm().text_color(t.primary).child("Icon legend"))
                     .child(crate::app::icons::legend_view(&t)),
             )
     }

@@ -1,4 +1,5 @@
 //! Shared mouse-driven widgets: buttons that dispatch the very same actions the keys do.
+use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -42,7 +43,7 @@ pub fn shortcut(key: &str) -> Kbd {
 /// Keycaps for a possibly multi-stroke binding (`"g i"`): one pill per stroke, joined by
 /// `then`, in the muted text colour the hint bar and help overlay use.
 pub fn shortcut_chips(key: &str, cx: &App) -> Div {
-    let then = crate::theme::active(cx).text_muted;
+    let then = cx.theme().muted_foreground;
     let mut el = div().flex().items_center().gap_1();
     for (i, part) in key.split_whitespace().enumerate() {
         if i > 0 {
@@ -62,7 +63,7 @@ pub fn button(
     key: &str,
     cx: &App,
 ) -> Button {
-    let t = crate::theme::active(cx);
+    let t = cx.theme();
     key_tooltip(
         Button::new(id)
             .label(label)
@@ -71,7 +72,7 @@ pub fn button(
             .px_2()
             .text_size(px(11.))
             .border_color(t.border)
-            .text_color(t.text),
+            .text_color(t.foreground),
         tip,
         key,
     )
@@ -104,7 +105,7 @@ pub fn icon_button(
     key: &str,
     cx: &App,
 ) -> Button {
-    let t = crate::theme::active(cx);
+    let t = cx.theme();
     key_tooltip(
         Button::new(id)
             .icon(icon)
@@ -112,7 +113,7 @@ pub fn icon_button(
             .h(px(22.))
             .w(px(24.))
             .px_0()
-            .text_color(t.text),
+            .text_color(t.foreground),
         tip,
         key,
     )

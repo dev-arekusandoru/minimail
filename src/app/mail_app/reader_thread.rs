@@ -19,7 +19,7 @@ impl MailApp {
             .items_center()
             .justify_between()
             .gap_2()
-            .child(look.mono(format!("THREAD · {} MORE", others.len()), t.text_muted))
+            .child(look.mono(format!("THREAD · {} MORE", others.len()), t.muted_foreground))
             .child(
                 look.link(
                     "reader-thread-toggle",
@@ -35,7 +35,7 @@ impl MailApp {
     pub(super) fn collapsed_line(&self, m: &Message, newest: &str, look: &Look, cx: &Context<Self>) -> AnyElement {
         let t = &look.t;
         let mid = m.id;
-        let hover = t.hover;
+        let hover = t.list_hover;
         let text = reading::reader_text(m);
         div()
             .id(("reader-thread-msg", m.id as usize))
@@ -48,7 +48,7 @@ impl MailApp {
             .rounded_md()
             .border_1()
             .border_color(t.border)
-            .bg(t.surface)
+            .bg(t.secondary)
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
@@ -59,7 +59,7 @@ impl MailApp {
                     .truncate()
                     .text_size(px(13.))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(t.text)
+                    .text_color(t.foreground)
                     .child(row::sender_label(m)),
             )
             .child(
@@ -68,11 +68,11 @@ impl MailApp {
                     .min_w_0()
                     .truncate()
                     .text_size(px(12.))
-                    .text_color(t.text_muted)
+                    .text_color(t.muted_foreground)
                     .child(crate::preview::snippet(&text)),
             )
             .when(!m.attachments.is_empty(), |d| d.child(icons::icon(Glyph::Attachment, t, 13.)))
-            .child(look.mono(Self::clock_label(&m.received, newest), t.text_muted).flex_none())
+            .child(look.mono(Self::clock_label(&m.received, newest), t.muted_foreground).flex_none())
             .into_any_element()
     }
 }

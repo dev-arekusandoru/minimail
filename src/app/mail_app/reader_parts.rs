@@ -1,12 +1,12 @@
 //! Small shared pieces of the reader: mono metadata text, keycaps, badges, key-labelled buttons
 //! and the thread rail.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::super::*;
 use crate::app::ui::{mono_font, shortcut};
-use crate::theme::Theme;
+use crate::theme::ThemeColor;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{kbd::Kbd, Sizable as _};
-use std::sync::Arc;
 
 /// Which surface of the reader a message is drawn as.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -20,13 +20,13 @@ pub(super) enum Role {
 
 /// Per-frame look shared by every reader piece: theme and mono family.
 pub(super) struct Look {
-    pub t: Arc<Theme>,
+    pub t: ThemeColor,
     pub mono: SharedString,
 }
 
 impl Look {
     pub fn new(cx: &App) -> Self {
-        Self { t: theme::active(cx), mono: mono_font(cx) }
+        Self { t: cx.theme().colors, mono: mono_font(cx) }
     }
 
     /// The sender's monogram (initials in a bordered rounded square) at `size` px: the one
@@ -44,7 +44,7 @@ impl Look {
             .border_color(self.t.border)
             .font_family(self.mono.clone())
             .text_size(px((size * 0.4).round()))
-            .text_color(self.t.text_muted)
+            .text_color(self.t.muted_foreground)
             .child(crate::reading::initials(name, email))
     }
 
@@ -74,7 +74,7 @@ impl Look {
             .gap_1()
             .font_family(self.mono.clone())
             .text_size(px(10.5))
-            .text_color(self.t.text_muted);
+            .text_color(self.t.muted_foreground);
         if let Some(k) = key {
             b = b.child(self.keycap(k));
         }
@@ -136,7 +136,7 @@ const DOT: f32 = 11.;
 /// line. The line starts at the first dot and ends at the last one. Only threads get a rail, so
 /// there are always at least two rows.
 pub(super) fn rail_row(
-    t: &Theme,
+    t: &ThemeColor,
     dot: Option<(f32, Hsla)>,
     first: bool,
     last: bool,

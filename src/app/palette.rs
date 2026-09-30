@@ -2,6 +2,7 @@
 //!
 //! Filtering is ours ([`crate::fuzzy`]); `Command` only renders the pre-filtered, sectioned
 //! list (`filterable(false)`) and reports the typed query and the confirmed row.
+use gpui_kit::component::ActiveTheme as _;
 
 use std::rc::Rc;
 
@@ -9,7 +10,6 @@ use crate::app::actions::{self, Category, CommandSpec, PALETTE_CONTEXT, ToggleCo
 use crate::app::ui::shortcut_chips;
 use crate::fuzzy;
 use crate::search::Query;
-use crate::theme;
 use gpui_kit::{
     base::IndexPath,
     component::command::{Command, CommandGroup, CommandItem, CommandState},
@@ -84,7 +84,7 @@ impl Render for CommandPalette {
                 div()
                     .p_4()
                     .text_sm()
-                    .text_color(theme::active(cx).text_muted)
+                    .text_color(cx.theme().muted_foreground)
                     .child("No matching commands")
             });
 

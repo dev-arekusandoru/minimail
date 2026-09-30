@@ -1,4 +1,5 @@
 //! Reply composer: read-only To/Subject header plus a multiline body.
+use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::actions::{CancelCompose, COMPOSE_CONTEXT, SendReply};
 use crate::app::chrome::HintBar;
@@ -13,7 +14,7 @@ use gpui_kit::{
     *,
 };
 
-use crate::theme::{self, Theme};
+use crate::theme::ThemeColor;
 
 pub enum ComposeEvent {
     Send { in_reply_to: MessageId, body: String },
@@ -85,18 +86,18 @@ impl Focusable for ComposeReply {
 
 impl EventEmitter<ComposeEvent> for ComposeReply {}
 
-fn header(t: &Theme, name: &'static str, value: String) -> impl IntoElement {
+fn header(t: &ThemeColor, name: &'static str, value: String) -> impl IntoElement {
     div()
         .flex()
         .gap_2()
         .text_sm()
-        .child(div().w(px(56.)).text_color(t.text_muted).child(name))
-        .child(div().text_color(t.text).child(Label::new(value)))
+        .child(div().w(px(56.)).text_color(t.muted_foreground).child(name))
+        .child(div().text_color(t.foreground).child(Label::new(value)))
 }
 
 impl Render for ComposeReply {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         div()
             .key_context(COMPOSE_CONTEXT)
             .on_action(cx.listener(|this, _: &SendReply, _, cx| this.send(cx)))
@@ -123,8 +124,8 @@ impl Render for ComposeReply {
                     )
                     .child(
                         button("compose-send", "Send", "Send (held 10s; undo recalls it)", "cmd-enter", cx)
-                            .bg(t.accent)
-                            .text_color(t.on_accent)
+                            .bg(t.primary)
+                            .text_color(t.primary_foreground)
                             .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
                     ),
             )

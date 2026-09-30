@@ -4,10 +4,11 @@
 //! `enter` picks the default option, `escape` cancels. The dialog holds no
 //! business logic: it reports the chosen index through [`DialogEvent`] and the
 //! owner decides what that index means.
+use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::overlay::FitViewport as _;
 use crate::app::ui::shortcut;
-use crate::theme::{self, Theme};
+use crate::theme::ThemeColor;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 /// Key context of a choice dialog. `1`–`5` are bound under `ChoiceDialog && !Input`,
@@ -94,8 +95,8 @@ impl ChoiceDialog {
         }
     }
 
-    fn row(t: &Theme, option: &DialogOption) -> Div {
-        let hover = t.hover;
+    fn row(t: &ThemeColor, option: &DialogOption) -> Div {
+        let hover = t.list_hover;
         div()
             .flex()
             .items_center()
@@ -104,7 +105,7 @@ impl ChoiceDialog {
             .py_1()
             .rounded_sm()
             .text_sm()
-            .text_color(t.text)
+            .text_color(t.foreground)
             .hover(move |el| el.bg(hover))
             .child(shortcut(&option.shortcut))
             .child(div().flex_1().child(option.label.clone()))
@@ -113,7 +114,7 @@ impl ChoiceDialog {
                     div()
                         .flex_none()
                         .text_xs()
-                        .text_color(t.text_muted)
+                        .text_color(t.muted_foreground)
                         .child(option.detail.clone()),
                 )
             })
@@ -130,7 +131,7 @@ impl EventEmitter<DialogEvent> for ChoiceDialog {}
 
 impl Render for ChoiceDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let default = self.default;
         let footer = self
             .options
@@ -152,7 +153,7 @@ impl Render for ChoiceDialog {
             .gap_2()
             .p_3()
             .fit_viewport(window, 420.)
-            .bg(t.surface)
+            .bg(t.secondary)
             .border_1()
             .border_color(t.border)
             .rounded_md()
@@ -169,7 +170,7 @@ impl Render for ChoiceDialog {
                 d.child(
                     div()
                         .text_xs()
-                        .text_color(t.text_muted)
+                        .text_color(t.muted_foreground)
                         .child(self.message.clone()),
                 )
             })
@@ -180,6 +181,6 @@ impl Render for ChoiceDialog {
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.choose(i, cx)))
             }))
-            .child(div().text_xs().text_color(t.text_muted).child(footer))
+            .child(div().text_xs().text_color(t.muted_foreground).child(footer))
     }
 }

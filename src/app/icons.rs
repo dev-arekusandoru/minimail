@@ -9,7 +9,7 @@
 
 use crate::judge::{Kind, QuestionKey, Suggestion};
 use crate::model::Tag;
-use crate::theme::Theme;
+use crate::theme::{self, ThemeColor};
 use gpui_kit::assets::{Assets, IconName};
 use gpui_kit::component::{Icon, Sizable as _, tooltip::Tooltip};
 use gpui_kit::*;
@@ -61,19 +61,19 @@ pub enum Token {
 }
 
 impl Token {
-    pub fn color(self, t: &Theme) -> Hsla {
+    pub fn color(self, t: &ThemeColor) -> Hsla {
         match self {
-            Token::Accent => t.accent,
-            Token::Muted => t.text_muted,
-            Token::NeedsReply => t.needs_reply,
-            Token::AwaitingReply => t.awaiting,
-            Token::FollowUp => t.follow_up,
-            Token::Reminder => t.reminder,
-            Token::PossibleSpam => t.possible_spam,
-            Token::NewSender => t.new_sender,
-            Token::Snoozed => t.state_snoozed,
-            Token::Urgent => t.urgent,
-            Token::Kind => t.kind,
+            Token::Accent => t.primary,
+            Token::Muted => t.muted_foreground,
+            Token::NeedsReply => theme::needs_reply(t),
+            Token::AwaitingReply => theme::awaiting(t),
+            Token::FollowUp => theme::follow_up(t),
+            Token::Reminder => theme::reminder(t),
+            Token::PossibleSpam => theme::spam(t),
+            Token::NewSender => theme::new_sender(t),
+            Token::Snoozed => theme::snoozed(t),
+            Token::Urgent => theme::urgent(t),
+            Token::Kind => theme::kind(t),
         }
     }
 }
@@ -290,7 +290,7 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
 }
 
 /// The themed icon of a glyph at `size` pixels.
-pub fn icon(glyph: Glyph, t: &Theme, size: f32) -> Icon {
+pub fn icon(glyph: Glyph, t: &ThemeColor, size: f32) -> Icon {
     let spec = glyph.spec();
     Icon::new(spec.icon).with_size(px(size)).text_color(spec.token.color(t))
 }
@@ -306,7 +306,7 @@ pub fn cluster(
     shown: &[Glyph],
     hidden: &[Glyph],
     suggestion_hint: &str,
-    t: &Theme,
+    t: &ThemeColor,
     id: usize,
 ) -> Div {
     let icons = shown.iter().enumerate().map(|(i, &g)| {
@@ -328,7 +328,7 @@ pub fn cluster(
             .id(("glyph-more", id))
             .flex_none()
             .text_size(px(10.))
-            .text_color(t.text_muted)
+            .text_color(t.muted_foreground)
             .child(format!("+{}", hidden.len()))
             .tooltip(tip(list))
     });
@@ -336,18 +336,18 @@ pub fn cluster(
 }
 
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
-pub fn legend_view(t: &Theme) -> Div {
+pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Unread", t.unread, "Yellow bar; sender and subject are bold."),
-        ("Urgent unread", t.urgent, "Red bar; the urgency icon remains in the icon cluster."),
-        ("Selected / open", t.selected, "Blue bar; opening a message uses the same treatment as a one-item selection."),
-        ("Partial thread selection", t.selected.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
+        ("Unread", theme::unread(t), "Yellow bar; sender and subject are bold."),
+        ("Urgent unread", theme::urgent(t), "Red bar; the urgency icon remains in the icon cluster."),
+        ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
+        ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
     ];
     let row_state_section = div()
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().text_xs().text_color(t.accent).child("Row states"))
+        .child(div().text_xs().text_color(t.primary).child("Row states"))
         .children(row_states.into_iter().map(|(label, color, description)| {
             div()
                 .flex()
@@ -355,13 +355,13 @@ pub fn legend_view(t: &Theme) -> Div {
                 .gap_2()
                 .text_xs()
                 .child(div().w(px(3.)).h(px(12.)).bg(color))
-                .child(div().w(px(112.)).flex_none().text_color(t.text).child(label))
-                .child(div().flex_1().text_color(t.text_muted).child(description))
+                .child(div().w(px(112.)).flex_none().text_color(t.foreground).child(label))
+                .child(div().flex_1().text_color(t.muted_foreground).child(description))
         }))
         .child(
             div()
                 .text_xs()
-                .text_color(t.text_muted)
+                .text_color(t.muted_foreground)
                 .child("Cursor: row_cursor background and outline. Click the left edge to select; cmd-click toggles and shift-click range-selects."),
         );
     let sections = legend().into_iter().map(|(group, glyphs)| {
@@ -369,7 +369,7 @@ pub fn legend_view(t: &Theme) -> Div {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().text_color(t.accent).child(group))
+            .child(div().text_xs().text_color(t.primary).child(group))
             .children(glyphs.into_iter().map(|g| {
                 let s = g.spec();
                 div()
@@ -378,8 +378,8 @@ pub fn legend_view(t: &Theme) -> Div {
                     .gap_2()
                     .text_xs()
                     .child(div().w(px(16.)).flex_none().child(icon(g, t, 13.)))
-                    .child(div().w(px(96.)).flex_none().text_color(t.text).child(s.label))
-                    .child(div().flex_1().text_color(t.text_muted).child(s.description))
+                    .child(div().w(px(96.)).flex_none().text_color(t.foreground).child(s.label))
+                    .child(div().flex_1().text_color(t.muted_foreground).child(s.description))
             }))
     });
     div().flex().flex_col().gap_2().child(row_state_section).children(sections)

@@ -2,6 +2,7 @@
 //!
 //! Chips only make sense on an Inbox view, so the row (and the `1`–`6` keys behind it)
 //! exists only there.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::*;
 use super::sidebar::is_inbox_location;
@@ -25,9 +26,9 @@ impl MailApp {
         if self.mode != ListMode::State || !is_inbox_location(&self.triage.view.location) {
             return None;
         }
-        let t = theme::active(cx);
+        let t = cx.theme();
         let active = self.triage.view.chip;
-        let hover = t.hover;
+        let hover = t.list_hover;
         Some(
             div()
                 .id("chip-row")
@@ -49,10 +50,10 @@ impl MailApp {
                         .px_2()
                         .rounded_full()
                         .border_1()
-                        .border_color(if on { t.accent } else { t.border })
-                        .bg(if on { t.selection } else { t.surface })
+                        .border_color(if on { t.primary } else { t.border })
+                        .bg(if on { t.list_active } else { t.secondary })
                         .text_size(px(11.))
-                        .text_color(if on { t.accent } else { t.text_muted })
+                        .text_color(if on { t.primary } else { t.muted_foreground })
                         .cursor_pointer()
                         .when(!on, |d| d.hover(move |d| d.bg(hover)))
                         .on_click(move |_, window, cx| window.dispatch_action(chip_action(i), cx))

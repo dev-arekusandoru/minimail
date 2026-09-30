@@ -6,6 +6,7 @@
 //! all of them in one undo step. Sender-wide actions and mute are unchanged (mute already
 //! covers the whole thread). Threads split across states show only the panel's messages.
 //! `]` / `[` walk the whole thread in date order regardless of the grouping setting.
+use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -247,7 +248,7 @@ impl MailApp {
         let Row::Header { thread_id, ids, expanded } = row else {
             unreachable!("render_group_header takes header rows")
         };
-        let t = crate::theme::active(cx);
+        let t = cx.theme();
         let latest = self.mailbox.get(ids[0]);
         let (from, subject, date) = latest
             .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), Self::clock_label(&m.received, newest)))
@@ -288,7 +289,7 @@ impl MailApp {
                     .id(("thread-chevron", thread as usize))
                     .flex_none()
                     .w(px(12.))
-                    .text_color(t.text_muted)
+                    .text_color(t.muted_foreground)
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.cursor_to(ix);
                         this.toggle_thread(thread);
@@ -322,14 +323,14 @@ impl MailApp {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(from),
                             )
-                            .child(div().flex_1().truncate().text_color(t.text_muted).child(subject))
+                            .child(div().flex_1().truncate().text_color(t.muted_foreground).child(subject))
                             .child(
                                 div()
                                     .w(px(90.))
                                     .flex_none()
                                     .truncate()
                                     .text_size(px(11.))
-                                    .text_color(t.text_muted)
+                                    .text_color(t.muted_foreground)
                                     .child(people),
                             ),
                     )
@@ -340,7 +341,7 @@ impl MailApp {
                                 .line_clamp(preview as usize)
                                 .text_size(px(12.))
                                 .line_height(px(row::PREVIEW_LINE_H))
-                                .text_color(t.text_muted)
+                                .text_color(t.muted_foreground)
                                 .child(snippet),
                         )
                     }),
@@ -353,7 +354,7 @@ impl MailApp {
                     .text_size(px(11.))
                     .border_1()
                     .border_color(t.border)
-                    .text_color(t.text_muted)
+                    .text_color(t.muted_foreground)
                     .child(format!("{}", ids.len())),
             )
             .child(
@@ -361,7 +362,7 @@ impl MailApp {
                     .id(("thread-date", thread as usize))
                     .flex_none()
                     .text_size(px(11.))
-                    .text_color(t.text_muted)
+                    .text_color(t.muted_foreground)
                     .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         this.click_row(ix, ev, window, cx)
                     }))

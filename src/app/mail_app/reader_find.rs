@@ -1,6 +1,7 @@
 //! Find in the active reader tab: the query state per tab (`crate::find`), landing on a match
 //! (expanding and revealing what hides it), and getting it into view. View state only: no undo
 //! steps, dropped with the tab.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::reader::FindReveal;
 use super::*;
@@ -228,11 +229,11 @@ impl MailApp {
         if spans.is_empty() {
             return None;
         }
-        let t = theme::active(cx);
+        let t = cx.theme();
         let others = HighlightStyle { background_color: Some(t.warning.opacity(0.35)), ..Default::default() };
         let this = HighlightStyle {
-            background_color: Some(t.accent),
-            color: Some(t.on_accent),
+            background_color: Some(t.primary),
+            color: Some(t.primary_foreground),
             ..Default::default()
         };
         Some(spans.into_iter().map(|(r, cur)| (r, if cur { this } else { others })).collect())
