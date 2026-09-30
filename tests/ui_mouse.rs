@@ -132,6 +132,7 @@ fn archive_button_marks_selection_and_titlebar_undo_restores(cx: &mut TestAppCon
     assert_eq!(h.state_of(ids[0]), Archived);
     assert_eq!(h.state_of(ids[1]), Archived);
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0 - 2, start.1 + 2));
+    h.click("btn-more");
     h.click("btn-undo");
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1));
 }
@@ -145,6 +146,7 @@ fn delete_button_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContex
     h.click("btn-delete");
     assert_eq!(h.state_of(id), Deleted);
     assert_eq!(h.count(Deleted), start + 1);
+    h.click("btn-more");
     h.click("btn-undo");
     assert_eq!(h.state_of(id), Inbox);
     assert_eq!(h.count(Deleted), start);
@@ -154,14 +156,16 @@ fn delete_button_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContex
 #[gpui_kit::gpui::test]
 fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert!(h.has("btn-palette"));
-    assert!(h.has("btn-undo"));
-    assert!(h.has("btn-settings"));
-    assert!(h.has("btn-help"));
-    assert!(h.has("btn-layout"));
+    for id in ["btn-session", "btn-layout", "tb-settings", "btn-more"] {
+        assert!(h.has(id), "{id}");
+    }
+    for id in ["btn-palette", "btn-undo", "btn-help"] {
+        assert!(!h.has(id), "{id} lives in the More menu only");
+    }
     h.click("search-box");
     assert!(h.read(|a| a.palette_open()), "search opens the command/search palette");
     h.keys("escape");
+    h.click("btn-more");
     h.click("btn-palette");
     assert!(h.read(|a| a.palette_open()));
     // Narrow to one row: a command far down the list sits below the palette's fold.
@@ -298,10 +302,11 @@ fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("btn-settings");
+    h.click("tb-settings");
     assert!(h.read(|a| a.settings_open()));
     h.click("settings-close");
     assert!(!h.read(|a| a.settings_open()));
+    h.click("btn-more");
     h.click("btn-help");
     assert!(h.read(|a| a.help_open()));
     h.keys("escape");

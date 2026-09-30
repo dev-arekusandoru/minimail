@@ -218,11 +218,11 @@ impl MailApp {
         HEADER_H + if self.context_actions() { BAR_H } else { 0. } + LIST_HEADER_H
     }
 
-    /// Toolbar glyph for the pane layout button: what pressing it switches to.
-    pub(super) fn layout_glyph(&self) -> &'static str {
+    /// Toolbar icon for the pane layout button: the current orientation.
+    pub(super) fn layout_icon(&self) -> gpui_kit::assets::IconName {
         match self.panes.orientation() {
-            PaneLayout::SideBySide => "▤",
-            PaneLayout::Stacked => "▥",
+            PaneLayout::SideBySide => gpui_kit::assets::IconName::PanelLeft,
+            PaneLayout::Stacked => gpui_kit::assets::IconName::PanelBottom,
         }
     }
 }

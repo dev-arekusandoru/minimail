@@ -3,13 +3,14 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{ListMode, MailApp, MenuKind};
 use crate::app::actions::*;
-use crate::app::ui::{button, run};
+use crate::app::ui::{icon_button, primary_button, run};
 
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -85,28 +86,27 @@ impl MailApp {
             .h_full()
             .pl_3()
             .pr_3()
-            .child(no_drag(button("btn-palette", "Commands", "Command palette", "cmd-k", cx).on_click(run(ToggleCommandPalette))))
-            .child(no_drag(button("btn-undo", "Undo", "Undo", "u", cx).on_click(run(Undo))))
-            .when(width >= 760., |d| {
-                d.child(no_drag(button("btn-settings", "Settings", "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
-            })
-            .when(width >= 690., |d| {
-                d.child(no_drag(button("btn-help", "?", "Keyboard shortcuts", "?", cx).on_click(run(ToggleHelp))))
-            })
             .child(no_drag(
-                button("btn-layout", self.layout_glyph(), "Stack the panes the other way", "alt-l", cx)
+                primary_button(
+                    "btn-session",
+                    IconName::Play,
+                    if width >= 800. { "Triage" } else { "" },
+                    "Start a triage session",
+                    "t",
+                    cx,
+                )
+                .on_click(run(StartSession)),
+            ))
+            .child(no_drag(
+                icon_button("btn-layout", self.layout_icon(), "Stack the panes the other way", "alt-l", cx)
                     .on_click(run(TogglePaneLayout)),
             ))
-            .when(width >= 800., |d| {
-                d.child(no_drag(button("btn-session", "Triage", "Start a triage session", "t", cx).on_click(run(StartSession))))
-            })
-            .when(width >= 670., |d| {
-                d.child(no_drag(
-                    button("btn-more", "More ▾", "More actions", "", cx)
-                        .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
-                ))
-            });
+            .child(no_drag(icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
+            .child(no_drag(
+                icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx)
+                    .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
+            ));
         let right = div()
             .flex()
             .flex_1()

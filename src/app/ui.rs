@@ -1,6 +1,7 @@
 //! Shared mouse-driven widgets: buttons that dispatch the very same actions the keys do.
 
-use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{Icon, Sizable as _, tooltip::Tooltip};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -32,7 +33,27 @@ pub fn button(
     cx: &App,
 ) -> Observable {
     let t = crate::theme::active(cx);
-    let (border, fg, hover, active) = (t.border, t.text, t.hover, t.selection);
+    styled_button(id, label, tip, key, Fill { bg: None, border: t.border, fg: t.text, hover: t.hover }, cx)
+}
+
+/// Resting and hover colours of a [`styled_button`].
+struct Fill {
+    bg: Option<Hsla>,
+    border: Hsla,
+    fg: Hsla,
+    hover: Hsla,
+}
+
+fn styled_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    tip: &str,
+    key: &str,
+    fill: Fill,
+    cx: &App,
+) -> Observable {
+    let Fill { bg, border, fg, hover } = fill;
+    let active = crate::theme::active(cx).selection;
     let tip: SharedString = if key.is_empty() {
         tip.to_owned().into()
     } else {
@@ -49,6 +70,7 @@ pub fn button(
         .rounded_sm()
         .border_1()
         .border_color(border)
+        .when_some(bg, |d, bg| d.bg(bg))
         .text_size(px(11.))
         .text_color(fg)
         .cursor_pointer()
@@ -59,4 +81,40 @@ pub fn button(
         })
         .child(label)
         .test_support()
+}
+
+/// Icon-only variant of [`button`] for toolbars; `tip`/`key` are the tooltip, so keep them set.
+pub fn icon_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    tip: &str,
+    key: &str,
+    cx: &App,
+) -> Observable {
+    button(id, "", tip, key, cx).px_0().w(px(26.)).justify_center().child(
+        Icon::new(icon).with_size(px(14.)).text_color(crate::theme::active(cx).text),
+    )
+}
+
+/// Accent-filled primary action: an icon, plus `label` unless it is empty (icon-only).
+pub fn primary_button(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    label: &str,
+    tip: &str,
+    key: &str,
+    cx: &App,
+) -> Observable {
+    let t = crate::theme::active(cx);
+    let (accent, on_accent) = (t.accent, t.on_accent);
+    let fill = Fill { bg: Some(accent), border: accent, fg: on_accent, hover: accent.opacity(0.85) };
+    let mut b = styled_button(id, "", tip, key, fill, cx)
+        .gap_1()
+        .child(Icon::new(icon).with_size(px(14.)).text_color(on_accent));
+    if label.is_empty() {
+        b = b.px_0().w(px(26.)).justify_center();
+    } else {
+        b = b.child(label.to_owned());
+    }
+    b
 }
