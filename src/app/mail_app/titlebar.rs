@@ -12,12 +12,12 @@ use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
 impl MailApp {
-    pub(super) fn render_titlebar(&self, window: &mut Window, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = crate::theme::active(cx);
         let searching = matches!(self.mode, ListMode::Search(_));
         let title_fg = if window.is_window_active() { t.text } else { t.text_muted };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
-        let moving = Rc::new(Cell::new(false));
+        let moving = window.use_keyed_state("titlebar-moving", cx, |_, _| Rc::new(Cell::new(false))).read(cx).clone();
         let view: SharedString = match &self.mode {
             ListMode::State => self.location_label().into(),
             ListMode::Search(_) => "Search".into(),
@@ -44,6 +44,7 @@ impl MailApp {
             .tooltip(move |window, cx| Tooltip::new(search_tip.clone()).build(window, cx))
             .child(search_text)
             .child(div().text_color(t.text_muted).child("/"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(run(OpenSearch));
 
         let width = f32::from(window.viewport_size().width);
@@ -60,7 +61,7 @@ impl MailApp {
             .bg(t.sidebar)
             .border_b_1()
             .border_color(t.border)
-            .child(drag_region(
+            .child(
                 div()
                     .flex()
                     .flex_none()
@@ -71,47 +72,46 @@ impl MailApp {
                     .child("Mail")
                     .child(div().text_color(t.text_muted).child("·"))
                     .child(div().text_color(t.text_muted).child(view)),
-                &moving,
-            ))
-            .child(drag_region(div().flex_1().h_full(), &moving))
+            )
+            .child(div().flex_1().h_full())
             .child(search)
             .when(searching, |d| {
-                d.child(button("search-clear", "×", "Leave search", "escape", cx).on_click(run(ClearSelection)))
+                d.child(no_drag(button("search-clear", "×", "Leave search", "escape", cx).on_click(run(ClearSelection))))
             })
-            .child(drag_region(div().flex_1().h_full(), &moving))
-            .child(button("btn-palette", "Commands", "Command palette", "cmd-k", cx).on_click(run(ToggleCommandPalette)))
-            .child(button("btn-undo", "Undo", "Undo", "u", cx).on_click(run(Undo)))
+            .child(div().flex_1().h_full())
+            .child(no_drag(button("btn-palette", "Commands", "Command palette", "cmd-k", cx).on_click(run(ToggleCommandPalette))))
+            .child(no_drag(button("btn-undo", "Undo", "Undo", "u", cx).on_click(run(Undo))))
             .when(width >= 760., |d| {
-                d.child(button("btn-settings", "Settings", "Settings", "cmd-,", cx).on_click(run(ToggleSettings)))
+                d.child(no_drag(button("btn-settings", "Settings", "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
             })
             .when(width >= 690., |d| {
-                d.child(button("btn-help", "?", "Keyboard shortcuts", "?", cx).on_click(run(ToggleHelp)))
+                d.child(no_drag(button("btn-help", "?", "Keyboard shortcuts", "?", cx).on_click(run(ToggleHelp))))
             })
-            .child(
+            .child(no_drag(
                 button("btn-layout", self.layout_glyph(), "Stack the panes the other way", "alt-l", cx)
                     .on_click(run(TogglePaneLayout)),
-            )
+            ))
             .when(width >= 800., |d| {
-                d.child(button("btn-session", "Triage", "Start a triage session", "t", cx).on_click(run(StartSession)))
+                d.child(no_drag(button("btn-session", "Triage", "Start a triage session", "t", cx).on_click(run(StartSession))))
             })
             .when(width >= 670., |d| {
-                d.child(
+                d.child(no_drag(
                     button("btn-more", "More ▾", "More actions", "", cx)
                         .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
-                )
+                ))
             });
-        titlebar.into_any_element()
+        drag_region(titlebar, &moving).into_any_element()
     }
 }
 
-/// Empty titlebar space that moves the window on drag and zooms it on double-click. Buttons and
-/// the search box are siblings of these regions, so pressing them never starts a window move.
-fn drag_region(region: Div, moving: &Rc<Cell<bool>>) -> Div {
+/// Makes the whole bar move the window on drag and zoom it on double-click, like gpui-component's
+/// `TitleBar`. Interactive children must call [`no_drag`] so pressing them never starts a move.
+/// `moving` must outlive a single render: a re-render between mouse-down and the first mouse-move
+/// (hover, tooltip, tick) would otherwise drop the pending-drag flag.
+fn drag_region<E: InteractiveElement>(bar: E, moving: &Rc<Cell<bool>>) -> E {
     let (down, up, motion, out) = (moving.clone(), moving.clone(), moving.clone(), moving.clone());
-    region
-        .when(cfg!(target_os = "macos"), |d| d.window_control_area(WindowControlArea::Drag))
-        .on_mouse_down_out(move |_, _, _| out.set(false))
+    bar.on_mouse_down_out(move |_, _, _| out.set(false))
         .on_mouse_down(MouseButton::Left, move |event, window, _| {
             if event.click_count == 2 {
                 #[cfg(target_os = "macos")]
@@ -128,4 +128,9 @@ fn drag_region(region: Div, moving: &Rc<Cell<bool>>) -> Div {
                 window.start_window_move();
             }
         })
+}
+
+/// Wraps an interactive titlebar child so presses on it are not treated as a bar drag.
+fn no_drag(child: impl IntoElement) -> Div {
+    div().flex_none().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(child)
 }
