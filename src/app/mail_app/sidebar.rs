@@ -2,7 +2,7 @@
 //!
 //! *All Inboxes*, then one foldable section per account: a small header label (colour dot,
 //! name; chevron on hover, Inbox count while folded), its Inbox / Snoozed / Sent / Archive /
-//! Trash, a `FOLDERS` label and the top-level folders, all as rail-less roots. Rows dispatch
+//! Trash, and the top-level folders, all as rail-less roots. Rows dispatch
 //! [`ShowLocation`]; Inbox and Snoozed rows (and All Inboxes) carry a count when non-zero.
 //!
 //! Every row has an always-coloured icon. The only trees are subfolders: rails run down from
@@ -118,8 +118,8 @@ impl MailApp {
         }
     }
 
-    /// The sidebar: All Inboxes, then per account a foldable section (its locations and a
-    /// `FOLDERS` label over the top-level folders, whose subfolders form the only trees).
+    /// The sidebar: All Inboxes, then per account a foldable section (its locations and the
+    /// top-level folders, whose subfolders form the only trees).
     pub(super) fn render_sidebar(&self, cx: &Context<Self>) -> AnyElement {
         let t = theme::active(cx);
         let mailbox = &self.mailbox;
@@ -156,7 +156,6 @@ impl MailApp {
             }
             let folders = mailbox.folders(&account.id);
             if folders.iter().any(|f| f.parent.is_none()) {
-                rows.push(folders_label(&t));
                 let mut through = Vec::new();
                 let ctx = FolderCtx {
                     t: &t,
@@ -384,10 +383,10 @@ fn account_header(
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(11.))
+                .text_size(px(10.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.text_muted)
-                .child(SharedString::from(name.to_owned())),
+                .child(SharedString::from(name.to_uppercase())),
         )
         .when(folded && inbox_count > 0, |d| {
             d.child(
@@ -404,22 +403,6 @@ fn account_header(
                 .group_hover(group, |s| s.opacity(1.))
                 .child(Icon::new(chevron).with_size(px(12.)).text_color(t.text_muted)),
         )
-        .into_any_element()
-}
-
-/// The small muted `FOLDERS` section label: not clickable, not a tree node.
-fn folders_label(t: &Theme) -> AnyElement {
-    div()
-        .flex_none()
-        .h(px(ROW_H - 4.))
-        .mt_1()
-        .pl(px(PAD))
-        .flex()
-        .items_center()
-        .text_size(px(10.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(t.text_muted)
-        .child("FOLDERS")
         .into_any_element()
 }
 
