@@ -143,6 +143,10 @@ pub struct MailApp {
     /// What `list_state` was last measured against, so a stale row height is re-measured.
     list_shape: Option<list::ListShape>,
     help_scroll: ScrollHandle,
+    /// Scroll state of the reader pane, so the opened message can be scrolled into view.
+    reader_scroll: ScrollHandle,
+    /// The message the reader last scrolled to; a different opened message triggers a reveal.
+    reader_revealed: std::cell::Cell<Option<MessageId>>,
     _modal_sub: Option<Subscription>,
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
@@ -215,6 +219,8 @@ impl MailApp {
             list_state: ListState::new(0, ListAlignment::Top, px(200.)),
             list_shape: None,
             help_scroll: ScrollHandle::new(),
+            reader_scroll: ScrollHandle::new(),
+            reader_revealed: std::cell::Cell::new(None),
             _modal_sub: None,
             menu: None,
             _menu_sub: None,

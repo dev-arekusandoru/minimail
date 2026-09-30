@@ -36,14 +36,14 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 
 ## Thread
 
-- Other messages in the thread sit **below** the opened message, newest first. Section title: `THREAD · N MORE`.
-- Each earlier message is its own surface, at the same width and visual level as the opened message and never nested inside it.
+- The thread renders as one timeline, oldest first, and the order never changes: the opened message sits at its chronological place, expanded; the other messages are collapsed lines unless toggled. Section title: `THREAD · N MORE` above the rail.
+- Each message is its own surface, at the same width and visual level, never nested inside another.
 - Threads only (2+ messages): a vertical thread line in the left margin connects all messages, with one dot per message colored by triage state (`Theme::state_color`). A single message has no rail and uses the full width.
 - Collapsed earlier message: one compact line (~46px) with the sender, a muted snippet, an attachment indicator, and a mono date aligned right.
 - Expanded earlier message: the same header as the opened message (subject, sender and address, labels, recipient disclosure), then the body.
 - Multiple messages can be open at once. `shift-o` expands all, or collapses all when every message is already expanded.
 - Expanding or collapsing never moves surfaces above the toggled one, and there is no height animation (the demo glitched with one).
-- `]` / `[` open the next or previous message in the thread (existing behavior). The opened message is always fully shown.
+- `]` / `[` open the next or previous message in the thread. The target expands in place, the previous one collapses back, and the reader scrolls so the newly opened message's top is visible (`ScrollHandle::scroll_to_top_of_item`). Opening a message from the list does the same.
 - Expansion, recipient, and quoted-text disclosure are view state, not undo steps. They reset when the reader opens a different thread.
 
 ## Actions

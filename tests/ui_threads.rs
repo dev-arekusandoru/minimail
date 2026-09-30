@@ -209,6 +209,55 @@ fn next_and_previous_in_thread_work_flat_and_grouped(cx: &mut TestAppContext) {
     assert_eq!(h.opened(), Some(3));
 }
 
+/// Top edge of each message of thread `ids` (as laid out in the reader), oldest id first in
+/// `ids`; the focused message is found by its expanded body, the rest by their collapsed line.
+fn reader_tops(h: &mut Harness<'_>, ids: &[MessageId], focused: MessageId) -> Vec<Pixels> {
+    ids.iter()
+        .map(|&id| {
+            if id == focused {
+                h.bounds("reader-body").top()
+            } else {
+                h.bounds(("reader-thread-msg", id as usize)).top()
+            }
+        })
+        .collect()
+}
+
+#[gpui_kit::gpui::test]
+fn reader_renders_the_thread_chronologically_and_stepping_does_not_reorder(
+    cx: &mut TestAppContext,
+) {
+    let msgs: Vec<String> = (1..=6u32)
+        .map(|i| msg(i, 1, "ann@x.com", "Plan", i, "Inbox"))
+        .collect();
+    let mut h = harness_with(cx, mailbox(&msgs));
+    let ids: Vec<MessageId> = (1..=6).collect();
+
+    // Inbox lists newest first: 6,5,...; open the 5th message.
+    h.keys("j enter");
+    assert_eq!(h.opened(), Some(5));
+    let tops = reader_tops(&mut h, &ids, 5);
+    assert!(tops.windows(2).all(|w| w[0] < w[1]), "oldest first, focused one in place: {tops:?}");
+    for id in ids.iter().copied() {
+        assert!(!h.read(move |a| a.reader_expanded(id)), "only the opened body is expanded");
+    }
+    let body = h.bounds("reader-body");
+    assert!(body.top() >= px(0.) && body.bottom() <= px(800.), "focused message is visible: {body:?}");
+
+    // `]` expands the next message in place and collapses the previous one; order is fixed.
+    h.keys("]");
+    assert_eq!(h.opened(), Some(6));
+    let tops = reader_tops(&mut h, &ids, 6);
+    assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after ]: {tops:?}");
+    h.bounds(("reader-thread-msg", 5usize));
+
+    h.keys("[ [");
+    assert_eq!(h.opened(), Some(4));
+    let tops = reader_tops(&mut h, &ids, 4);
+    assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after [: {tops:?}");
+    h.bounds(("reader-thread-msg", 6usize));
+}
+
 #[gpui_kit::gpui::test]
 fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
     cx: &mut TestAppContext,
