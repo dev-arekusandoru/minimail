@@ -202,8 +202,8 @@ impl Mailbox {
 
     pub fn load_default() -> Self {
         Self::from_json_with_contacts(
-            include_str!("../fixtures/mailbox.json"),
-            include_str!("../fixtures/contacts.json"),
+            include_str!("../../fixtures/mailbox.json"),
+            include_str!("../../fixtures/contacts.json"),
         )
         .expect("fixtures parse")
     }
