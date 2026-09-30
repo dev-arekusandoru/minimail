@@ -60,6 +60,18 @@ State is pure (`src/tabs.rs`: `Tabs`, one `Tab { thread, msg, pinned }` per thre
 - Session mode hides the tab bar and shows only the session message; the tabs are untouched and return afterwards.
 - Tabs are view state: no undo step, no persistence.
 
+## Find in thread
+
+Pure matching and per-tab query state live in `src/find.rs` (`find_in_thread`, `Find`, `Options`; uses the `regex` crate); the tab's state, landing and scrolling in `src/app/mail_app/reader_find.rs`, the bar in `reader_findbar.rs`.
+
+- `cmd-f` opens a bar directly under the tab bar of the active tab (nothing without a tab, during a session, or behind a modal). It holds an input, the match count (`3/12`, `No results`, `Invalid regex`), icon toggles for case, whole word and regex (tooltips; `alt-c` / `alt-w` / `alt-r` while the bar is focused) and previous / next / close buttons. Bindings live in `FindBar` key context in `src/app/actions.rs`; `cmd-g` / `cmd-shift-g` work from anywhere in the app.
+- Searched text: the opened message's subject line, then each message of the thread oldest first: its body and, as a separate segment, its folded quoted history. These are exactly the strings the reader renders (`reader_text` / `split_quoted`), collapsed messages included. Other messages' own subject lines are not searched (they repeat the thread subject).
+- Matching is live and non-overlapping; empty matches are skipped. Case-insensitive by default (Unicode case folding); whole word uses `\b` on the sides that are word characters; regex mode takes the query as a regex, and an invalid one yields no matches and a red field, never a panic.
+- The first match is current while typing. `enter` / `cmd-g` step forward and `shift-enter` / `cmd-shift-g` back, wrapping. Landing on a match in a collapsed message expands it (and so pins the tab); landing in folded quoted text shows the quote. The reader scrolls the match's message to the top, then nudges the match's own line into the viewport once its text is painted.
+- All matches are highlighted in the body, quote and opened subject (theme `warning` tint); the current one uses `accent` with `on_accent` text. HTML bodies are rendered by `TextView`, which takes no highlights, so while the find has matches in a message it shows that message's text (Reader mode) instead; the message's own Reader mode setting is untouched and returns when the bar closes or the matches go.
+- `esc` closes the bar, drops the query and the highlights, and returns focus to the app. Query state is per tab (switching tabs keeps each one's query and position) and is dropped when the tab closes or the preview is replaced. View state: no undo step, no persistence.
+- `cmd-shift-f` focuses the global search (the titlebar's, same as `/`).
+
 ## Actions
 
 - **Per message** (every expanded surface, in the header's right cluster; they act on that message, not on the opened one):
