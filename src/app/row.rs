@@ -80,9 +80,7 @@ impl RowVisual {
             BarState::None
         }
     }
-}
 
-impl RowVisual {
     pub fn combined(self) -> bool {
         self.cursor && self.open
     }
@@ -92,6 +90,13 @@ impl RowVisual {
 /// height, so a thread header can be shorter than the message rows around it.
 pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Observable {
     let hover = t.hover;
+    let bar = match v.bar_state() {
+        BarState::None => None,
+        BarState::Unread => Some(t.unread),
+        BarState::Urgent => Some(t.urgent),
+        BarState::Selected => Some(t.selected),
+        BarState::Partial => Some(t.selected.opacity(0.45)),
+    };
     row.test_support().relative()
         .w_full()
         .flex()
@@ -101,23 +106,8 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Obs
         .pr_2()
         .border_1()
         .border_color(if v.cursor { t.selected.opacity(0.8) } else { transparent_black() })
-        .when(v.bar_state() != BarState::None, |d| {
-            let color = match v.bar_state() {
-                BarState::None => unreachable!(),
-                BarState::Unread => t.unread,
-                BarState::Urgent => t.urgent,
-                BarState::Selected => t.selected,
-                BarState::Partial => t.selected.opacity(0.45),
-            };
-            d.child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(3.))
-                    .bg(color),
-            )
+        .when_some(bar, |d, color| {
+            d.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).bg(color))
         })
         .when(v.cursor, |d| d.bg(t.row_cursor))
         .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.selected.opacity(0.14)))
