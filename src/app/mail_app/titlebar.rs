@@ -50,13 +50,7 @@ impl MailApp {
             })
             .child(search_text)
             .child(if searching {
-                div()
-                    .id("search-clear")
-                    .test_support()
-                    .flex_none()
-                    .text_color(t.text_muted)
-                    .hover(|d| d.text_color(t.text))
-                    .child("×")
+                icon_button("search-clear", IconName::Close, "Clear search", "escape", cx)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(|event, window, cx| {
                         run(ClearSelection)(event, window, cx);

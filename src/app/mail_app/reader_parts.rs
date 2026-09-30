@@ -2,9 +2,10 @@
 //! and the thread rail.
 
 use super::super::*;
-use crate::app::ui::{mono_font, shortcut, Observable};
+use crate::app::ui::{mono_font, shortcut};
 use crate::theme::Theme;
-use gpui_kit::component::kbd::Kbd;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{kbd::Kbd, Sizable as _};
 use std::sync::Arc;
 
 /// Which surface of the reader a message is drawn as.
@@ -63,23 +64,21 @@ impl Look {
         id: impl Into<ElementId>,
         label: impl Into<SharedString>,
         key: Option<&str>,
-    ) -> Observable {
-        let hover = self.t.text;
-        div()
-            .id(id)
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
+    ) -> Button {
+        let mut b = Button::new(id)
+            .label(label)
+            .ghost()
+            .xsmall()
             .h(px(20.))
-            .cursor_pointer()
+            .px_1()
+            .gap_1()
             .font_family(self.mono.clone())
             .text_size(px(10.5))
-            .text_color(self.t.text_muted)
-            .hover(move |s| s.text_color(hover))
-            .child(label.into())
-            .when_some(key, |d, k| d.child(self.keycap(k)))
-            .test_support()
+            .text_color(self.t.text_muted);
+        if let Some(k) = key {
+            b = b.child(self.keycap(k));
+        }
+        b
     }
 
     /// Row-badge look (see `icons.rs`): tinted border and fill, mono label, optional glyph.
@@ -111,7 +110,7 @@ impl Look {
         key: &str,
         action: A,
         cx: &App,
-    ) -> Observable {
+    ) -> Button {
         button(id, label, tip, key, cx)
             .gap_1()
             .when(!key.is_empty(), |b| b.child(self.keycap(key)))

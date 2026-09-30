@@ -8,6 +8,7 @@ Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0
 - Every user action is one undo step. `tick(now)` never pushes undo.
 - Never read the system clock in logic: take `now: Timestamp` and use `clock::FakeClock` in tests.
 - `gpui-kit` re-exports GPUI (`use gpui_kit::*`). Verify APIs against `~/.cargo/registry/src/*/gpui-{kit,pre}-*`, not memory.
+- Before writing a custom element, check gpui-kit for an existing component (Button, Kbd, Tab, Tooltip, …) and use it.
 - Bind bare-letter keys under `"MailApp && !Input"`, or they fire while typing in inputs.
 - `.when`/`.when_some` need `use gpui_kit::prelude::*`. In test files import names explicitly (a `gpui_kit::*` glob shadows `#[test]`).
 - New actions go in `src/app/actions.rs` (`bind_keys` + `commands()`), which makes them appear in the palette and help automatically.

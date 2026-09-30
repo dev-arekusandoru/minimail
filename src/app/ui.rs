@@ -1,8 +1,12 @@
 //! Shared mouse-driven widgets: buttons that dispatch the very same actions the keys do.
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{kbd::Kbd, Icon, Sizable as _, tooltip::Tooltip};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::{
+    button::{Button, ButtonVariants as _},
+    kbd::Kbd,
+    tooltip::Tooltip,
+    Sizable as _,
+};
 use gpui_kit::*;
 
 /// A stateful div that headless tests can find by id (a plain `Stateful<Div>` in release builds).
@@ -49,70 +53,47 @@ pub fn shortcut_chips(key: &str, cx: &App) -> Div {
     el
 }
 
-/// Small clickable button. `key` (a shortcut such as `"shift-e"`, or empty) is shown in the
-/// tooltip. Attach behavior with `.on_click(..)` or [`run`].
+/// Small clickable button, a gpui-kit [`Button`]. `key` (a shortcut such as `"shift-e"`, or
+/// empty) is shown in the tooltip as a keycap. Attach behavior with `.on_click(..)` or [`run`].
 pub fn button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     tip: &str,
     key: &str,
     cx: &App,
-) -> Observable {
+) -> Button {
     let t = crate::theme::active(cx);
-    styled_button(id, label, tip, key, Fill { bg: None, border: t.border, fg: t.text, hover: t.hover }, cx)
+    key_tooltip(
+        Button::new(id)
+            .label(label)
+            .xsmall()
+            .h(px(22.))
+            .px_2()
+            .text_size(px(11.))
+            .border_color(t.border)
+            .text_color(t.text),
+        tip,
+        key,
+    )
 }
 
-/// Resting and hover colours of a [`styled_button`].
-struct Fill {
-    bg: Option<Hsla>,
-    border: Hsla,
-    fg: Hsla,
-    hover: Hsla,
-}
-
-fn styled_button(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    tip: &str,
-    key: &str,
-    fill: Fill,
-    cx: &App,
-) -> Observable {
-    let Fill { bg, border, fg, hover } = fill;
-    let active = crate::theme::active(cx).selection;
-    let has_tip = !tip.is_empty();
-    let tip: SharedString = tip.to_owned().into();
-    let key: SharedString = key.to_owned().into();
-    let label: SharedString = label.into();
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .h(px(22.))
-        .px_2()
-        .rounded_sm()
-        .border_1()
-        .border_color(border)
-        .when_some(bg, |d, bg| d.bg(bg))
-        .text_size(px(11.))
-        .text_color(fg)
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover))
-        .active(move |s| s.bg(active))
-        .when(has_tip, |d| {
-            d.tooltip(move |window, cx| {
-                let tooltip = Tooltip::new(tip.clone());
-                let tooltip = if key.is_empty() {
-                    tooltip
-                } else {
-                    tooltip.key_binding(Some(shortcut(&key)))
-                };
-                tooltip.build(window, cx)
-            })
-        })
-        .child(label)
-        .test_support()
+/// Attach the app's tooltip — text plus the shortcut as a [`Kbd`] pill — to a kit [`Button`].
+/// Uses GPUI's interaction tooltip so the kit Button keeps its own look.
+pub fn key_tooltip<B: InteractiveElement>(mut el: B, tip: &str, key: &str) -> B {
+    if !tip.is_empty() {
+        let tip: SharedString = tip.to_owned().into();
+        let key: SharedString = key.to_owned().into();
+        el.interactivity().tooltip(move |window, cx| {
+            let tooltip = Tooltip::new(tip.clone());
+            let tooltip = if key.is_empty() {
+                tooltip
+            } else {
+                tooltip.key_binding(Some(shortcut(&key)))
+            };
+            tooltip.build(window, cx)
+        });
+    }
+    el
 }
 
 /// Icon-only variant of [`button`] for toolbars; `tip`/`key` are the tooltip, so keep them set.
@@ -122,9 +103,18 @@ pub fn icon_button(
     tip: &str,
     key: &str,
     cx: &App,
-) -> Observable {
-    button(id, "", tip, key, cx).px_0().w(px(26.)).justify_center().child(
-        Icon::new(icon).with_size(px(14.)).text_color(crate::theme::active(cx).text),
+) -> Button {
+    let t = crate::theme::active(cx);
+    key_tooltip(
+        Button::new(id)
+            .icon(icon)
+            .xsmall()
+            .h(px(22.))
+            .w(px(24.))
+            .px_0()
+            .text_color(t.text),
+        tip,
+        key,
     )
 }
 
@@ -135,18 +125,20 @@ pub fn primary_button(
     label: &str,
     tip: &str,
     key: &str,
-    cx: &App,
-) -> Observable {
-    let t = crate::theme::active(cx);
-    let (accent, on_accent) = (t.accent, t.on_accent);
-    let fill = Fill { bg: Some(accent), border: accent, fg: on_accent, hover: accent.opacity(0.85) };
-    let mut b = styled_button(id, "", tip, key, fill, cx)
-        .gap_1()
-        .child(Icon::new(icon).with_size(px(14.)).text_color(on_accent));
+    _cx: &App,
+) -> Button {
+    let mut b = Button::new(id)
+        .icon(icon)
+        .primary()
+        .xsmall()
+        .h(px(22.))
+        .px_2()
+        .text_size(px(11.))
+        .gap_1();
     if label.is_empty() {
-        b = b.px_0().w(px(26.)).justify_center();
+        b = b.w(px(24.)).px_0();
     } else {
-        b = b.child(label.to_owned());
+        b = b.label(label.to_owned());
     }
-    b
+    key_tooltip(b, tip, key)
 }

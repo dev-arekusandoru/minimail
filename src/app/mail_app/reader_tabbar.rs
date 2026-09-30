@@ -4,8 +4,9 @@ use super::super::*;
 use super::parts::Look;
 use crate::tabs;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{Icon, Sizable as _};
+use gpui_kit::component::Sizable as _;
 
 /// Longest tab title, in characters.
 const TITLE_MAX: usize = 28;
@@ -28,26 +29,18 @@ impl MailApp {
                 .when(!tab.pinned, |d| d.italic())
                 .child(title.clone())
                 .test_support();
-            let close = div()
-                .id(("reader-tab-close", thread))
-                .flex()
-                .items_center()
-                .justify_center()
+            let close = Button::new(("reader-tab-close", thread))
+                .icon(IconName::Close)
+                .ghost()
+                .xsmall()
                 .w(px(16.))
                 .h(px(16.))
-                .rounded_sm()
-                .cursor_pointer()
-                .hover({
-                    let hover = look.t.hover;
-                    move |d| d.bg(hover)
-                })
+                .px_0()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
                     this.close_tab(ix, window, cx);
-                }))
-                .child(Icon::new(IconName::Close).with_size(px(12.)).text_color(look.t.text_muted))
-                .test_support();
+                }));
             Tab::new()
                 .aria_label(title)
                 .when(self.tab_avatars, |tab| {

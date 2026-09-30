@@ -6,7 +6,8 @@ use crate::clock::{Timestamp, DAY};
 use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::{self, Theme};
 use gpui_kit::{
-    component::{label::Label, separator::Separator},
+    assets::IconName,
+    component::{button::{Button, ButtonVariants as _}, label::Label, separator::Separator, Sizable as _},
     prelude::FluentBuilder as _,
     *,
 };
@@ -211,13 +212,10 @@ impl RenderOnce for HelpOverlay {
                     .justify_between()
                     .child(div().text_sm().text_color(t.accent).child("Keyboard"))
                     .child(
-                        div()
-                            .id("help-close")
-                            .px_2()
-                            .text_sm()
-                            .text_color(t.text_muted)
-                            .cursor_pointer()
-                            .child("✕")
+                        Button::new("help-close")
+                            .icon(IconName::Close)
+                            .ghost()
+                            .xsmall()
                             .on_click(self.on_close),
                     ),
             )
