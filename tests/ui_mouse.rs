@@ -6,7 +6,7 @@ use gpui_kit::{
     WindowBounds, WindowOptions, base::Root, px, size,
 };
 use mail_classifier::app::MailApp;
-use mail_classifier::app::actions::{bind_keys, commands};
+use mail_classifier::app::actions::bind_keys;
 use mail_classifier::model::{Mailbox, MessageId, TriageState, TriageState::*};
 
 struct Harness<'a> {
@@ -193,7 +193,7 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
 
 
 #[gpui_kit::gpui::test]
-fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut TestAppContext) {
+fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     for id in ["btn-session", "btn-layout", "tb-settings", "btn-more"] {
         assert!(h.has(id), "{id}");
@@ -203,14 +203,14 @@ fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut Te
     }
     h.click("search-box");
     assert!(h.read(|a| a.palette_open()), "search opens the command/search palette");
-    h.keys("escape");
+    // The first escape clears the prefilled `/`, the second closes.
+    h.keys("escape escape");
+    assert!(!h.read(|a| a.palette_open()));
     h.click("btn-more");
     h.click("btn-palette");
     assert!(h.read(|a| a.palette_open()));
-    // Narrow to one row: a command far down the list sits below the palette's fold.
     h.keys("s n o o z e d");
-    let ix = commands().iter().position(|c| c.name == "Go to snoozed").unwrap();
-    h.click(("command", ix));
+    h.keys("enter");
     assert!(!h.read(|a| a.palette_open()));
     assert_eq!(
         h.read(|a| a.triage.view.location.clone()),

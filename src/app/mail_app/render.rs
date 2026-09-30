@@ -374,9 +374,6 @@ impl Render for MailApp {
                 )
             })
             .when_some(self.render_menu(window, cx), |d, menu| d.child(menu))
-            .when_some(self.palette.clone(), |d, palette| {
-                d.child(overlay(window, palette).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
             .when_some(self.snooze.clone(), |d, picker| {
                 d.child(overlay(window, picker).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
             })
@@ -388,9 +385,6 @@ impl Render for MailApp {
             })
             .when_some(self.dialog.clone(), |d, dialog| {
                 d.child(overlay(window, dialog).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
-            .when_some(self.folder_picker.clone(), |d, picker| {
-                d.child(overlay(window, picker).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
             })
     }
 }

@@ -22,6 +22,9 @@ impl MailApp {
     }
 
     pub(super) fn close_modals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.is_some() || self.folder_picker.is_some() {
+            window.close_dialog(cx);
+        }
         self.palette = None;
         self.compose = None;
         self.snooze = None;

@@ -469,6 +469,29 @@ fn folder_picker_filters_by_typed_name(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn folder_picker_arrows_move_the_highlight_and_escape_changes_nothing(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
+    h.keys("f");
+    h.keys("escape");
+    assert!(!h.read(|a| a.folder_picker_open()));
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+
+    h.keys("f");
+    h.keys("down down enter");
+    assert_eq!(h.state_of(1), TriageState::Filed(3), "two downs reach the third folder");
+}
+
+#[gpui_kit::gpui::test]
+fn folder_picker_typing_letters_never_triggers_mail_bindings(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
+    h.keys("f");
+    h.keys("e d r");
+    assert!(h.read(|a| a.folder_picker_open()));
+    assert_eq!(h.state_of(1), TriageState::Inbox, "e, d and r went to the filter");
+    assert_eq!(h.folder_rows(), vec!["Create “edr”"]);
+}
+
+#[gpui_kit::gpui::test]
 fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("#");

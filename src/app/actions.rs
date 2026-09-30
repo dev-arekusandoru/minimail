@@ -1,6 +1,5 @@
 //! Actions (namespace `mail`), keymap and the command list shown in the palette/help.
 
-use crate::app::palette::{PaletteDismiss, PaletteMoveDown, PaletteMoveUp, PaletteRun};
 use crate::app::panels::{RULES_CONTEXT, RulesClose, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{
     SETTINGS_CONTEXT, SettingsClose, SettingsNext, SettingsPrev, SettingsSearch,
@@ -15,10 +14,6 @@ use crate::app::snooze::{
 };
 use crate::app::dialog::{
     Choice1, Choice2, Choice3, Choice4, Choice5, DIALOG_CONTEXT, DialogCancel, DialogConfirm,
-};
-use crate::app::folder_picker::{
-    FOLDER_PICKER_CONTEXT, FolderPickerCancel, FolderPickerConfirm, FolderPickerNext,
-    FolderPickerPrev,
 };
 use crate::judge::Kind;
 use crate::model::{AccountId, FolderId, Location, TagFilter};
@@ -210,11 +205,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("5", Choice5, Some("ChoiceDialog && !Input")),
         KeyBinding::new("enter", DialogConfirm, Some("ChoiceDialog && !Input")),
         KeyBinding::new("escape", DialogCancel, Some(DIALOG_CONTEXT)),
-        // Folder picker: type to filter, arrows to move, enter to file.
-        KeyBinding::new("down", FolderPickerNext, Some(FOLDER_PICKER_CONTEXT)),
-        KeyBinding::new("up", FolderPickerPrev, Some(FOLDER_PICKER_CONTEXT)),
-        KeyBinding::new("enter", FolderPickerConfirm, Some("FolderPicker && !Input")),
-        KeyBinding::new("escape", FolderPickerCancel, Some(FOLDER_PICKER_CONTEXT)),
         // Settings panel.
         KeyBinding::new("j", SettingsNext, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("down", SettingsNext, Some(SETTINGS_CONTEXT)),
@@ -247,19 +237,54 @@ pub fn bind_keys(cx: &mut App) {
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),
-        // Palette context.
-        KeyBinding::new("up", PaletteMoveUp, p),
-        KeyBinding::new("ctrl-p", PaletteMoveUp, p),
-        KeyBinding::new("down", PaletteMoveDown, p),
-        KeyBinding::new("ctrl-n", PaletteMoveDown, p),
-        KeyBinding::new("enter", PaletteRun, p),
-        KeyBinding::new("escape", PaletteDismiss, p),
+        // Palette dialog: the kit's Command owns navigation, enter and escape.
         KeyBinding::new("cmd-k", ToggleCommandPalette, p),
     ]);
 }
 
+/// Palette section a command is listed under.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Category {
+    Navigate,
+    Triage,
+    Sender,
+    Classify,
+    Tabs,
+    Find,
+    View,
+    App,
+}
+
+impl Category {
+    /// Palette section order.
+    pub const ALL: [Category; 8] = [
+        Category::Navigate,
+        Category::Triage,
+        Category::Sender,
+        Category::Classify,
+        Category::Tabs,
+        Category::Find,
+        Category::View,
+        Category::App,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Navigate => "Navigate",
+            Category::Triage => "Triage",
+            Category::Sender => "Sender",
+            Category::Classify => "Classify",
+            Category::Tabs => "Tabs",
+            Category::Find => "Find",
+            Category::View => "View",
+            Category::App => "App",
+        }
+    }
+}
+
 /// One user-facing command.
 pub struct CommandSpec {
+    pub category: Category,
     pub name: &'static str,
     /// Human-readable key hint, e.g. `"e"`, `"shift-e"`, `"cmd-k"`.
     pub key: &'static str,
@@ -267,8 +292,9 @@ pub struct CommandSpec {
 }
 
 macro_rules! cmd {
-    ($name:expr, $key:expr, $a:ident) => {
+    ($cat:ident, $name:expr, $key:expr, $a:ident) => {
         CommandSpec {
+            category: Category::$cat,
             name: $name,
             key: $key,
             action: || Box::new($a),
@@ -279,77 +305,77 @@ macro_rules! cmd {
 /// Every action except palette/compose-internal ones.
 pub fn commands() -> Vec<CommandSpec> {
     vec![
-        cmd!("Next message", "j", SelectNext),
-        cmd!("Previous message", "k", SelectPrev),
-        cmd!("Extend selection down", "shift-j", ExtendNext),
-        cmd!("Extend selection up", "shift-k", ExtendPrev),
-        cmd!("Toggle select", "x", ToggleSelect),
-        cmd!("Clear selection", "escape", ClearSelection),
-        cmd!("Open message", "enter", OpenMessage),
-        cmd!("Archive", "e", Archive),
-        cmd!("Delete", "d", Delete),
-        cmd!("File…", "f", File),
-        cmd!("Move to inbox", "i", MoveToInbox),
-        cmd!("Archive all from sender…", "shift-e", SenderArchive),
-        cmd!("Delete all from sender…", "shift-d", SenderDelete),
-        cmd!("File all from sender…", "shift-f", SenderFile),
-        cmd!("Snooze all from sender…", "shift-s", SenderSnooze),
-        cmd!("Move all from sender to inbox…", "shift-i", SenderInbox),
-        cmd!("Undo", "u", Undo),
-        cmd!("Reply", "r", Reply),
-        cmd!("Toggle command palette", "cmd-k", ToggleCommandPalette),
-        cmd!("Toggle help", "?", ToggleHelp),
-        cmd!("Snooze…", "s", OpenSnoozePicker),
-        cmd!("Accept suggestions", "y", AcceptSuggestions),
-        cmd!("Reject suggestions", "n", RejectSuggestions),
-        cmd!("Accept rule suggestion", "shift-y", AcceptRule),
-        cmd!("Dismiss rule suggestion", "shift-n", DismissRule),
-        cmd!("Toggle rules panel", "shift-r", ToggleRules),
-        cmd!("Allow sender", "a", AllowSender),
-        cmd!("Block sender…", "b", BlockSender),
-        cmd!("Mark spam…", "!", MarkSpam),
-        cmd!("Block sender and delete", "", SpamBlock),
-        cmd!("Mute thread", "m", MuteThread),
-        cmd!("Unsubscribe from sender…", "shift-u", Unsubscribe),
-        cmd!("Summarize thread", "z", SummarizeThread),
-        cmd!("Toggle settings", "cmd-,", ToggleSettings),
-        cmd!("Start triage session", "t", StartSession),
-        cmd!("Search", "/", OpenSearch),
-        cmd!("Classify visible mail", "c", ClassifyVisible),
-        cmd!("Toggle group by thread", "ctrl-g", ToggleGrouping),
-        cmd!("Cycle preview lines", "", CyclePreviewLines),
-        cmd!("Expand thread", "right", ExpandThread),
-        cmd!("Collapse thread", "left", CollapseThread),
-        cmd!("Next message in thread", "]", NextInThread),
-        cmd!("Previous message in thread", "[", PrevInThread),
-        cmd!("Close tab", "cmd-w", CloseTab),
-        cmd!("Next tab", "ctrl-tab", NextTab),
-        cmd!("Previous tab", "ctrl-shift-tab", PrevTab),
-        cmd!("Find in thread", "cmd-f", OpenFind),
-        cmd!("Next match", "cmd-g", FindNext),
-        cmd!("Previous match", "cmd-shift-g", FindPrev),
-        cmd!("Find: match case", "alt-c", ToggleFindCase),
-        cmd!("Find: whole word", "alt-w", ToggleFindWord),
-        cmd!("Find: regex", "alt-r", ToggleFindRegex),
-        cmd!("Toggle reader mode", "v", ToggleReaderMode),
-        cmd!("Expand or collapse thread messages", "shift-o", ToggleThreadExpansion),
-        cmd!("Grow list pane", "alt-right", GrowListPane),
-        cmd!("Shrink list pane", "alt-left", ShrinkListPane),
-        cmd!("Reset pane sizes", "alt-r", ResetPanes),
-        cmd!("Toggle pane layout", "alt-l", TogglePaneLayout),
+        cmd!(Navigate, "Next message", "j", SelectNext),
+        cmd!(Navigate, "Previous message", "k", SelectPrev),
+        cmd!(Navigate, "Extend selection down", "shift-j", ExtendNext),
+        cmd!(Navigate, "Extend selection up", "shift-k", ExtendPrev),
+        cmd!(Navigate, "Toggle select", "x", ToggleSelect),
+        cmd!(Navigate, "Clear selection", "escape", ClearSelection),
+        cmd!(Navigate, "Open message", "enter", OpenMessage),
+        cmd!(Triage, "Archive", "e", Archive),
+        cmd!(Triage, "Delete", "d", Delete),
+        cmd!(Triage, "File…", "f", File),
+        cmd!(Triage, "Move to inbox", "i", MoveToInbox),
+        cmd!(Sender, "Archive all from sender…", "shift-e", SenderArchive),
+        cmd!(Sender, "Delete all from sender…", "shift-d", SenderDelete),
+        cmd!(Sender, "File all from sender…", "shift-f", SenderFile),
+        cmd!(Sender, "Snooze all from sender…", "shift-s", SenderSnooze),
+        cmd!(Sender, "Move all from sender to inbox…", "shift-i", SenderInbox),
+        cmd!(Triage, "Undo", "u", Undo),
+        cmd!(Triage, "Reply", "r", Reply),
+        cmd!(App, "Toggle command palette", "cmd-k", ToggleCommandPalette),
+        cmd!(App, "Toggle help", "?", ToggleHelp),
+        cmd!(Triage, "Snooze…", "s", OpenSnoozePicker),
+        cmd!(Classify, "Accept suggestions", "y", AcceptSuggestions),
+        cmd!(Classify, "Reject suggestions", "n", RejectSuggestions),
+        cmd!(Classify, "Accept rule suggestion", "shift-y", AcceptRule),
+        cmd!(Classify, "Dismiss rule suggestion", "shift-n", DismissRule),
+        cmd!(Classify, "Toggle rules panel", "shift-r", ToggleRules),
+        cmd!(Triage, "Allow sender", "a", AllowSender),
+        cmd!(Triage, "Block sender…", "b", BlockSender),
+        cmd!(Triage, "Mark spam…", "!", MarkSpam),
+        cmd!(Triage, "Block sender and delete", "", SpamBlock),
+        cmd!(Triage, "Mute thread", "m", MuteThread),
+        cmd!(Triage, "Unsubscribe from sender…", "shift-u", Unsubscribe),
+        cmd!(Classify, "Summarize thread", "z", SummarizeThread),
+        cmd!(App, "Toggle settings", "cmd-,", ToggleSettings),
+        cmd!(App, "Start triage session", "t", StartSession),
+        cmd!(Navigate, "Search", "/", OpenSearch),
+        cmd!(Classify, "Classify visible mail", "c", ClassifyVisible),
+        cmd!(View, "Toggle group by thread", "ctrl-g", ToggleGrouping),
+        cmd!(View, "Cycle preview lines", "", CyclePreviewLines),
+        cmd!(Navigate, "Expand thread", "right", ExpandThread),
+        cmd!(Navigate, "Collapse thread", "left", CollapseThread),
+        cmd!(Navigate, "Next message in thread", "]", NextInThread),
+        cmd!(Navigate, "Previous message in thread", "[", PrevInThread),
+        cmd!(Tabs, "Close tab", "cmd-w", CloseTab),
+        cmd!(Tabs, "Next tab", "ctrl-tab", NextTab),
+        cmd!(Tabs, "Previous tab", "ctrl-shift-tab", PrevTab),
+        cmd!(Find, "Find in thread", "cmd-f", OpenFind),
+        cmd!(Find, "Next match", "cmd-g", FindNext),
+        cmd!(Find, "Previous match", "cmd-shift-g", FindPrev),
+        cmd!(Find, "Find: match case", "alt-c", ToggleFindCase),
+        cmd!(Find, "Find: whole word", "alt-w", ToggleFindWord),
+        cmd!(Find, "Find: regex", "alt-r", ToggleFindRegex),
+        cmd!(View, "Toggle reader mode", "v", ToggleReaderMode),
+        cmd!(View, "Expand or collapse thread messages", "shift-o", ToggleThreadExpansion),
+        cmd!(View, "Grow list pane", "alt-right", GrowListPane),
+        cmd!(View, "Shrink list pane", "alt-left", ShrinkListPane),
+        cmd!(View, "Reset pane sizes", "alt-r", ResetPanes),
+        cmd!(View, "Toggle pane layout", "alt-l", TogglePaneLayout),
         // Sidebar navigation.
-        cmd!("Go to inbox", "g i", GoInbox),
-        cmd!("Go to snoozed", "g s", GoSnoozed),
-        cmd!("Go to sent", "g t", GoSent),
-        cmd!("Go to archive", "g a", GoArchive),
-        cmd!("Go to trash", "g d", GoTrash),
-        cmd!("Chip: all", "1", SelectChip1),
-        cmd!("Chip: needs reply", "2", SelectChip2),
-        cmd!("Chip: follow up", "3", SelectChip3),
-        cmd!("Chip: urgent", "4", SelectChip4),
-        cmd!("Chip: new senders", "5", SelectChip5),
-        cmd!("Chip: possible spam", "6", SelectChip6),
-        cmd!("Clear filters", "", ClearFilters),
+        cmd!(Navigate, "Go to inbox", "g i", GoInbox),
+        cmd!(Navigate, "Go to snoozed", "g s", GoSnoozed),
+        cmd!(Navigate, "Go to sent", "g t", GoSent),
+        cmd!(Navigate, "Go to archive", "g a", GoArchive),
+        cmd!(Navigate, "Go to trash", "g d", GoTrash),
+        cmd!(Navigate, "Chip: all", "1", SelectChip1),
+        cmd!(Navigate, "Chip: needs reply", "2", SelectChip2),
+        cmd!(Navigate, "Chip: follow up", "3", SelectChip3),
+        cmd!(Navigate, "Chip: urgent", "4", SelectChip4),
+        cmd!(Navigate, "Chip: new senders", "5", SelectChip5),
+        cmd!(Navigate, "Chip: possible spam", "6", SelectChip6),
+        cmd!(Navigate, "Clear filters", "", ClearFilters),
     ]
 }
 

@@ -213,6 +213,59 @@ fn palette_runs_view_switch(cx: &mut TestAppContext) {
     assert_eq!(h.view(), Location::Snoozed("personal".into()));
 }
 
+impl Harness<'_> {
+    fn palette_rows(&mut self) -> Vec<String> {
+        self.app.read_with(self.cx, |a, cx| a.palette_rows(cx))
+    }
+}
+
+#[gpui_kit::gpui::test]
+fn palette_matches_by_subsequence_and_by_key_string(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("cmd-k");
+    // `gtsn` is not a substring of anything; it is a subsequence of "Go to snoozed".
+    h.keys("g t s n");
+    assert!(h.palette_rows().contains(&"Go to snoozed".to_owned()), "{:?}", h.palette_rows());
+    h.keys("escape escape");
+    assert!(!h.read(|a| a.palette_open()));
+
+    // Typing a command's key (`g a`) finds it, and it leads the list.
+    h.keys("cmd-k");
+    h.keys("g space a");
+    assert_eq!(h.palette_rows().first().map(String::as_str), Some("Go to archive"));
+    h.keys("enter");
+    assert_eq!(h.view(), Location::Archive("personal".into()));
+}
+
+#[gpui_kit::gpui::test]
+fn palette_escape_clears_the_query_then_closes(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let all = {
+        h.keys("cmd-k");
+        h.palette_rows()
+    };
+    h.keys("u n d o");
+    assert_eq!(h.palette_rows(), vec!["Undo".to_owned()]);
+    h.keys("escape");
+    assert!(h.read(|a| a.palette_open()), "the first escape only clears the query");
+    assert_eq!(h.palette_rows(), all);
+    h.keys("escape");
+    assert!(!h.read(|a| a.palette_open()));
+}
+
+#[gpui_kit::gpui::test]
+fn palette_search_row_replaces_the_command_list(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("/");
+    assert!(h.read(|a| a.palette_open()), "`/` opens the palette prefilled with `/`");
+    assert!(h.palette_rows().is_empty(), "search mode lists no commands");
+    h.keys("f r o m : a");
+    assert!(h.palette_rows().is_empty());
+    h.keys("enter");
+    assert!(!h.read(|a| a.palette_open()));
+    assert!(h.read(|a| a.search_header()).is_some_and(|s| s.starts_with("search:")));
+}
+
 #[gpui_kit::gpui::test]
 fn reply_send_tracks_awaiting_reply_without_moving_message(cx: &mut TestAppContext) {
     let mut h = harness(cx);

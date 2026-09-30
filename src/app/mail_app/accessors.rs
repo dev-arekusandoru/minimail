@@ -52,7 +52,7 @@ impl MailApp {
     pub fn folder_rows(&self, cx: &App) -> Vec<String> {
         self.folder_picker
             .as_ref()
-            .map(|p| p.read(cx).rows(cx))
+            .map(|p| p.read(cx).rows())
             .unwrap_or_default()
     }
 

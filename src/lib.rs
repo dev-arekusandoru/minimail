@@ -1,4 +1,5 @@
 pub mod app;
+pub mod fuzzy;
 pub mod preview;
 pub mod clock;
 pub mod find;

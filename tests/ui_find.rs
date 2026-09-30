@@ -228,7 +228,7 @@ fn cmd_shift_f_opens_global_search_like_slash(cx: &mut TestAppContext) {
     h.keys("cmd-shift-f");
     assert!(h.read(|a| a.palette_open()));
     assert_eq!(h.app.read_with(h.cx, |a, cx| a.palette_query(cx)), Some("/".to_owned()));
-    h.keys("escape");
+    h.keys("escape escape");
     assert!(!h.read(|a| a.palette_open()));
     h.keys("/");
     assert!(h.read(|a| a.palette_open()), "`/` still works");

@@ -143,7 +143,7 @@ pub fn every_new_command_is_in_palette_search_and_help(cx: &mut TestAppContext) 
         h.type_text(name);
         let rows = h.palette_rows();
         assert!(rows.iter().any(|r| r.contains(name)), "palette search for {name:?}: {rows:?}");
-        h.keys("escape");
+        h.keys("escape escape");
         assert!(!h.read(|a| a.palette_open()));
     }
 }

@@ -1,8 +1,40 @@
 use super::*;
 
 impl MailApp {
+    /// Host `view` in a top-anchored kit dialog `width` wide. Escape and backdrop clicks close
+    /// it through the dialog itself and land in [`Self::dialog_dismissed`]; the owner closes it
+    /// programmatically through [`Self::close_modals`].
+    fn host_in_dialog<V: Render>(
+        &mut self,
+        view: Entity<V>,
+        width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = cx.weak_entity();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (view, app) = (view.clone(), app.clone());
+            dialog
+                .close_button(false)
+                .p_0()
+                .w(px(width))
+                .on_close(move |_, _, cx| {
+                    app.update(cx, |this, cx| this.dialog_dismissed(cx)).ok();
+                })
+                .content(move |content, _, _| content.child(view.clone()))
+        });
+    }
+
+    /// The hosting dialog closed itself (escape, backdrop): forget its view.
+    fn dialog_dismissed(&mut self, cx: &mut Context<Self>) {
+        self.palette = None;
+        self.folder_picker = None;
+        self._modal_sub = None;
+        cx.notify();
+    }
+
     pub(super) fn open_palette(&mut self, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
-        let palette = cx.new(|cx| CommandPalette::new(window, cx));
+        let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &palette,
             window,
@@ -15,11 +47,9 @@ impl MailApp {
                 }
             },
         ));
-        if let Some(q) = prefill {
-            palette.update(cx, |p, cx| p.set_query(q, window, cx));
-        }
-        window.focus(&palette.focus_handle(cx), cx);
-        self.palette = Some(palette);
+        self.palette = Some(palette.clone());
+        self.host_in_dialog(palette.clone(), 480., window, cx);
+        palette.update(cx, |p, cx| p.focus(window, cx));
         cx.notify();
     }
 
@@ -516,20 +546,17 @@ impl MailApp {
             window,
             move |this, _, event: &FolderPickerEvent, window, cx| {
                 let pick = match event {
-                    FolderPickerEvent::File(id) => Some(Pick::File(*id)),
-                    FolderPickerEvent::Create(name) => Some(Pick::Create(name.clone())),
-                    FolderPickerEvent::Cancel => None,
+                    FolderPickerEvent::File(id) => Pick::File(*id),
+                    FolderPickerEvent::Create(name) => Pick::Create(name.clone()),
                 };
                 this.close_modals(window, cx);
-                if let Some(pick) = pick {
-                    this.apply_pick(&action, &account, pick, window, cx);
-                }
+                this.apply_pick(&action, &account, pick, window, cx);
                 cx.notify();
             },
         ));
-        let input = picker.read(cx).input_focus_handle(cx);
-        window.focus(&input, cx);
-        self.folder_picker = Some(picker);
+        self.folder_picker = Some(picker.clone());
+        self.host_in_dialog(picker.clone(), 420., window, cx);
+        picker.update(cx, |p, cx| p.focus(window, cx));
         cx.notify();
     }
 
