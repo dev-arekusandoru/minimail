@@ -1,5 +1,5 @@
 //! Resizable panes: the divider drag, the keyboard sizes, the two orientations and
-//! the settings entry that switches between them.
+//! the titlebar and keyboard toggles between them.
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -241,19 +241,6 @@ fn rows_span_the_pane_in_both_orientations(cx: &mut TestAppContext) {
     assert!(stacked > side_by_side);
 }
 
-#[gpui_kit::gpui::test]
-fn settings_pane_layout_entry_switches_the_orientation(cx: &mut TestAppContext) {
-    let mut h = harness(cx, 1400., 900.);
-    h.keys("cmd-,");
-    h.click("settings-search");
-    h.cx.update_window(h.window, |_, window, cx| window.input("pane layout", cx)).expect("window alive");
-    h.cx.run_until_parked();
-    // Enter leaves the search box for the matching row; space flips the dropdown's value.
-    h.keys("enter space");
-    assert_eq!(h.orientation(), Orientation::Stacked);
-    h.keys("space");
-    assert_eq!(h.orientation(), Orientation::SideBySide);
-}
 #[gpui_kit::gpui::test]
 fn sidebar_drag_resizes_within_limits(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);

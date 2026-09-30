@@ -143,9 +143,6 @@ fn ranked(ctx: &HintContext) -> Vec<Ranked> {
             v.push(HELP);
         }
         HintMode::Settings => {
-            v.push(h("space", "auto/review", 1));
-            v.push(h("=", "threshold +", 2));
-            v.push(h("-", "threshold -", 2));
             v.push(ESC_CLOSE);
         }
         HintMode::Rules => {

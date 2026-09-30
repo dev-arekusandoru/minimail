@@ -1,4 +1,5 @@
-use gpui_kit::{TestAppContext};
+use gpui_kit::{AppContext, TestAppContext};
+use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::actions::{commands};
 use mail_classifier::clock::{DAY};
 use mail_classifier::judge::{Mode, QuestionKey};
@@ -7,24 +8,7 @@ use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness, harness_with, mailbox, msg};
 use crate::session_search::{search, search_box};
 
-// ---------------------------------------------------------------- Settings / summaries
-
-#[gpui_kit::gpui::test]
-pub fn settings_switch_question_to_review(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    let auto = |h: &mut Harness<'_>| {
-        h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Auto { .. }))
-    };
-    assert!(auto(&mut h), "Spam defaults to Auto");
-    h.keys("cmd-,");
-    assert!(h.read(|a| a.settings_open()));
-    h.keys("space");
-    assert!(!auto(&mut h), "space toggles the selected question to Review");
-    h.keys("space");
-    assert!(auto(&mut h), "and back to Auto");
-    h.keys("escape");
-    assert!(!h.read(|a| a.settings_open()));
-}
+// ---------------------------------------------------------------- Summaries
 
 /// A mailbox whose only inbox mail is an obvious spam message (id 1), classified on startup.
 pub fn spam_box() -> Mailbox {
@@ -61,7 +45,16 @@ pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
 pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
     reset_spam(&mut h);
-    h.keys("cmd-, space escape");
+    // Settings -> Classifier -> first question (Spam) -> Handling dropdown -> Review.
+    h.keys("cmd-,");
+    h.click("0-4");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.within("group-0").within("item-0").click("btn", cx);
+        window.within("popup-menu").click(1usize, cx);
+    })
+    .expect("window alive");
+    h.cx.run_until_parked();
+    h.keys("escape");
     assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
     h.keys("c");
     assert!(!h.has_tag(1, Tag::PossibleSpam), "Review: no auto-applied label");
@@ -96,8 +89,11 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.summary_shown()).is_none());
 
     h.keys("cmd-,");
-    h.click(("settings-section", 0usize));
-    h.click("summaries-row");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.within("group-0").within("item-0").click("check", cx)
+    })
+    .expect("window alive");
+    h.cx.run_until_parked();
     assert!(h.read(|a| a.summaries_enabled));
     h.keys("escape");
     assert!(!h.read(|a| a.settings_open()));
