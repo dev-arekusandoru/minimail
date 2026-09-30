@@ -42,6 +42,7 @@ fn contact_from_row(row: &Row) -> rusqlite::Result<Contact> {
         addresses: Vec::new(),
         urls: Vec::new(),
         groups: Vec::new(),
+        fields: Vec::new(),
     })
 }
 
@@ -52,6 +53,7 @@ fn assemble(mut contact: Contact, children: Children) -> Contact {
     contact.addresses = children.addresses;
     contact.urls = children.urls;
     contact.groups = children.groups;
+    contact.fields = children.fields;
     contact
 }
 

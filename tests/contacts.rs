@@ -142,9 +142,11 @@ fn delete_cascades_to_children_and_groups() {
     let group = store.create_group("Work").expect("group");
     store.assign_group(id, group.id).expect("assign");
     assert_eq!(store.fields(id).unwrap().len(), 1);
+    assert_eq!(store.get(id).unwrap().unwrap().fields[0].key, "pronouns");
 
     assert!(store.delete(id).expect("delete"));
     assert_eq!(store.fields(id).unwrap(), []);
+    assert!(store.get(id).unwrap().is_none());
     assert_eq!(store.groups().unwrap().len(), 1, "the group itself survives");
     assert_eq!(
         store.search(&ContactQuery::new()).unwrap().len(),
