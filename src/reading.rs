@@ -5,7 +5,7 @@
 //! No GPUI types live here, so all of it is headlessly testable.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::model::{Message, MessageId};
 use crate::threads::thread_order;
@@ -705,12 +705,16 @@ pub fn thread_others(messages: &[Message], opened: &Message) -> Vec<MessageId> {
 
 // -------------------------------------------------------------- view state
 
-/// Per-thread reader toggles. State belongs to one thread at a time: queries
-/// for any other thread see nothing, and toggling for another thread starts
-/// from a clean slate. None of it is an undo step.
+/// Reader toggles of every thread that has one. Each thread keeps its own state, so a tab
+/// switch never loses it; `forget` drops a thread's state when its tab goes. None of it is an
+/// undo step.
 #[derive(Default, Clone, Debug)]
 pub struct ReaderView {
-    thread: Option<u32>,
+    threads: HashMap<u32, ThreadView>,
+}
+
+#[derive(Default, Clone, Debug)]
+struct ThreadView {
     expanded: HashSet<MessageId>,
     recipients: HashSet<MessageId>,
     quoted: HashSet<MessageId>,
@@ -724,71 +728,65 @@ fn flip(set: &mut HashSet<MessageId>, id: MessageId) {
 }
 
 impl ReaderView {
-    fn enter(&mut self, thread: u32) {
-        if self.thread != Some(thread) {
-            *self = ReaderView { thread: Some(thread), ..ReaderView::default() };
-        }
+    fn of(&mut self, thread: u32) -> &mut ThreadView {
+        self.threads.entry(thread).or_default()
     }
 
-    fn live(&self, thread: u32) -> bool {
-        self.thread == Some(thread)
+    /// Drop everything stored for `thread`.
+    pub fn forget(&mut self, thread: u32) {
+        self.threads.remove(&thread);
     }
 
     pub fn is_expanded(&self, thread: u32, id: MessageId) -> bool {
-        self.live(thread) && self.expanded.contains(&id)
+        self.threads.get(&thread).is_some_and(|v| v.expanded.contains(&id))
     }
 
     pub fn toggle_expanded(&mut self, thread: u32, id: MessageId) {
-        self.enter(thread);
-        flip(&mut self.expanded, id);
+        flip(&mut self.of(thread).expanded, id);
     }
 
     /// Expand `id` (no-op when it already is); never collapses anything.
     pub fn expand(&mut self, thread: u32, id: MessageId) {
-        self.enter(thread);
-        self.expanded.insert(id);
+        self.of(thread).expanded.insert(id);
     }
 
     /// Expand every id, unless all are already expanded: then collapse them.
     pub fn toggle_all(&mut self, thread: u32, ids: &[MessageId]) {
-        self.enter(thread);
         if ids.is_empty() {
             return;
         }
-        if ids.iter().all(|id| self.expanded.contains(id)) {
+        let v = self.of(thread);
+        if ids.iter().all(|id| v.expanded.contains(id)) {
             for id in ids {
-                self.expanded.remove(id);
+                v.expanded.remove(id);
             }
         } else {
-            self.expanded.extend(ids.iter().copied());
+            v.expanded.extend(ids.iter().copied());
         }
     }
 
     pub fn recipients_open(&self, thread: u32, id: MessageId) -> bool {
-        self.live(thread) && self.recipients.contains(&id)
+        self.threads.get(&thread).is_some_and(|v| v.recipients.contains(&id))
     }
 
     pub fn toggle_recipients(&mut self, thread: u32, id: MessageId) {
-        self.enter(thread);
-        flip(&mut self.recipients, id);
+        flip(&mut self.of(thread).recipients, id);
     }
 
     pub fn quoted_open(&self, thread: u32, id: MessageId) -> bool {
-        self.live(thread) && self.quoted.contains(&id)
+        self.threads.get(&thread).is_some_and(|v| v.quoted.contains(&id))
     }
 
     pub fn toggle_quoted(&mut self, thread: u32, id: MessageId) {
-        self.enter(thread);
-        flip(&mut self.quoted, id);
+        flip(&mut self.of(thread).quoted, id);
     }
 
     /// Reader mode (plain text instead of HTML) is on for this message.
     pub fn plain(&self, thread: u32, id: MessageId) -> bool {
-        self.live(thread) && self.plain.contains(&id)
+        self.threads.get(&thread).is_some_and(|v| v.plain.contains(&id))
     }
 
     pub fn toggle_plain(&mut self, thread: u32, id: MessageId) {
-        self.enter(thread);
-        flip(&mut self.plain, id);
+        flip(&mut self.of(thread).plain, id);
     }
 }

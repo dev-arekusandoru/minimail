@@ -387,28 +387,22 @@ fn reader_view_toggles_each_set_independently() {
 }
 
 #[test]
-fn reader_view_ignores_and_resets_stale_thread_state() {
+fn reader_view_keeps_each_threads_state_and_forgets_on_request() {
     let mut v = ReaderView::default();
     v.toggle_expanded(1, 10);
     v.toggle_recipients(1, 10);
     v.toggle_quoted(1, 10);
     v.toggle_plain(1, 10);
 
-    // Queries for another thread see nothing, and do not disturb the stored one.
-    assert!(!v.is_expanded(2, 10));
-    assert!(!v.recipients_open(2, 10));
-    assert!(!v.quoted_open(2, 10));
-    assert!(!v.plain(2, 10));
-    assert!(v.is_expanded(1, 10));
-
-    // Toggling for another thread starts clean: the old thread's state is gone.
+    // Another thread sees nothing of it, and toggling there leaves thread 1 alone.
+    assert!(!v.is_expanded(2, 10) && !v.recipients_open(2, 10) && !v.quoted_open(2, 10) && !v.plain(2, 10));
     v.toggle_expanded(2, 20);
-    assert!(v.is_expanded(2, 20));
-    assert!(!v.recipients_open(2, 10) && !v.quoted_open(2, 10) && !v.plain(2, 10));
-    assert!(!v.is_expanded(1, 10));
-    v.toggle_expanded(1, 10);
-    assert!(v.is_expanded(1, 10), "returning to thread 1 toggles from empty, not from the old state");
-    assert!(!v.recipients_open(1, 10));
+    assert!(v.is_expanded(2, 20) && v.is_expanded(1, 10));
+    assert!(v.recipients_open(1, 10) && v.quoted_open(1, 10) && v.plain(1, 10));
+
+    v.forget(1);
+    assert!(!v.is_expanded(1, 10) && !v.recipients_open(1, 10) && !v.quoted_open(1, 10) && !v.plain(1, 10));
+    assert!(v.is_expanded(2, 20), "forgetting one thread keeps the others");
 }
 
 #[test]
@@ -432,9 +426,9 @@ fn reader_view_toggle_all_expands_then_collapses() {
     v.toggle_all(7, &[]);
     assert!(v.is_expanded(7, 99));
 
-    // toggle_all on a new thread resets first.
+    // toggle_all on another thread leaves this one alone.
     v.toggle_all(8, &[5]);
-    assert!(v.is_expanded(8, 5) && !v.is_expanded(7, 99));
+    assert!(v.is_expanded(8, 5) && v.is_expanded(7, 99));
 }
 
 #[test]

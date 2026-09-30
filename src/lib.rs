@@ -10,4 +10,5 @@ pub mod search;
 pub mod theme;
 pub mod reading;
 pub mod summary;
+pub mod tabs;
 pub mod threads;
