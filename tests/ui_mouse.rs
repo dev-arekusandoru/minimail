@@ -102,11 +102,11 @@ fn keys_still_work_after_a_click(cx: &mut TestAppContext) {
 fn checkbox_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
-    h.click(("row-check", 0));
-    h.click(("row-check", 1));
+    h.click(("row-check", 0usize));
+    h.click(("row-check", 1usize));
     assert_eq!(h.read(|a| a.triage.selected()), vec![ids[0], ids[1]]);
     assert_eq!(h.read(|a| a.opened()), None);
-    h.click(("row-check", 0));
+    h.click(("row-check", 0usize));
     assert_eq!(h.read(|a| a.triage.selected()), vec![ids[1]]);
 }
 
@@ -115,8 +115,8 @@ fn done_button_marks_selection_and_undo_button_restores(cx: &mut TestAppContext)
     let mut h = harness(cx);
     let start = (h.count(Inbox), h.count(Done));
     let ids = h.ids();
-    h.click(("row-check", 0));
-    h.click(("row-check", 1));
+    h.click(("row-check", 0usize));
+    h.click(("row-check", 1usize));
     h.click("btn-done");
     assert_eq!(h.state_of(ids[0]), Done);
     assert_eq!(h.state_of(ids[1]), Done);
@@ -137,13 +137,13 @@ fn state_buttons_act_on_the_cursor_row(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn sidebar_tabs_switch_views(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click(("view-tab", 3));
+    h.click(("view-tab", 3usize));
     assert_eq!(h.read(|a| a.triage.view), Done);
-    h.click(("view-tab", 1));
+    h.click(("view-tab", 1usize));
     assert_eq!(h.read(|a| a.triage.view), Waiting);
-    h.click(("view-tab", 4));
+    h.click(("view-tab", 4usize));
     assert!(h.read(|a| a.screener_open()));
-    h.click(("view-tab", 0));
+    h.click(("view-tab", 0usize));
     assert!(!h.read(|a| a.screener_open()));
     assert_eq!(h.read(|a| a.triage.view), Inbox);
 }
@@ -165,7 +165,7 @@ fn later_button_opens_snooze_and_preset_click_snoozes(cx: &mut TestAppContext) {
     let id = h.cursor().unwrap();
     h.click("btn-later");
     assert!(h.read(|a| a.snooze_open()));
-    h.click(("snooze-preset", 0));
+    h.click(("snooze-preset", 0usize));
     assert!(!h.read(|a| a.snooze_open()));
     assert_eq!(h.state_of(id), Later);
 }
