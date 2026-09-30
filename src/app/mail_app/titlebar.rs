@@ -64,6 +64,7 @@ impl MailApp {
             .on_click(run(OpenSearch));
 
         let width = f32::from(window.viewport_size().width);
+        let sidebar_icon = if self.sidebar_visible() { IconName::PanelLeftClose } else { IconName::PanelLeftOpen };
         let left = div().flex().flex_1().flex_basis(px(0.)).min_w_0().overflow_hidden().h_full().child(
             div()
                 .flex()
@@ -71,6 +72,10 @@ impl MailApp {
                 .min_w_0()
                 .h_full()
                 .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
+                .gap_2()
+                .child(no_drag(
+                    icon_button("btn-sidebar", sidebar_icon, "Toggle the sidebar", "cmd-b", cx).on_click(run(ToggleSidebar)),
+                ))
                 .pr_3()
                 .text_size(px(12.))
                 .text_color(title_fg)
