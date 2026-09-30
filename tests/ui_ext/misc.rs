@@ -96,10 +96,11 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.summary_shown()).is_none());
 
     h.keys("cmd-,");
-    // Five questions, then the summaries row.
-    h.keys("j j j j j space");
+    h.click(("settings-section", 0usize));
+    h.click("summaries-row");
     assert!(h.read(|a| a.summaries_enabled));
     h.keys("escape");
+    assert!(!h.read(|a| a.settings_open()));
     h.keys("s");
     let summary = h.read(|a| a.summary_shown()).expect("summary shown after enabling");
     assert!(!summary.summary.is_empty());

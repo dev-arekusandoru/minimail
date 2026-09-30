@@ -85,6 +85,11 @@ impl Harness<'_> {
             .unwrap();
         self.cx.run_until_parked();
     }
+    pub fn click(&mut self, id: impl Into<gpui_kit::ElementId>) {
+        let id = id.into();
+        self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).unwrap();
+        self.cx.run_until_parked();
+    }
     pub fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
         self.cx.read_entity(&self.app, |a, _| f(a))
     }

@@ -221,7 +221,7 @@ impl SettingsPanel {
     fn row_key(row: usize) -> Option<SettingKey> {
         if row < QuestionKey::ALL.len() * 2 {
             let question = QuestionKey::ALL[row / 2];
-            return Some(if row % 2 == 0 { SettingKey::Classifier(question) } else { SettingKey::Threshold(question) });
+            return Some(if row.is_multiple_of(2) { SettingKey::Classifier(question) } else { SettingKey::Threshold(question) });
         }
         match row {
             value if value == Self::summary_row() => Some(SettingKey::Summaries),
