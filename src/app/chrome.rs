@@ -301,6 +301,7 @@ fn tab(t: &Theme, i: usize, name: &'static str, n: usize, active: bool, color: H
     let hover = t.hover;
     div()
         .id(("view-tab", i))
+        .test_support()
         .flex()
         .items_center()
         .justify_between()

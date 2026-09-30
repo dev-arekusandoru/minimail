@@ -89,7 +89,7 @@ impl MailApp {
     }
 
     /// Message row: sender + date, full-width subject, optional preview, icon cluster.
-    pub(super) fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> crate::app::ui::Observable {
         let t = theme::active(cx);
         let mut visual = self.row_visual(msg.id);
         visual.cursor = ix == self.cursor_ix();

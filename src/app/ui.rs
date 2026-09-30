@@ -4,6 +4,9 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+/// A stateful div that headless tests can find by id (a plain `Stateful<Div>` in release builds).
+pub type Observable = gpui_kit::base::ObservedElement<Stateful<Div>>;
+
 /// Click handler that dispatches `action` through the focused element's key path, exactly like
 /// pressing its shortcut.
 pub fn run<A: Action + Clone>(
@@ -20,7 +23,7 @@ pub fn button(
     tip: &str,
     key: &str,
     cx: &App,
-) -> Stateful<Div> {
+) -> Observable {
     let t = crate::theme::active(cx);
     let (border, fg, hover, active) = (t.border, t.text, t.hover, t.selection);
     let tip: SharedString = if key.is_empty() {
@@ -48,4 +51,5 @@ pub fn button(
             d.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         })
         .child(label)
+        .test_support()
 }

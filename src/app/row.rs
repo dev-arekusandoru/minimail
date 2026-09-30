@@ -45,9 +45,9 @@ impl RowVisual {
 }
 
 /// Apply the row geometry and the visual states of `v` to a row container.
-pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme, height: f32) -> Stateful<Div> {
+pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme, height: f32) -> crate::app::ui::Observable {
     let hover = t.hover;
-    row.relative()
+    row.test_support().relative()
         .h(px(height))
         .w_full()
         .flex()

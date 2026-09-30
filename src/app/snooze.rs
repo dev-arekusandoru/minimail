@@ -163,6 +163,7 @@ impl Render for SnoozePicker {
                     SharedString::from(format_time(*ts)),
                 )
                 .id(("snooze-preset", i))
+                .test_support()
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| this.pick(i, cx)))
             }))

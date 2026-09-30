@@ -230,7 +230,7 @@ impl MailApp {
         ix: usize,
         newest: &str,
         cx: &Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> crate::app::ui::Observable {
         let Row::Header { thread_id, ids, expanded } = row else {
             unreachable!("render_group_header takes header rows")
         };

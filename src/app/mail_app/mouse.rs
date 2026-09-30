@@ -98,7 +98,7 @@ impl MailApp {
     }
 
     /// Selection checkbox for row `ix`. Sits beside (not inside) the clickable row body.
-    pub(super) fn row_checkbox(&self, ix: usize, selected: bool, cx: &Context<Self>) -> Stateful<Div> {
+    pub(super) fn row_checkbox(&self, ix: usize, selected: bool, cx: &Context<Self>) -> crate::app::ui::Observable {
         let t = crate::theme::active(cx);
         div()
             .id(("row-check", ix))
@@ -119,6 +119,7 @@ impl MailApp {
                 gpui_kit::component::tooltip::Tooltip::new("Select (x)").build(window, cx)
             })
             .child(if selected { "✓" } else { "" })
+            .test_support()
             .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)))
     }
 

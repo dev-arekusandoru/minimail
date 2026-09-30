@@ -151,6 +151,7 @@ impl Render for CommandPalette {
                         let command = &self.commands[index];
                         div()
                             .id(("command", index))
+                            .test_support()
                             .flex()
                             .items_center()
                             .justify_between()
