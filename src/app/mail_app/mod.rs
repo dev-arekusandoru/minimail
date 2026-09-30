@@ -49,6 +49,7 @@ mod mouse;
 pub mod panes;
 mod reader;
 mod render;
+mod reader_find;
 mod reader_state;
 mod reader_tabs;
 mod sidebar;
@@ -153,6 +154,12 @@ pub struct MailApp {
     /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
     /// opened message can be scrolled into view.
     reader_panes: RefCell<HashMap<u32, reader::ReaderPane>>,
+    /// Open find bars, by the thread of their tab.
+    finds: HashMap<u32, reader_find::FindTab>,
+    /// Layout of the text holding the current find match, from the frame numbered by the last
+    /// field, and that frame counter (see `place_find_match`).
+    find_layout: RefCell<Option<reader_find::FindLayout>>,
+    find_gen: std::cell::Cell<u64>,
     _modal_sub: Option<Subscription>,
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
@@ -228,6 +235,9 @@ impl MailApp {
             list_shape: None,
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),
+            finds: HashMap::new(),
+            find_layout: RefCell::new(None),
+            find_gen: std::cell::Cell::new(0),
             _modal_sub: None,
             menu: None,
             _menu_sub: None,

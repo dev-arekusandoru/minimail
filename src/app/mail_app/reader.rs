@@ -3,6 +3,8 @@
 
 use super::*;
 
+#[path = "reader_findbar.rs"]
+mod findbar;
 #[path = "reader_message.rs"]
 mod message;
 #[path = "reader_parts.rs"]
@@ -24,8 +26,22 @@ const DOT_COLLAPSED: f32 = thread::COLLAPSED_H / 2.;
 /// and the message it last scrolled to (a different opened message triggers a reveal).
 #[derive(Default)]
 pub(super) struct ReaderPane {
-    scroll: ScrollHandle,
+    pub(super) scroll: ScrollHandle,
     revealed: Option<MessageId>,
+    /// Where the current find match is in being scrolled into view.
+    pub(super) find_reveal: FindReveal,
+}
+
+/// Bringing the current find match into view takes two frames: scroll its message to the top
+/// (needs the row layout), then nudge the exact line into the viewport (needs the painted text).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum FindReveal {
+    #[default]
+    Idle,
+    /// Scroll the match's message into view on the next render.
+    Message,
+    /// The message is in view: place the match's own line next frame.
+    Line,
 }
 
 impl MailApp {
@@ -45,6 +61,7 @@ impl MailApp {
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full())
             .child(self.tab_bar(&Look::new(cx), cx))
+            .children(self.find_bar(&Look::new(cx)))
             .child(pane)
             .into_any_element()
     }
@@ -113,6 +130,14 @@ impl MailApp {
             let pane = panes.entry(msg.thread_id).or_default();
             if pane.revealed.replace(msg.id) != Some(msg.id) {
                 pane.scroll.scroll_to_top_of_item(lead + at);
+            }
+            if pane.find_reveal == FindReveal::Message {
+                let target = self.find_current(msg.thread_id).map_or(0, |m| {
+                    let at = order.iter().position(|&id| id == m.msg).unwrap_or(0);
+                    if m.segment == crate::find::Segment::Subject { 0 } else { lead + at }
+                });
+                pane.scroll.scroll_to_top_of_item(target);
+                pane.find_reveal = FindReveal::Line;
             }
             pane.scroll.clone()
         };

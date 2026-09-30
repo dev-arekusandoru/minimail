@@ -77,6 +77,13 @@ gpui_kit::actions!(
         CloseTab,
         NextTab,
         PrevTab,
+        OpenFind,
+        FindNext,
+        FindPrev,
+        CloseFind,
+        ToggleFindCase,
+        ToggleFindWord,
+        ToggleFindRegex,
         ToggleReaderMode,
         ToggleThreadExpansion,
         GrowListPane,
@@ -93,6 +100,8 @@ pub const MAIL_CONTEXT: &str = "MailApp";
 const MAIL_BINDING: &str = "MailApp && !Input";
 /// Key context of the command palette.
 pub const PALETTE_CONTEXT: &str = "CommandPalette";
+/// Key context of the reader's find bar.
+pub const FIND_CONTEXT: &str = "FindBar";
 /// Key context of the compose pane.
 pub const COMPOSE_CONTEXT: &str = "Compose";
 
@@ -170,6 +179,18 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-]", NextTab, Some(MAIL_CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PrevTab, Some(MAIL_CONTEXT)),
         KeyBinding::new("cmd-shift-[", PrevTab, Some(MAIL_CONTEXT)),
+        // Global search (the titlebar's search, like `/`) and find in the active reader tab.
+        KeyBinding::new("cmd-shift-f", OpenSearch, Some(MAIL_CONTEXT)),
+        KeyBinding::new("cmd-f", OpenFind, Some(MAIL_CONTEXT)),
+        KeyBinding::new("cmd-g", FindNext, Some(MAIL_CONTEXT)),
+        KeyBinding::new("cmd-shift-g", FindPrev, Some(MAIL_CONTEXT)),
+        // Find bar (its input has focus, so these are not under `m`).
+        KeyBinding::new("enter", FindNext, Some(FIND_CONTEXT)),
+        KeyBinding::new("shift-enter", FindPrev, Some(FIND_CONTEXT)),
+        KeyBinding::new("escape", CloseFind, Some(FIND_CONTEXT)),
+        KeyBinding::new("alt-c", ToggleFindCase, Some(FIND_CONTEXT)),
+        KeyBinding::new("alt-w", ToggleFindWord, Some(FIND_CONTEXT)),
+        KeyBinding::new("alt-r", ToggleFindRegex, Some(FIND_CONTEXT)),
         // Pane divider.
         KeyBinding::new("alt-right", GrowListPane, m),
         KeyBinding::new("alt-left", ShrinkListPane, m),
@@ -304,6 +325,12 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Close tab", "cmd-w", CloseTab),
         cmd!("Next tab", "ctrl-tab", NextTab),
         cmd!("Previous tab", "ctrl-shift-tab", PrevTab),
+        cmd!("Find in thread", "cmd-f", OpenFind),
+        cmd!("Next match", "cmd-g", FindNext),
+        cmd!("Previous match", "cmd-shift-g", FindPrev),
+        cmd!("Find: match case", "alt-c", ToggleFindCase),
+        cmd!("Find: whole word", "alt-w", ToggleFindWord),
+        cmd!("Find: regex", "alt-r", ToggleFindRegex),
         cmd!("Toggle reader mode", "v", ToggleReaderMode),
         cmd!("Expand or collapse thread messages", "shift-o", ToggleThreadExpansion),
         cmd!("Grow list pane", "alt-right", GrowListPane),

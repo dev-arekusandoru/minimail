@@ -51,6 +51,7 @@ impl MailApp {
     /// Everything the reader keeps for a thread that no longer has a tab.
     fn forget_thread(&mut self, thread: u32) {
         self.reader.forget(thread);
+        self.drop_find(thread);
         self.reader_panes.borrow_mut().remove(&thread);
     }
 
@@ -95,18 +96,20 @@ impl MailApp {
     }
 
     /// `ctrl-tab` / `ctrl-shift-tab`: step to the next or previous tab, wrapping.
-    pub(super) fn cycle_tab(&mut self, delta: isize, cx: &mut Context<Self>) {
+    pub(super) fn cycle_tab(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }
         if self.tabs.cycle(delta) {
             self.follow_active_tab();
+            // The tab we left may have owned the focused find input.
+            window.focus(&self.focus_handle, cx);
             cx.notify();
         }
     }
 
     /// Tab shortcuts do nothing behind a modal or menu, or while a session hides the tabs.
-    fn tabs_locked(&self) -> bool {
+    pub(super) fn tabs_locked(&self) -> bool {
         self.modal_open() || self.menu_open() || self.in_session() || self.session_end.is_some()
     }
 

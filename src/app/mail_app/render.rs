@@ -9,6 +9,8 @@ impl Focusable for MailApp {
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.reconcile_tabs();
+        self.place_find_match(window);
+        self.refresh_find();
         let hint = self.hint_context();
         let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
@@ -35,6 +37,9 @@ impl Render for MailApp {
                 .into_any_element(),
             None => self.render_reader(cx),
         };
+        if self.find_placement_pending() {
+            window.request_animation_frame();
+        }
         let banner = self.pending_rule.clone();
         let t = theme::active(cx);
         let (bg, fg, border, muted, sidebar) = (t.background, t.text, t.border, t.text_muted, t.sidebar);
@@ -146,8 +151,21 @@ impl Render for MailApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
-            .on_action(cx.listener(|this, _: &NextTab, _, cx| this.cycle_tab(1, cx)))
-            .on_action(cx.listener(|this, _: &PrevTab, _, cx| this.cycle_tab(-1, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenFind, window, cx| this.open_find(window, cx)))
+            .on_action(cx.listener(|this, _: &CloseFind, window, cx| this.close_find(window, cx)))
+            .on_action(cx.listener(|this, _: &FindNext, _, cx| this.find_step(1, cx)))
+            .on_action(cx.listener(|this, _: &FindPrev, _, cx| this.find_step(-1, cx)))
+            .on_action(cx.listener(|this, _: &ToggleFindCase, window, cx| {
+                this.toggle_find_option(|o| o.case_sensitive = !o.case_sensitive, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFindWord, window, cx| {
+                this.toggle_find_option(|o| o.whole_word = !o.whole_word, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFindRegex, window, cx| {
+                this.toggle_find_option(|o| o.regex = !o.regex, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &CancelCompose, window, cx| {
                 if this.compose.is_some() {
                     this.close_modals(window, cx);

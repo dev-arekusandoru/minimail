@@ -140,6 +140,11 @@ impl MailApp {
         }
     }
 
+    /// Text in the open palette's input.
+    pub fn palette_query(&self, cx: &App) -> Option<String> {
+        self.palette.as_ref().map(|p| p.read(cx).query())
+    }
+
     /// Command names currently listed in the open palette.
     pub fn palette_rows(&self, cx: &App) -> Vec<String> {
         self.palette

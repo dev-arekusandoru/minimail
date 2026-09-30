@@ -4,6 +4,7 @@
 use super::super::*;
 use super::parts::{stamp, Look, Role};
 use crate::app::chrome::humanize_time;
+use crate::find::Segment;
 use crate::judge::QuestionKey;
 use crate::reading;
 use gpui_kit::assets::IconName;
@@ -94,10 +95,11 @@ impl MailApp {
                     .child(self.message_buttons(m.id, cx)),
             );
 
-        let subject = if m.subject.trim().is_empty() {
-            "(no subject)".to_owned()
+        let subject = reading::display_subject(m);
+        let subject = if opened {
+            self.find_text(m.thread_id, m.id, Segment::Subject, &subject, cx)
         } else {
-            m.subject.clone()
+            subject.into_any_element()
         };
         let subject = div()
             .text_size(px(22.))
@@ -437,7 +439,7 @@ impl MailApp {
         let body_id: ElementId =
             if opened { "reader-body".into() } else { ("reader-thread-body", id).into() };
         let html = m.html.as_deref().filter(|h| !h.trim().is_empty());
-        let plain = self.reader.plain(m.thread_id, m.id);
+        let plain = self.reader.plain(m.thread_id, m.id) || self.find_forces_plain(m);
         let mut body = div()
             .id(body_id)
             .test_support()
@@ -505,7 +507,7 @@ impl MailApp {
         let main = if split.main.trim().is_empty() {
             div().text_color(t.text_muted).child("(no text)")
         } else {
-            div().child(split.main.to_owned())
+            div().child(self.find_text(m.thread_id, m.id, Segment::Main, split.main, cx))
         };
         div()
             .flex()
@@ -529,7 +531,7 @@ impl MailApp {
                             .border_l_2()
                             .border_color(t.border)
                             .text_color(t.text_muted)
-                            .child(quoted.to_owned()),
+                            .child(self.find_text(m.thread_id, m.id, Segment::Quoted, quoted, cx)),
                     )
                 })
             })
