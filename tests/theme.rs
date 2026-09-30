@@ -75,3 +75,24 @@ fn state_colors_are_distinct_per_state() {
         }
     }
 }
+
+/// The kit resolves its own palette for any token `sync_kit` leaves alone. Switching theme must
+/// repaint the kit's tab tokens from ours, or the reader tabs fall back to the default palette.
+#[gpui_kit::gpui::test]
+fn switching_theme_syncs_kit_tab_colors(cx: &mut gpui_kit::TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        let tokyo = mail_classifier::theme::set_active(cx, "Tokyo Night");
+        let kit = gpui_kit::component::theme::Theme::global(cx);
+        assert_eq!(kit.tab_bar, tokyo.surface);
+        assert_eq!(kit.tab_active, tokyo.background);
+        assert_eq!(kit.tab_active_foreground, tokyo.text);
+        assert_eq!(kit.tab_foreground, tokyo.text_muted);
+
+        let one_dark = mail_classifier::theme::set_active(cx, DEFAULT_THEME);
+        let kit = gpui_kit::component::theme::Theme::global(cx);
+        assert_eq!(kit.tab_active, one_dark.background);
+        assert_eq!(kit.tab_bar, one_dark.surface);
+        assert_ne!(one_dark.surface, tokyo.surface, "themes differ, so the assert proves a repaint");
+    });
+}

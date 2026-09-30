@@ -5,7 +5,7 @@
 //! [`BUILTIN`]. User themes are loaded from a directory of `*.json` files (see
 //! [`user_themes_dir`]). Views read colors only through [`active`].
 
-use gpui_kit::component::theme::Theme as KitTheme;
+use gpui_kit::component::theme::{Colorize as _, Theme as KitTheme};
 use gpui_kit::{App, Global, Hsla, rgba};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -288,7 +288,18 @@ pub fn set_active(cx: &mut App, name: &str) -> Arc<Theme> {
     theme
 }
 
-/// Keep the kit widgets (inputs, kbd, labels) in step with the active theme.
+/// How far a solid fill lightens for its hover shade, and darkens for its pressed one.
+const HOVER: f32 = 0.10;
+const ACTIVE: f32 = 0.14;
+
+/// Keep the kit widgets (inputs, kbd, labels, tabs, buttons, dialogs) in step with the active
+/// theme.
+///
+/// gpui-kit falls back to its own default palette for any token left alone — which is why the
+/// reader tabs looked foreign, since their `tab*` tokens were never copied. Map every token a
+/// component this app uses can read. Neutral hover and pressed shades reuse our own
+/// [`Theme::hover`] and [`Theme::selection`]; a solid accent or semantic fill derives its own
+/// by a lightness step.
 fn sync_kit(cx: &mut App, t: &Theme) {
     if !cx.has_global::<KitTheme>() {
         return;
@@ -296,20 +307,126 @@ fn sync_kit(cx: &mut App, t: &Theme) {
     let t = t.clone();
     KitTheme::update(cx, move |k| {
         let c = &mut k.colors;
+
+        // Window and shared text.
         c.background = t.background;
         c.foreground = t.text;
         c.border = t.border;
-        c.input = t.border;
+        c.window_border = t.border;
+        c.overlay = rgba(0x00000059).into();
+
+        // Neutral interactions: our own hover and selection shades.
+        c.accent = t.hover;
+        c.accent_foreground = t.text;
+        c.secondary = t.surface;
+        c.secondary_foreground = t.text;
+        c.secondary_hover = t.hover;
+        c.secondary_active = t.selection;
         c.muted = t.surface;
         c.muted_foreground = t.text_muted;
+        c.selection = t.selection;
+        c.caret = t.accent;
+        c.ring = t.accent;
+
+        // Brand accent: solid primary fills and links.
         c.primary = t.accent;
         c.primary_foreground = t.on_accent;
-        c.secondary = t.surface;
+        c.primary_hover = t.accent.lighten(HOVER);
+        c.primary_active = t.accent.darken(ACTIVE);
+        c.link = t.accent;
+        c.link_hover = t.accent.lighten(HOVER);
+        c.link_active = t.accent.darken(ACTIVE);
+
+        // Inputs.
+        c.input = t.border;
+
+        // Popovers, menus, palettes and lists (tooltips land here too).
         c.popover = t.surface;
         c.popover_foreground = t.text;
-        c.caret = t.accent;
-        c.selection = t.selection;
+        c.list = t.background;
         c.list_active = t.selection;
+        c.list_active_border = t.accent;
         c.list_hover = t.hover;
+        c.list_head = t.surface;
+        c.list_even = t.surface;
+
+        // Buttons: the default, secondary and ghost variants the app builds, plus primary.
+        c.button = t.surface;
+        c.button_foreground = t.text;
+        c.button_hover = t.hover;
+        c.button_active = t.selection;
+        c.button_primary = t.accent;
+        c.button_primary_foreground = t.on_accent;
+        c.button_primary_hover = t.accent.lighten(HOVER);
+        c.button_primary_active = t.accent.darken(ACTIVE);
+        c.button_secondary = t.surface;
+        c.button_secondary_foreground = t.text;
+        c.button_secondary_hover = t.hover;
+        c.button_secondary_active = t.selection;
+
+        // Semantic fills, each with its on-colour, hover and pressed shades. The fill is bright
+        // enough in every theme for the ink used on the accent.
+        c.danger = t.error;
+        c.danger_foreground = t.on_accent;
+        c.danger_hover = t.error.lighten(HOVER);
+        c.danger_active = t.error.darken(ACTIVE);
+        c.button_danger = t.error;
+        c.button_danger_foreground = t.on_accent;
+        c.button_danger_hover = t.error.lighten(HOVER);
+        c.button_danger_active = t.error.darken(ACTIVE);
+        c.warning = t.warning;
+        c.warning_foreground = t.on_accent;
+        c.warning_hover = t.warning.lighten(HOVER);
+        c.warning_active = t.warning.darken(ACTIVE);
+        c.button_warning = t.warning;
+        c.button_warning_foreground = t.on_accent;
+        c.button_warning_hover = t.warning.lighten(HOVER);
+        c.button_warning_active = t.warning.darken(ACTIVE);
+        c.success = t.success;
+        c.success_foreground = t.on_accent;
+        c.success_hover = t.success.lighten(HOVER);
+        c.success_active = t.success.darken(ACTIVE);
+        c.button_success = t.success;
+        c.button_success_foreground = t.on_accent;
+        c.button_success_hover = t.success.lighten(HOVER);
+        c.button_success_active = t.success.darken(ACTIVE);
+        c.info = t.info;
+        c.info_foreground = t.on_accent;
+        c.info_hover = t.info.lighten(HOVER);
+        c.info_active = t.info.darken(ACTIVE);
+        c.button_info = t.info;
+        c.button_info_foreground = t.on_accent;
+        c.button_info_hover = t.info.lighten(HOVER);
+        c.button_info_active = t.info.darken(ACTIVE);
+
+        // Tabs: the strip and inactive tabs take the chrome surface, the active tab opens onto
+        // the reader's own background.
+        c.tab_bar = t.surface;
+        c.tab_bar_segmented = t.surface;
+        c.tab = t.surface;
+        c.tab_active = t.background;
+        c.tab_foreground = t.text_muted;
+        c.tab_active_foreground = t.text;
+
+        // Title bar, status bar and sidebar chrome.
+        c.title_bar = t.sidebar;
+        c.title_bar_border = t.border;
+        c.status_bar = t.sidebar;
+        c.status_bar_border = t.border;
+        c.sidebar = t.sidebar;
+        c.sidebar_foreground = t.text;
+        c.sidebar_border = t.border;
+        c.sidebar_accent = t.hover;
+        c.sidebar_accent_foreground = t.text;
+        c.sidebar_primary = t.accent;
+        c.sidebar_primary_foreground = t.on_accent;
+
+        // Switch, skeleton and scrollbar.
+        c.switch = t.border;
+        c.switch_thumb = t.text;
+        c.skeleton = t.surface;
+        c.scrollbar = t.background.opacity(0.0);
+        c.scrollbar_thumb = t.border;
+        c.scrollbar_thumb_hover = t.text_muted;
     });
 }
