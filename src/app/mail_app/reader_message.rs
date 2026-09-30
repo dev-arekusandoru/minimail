@@ -5,9 +5,39 @@ use super::super::*;
 use super::parts::{stamp, Look, Role};
 use crate::judge::QuestionKey;
 use crate::reading;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::text::TextView;
 
 impl MailApp {
+    /// Reply and the `⋯` menu of one expanded message. Both act on that message, whichever one
+    /// the reader is opened on. Pressing them never counts as a click on the header.
+    fn message_buttons(&self, mid: MessageId, cx: &Context<Self>) -> Div {
+        let id = mid as usize;
+        let kind = MenuKind::Message(mid);
+        let selection = theme::active(cx).selection;
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                icon_button(("btn-reply", id), IconName::Reply, "Reply to this message", "r", cx)
+                    .on_click(cx.listener(move |this, _, window, cx| this.reply_to(mid, window, cx))),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(
+                        icon_button(("btn-message-more", id), IconName::Ellipsis, "More actions for this message", "", cx)
+                            .when(self.menu_is(kind), |b| b.bg(selection))
+                            .on_click(cx.listener(move |this, _, window, cx| this.toggle_menu(kind, window, cx))),
+                    )
+                    .child(self.anchor_probe(kind)),
+            )
+    }
+
     pub(super) fn message_surface(
         &self,
         m: &Message,
@@ -44,9 +74,7 @@ impl MailApp {
                     .gap_3()
                     .when(!opened, |d| d.child(look.mono("COLLAPSE", t.text_muted)))
                     .child(look.mono(stamp(&m.received), t.text_muted))
-                    .when(opened && look.toolbar, |d| {
-                        d.child(look.action_button("btn-reader-reply", "Reply", "Reply", "r", Reply, cx))
-                    }),
+                    .child(self.message_buttons(m.id, cx)),
             );
 
         let subject = if m.subject.trim().is_empty() {
@@ -232,7 +260,7 @@ impl MailApp {
             }))
     }
 
-    /// New-sender and possible-spam banners: key hints, or buttons when the toolbar is on.
+    /// New-sender and possible-spam banners, with their action buttons.
     fn banners(&self, m: &Message, look: &Look, cx: &Context<Self>) -> Vec<AnyElement> {
         let t = &look.t;
         let banner = |id: &'static str, color: Hsla| {
@@ -267,27 +295,22 @@ impl MailApp {
                             .flex_none()
                             .items_center()
                             .gap_2()
-                            .when(look.toolbar, |d| {
-                                d.child(look.action_button(
-                                    "btn-banner-allow",
-                                    "Allow",
-                                    "Allow this sender",
-                                    "a",
-                                    AllowSender,
-                                    cx,
-                                ))
-                                .child(look.action_button(
-                                    "btn-banner-block",
-                                    "Block",
-                                    "Block this sender",
-                                    "b",
-                                    BlockSender,
-                                    cx,
-                                ))
-                            })
-                            .when(!look.toolbar, |d| {
-                                d.child(look.hint("a", "allow")).child(look.hint("b", "block"))
-                            }),
+                            .child(look.action_button(
+                                "btn-banner-allow",
+                                "Allow",
+                                "Allow this sender",
+                                "a",
+                                AllowSender,
+                                cx,
+                            ))
+                            .child(look.action_button(
+                                "btn-banner-block",
+                                "Block",
+                                "Block this sender",
+                                "b",
+                                BlockSender,
+                                cx,
+                            )),
                     )
                     .into_any_element(),
             );
@@ -302,27 +325,22 @@ impl MailApp {
                             .flex_none()
                             .items_center()
                             .gap_2()
-                            .when(look.toolbar, |d| {
-                                d.child(look.action_button(
-                                    "btn-banner-spam-block",
-                                    "Block & Delete",
-                                    "Block the sender and delete this message",
-                                    "",
-                                    SpamBlock,
-                                    cx,
-                                ))
-                                .child(look.action_button(
-                                    "btn-banner-spam-delete",
-                                    "Delete",
-                                    "Delete this message",
-                                    "d",
-                                    Delete,
-                                    cx,
-                                ))
-                            })
-                            .when(!look.toolbar, |d| {
-                                d.child(look.hint("!", "spam")).child(look.hint("d", "delete"))
-                            }),
+                            .child(look.action_button(
+                                "btn-banner-spam-block",
+                                "Block & Delete",
+                                "Block the sender and delete this message",
+                                "",
+                                SpamBlock,
+                                cx,
+                            ))
+                            .child(look.action_button(
+                                "btn-banner-spam-delete",
+                                "Delete",
+                                "Delete this message",
+                                "d",
+                                Delete,
+                                cx,
+                            )),
                     )
                     .into_any_element(),
             );
@@ -330,8 +348,8 @@ impl MailApp {
         out
     }
 
-    /// `Suggested: Needs reply 87% · Newsletter 92%` with `y accept  n reject` (buttons with the
-    /// toolbar on). `None` when nothing is pending.
+    /// `Suggested: Needs reply 87% · Newsletter 92%` with Accept / Reject buttons (`y` / `n`).
+    /// `None` when nothing is pending.
     fn suggestion_strip(&self, m: &Message, look: &Look, cx: &Context<Self>) -> Option<AnyElement> {
         let t = &look.t;
         let pending = self.mailbox.pending(m.id);
@@ -381,27 +399,22 @@ impl MailApp {
                         .flex_none()
                         .items_center()
                         .gap_2()
-                        .when(look.toolbar, |d| {
-                            d.child(look.action_button(
-                                "btn-suggest-accept",
-                                "Accept",
-                                "Accept the suggestions",
-                                "y",
-                                AcceptSuggestions,
-                                cx,
-                            ))
-                            .child(look.action_button(
-                                "btn-suggest-reject",
-                                "Reject",
-                                "Reject the suggestions",
-                                "n",
-                                RejectSuggestions,
-                                cx,
-                            ))
-                        })
-                        .when(!look.toolbar, |d| {
-                            d.child(look.hint("y", "accept")).child(look.hint("n", "reject"))
-                        }),
+                        .child(look.action_button(
+                            "btn-suggest-accept",
+                            "Accept",
+                            "Accept the suggestions",
+                            "y",
+                            AcceptSuggestions,
+                            cx,
+                        ))
+                        .child(look.action_button(
+                            "btn-suggest-reject",
+                            "Reject",
+                            "Reject the suggestions",
+                            "n",
+                            RejectSuggestions,
+                            cx,
+                        )),
                 )
                 .into_any_element(),
         )

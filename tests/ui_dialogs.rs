@@ -1,5 +1,5 @@
 //! Headless keystroke tests for the choice dialogs, the folder picker and the
-//! reader's action bar and banners.
+//! reader's message menu and banners.
 
 use std::rc::Rc;
 
@@ -196,16 +196,6 @@ impl Harness<'_> {
         self.keys("r");
         self.type_text(body);
         self.keys("cmd-enter");
-    }
-
-    /// Turn on Settings ▸ Appearance ▸ Reader action toolbar, then close the panel.
-    fn enable_reader_toolbar(&mut self) {
-        self.keys("cmd-,");
-        self.click(("settings-section", 1usize));
-        self.click("reader-toolbar-row");
-        self.keys("escape");
-        assert!(self.read(|a| a.reader_toolbar), "toolbar setting turned on");
-        assert!(!self.read(|a| a.settings_open()));
     }
 }
 
@@ -479,21 +469,22 @@ fn folder_picker_filters_by_typed_name(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn hash_deletes_and_reader_bar_archives(cx: &mut TestAppContext) {
+fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
-    h.enable_reader_toolbar();
     h.keys("#");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     h.keys("u");
     assert_eq!(h.state_of(1), TriageState::Inbox);
 
     h.keys("enter");
-    h.click("btn-reader-archive");
+    h.click(("btn-message-more", 1usize));
+    h.click("btn-archive");
     assert_eq!(h.state_of(1), TriageState::Archived);
 
     h.keys("u");
     h.keys("enter");
-    h.click("btn-reader-file");
+    h.click(("btn-message-more", 1usize));
+    h.click("btn-file");
     assert!(h.read(|a| a.folder_picker_open()));
     h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Filed(1));
@@ -502,7 +493,6 @@ fn hash_deletes_and_reader_bar_archives(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn new_sender_banner_allows_and_blocks(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "stranger@example.com", "Hello", 1)]));
-    h.enable_reader_toolbar();
     h.keys("enter");
     assert!(h.is_new_sender(1), "the fixture sender is unknown");
 
@@ -511,7 +501,6 @@ fn new_sender_banner_allows_and_blocks(cx: &mut TestAppContext) {
     assert_eq!(h.state_of(1), TriageState::Inbox);
 
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "stranger@example.com", "Hello", 1)]));
-    h.enable_reader_toolbar();
     h.keys("enter");
     h.click("btn-banner-block");
     assert!(h.dialog_open(), "Block opens the block dialog");
@@ -524,7 +513,6 @@ fn spam_banner_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     let mut mb = mailbox(&[msg(1, 1, "spam@example.com", "Offer", 1)]);
     tag_possible_spam(&mut mb, 1);
     let mut h = harness_with(cx, mb);
-    h.enable_reader_toolbar();
     h.keys("enter");
     assert!(h.has_tag(1, Tag::PossibleSpam));
 
@@ -535,7 +523,6 @@ fn spam_banner_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     let mut mb = mailbox(&[msg(1, 1, "spam@example.com", "Offer", 1)]);
     tag_possible_spam(&mut mb, 1);
     let mut h = harness_with(cx, mb);
-    h.enable_reader_toolbar();
     h.keys("enter");
     h.click("btn-banner-spam-delete");
     assert_eq!(h.state_of(1), TriageState::Deleted);

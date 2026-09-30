@@ -1,4 +1,4 @@
-//! Headless keystroke tests for the reader: the action-toolbar setting, thread expansion,
+//! Headless keystroke tests for the reader: per-message menus, thread expansion,
 //! Reader mode and the footer hint mode. Mailboxes are built inline so nothing depends on the
 //! shipped fixtures.
 
@@ -36,7 +36,8 @@ fn thread_of_two() -> Mailbox {
 }
 
 impl Harness<'_> {
-    fn exists(&mut self, id: &'static str) -> bool {
+    fn exists(&mut self, id: impl Into<gpui_kit::ElementId>) -> bool {
+        let id = id.into();
         let window = self.window;
         self.cx
             .update_window(window, |_, window, cx| {
@@ -53,35 +54,65 @@ impl Harness<'_> {
     fn hint(&mut self) -> HintContext {
         self.read(|a| a.hint_context())
     }
-
-    /// Settings ▸ Appearance ▸ Reader action toolbar, then close the panel.
-    fn toggle_toolbar_setting(&mut self) {
-        self.keys("cmd-,");
-        self.click(("settings-section", 1usize));
-        self.click("reader-toolbar-row");
-        self.keys("escape");
-        assert!(!self.read(|a| a.settings_open()));
-    }
 }
 
+/// The `⋯` on an expanded thread message that is not the opened one acts on that message only.
 #[gpui_kit::gpui::test]
-fn reader_toolbar_is_off_by_default_and_the_setting_toggles_it(cx: &mut TestAppContext) {
+fn the_menu_of_a_non_opened_thread_message_archives_that_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState::{Archived, Inbox};
     let mut h = harness_with(cx, thread_of_two());
-    assert!(!h.read(|a| a.reader_toolbar), "keyboard hints only by default");
-
     h.keys("enter");
-    h.opened();
-    assert!(!h.exists("btn-reader-archive"), "no action buttons while the toolbar is off");
+    let opened = h.opened();
+    let other = if opened == 1 { 2 } else { 1 };
+    h.keys("shift-o");
+    assert!(h.read(|a| a.reader_expanded(other)));
 
-    h.toggle_toolbar_setting();
-    assert!(h.read(|a| a.reader_toolbar));
-    h.opened();
-    assert!(h.exists("btn-reader-archive"), "the toolbar appears once the setting is on");
+    h.click(("btn-message-more", other as usize));
+    assert!(h.read(|a| a.menu_open()));
+    h.click("btn-archive");
+    assert!(!h.read(|a| a.menu_open()));
+    assert_eq!(h.state_of(other), Archived, "the message whose menu it was");
+    assert_eq!(h.state_of(opened), Inbox, "the opened message is untouched");
 
-    h.toggle_toolbar_setting();
-    assert!(!h.read(|a| a.reader_toolbar), "the same row turns it off again");
-    h.opened();
-    assert!(!h.exists("btn-reader-archive"));
+    h.keys("u");
+    assert_eq!(h.state_of(other), Inbox, "one undo step");
+
+    // The keyboard path still targets the opened message.
+    h.keys("e");
+    assert_eq!(h.state_of(opened), Archived);
+    assert_eq!(h.state_of(other), Inbox);
+}
+
+/// The reader's `⋯` menu keeps working for flows that outlive the dispatch (the folder picker).
+#[gpui_kit::gpui::test]
+fn filing_from_a_non_opened_message_menu_files_that_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState::{Filed, Inbox};
+    let mut h = harness_with(cx, thread_of_two());
+    h.keys("enter");
+    let opened = h.opened();
+    let other = if opened == 1 { 2 } else { 1 };
+    h.keys("shift-o");
+
+    h.click(("btn-message-more", other as usize));
+    h.click("btn-file");
+    assert!(h.read(|a| a.folder_picker_open()));
+    h.keys("enter");
+    assert!(matches!(h.state_of(other), Filed(_)), "the menu's message was filed");
+    assert_eq!(h.state_of(opened), Inbox);
+}
+
+/// Reply on an expanded thread message replies to that message.
+#[gpui_kit::gpui::test]
+fn reply_on_a_thread_message_opens_compose_for_it(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, thread_of_two());
+    h.keys("enter");
+    let opened = h.opened();
+    let other = if opened == 1 { 2 } else { 1 };
+    h.keys("shift-o");
+    assert!(h.exists(("btn-reply", opened as usize)), "the opened message has its own Reply");
+    h.click(("btn-reply", other as usize));
+    assert!(h.read(|a| a.compose_open()));
+    assert_eq!(h.opened(), other, "the reply is to the message whose button was pressed");
 }
 
 #[gpui_kit::gpui::test]

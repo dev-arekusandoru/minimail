@@ -96,20 +96,6 @@ impl MailApp {
         self.menu.as_ref().map(|m| m.panel.clone())
     }
 
-    /// Whether the contextual action bar applies right now.
-    pub fn context_actions(&self) -> bool {
-        if self.compose.is_some() || self.session_end.is_some() {
-            return false;
-        }
-        !self.target_ids().is_empty()
-    }
-
-    /// Number of AI suggestions still pending on the message the actions target.
-    pub fn pending_suggestions(&self) -> usize {
-        self.cursor_id()
-            .map(|id| self.mailbox.pending(id).len())
-            .unwrap_or(0)
-    }
 
     pub fn opened(&self) -> Option<MessageId> {
         self.opened
@@ -194,8 +180,12 @@ impl MailApp {
         self.session.as_ref().and_then(|s| s.ids.get(s.index).copied())
     }
 
-    /// Message under the cursor (or the session's current message).
+    /// Message the actions target: the menu's message, else the one under the cursor (or the
+    /// session's current message).
     pub(super) fn cursor_id(&self) -> Option<MessageId> {
+        if let Some(id) = self.menu_target.as_ref().and_then(|ids| ids.first()) {
+            return Some(*id);
+        }
         if let Some(id) = self.session_current() {
             return Some(id);
         }
@@ -221,8 +211,11 @@ impl MailApp {
         }
     }
 
-    /// Ids an action applies to: session message, selection/cursor, or cursor.
+    /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
     pub(super) fn target_ids(&self) -> Vec<MessageId> {
+        if let Some(ids) = &self.menu_target {
+            return ids.clone();
+        }
         if self.grouped() && self.triage.selected().is_empty() {
             return self.cursor_row().map(|r| r.ids()).unwrap_or_default();
         }

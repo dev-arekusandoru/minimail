@@ -122,27 +122,35 @@ fn left_edge_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn archive_button_marks_selection_and_titlebar_undo_restores(cx: &mut TestAppContext) {
+fn list_header_menu_shows_with_two_selected_and_acts_on_all_of_them(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let start = (h.count(Inbox), h.count(Archived));
     let ids = h.ids();
+    assert!(!h.has("btn-selection-more"), "nothing selected");
     h.click(("row-select", 0usize));
+    assert!(!h.has("btn-selection-more"), "one selected message has its own menu in the reader");
     h.click(("row-select", 1usize));
+    assert!(h.has("btn-selection-more"), "two selected");
+    h.click("btn-selection-more");
+    assert!(h.read(|a| a.menu_open()));
+    assert!(!h.has("btn-summarize") && !h.has("btn-unsubscribe"), "single-message rows are left out");
     h.click("btn-archive");
     assert_eq!(h.state_of(ids[0]), Archived);
     assert_eq!(h.state_of(ids[1]), Archived);
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0 - 2, start.1 + 2));
+    assert!(!h.has("btn-selection-more"), "the selection is spent");
     h.click("btn-more");
     h.click("btn-undo");
-    assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1));
+    assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1), "one undo step for both");
 }
 
 #[gpui_kit::gpui::test]
-fn delete_button_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContext) {
+fn delete_menu_row_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let id = h.cursor().unwrap();
     let start = h.count(Deleted);
     h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
     h.click("btn-delete");
     assert_eq!(h.state_of(id), Deleted);
     assert_eq!(h.count(Deleted), start + 1);
@@ -150,6 +158,37 @@ fn delete_button_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContex
     h.click("btn-undo");
     assert_eq!(h.state_of(id), Inbox);
     assert_eq!(h.count(Deleted), start);
+}
+
+/// A menu hangs under its trigger, right-aligned to it, and never leaves the window.
+#[gpui_kit::gpui::test]
+fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let id = h.ids()[0];
+    h.click(("row", id as usize));
+    let cases: [(ElementId, &'static str); 3] = [
+        (("btn-message-more", id as usize).into(), "btn-archive"),
+        ("btn-more".into(), "btn-palette"),
+        ("btn-filter".into(), "filter-tag-needs-reply"),
+    ];
+    for (trigger, first_row) in cases {
+        h.click(trigger.clone());
+        let (button, row, viewport) = h
+            .cx
+            .update_window(h.window, |_, window, cx| {
+                window.render_frame(cx);
+                (
+                    window.find(trigger.clone()).bounds(),
+                    window.find(first_row).bounds(),
+                    window.viewport_size(),
+                )
+            })
+            .expect("window alive");
+        assert!(row.origin.y >= button.bottom(), "{trigger:?}: menu starts under the trigger");
+        assert!(row.right() <= button.right() + px(1.), "{trigger:?}: right-aligned to the trigger");
+        assert!(row.origin.x >= px(0.) && row.right() <= viewport.width, "{trigger:?}: inside the window");
+        h.keys("escape");
+    }
 }
 
 
@@ -211,7 +250,8 @@ fn a_menu_dismisses_when_the_backdrop_is_clicked(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.menu_open()), "clicking away dismisses");
     assert_eq!(h.state_of(id), Inbox, "the click ran no menu row");
 
-    h.click("btn-message-more");
+    h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
     assert!(h.read(|a| a.menu_open()), "the other menu opens too");
     h.click("menu-backdrop");
     assert!(!h.read(|a| a.menu_open()));
@@ -235,7 +275,7 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     assert!(!other_senders.is_empty(), "the fixture needs more than one sender");
 
     h.click(("row", id as usize));
-    h.click("btn-message-more");
+    h.click(("btn-message-more", id as usize));
     assert!(h.read(|a| a.menu_open()));
     assert!(h.has("btn-sender-actions"));
     assert!(!h.has("btn-sender-archive"), "the submenu's rows are a level down");
@@ -252,9 +292,10 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
         assert_eq!(h.state_of(*other), expected, "only the cursor's sender was marked");
     }
 }
-/// Accept/reject only exist while a suggestion is pending on the message under the cursor.
+
+/// Accept/reject only exist in a message's menu while a suggestion is pending on it.
 #[gpui_kit::gpui::test]
-fn ai_buttons_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext) {
+fn ai_rows_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     let pending = ids
@@ -263,6 +304,7 @@ fn ai_buttons_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext)
         .find(|id| h.read(|a| !a.mailbox.pending(*id).is_empty()))
         .expect("the fixture classifies at startup, so some message is pending");
     h.click(("row", pending as usize));
+    h.click(("btn-message-more", pending as usize));
     assert!(h.has("btn-accept"), "a pending suggestion offers Accept");
     assert!(h.has("btn-reject"), "and Reject");
     h.click("btn-reject");
@@ -270,14 +312,18 @@ fn ai_buttons_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext)
         h.read(|a| a.mailbox.pending(pending).is_empty()),
         "reject drops the badges"
     );
+    h.click(("btn-message-more", pending as usize));
+    assert!(h.has("btn-archive"), "the menu still opens");
     assert!(!h.has("btn-accept"), "nothing left pending: no Accept");
     assert!(!h.has("btn-reject"), "nothing left pending: no Reject");
 }
 
 #[gpui_kit::gpui::test]
-fn snooze_button_opens_picker_and_preset_click_snoozes(cx: &mut TestAppContext) {
+fn snooze_menu_row_opens_picker_and_preset_click_snoozes(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let id = h.cursor().unwrap();
+    let id = h.ids()[0];
+    h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
     h.click("btn-snooze");
     assert!(h.read(|a| a.snooze_open()));
     h.click(("snooze-preset", 0usize));
@@ -285,15 +331,15 @@ fn snooze_button_opens_picker_and_preset_click_snoozes(cx: &mut TestAppContext) 
     assert_eq!(h.state_of(id), Snoozed);
 }
 
-/// Reply belongs to an open message, so it only shows in the reader.
+/// Each expanded message of the reader carries its own Reply; it replies to that message.
 #[gpui_kit::gpui::test]
 fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert!(!h.has("btn-reply"), "no message open: nothing to reply to");
     let id = h.ids()[1];
+    assert!(!h.has(("btn-reply", id as usize)), "no message open: nothing to reply to");
     h.click(("row", id as usize));
-    assert!(h.has("btn-reply"));
-    h.click("btn-reply");
+    assert!(h.has(("btn-reply", id as usize)));
+    h.click(("btn-reply", id as usize));
     assert!(h.read(|a| a.compose_open()));
     h.click("compose-cancel");
     assert!(!h.read(|a| a.compose_open()));

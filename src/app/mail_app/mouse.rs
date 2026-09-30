@@ -1,13 +1,9 @@
-//! Mouse entry points for row clicks, left-edge selection, suggestion badges and
-//! the contextual action bar.
+//! Mouse entry points for row clicks, left-edge selection, suggestion badges and the
+//! popup menu layer.
 
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{BAR_H, HEADER_H, LIST_HEADER_H, ListMode, MENU_W, MailApp, MenuKind, PaneLayout};
-use crate::model::Location;
-use crate::app::actions::*;
-use crate::app::ui::{button, run};
+use super::{HEADER_H, ListMode, MENU_W, MailApp, PaneLayout};
 
 /// Mouse-down listener for a modal backdrop: clicking outside the panel closes the modal like
 /// `escape` does.
@@ -121,74 +117,24 @@ impl MailApp {
     }
 
 
-    /// Actions for whatever the list targets: the core triage buttons and the selection
-    /// count, then — only where they apply — the AI suggestions, Reply and the rest.
-    pub(super) fn render_context_bar(&self, cx: &Context<Self>) -> AnyElement {
-        let t = crate::theme::active(cx);
-        let selected = self.triage.selected().len();
-        let pending = self.pending_suggestions();
-        let more_open = self.menu_is(MenuKind::Message);
-
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .h(px(BAR_H))
-            .px_3()
-            .bg(t.sidebar)
-            .border_b_1()
-            .border_color(t.border)
-            .child(button("btn-archive", "Archive", "Archive", "e", cx).on_click(run(Archive)))
-            .child(button("btn-file", "File…", "File into a folder", "f", cx).on_click(run(File)))
-            .child(button("btn-delete", "Delete", "Delete", "d", cx).on_click(run(Delete)))
-            .when(self.triage.view.location != Location::AllInboxes, |d| {
-                d.child(button("btn-inbox", "Inbox", "Move to inbox", "i", cx).on_click(run(MoveToInbox)))
-            })
-            .child(button("btn-snooze", "Snooze…", "Snooze", "s", cx).on_click(run(OpenSnoozePicker)))
-            .when(selected > 0, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .text_size(px(11.))
-                        .text_color(t.accent)
-                        .child(format!("{selected} selected")),
-                )
-            })
-            .child(div().flex_1())
-            .when(pending > 0, |d| {
-                d.child(
-                    button("btn-accept", "Accept AI", "Accept the AI suggestions on this message", "y", cx)
-                        .on_click(run(AcceptSuggestions)),
-                )
-                .child(
-                    button("btn-reject", "Reject AI", "Reject the AI suggestions on this message", "n", cx)
-                        .on_click(run(RejectSuggestions)),
-                )
-            })
-            .when(self.opened.is_some(), |d| {
-                d.child(button("btn-reply", "Reply", "Reply to the open message", "r", cx).on_click(run(Reply)))
-            })
-            .child(
-                button("btn-message-more", "More ▾", "More actions for this message", "", cx)
-                    .when(more_open, |b| b.bg(t.selection))
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Message, window, cx))),
-            )
-            .into_any_element()
-    }
-
     /// The popup menu layer: a backdrop that dismisses on a click, plus the open panel
-    /// tucked under the bar whose trigger opened it.
-    pub(super) fn render_menu(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    /// hanging under the trigger that opened it, right-aligned to it and kept inside the
+    /// window.
+    pub(super) fn render_menu(&self, window: &Window, cx: &Context<Self>) -> Option<AnyElement> {
+        const MARGIN: f32 = 8.;
         let panel = self.menu_panel()?;
-        let filter = self.menu_is(MenuKind::Filter);
-        let top = match filter {
-            true => self.list_header_bottom(),
-            false if self.menu_is(MenuKind::Global) => HEADER_H,
-            false => HEADER_H + BAR_H,
+        let open = self.menu.as_ref()?;
+        let viewport = window.viewport_size();
+        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
+        let (left, top) = match self.anchors.borrow().get(&open.kind) {
+            Some(b) => (
+                f32::from(b.right()) - MENU_W,
+                f32::from(b.bottom()) + 4.,
+            ),
+            None => (vw - MENU_W - 12., HEADER_H),
         };
-        // The filter menu hangs under the Filter ▾ button at the list header's right edge.
-        let left = self.sidebar_w + self.list_w - MENU_W - 12.;
+        let left = left.clamp(MARGIN, (vw - MENU_W - MARGIN).max(MARGIN));
+        let top = top.min(vh - open.height - MARGIN).max(MARGIN);
         Some(
             div()
                 .id("menu-backdrop")
@@ -204,18 +150,12 @@ impl MailApp {
                     div()
                         .absolute()
                         .top(px(top))
-                        .when(filter, |d| d.left(px(left.max(self.sidebar_w + 8.))))
-                        .when(!filter, |d| d.right(px(12.)))
+                        .left(px(left))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(panel),
                 )
                 .into_any_element(),
         )
-    }
-
-    /// Distance from the window top to the bottom edge of the list header.
-    fn list_header_bottom(&self) -> f32 {
-        HEADER_H + if self.context_actions() { BAR_H } else { 0. } + LIST_HEADER_H
     }
 
     /// Toolbar icon for the pane layout button: the current orientation.

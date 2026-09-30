@@ -102,11 +102,15 @@ impl MailApp {
                     .on_click(run(TogglePaneLayout)),
             ))
             .child(no_drag(icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
-            .child(no_drag(
-                icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx)
-                    .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
-            ));
+            .child(
+                no_drag(
+                    icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx)
+                        .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
+                )
+                .relative()
+                .child(self.anchor_probe(MenuKind::Global)),
+            );
         let right = div()
             .flex()
             .flex_1()

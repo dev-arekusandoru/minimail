@@ -1,6 +1,5 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
-//! state-colored rail, the opened message expanded in place, plus the optional action toolbar.
-//! The pieces live in `reader_*.rs`.
+//! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
 
 use super::*;
 
@@ -43,7 +42,7 @@ impl MailApp {
                 .child("Click a message or press enter to open")
                 .into_any_element();
         };
-        let look = Look::new(self.reader_toolbar, cx);
+        let look = Look::new(cx);
         let newest = self.newest();
         let others = crate::reading::thread_others(self.mailbox.messages(), msg);
         let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
@@ -89,7 +88,6 @@ impl MailApp {
             .when_some(self.session.as_ref(), |d, s| {
                 d.child(SessionCard::new(s.index + 1, s.ids.len()))
             })
-            .when(self.reader_toolbar, |d| d.child(self.reader_toolbar_row(&look, cx)))
             .child(
                 div()
                     .id("reader-scroll")
@@ -104,27 +102,6 @@ impl MailApp {
                     .children(rows.into_iter().map(column)),
             )
             .into_any_element()
-    }
-
-    /// Thread-level actions with their keys. Only drawn when the toolbar setting is on; the
-    /// footer hint bar carries the same keys otherwise.
-    fn reader_toolbar_row(&self, look: &Look, cx: &Context<Self>) -> Div {
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(look.action_button("btn-reader-archive", "Archive", "Archive", "e", Archive, cx))
-            .child(look.action_button("btn-reader-file", "File", "File into a folder", "f", File, cx))
-            .child(look.action_button("btn-reader-delete", "Delete", "Delete", "d", Delete, cx))
-            .child(look.action_button(
-                "btn-reader-snooze",
-                "Snooze…",
-                "Snooze",
-                "s",
-                OpenSnoozePicker,
-                cx,
-            ))
     }
 }
 

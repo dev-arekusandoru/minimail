@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::assets::IconName;
 
 impl MailApp {
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -47,12 +48,39 @@ impl MailApp {
                         ),
                 )
             })
+            .when(selected >= 2, |d| {
+                d.child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .child(
+                            icon_button(
+                                "btn-selection-more",
+                                IconName::Ellipsis,
+                                "Actions for the selected messages",
+                                "",
+                                cx,
+                            )
+                            .when(self.menu_is(MenuKind::Selection), |b| b.bg(t.selection))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_menu(MenuKind::Selection, window, cx)
+                            })),
+                        )
+                        .child(self.anchor_probe(MenuKind::Selection)),
+                )
+            })
             .child(
-                button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
-                    .when(filter_active, |b| b.bg(t.selection).text_color(t.accent))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_menu(MenuKind::Filter, window, cx)
-                    })),
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(
+                        button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
+                            .when(filter_active, |b| b.bg(t.selection).text_color(t.accent))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_menu(MenuKind::Filter, window, cx)
+                            })),
+                    )
+                    .child(self.anchor_probe(MenuKind::Filter)),
             );
         let body = if count == 0 {
             let empty = match &self.mode {

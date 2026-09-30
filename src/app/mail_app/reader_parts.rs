@@ -11,22 +11,21 @@ use std::sync::Arc;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Role {
     /// The message the reader is opened on: always fully shown, owns the suggestion strip,
-    /// the banners, the toolbar's Reply and the `reader-body` id.
+    /// the banners and the `reader-body` id.
     Opened,
     /// Another message of the thread, expanded.
     Thread,
 }
 
-/// Per-frame look shared by every reader piece: theme, mono family and the toolbar setting.
+/// Per-frame look shared by every reader piece: theme and mono family.
 pub(super) struct Look {
     pub t: Arc<Theme>,
     pub mono: SharedString,
-    pub toolbar: bool,
 }
 
 impl Look {
-    pub fn new(toolbar: bool, cx: &App) -> Self {
-        Self { t: theme::active(cx), mono: mono_font(cx), toolbar }
+    pub fn new(cx: &App) -> Self {
+        Self { t: theme::active(cx), mono: mono_font(cx) }
     }
 
     /// One line of mono metadata text.
@@ -38,17 +37,6 @@ impl Look {
     pub fn keycap(&self, key: &str) -> Kbd {
         let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
         Kbd::new(stroke).outline().font_family(self.mono.clone()).text_size(px(10.))
-    }
-
-    /// `key what`, the inline form of a shortcut hint.
-    pub fn hint(&self, key: &str, what: &str) -> Div {
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .child(self.keycap(key))
-            .child(self.mono(what.to_owned(), self.t.text_muted))
     }
 
     /// Clickable mono text such as `SHOW QUOTED TEXT`, with an optional keycap.

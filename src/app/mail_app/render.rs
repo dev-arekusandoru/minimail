@@ -90,7 +90,9 @@ impl Render for MailApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleSelect, _, cx| {
-                if this.mode == ListMode::State && !this.in_session() {
+                if let Some(ids) = this.menu_target.clone() {
+                    this.toggle_select_ids(&ids);
+                } else if this.mode == ListMode::State && !this.in_session() {
                     this.toggle_select_cursor();
                 }
                 cx.notify();
@@ -224,7 +226,6 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
             .child(self.render_titlebar(window, cx))
-            .when(self.context_actions(), |d| d.child(self.render_context_bar(cx)))
             .child(
                 div()
                     .flex_1()
@@ -357,7 +358,7 @@ impl Render for MailApp {
                         )),
                 )
             })
-            .when_some(self.render_menu(cx), |d, menu| d.child(menu))
+            .when_some(self.render_menu(window, cx), |d, menu| d.child(menu))
             .when_some(self.palette.clone(), |d, palette| {
                 d.child(overlay(window, palette).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
             })

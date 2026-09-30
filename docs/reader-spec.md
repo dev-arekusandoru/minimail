@@ -19,7 +19,7 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
   - Triage state: `Inbox`, `Snoozed · <wake time>`, `Archived`, `Filed · <folder>`, `Deleted`, tinted by `Theme::state_color`.
   - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender.
   - Category: the `Kind` tag (for example Newsletter or Receipt).
-- New Sender and Possible Spam keep their banners (triage spec). With the toolbar off, banners show key hints (`a` allow / `b` block; `!` spam / `d` delete) instead of buttons.
+- New Sender and Possible Spam keep their banners (triage spec), with buttons: Allow `a` / Block `b`; Block & Delete / Delete `d`.
 - Recipient summary (`to me, +3 others`) expands to full-width rows **below** the header:
   - `To:` / `Cc:` / `Bcc:`, one row each, wrapping long lists.
   - Omit empty rows. Bcc appears only when known, which usually means sent mail.
@@ -48,19 +48,18 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 
 ## Actions
 
-- **No action buttons by default.** Keyboard shortcuts appear in the footer hint bar (`HintMode::Reader`, currently unreachable and must be wired): `r` reply, `e` archive, `f` file, `d` delete, `s` snooze, `]`/`[` thread, `v` reader mode, `shift-o` expand thread, `u` undo, `?` help; plus `y`/`n` while suggestions are pending.
-- **Setting:** Appearance → "Reader action toolbar", off by default, settings screen only (not in the palette). When on:
-  - Thread-level: Archive `e`, File `f`, Delete `d`, Snooze `s` (triage spec viewer set).
-  - Per message: Reply `r`.
-  - Banner and suggestion buttons replace their key hints.
-  - Each button shows its shortcut key.
-- Mute is deferred (triage spec). Reply all, Forward, and More are omitted because no such actions exist; no dead buttons.
+- **Per message** (every expanded surface, in the header's right cluster; they act on that message, not on the opened one):
+  - Reply `r`, an icon button.
+  - `⋯` menu: Archive `e`, Delete `d`, Snooze… `s`, Move to inbox `i` (each only when it changes something), Accept / Reject AI `y` / `n` while suggestions are pending, File… `f`, Mark spam… `!`, Toggle select `x`, Summarize `z`, Mute `m`, Unsubscribe `shift-u`, Sender actions ▸. It hangs under the button.
+- Banner and suggestion buttons sit in their banners; each shows its shortcut key.
+- Keyboard shortcuts also appear in the footer hint bar (`HintMode::Reader`, currently unreachable and must be wired): `r` reply, `e` archive, `f` file, `d` delete, `s` snooze, `]`/`[` thread, `v` reader mode, `shift-o` expand thread, `u` undo, `?` help; plus `y`/`n` while suggestions are pending. Keys act on the opened message or the list selection.
+- Reply all and Forward are omitted because no such actions exist; no dead buttons.
 - Keys come from `src/app/actions.rs`; never hard-code a second map.
 
 ## AI suggestion
 
 - A strip under the header lists the pending review suggestions for the message (`Mailbox::pending`), one per question key, for example `Suggested: Needs Reply 87% · Newsletter 92%`.
-- Toolbar off: shows inline key hints `y accept  n reject`. Toolbar on: shows Accept / Reject buttons.
+- The strip carries Accept `y` / Reject `n` buttons.
 - Resolving removes the strip; accepted tags appear in the labels row.
 
 ## Seed data coverage (`fixtures/`)

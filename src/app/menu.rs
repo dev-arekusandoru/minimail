@@ -1,4 +1,4 @@
-//! Popup menus for the quiet header and the contextual action bar.
+//! Popup menus: the titlebar overflow, the Filter ▾ menu and the per-message and selection `⋯` menus.
 //!
 //! A menu holds no business logic: it renders a list of [`MenuItem`]s, moves a
 //! selection with the keyboard, and hands the chosen action back through

@@ -2,7 +2,8 @@
 //! command palette, reply composer, snooze picker, settings/rules panels,
 //! search and triage-session modes.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
-use crate::app::ui::{button, run};
+use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
 
 mod accessors;
@@ -56,10 +57,8 @@ use panes::{Orientation as PaneLayout, Panes};
 use mouse::close_on_backdrop;
 use reader::format_when;
 
-/// Height of the app-owned titlebar (also anchors the global menu below it).
+/// Height of the app-owned titlebar (where a menu lands when its trigger has no bounds yet).
 const HEADER_H: f32 = 36.;
-/// Height of the contextual action bar.
-const BAR_H: f32 = 30.;
 /// Height of the list header above the rows (title, selection count, Filter ▾).
 const LIST_HEADER_H: f32 = 28.;
 const TOAST_MS: u64 = 4000;
@@ -109,8 +108,11 @@ pub struct MailApp {
     sidebar_dragging: bool,
     /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
     pub reader: ReaderView,
-    /// Show action buttons in the reader (off: keyboard hints only).
-    pub reader_toolbar: bool,
+    /// Messages the next dispatched menu action applies to, instead of the cursor's. Set
+    /// by a message menu for exactly one action dispatch (see `menus.rs`).
+    menu_target: Option<Vec<MessageId>>,
+    /// Window bounds of each menu trigger from the last frame, so a menu hangs under its button.
+    anchors: Rc<RefCell<HashMap<MenuKind, Bounds<Pixels>>>>,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -195,7 +197,8 @@ impl MailApp {
             sidebar_w: panes::SIDEBAR_W,
             sidebar_dragging: false,
             reader: ReaderView::default(),
-            reader_toolbar: false,
+            menu_target: None,
+            anchors: Rc::default(),
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,

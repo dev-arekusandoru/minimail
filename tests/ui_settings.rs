@@ -40,7 +40,6 @@ fn panel(cx: &mut TestAppContext) -> PanelHarness<'_> {
                 SettingsEvent::Grouping(on) => format!("group:{on}"),
                 SettingsEvent::PreviewLines(n) => format!("preview:{n}"),
                 SettingsEvent::PaneLayout(o) => format!("layout:{}", o.label()),
-                SettingsEvent::ReaderToolbar(on) => format!("toolbar:{on}"),
                 SettingsEvent::FollowUp(timeout) => format!("followup:{timeout}"),
                 SettingsEvent::Unblock(email) => format!("unblock:{email}"),
                 SettingsEvent::Close => "close".into(),
@@ -89,25 +88,6 @@ fn search_filters_across_sections(cx: &mut TestAppContext) {
     h.type_text("theme");
     h.click("theme-row");
     assert!(h.events.borrow().iter().any(|e| e.starts_with("changed:")));
-}
-
-#[gpui_kit::gpui::test]
-fn reader_toolbar_row_toggles_and_is_found_by_search(cx: &mut TestAppContext) {
-    let mut h = panel(cx);
-    h.click(("settings-section", 1usize));
-    h.click("reader-toolbar-row");
-    h.click("reader-toolbar-row");
-    assert_eq!(
-        *h.events.borrow(),
-        vec!["toolbar:true".to_owned(), "toolbar:false".to_owned()],
-        "each click flips the setting and reports the new value"
-    );
-
-    let mut h = panel(cx);
-    h.click("settings-search");
-    h.type_text("action buttons");
-    h.click("reader-toolbar-row");
-    assert_eq!(*h.events.borrow(), vec!["toolbar:true".to_owned()], "search surfaces the row from any section");
 }
 
 #[gpui_kit::gpui::test]

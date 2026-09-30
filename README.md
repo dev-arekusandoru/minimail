@@ -24,7 +24,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | | |
 |---|---|
 | ⌨️ **Keyboard-first** | Every action has a key. `cmd-k` opens a command palette and `?` shows every shortcut. |
-| 🖱️ **Mouse and keyboard driven** | Everything the keys do is one click away, and keys keep working after clicks. The titlebar holds search, **Triage**, the pane-layout toggle, a Settings gear and **More** (the global overflow: Commands, Undo, Classify, Rules, Settings, Shortcuts). Selecting messages shows a context row above the list with Archive · File · Delete · Snooze (plus Inbox when you are not already in it) and Reply; its own **More** menu holds Select, Summarize, Mute, Unsubscribe, the AI Accept/Reject pair (only while a suggestion is pending) and a **Sender actions** submenu that acts on every message from one sender at once. Hover anything to see its shortcut. Click a row to open it, click its left edge (or cmd-click) to select, shift-click for a range, click a pending AI icon to accept it (right-click rejects), click sidebar locations, palette and snooze entries, click outside a menu or panel to close it, and press Escape to dismiss it. |
+| 🖱️ **Mouse and keyboard driven** | Everything the keys do is one click away, and keys keep working after clicks. The titlebar holds search, **Triage**, the pane-layout toggle, a Settings gear and **More** (the global overflow: Commands, Undo, Classify, Rules, Settings, Shortcuts). Every expanded message in the reader has a **Reply** button and a **⋯** menu with Archive · Delete · Snooze (plus Inbox when it is not already there), Accept/Reject AI (only while a suggestion is pending), File, Mark spam, Select, Summarize, Mute, Unsubscribe and a **Sender actions** submenu that acts on every message from one sender at once; with two or more messages selected the list header gets the same **⋯** for the whole selection. Hover anything to see its shortcut. Click a row to open it, click its left edge (or cmd-click) to select, shift-click for a range, click a pending AI icon to accept it (right-click rejects), click sidebar locations, palette and snooze entries, click outside a menu or panel to close it, and press Escape to dismiss it. |
 | ✅ **Inbox as a to-do list** | Every message is in exactly one of Inbox, Snoozed, Archived, Filed or Deleted. Every action can be undone. |
 | 📦 **Batch triage** | Multi-select with `shift-j`/`shift-k` or `x`, or act on everything from one sender at once. |
 | 🧠 **System 1 classifier** | Labels possible spam, needs-reply, urgency and kind. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. The interface mirrors [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). |
@@ -68,7 +68,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `alt-r` | Reset pane sizes | `v` | Reader mode for the open HTML message |
 | `shift-o` | Expand / collapse the other messages of the open thread | | |
 
-The reader shows no action buttons by default; the footer lists up to five keys that apply to the current message (`?` shows the rest); `u` undo appears on the toast after an action. Settings → Appearance → *Reader action toolbar* adds buttons to the reader and its banners.
+The reader shows the keys that apply to the current message in the footer (up to five; `?` shows the rest); `u` undo appears on the toast after an action. Each expanded message has Reply and **⋯** buttons in its header, and the New Sender / Possible Spam banners and the suggestion strip carry their own buttons.
 
 #### HTML mail
 
@@ -91,11 +91,11 @@ The chrome stays out of the way: a sidebar of locations, one titlebar, and actio
 
 **Titlebar** — the current view on the left, `Search…` in the middle (`/`), then **Triage** (`t`), the pane-layout toggle (`alt-l`), a Settings gear (`cmd-,`) and **More**. Below 800px wide Triage shows only its icon. Commands, Undo and Shortcuts live in **More**, the palette and their own shortcuts.
 
-**Context row above the list** — with one or more messages selected it shows *N selected*, *Archive* (`e`), *File* (`f`), *Delete* (`d`), *Snooze* (`s`) and, when you are not already in the Inbox, *Inbox* (`i`), plus *Reply* while a message is open in the reader. The buttons only appear when there is something valid to act on.
+**Message menu (`⋯`)** — every expanded message in the reader has a **Reply** button (`r`) and a **⋯** menu, and both act on *that* message, not on whichever one the reader is opened on. The menu holds *Archive* (`e`), *Delete* (`d`), *Snooze…* (`s`) and *Move to inbox* (`i`) (each only when it would change something), *Accept AI* (`y`) / *Reject AI* (`n`) while a suggestion is pending, *File…* (`f`), *Mark spam…* (`!`), *Toggle select* (`x`), *Summarize thread* (`z`), *Mute thread* (`m`), *Unsubscribe* (`shift-u`) and the **Sender actions** submenu: *Archive · Delete · File · Move to inbox from this sender* (`shift-e` / `shift-d` / `shift-f` / `shift-i`).
 
-**More menu beside the context row** — the secondary actions: *Select* (`x`), *Summarize* (`z`), *Mute* (`m`), *Unsubscribe* (`shift-u`), *Accept AI* (`y`) and *Reject AI* (`n`), shown only while a suggestion is pending, and the **Sender actions** submenu: *All from sender: Archive · Delete · File · Snooze* (`shift-e` / `shift-d` / `shift-f` / `shift-s`).
+**Selection menu (`⋯` in the list header)** — with two or more messages selected, a **⋯** next to *Filter ▾* opens the actions that make sense for several messages: Archive, Delete, Snooze…, Move to inbox, File… and Mark spam…. They apply to the whole selection in one undo step.
 
-Nothing was dropped: every action is still reachable from the titlebar, the context row, the menus, the command palette (`cmd-k`) and its own shortcut.
+Nothing was dropped: every action is still reachable from the titlebar, the menus, the command palette (`cmd-k`) and its own shortcut.
 
 ### Settings
 

@@ -30,10 +30,9 @@ pub const SIDEBAR_W: f32 = 148.;
 /// Sidebar drag limits.
 pub const MIN_SIDEBAR_W: f32 = 120.;
 pub const MAX_SIDEBAR_W: f32 = 320.;
-/// The toolbar and the hint bar, which the stacked panes do not get. The toolbar
-/// wraps at narrow widths, so this is an allowance: the reader pane keeps its own
-/// minimum in the flex layout and takes the hit if the allowance was too small.
-const CHROME_H: f32 = 108.;
+/// The titlebar and the hint bar, which the stacked panes do not get. An allowance: the
+/// reader pane keeps its own minimum in the flex layout and takes the hit if it was too small.
+const CHROME_H: f32 = 78.;
 
 /// Room the panes share on the width axis.
 pub fn available_width(viewport_w: f32, sidebar_w: f32) -> f32 {

@@ -39,6 +39,16 @@ impl MailApp {
         self.open_compose_for(&msg, None, window, cx);
     }
 
+    /// Reply to message `id` (the reply buttons on each message of the reader).
+    pub(super) fn reply_to(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.modal_open() {
+            return;
+        }
+        if let Some(msg) = self.mailbox.get(id).cloned() {
+            self.open_compose_for(&msg, None, window, cx);
+        }
+    }
+
     pub(super) fn open_compose_for(
         &mut self,
         msg: &Message,
@@ -92,8 +102,10 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.in_session() && ids.is_none() {
-            let ids = self.target_ids();
+        let quick = self.in_session() && ids.is_none();
+        // Captured now: a message menu's target only lives for its own dispatch.
+        let ids = ids.unwrap_or_else(|| self.target_ids());
+        if quick {
             let now = self.now();
             if let Some((_, until)) = self.mailbox.snooze_presets(now).into_iter().next() {
                 self.mailbox.snooze(&ids, until, now);
@@ -103,7 +115,7 @@ impl MailApp {
             cx.notify();
             return;
         }
-        if ids.clone().unwrap_or_else(|| self.target_ids()).is_empty() {
+        if ids.is_empty() {
             return;
         }
         let now = self.now();
@@ -126,9 +138,9 @@ impl MailApp {
                 };
                 this.close_modals(window, cx);
                 if let Some(until) = pick {
-                    let ids = ids.clone().unwrap_or_else(|| this.target_ids());
+                    let ids = &ids;
                     let now = this.now();
-                    let n = this.mailbox.snooze(&ids, until, now);
+                    let n = this.mailbox.snooze(ids, until, now);
                     this.triage.clear_selection();
                     this.show_toast(
                         format!("Snoozed {n} until {} · u to undo", format_when(until)),
@@ -169,7 +181,6 @@ impl MailApp {
                 self.mailbox.unsubscribed().to_vec(),
                 self.mailbox.follow_up_timeout(),
             )
-            .reader_toolbar(self.reader_toolbar)
         });
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
@@ -192,10 +203,6 @@ impl MailApp {
                     if this.panes.orientation() != *orientation {
                         this.set_pane_layout(*orientation, window, cx);
                     }
-                }
-                SettingsEvent::ReaderToolbar(on) => {
-                    this.reader_toolbar = *on;
-                    cx.notify();
                 }
                 SettingsEvent::FollowUp(timeout) => {
                     this.mailbox.set_follow_up_timeout(*timeout);
@@ -464,17 +471,35 @@ impl MailApp {
         self.open_folder_picker(FileAction::Ids(ids), window, cx);
     }
 
-    /// Folder picker for the cursor's account.
+    /// The account whose folders `action` files into: that of the messages it moves, not the
+    /// cursor's (a message menu can act on a message the cursor is not on).
+    fn action_account(&self, action: &FileAction) -> Option<String> {
+        let first = match action {
+            FileAction::Ids(ids) => ids.first().copied(),
+            FileAction::AfterReply(original) => Some(*original),
+            FileAction::Sender(email, from) => {
+                self.mailbox.sender_ids_in(email, *from).first().copied()
+            }
+            FileAction::BlockSender { email, .. } => self
+                .mailbox
+                .messages()
+                .iter()
+                .find(|m| m.from_email == *email)
+                .map(|m| m.id),
+        };
+        first.and_then(|id| self.mailbox.get(id)).map(|m| m.account.clone())
+    }
+
+    /// Folder picker for the account of the messages `action` files.
     fn open_folder_picker(
         &mut self,
         action: FileAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(msg) = self.cursor_id().and_then(|id| self.mailbox.get(id)) else {
+        let Some(account) = self.action_account(&action) else {
             return;
         };
-        let account = msg.account.clone();
         let title = match &action {
             FileAction::Ids(ids) if ids.len() == 1 => "File to folder:".to_owned(),
             FileAction::Ids(ids) => format!("File {} messages to:", ids.len()),

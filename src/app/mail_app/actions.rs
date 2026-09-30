@@ -38,6 +38,13 @@ impl MailApp {
 
     /// After a state change in a session: count it and move to the next message.
     pub(super) fn session_advance(&mut self) {
+        // A menu acting on a message other than the session's current one handles nothing
+        // of the session.
+        if let (Some(ids), Some(current)) = (&self.menu_target, self.session_current())
+            && !ids.contains(&current)
+        {
+            return;
+        }
         let Some(s) = self.session.as_mut() else { return };
         s.handled += 1;
         s.index += 1;
