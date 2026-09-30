@@ -208,7 +208,8 @@ impl Panes {
     }
 }
 
-type Handler = Box<dyn Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static>;
+type DragHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
+type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// The hairline between the panes: a pointer band that highlights on hover, drags
 /// on press and resets on double-click.
@@ -216,16 +217,16 @@ type Handler = Box<dyn Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'stati
 pub struct Divider {
     orientation: Orientation,
     theme: Arc<Theme>,
-    on_drag: Handler,
-    on_reset: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+    on_drag: DragHandler,
+    on_reset: ClickHandler,
 }
 
 impl Divider {
     pub fn new(
         orientation: Orientation,
         theme: Arc<Theme>,
-        on_drag: Handler,
-        on_reset: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+        on_drag: DragHandler,
+        on_reset: ClickHandler,
     ) -> Self {
         Self { orientation, theme, on_drag, on_reset }
     }

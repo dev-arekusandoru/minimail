@@ -78,17 +78,22 @@ impl Harness<'_> {
         self.cx.run_until_parked();
         bounds
     }
-    /// Press on the middle of the divider, move the pointer `dx`/`dy` and release.
+    /// The window's viewport in pixels, which is what the panes are clamped against.
+    fn viewport(&mut self) -> (f32, f32) {
+        let size = self
+            .cx
+            .update_window(self.window, |_, window, _| window.viewport_size())
+            .expect("window alive");
+        (f32::from(size.width), f32::from(size.height))
+    }
     fn drag_divider(&mut self, dx: f32, dy: f32) {
         let bounds = self.bounds("pane-divider");
-        let from = point(px(bounds.origin.x + bounds.size.width / 2.), px(bounds.origin.y + bounds.size.height / 2.));
-        let to = point(px(from.x + dx), px(from.y + dy));
+        let from = point(
+            px(f32::from(bounds.origin.x) + f32::from(bounds.size.width) / 2.),
+            px(f32::from(bounds.origin.y) + f32::from(bounds.size.height) / 2.),
+        );
+        let to = point(px(f32::from(from.x) + dx), px(f32::from(from.y) + dy));
         self.cx.update_window(self.window, |_, window, cx| window.drag(from, to, cx)).expect("window alive");
-        self.cx.run_until_parked();
-    }
-    fn resize(&mut self, w: f32, h: f32) {
-        self.cx.update_window(self.window, |_, window, _| window.resize(size(px(w), px(h)))).expect("window alive");
-        self.cx.update_window(self.window, |_, window, cx| window.render_frame(cx)).expect("window alive");
         self.cx.run_until_parked();
     }
     fn ids(&mut self) -> Vec<MessageId> {
@@ -110,16 +115,23 @@ fn divider_drag_resizes_the_list_pane(cx: &mut TestAppContext) {
 
     // The divider can be dragged, so it is there at all.
     let divider = h.bounds("pane-divider");
-    assert!(divider.size.width > 0. && divider.size.height > 0.);
+    assert!(divider.size.width > px(0.) && divider.size.height > px(0.));
 }
-
 #[gpui_kit::gpui::test]
 fn drag_is_clamped_to_usable_panes(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     h.drag_divider(-2000., 0.);
-    assert_eq!(h.list_size(), MIN_LIST_W);
+    assert_eq!(h.list_size(), MIN_LIST_W, "the list pane never collapses");
+
+    let (viewport_w, _) = h.viewport();
+    let max = available_width(viewport_w) - MIN_READER_W;
     h.drag_divider(4000., 0.);
-    assert_eq!(h.list_size(), available_width(1400.) - MIN_READER_W);
+    let stretched = h.list_size();
+    assert!(stretched > MIN_LIST_W && stretched <= max, "{stretched} must stay under {max}");
+    h.drag_divider(4000., 0.);
+    assert_eq!(h.list_size(), stretched, "the pointer is already at the end of the window");
+    h.drag_divider(-4000., 0.);
+    assert_eq!(h.list_size(), MIN_LIST_W, "and back down to the minimum");
 }
 
 #[gpui_kit::gpui::test]
@@ -154,16 +166,19 @@ fn keyboard_shrink_stops_at_the_minimum(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn a_smaller_window_reclamps_the_pane(cx: &mut TestAppContext) {
-    let mut h = harness(cx, 1400., 900.);
-    h.drag_divider(900., 0.);
-    let wide = h.list_size();
-    h.resize(900., 900.);
-    let narrow = h.list_size();
-    assert!(narrow < wide, "shrinking the window should not keep a 1000px list: {narrow}");
-    assert!(narrow >= MIN_LIST_W);
-    assert!(available_width(900.) - narrow >= MIN_READER_W - 0.5);
+fn a_narrow_window_clamps_the_panes(cx: &mut TestAppContext) {
+    let mut h = harness(cx, 900., 700.);
+    let (viewport_w, _) = h.viewport();
+    let available = available_width(viewport_w);
+    let list = h.list_size();
+    assert!(list >= MIN_LIST_W, "the list keeps a usable width: {list}");
+    assert!(available - list >= MIN_READER_W - 0.5, "the reader keeps a usable width: {}", available - list);
+
+    h.drag_divider(2000., 0.);
+    let stretched = h.list_size();
+    assert!(stretched <= available - MIN_READER_W, "{stretched} leaves the reader nothing");
 }
+
 
 #[gpui_kit::gpui::test]
 fn toolbar_button_toggles_the_pane_layout(cx: &mut TestAppContext) {
@@ -213,12 +228,12 @@ fn each_orientation_remembers_its_own_size(cx: &mut TestAppContext) {
 fn rows_span_the_pane_in_both_orientations(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     let id = h.ids()[0];
-    let side_by_side = h.bounds(("row", id as usize)).size.width;
+    let side_by_side = f32::from(h.bounds(("row", id as usize)).size.width);
     let list = h.list_size();
     assert!((side_by_side - list).abs() < 2., "row fills the list pane: {side_by_side} vs {list}");
 
     h.keys("alt-l");
-    let stacked = h.bounds(("row", id as usize)).size.width;
+    let stacked = f32::from(h.bounds(("row", id as usize)).size.width);
     assert!(
         (stacked - available_width(1400.)).abs() < 2.,
         "stacked rows use the full pane width: {stacked}"
