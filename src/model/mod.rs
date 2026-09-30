@@ -73,6 +73,23 @@ pub struct Message {
     pub outgoing: bool,
     #[serde(default)]
     pub snooze: Option<String>,
+    /// Carbon-copy recipients, same comma-separated format as `to`.
+    #[serde(default)]
+    pub cc: String,
+    #[serde(default)]
+    pub bcc: String,
+    /// HTML alternative. `body` is the text part (empty for HTML-only mail).
+    #[serde(default)]
+    pub html: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+/// A file attached to a message; `size` is in bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attachment {
+    pub name: String,
+    pub size: u64,
 }
 
 fn personal_account() -> AccountId {

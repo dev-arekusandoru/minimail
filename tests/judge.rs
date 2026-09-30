@@ -23,6 +23,10 @@ fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
         account: "personal".into(),
         outgoing: false,
         snooze: None,
+        cc: String::new(),
+        bcc: String::new(),
+        html: None,
+        attachments: Vec::new(),
     }
 }
 

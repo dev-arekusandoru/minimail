@@ -17,6 +17,10 @@ fn msg(name: &str, email: &str, subject: &str, body: &str, received: &str) -> Me
         account: "personal".into(),
         outgoing: false,
         snooze: None,
+        cc: String::new(),
+        bcc: String::new(),
+        html: None,
+        attachments: Vec::new(),
     }
 }
 

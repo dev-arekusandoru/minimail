@@ -110,6 +110,10 @@ impl Mailbox {
                 account: original.account.clone(),
                 outgoing: true,
                 snooze: None,
+                cc: String::new(),
+                bcc: String::new(),
+                html: None,
+                attachments: Vec::new(),
             };
             self.index.insert(id, self.messages.len());
             self.newest_first.insert(0, id);
