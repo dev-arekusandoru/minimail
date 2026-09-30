@@ -146,7 +146,7 @@ impl Query {
         let name = m.from_name.to_lowercase();
         let email = m.from_email.to_lowercase();
         let subject = m.subject.to_lowercase();
-        let body = m.body.to_lowercase();
+        let body = crate::reading::reader_text(m).to_lowercase();
         let date = m.received.get(..10).unwrap_or(&m.received);
         self.from
             .iter()

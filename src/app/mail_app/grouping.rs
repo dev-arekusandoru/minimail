@@ -266,7 +266,9 @@ impl MailApp {
         };
         let thread = *thread_id;
         let preview = row::thread_preview_lines(self.preview_lines);
-        let snippet = latest.map(|m| crate::preview::snippet(&m.body)).unwrap_or_default();
+        let snippet = latest
+            .map(|m| crate::preview::snippet(&crate::reading::reader_text(m)))
+            .unwrap_or_default();
         crate::app::row::frame(
             div()
                 .id(("thread-row", thread as usize))

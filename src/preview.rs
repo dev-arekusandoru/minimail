@@ -75,14 +75,3 @@ pub fn snippet(body: &str) -> String {
         None => out,
     }
 }
-
-/// Whether the subject or the opening of the body announces an attachment
-/// (the mailbox model carries no attachment list, so this is a text heuristic).
-pub fn mentions_attachment(subject: &str, body: &str) -> bool {
-    let head: String = snippet(body).chars().take(160).collect();
-    let text = format!("{subject} {head}").to_lowercase();
-    if text.contains("no longer attach") || text.contains("not attach") {
-        return false;
-    }
-    text.contains("attached") || text.contains("attachment")
-}

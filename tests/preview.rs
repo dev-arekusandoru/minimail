@@ -46,14 +46,6 @@ fn preview_lines_options_and_steps() {
 }
 
 #[test]
-fn attachment_heuristic() {
-    assert!(mentions_attachment("Lisbon print run — proofs attached", "Four proofs."));
-    assert!(mentions_attachment("Boarding", "Boarding pass attached.\n\nGate B22"));
-    assert!(!mentions_attachment("Statement", "Download the PDF; we no longer attach statements."));
-    assert!(!mentions_attachment("Hi", "Lunch?"));
-}
-
-#[test]
 fn fixture_snippets_are_plain_single_paragraph_text() {
     let mailbox = Mailbox::load_default();
     for m in mailbox.messages() {

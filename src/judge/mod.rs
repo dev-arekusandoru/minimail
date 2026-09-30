@@ -228,9 +228,11 @@ pub fn expects_reply(judge: &dyn Judge, body: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The JSON state a judge sees: sender, subject and a trimmed body only.
+/// The JSON state a judge sees: sender, subject and a trimmed body only (the text part,
+/// or text extracted from the HTML for HTML-only mail).
 pub fn message_state(m: &Message) -> Value {
-    let body = m.body.trim();
+    let text = crate::reading::reader_text(m);
+    let body = text.trim();
     let body: String = match body.char_indices().nth(MAX_BODY_CHARS) {
         Some((end, _)) => body[..end].to_string(),
         None => body.to_string(),

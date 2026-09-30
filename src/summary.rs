@@ -170,12 +170,13 @@ impl Summarizer for StubSummarizer {
         let mut action_items: Vec<String> = Vec::new();
         let mut dates: Vec<String> = Vec::new();
         for m in thread {
+            let body = crate::reading::reader_text(m);
             if sentences.len() < MAX_SUMMARY_MESSAGES
-                && let Some(s) = first_sentence(&m.body)
+                && let Some(s) = first_sentence(&body)
             {
                 sentences.push(s);
             }
-            for line in m.body.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
                 if is_action_line(line)
                     && action_items.len() < MAX_ACTION_ITEMS
                     && !action_items.iter().any(|a| a == line)
@@ -183,7 +184,7 @@ impl Summarizer for StubSummarizer {
                     action_items.push(line.to_string());
                 }
             }
-            for d in find_dates(&format!("{} {}", m.subject, m.body)) {
+            for d in find_dates(&format!("{} {}", m.subject, body)) {
                 if dates.len() < MAX_DATES && !dates.contains(&d) {
                     dates.push(d);
                 }

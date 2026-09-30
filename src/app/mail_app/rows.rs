@@ -89,7 +89,7 @@ impl MailApp {
             muted: self.mailbox.is_muted(msg.thread_id),
             new_sender: self.mailbox.is_new_sender(id),
             snoozed: self.mailbox.snoozed_until(id).is_some() && !return_time_shown,
-            attachment: crate::preview::mentions_attachment(&msg.subject, &msg.body),
+            attachment: !msg.attachments.is_empty(),
         });
         icons::split_overflow(&glyphs, icons::max_icons(width))
     }
@@ -175,7 +175,7 @@ impl MailApp {
                                 .text_size(px(12.))
                                 .line_height(px(row::PREVIEW_LINE_H))
                                 .text_color(t.text_muted)
-                                .child(crate::preview::snippet(&msg.body)),
+                                .child(crate::preview::snippet(&crate::reading::reader_text(msg))),
                         )
                     }),
             )
