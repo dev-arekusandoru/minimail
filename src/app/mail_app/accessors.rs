@@ -29,6 +29,38 @@ impl MailApp {
         self.mode == ListMode::Screener
     }
 
+    /// A popup menu is open.
+    pub fn menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
+
+    /// The open menu of `kind`, if that is the one showing.
+    pub(super) fn menu_is(&self, kind: MenuKind) -> bool {
+        self.menu.as_ref().is_some_and(|m| m.kind == kind)
+    }
+
+    /// The open menu's panel, to draw it.
+    pub(super) fn menu_panel(&self) -> Option<Entity<MenuPanel>> {
+        self.menu.as_ref().map(|m| m.panel.clone())
+    }
+
+    /// Whether the contextual action bar applies right now: a message to act on, in a
+    /// view that is not the screener (it has its own controls), the composer or a
+    /// finished session.
+    pub fn context_actions(&self) -> bool {
+        if self.compose.is_some() || self.mode == ListMode::Screener || self.session_end.is_some() {
+            return false;
+        }
+        !self.target_ids().is_empty()
+    }
+
+    /// Number of AI suggestions still pending on the message the actions target.
+    pub fn pending_suggestions(&self) -> usize {
+        self.cursor_id()
+            .map(|id| self.mailbox.pending(id).len())
+            .unwrap_or(0)
+    }
+
     pub fn opened(&self) -> Option<MessageId> {
         self.opened
     }
@@ -176,8 +208,9 @@ impl MailApp {
             || self.rules_panel.is_some()
     }
 
+    /// Scroll the cursor row fully into view; rows have their own heights, so the list state
+    /// works it out.
     pub(super) fn scroll_to_cursor(&self) {
-        self.list_scroll
-            .scroll_to_item(self.cursor_ix(), ScrollStrategy::Nearest);
+        self.list_state.scroll_to_reveal_item(self.cursor_ix());
     }
 }

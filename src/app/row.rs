@@ -1,21 +1,42 @@
 //! Shared look of a list row: geometry that depends on the preview setting, the panel width,
 //! and the cursor / open / checked visual states. Message rows and thread headers both use
-//! [`frame`] so the states read the same everywhere.
+//! [`frame`] so the states read the same everywhere; each row sets its own height, derived
+//! from its content by [`message_row_height`] or [`thread_row_height`].
 
 use crate::app::icons::{self, Glyph};
 use crate::theme::Theme;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 /// Height of the sender line and of the subject line.
-const LINE_H: f32 = 18.;
+pub const LINE_H: f32 = 18.;
 /// Height of one preview line.
 pub const PREVIEW_LINE_H: f32 = 16.;
-/// Vertical padding of a row (top + bottom).
+/// Vertical padding of a message row (top + bottom).
 const PAD_Y: f32 = 8.;
+/// Vertical padding of a thread header row: tighter than a message row, it groups
+/// messages rather than showing one.
+const THREAD_PAD_Y: f32 = 6.;
+/// Preview lines a thread header shows at most, however the `Preview lines` setting is set.
+const THREAD_PREVIEW_MAX: u8 = 2;
 
-/// Uniform row height for a `Preview lines` setting (`uniform_list` needs one height).
-pub fn row_height(preview_lines: u8) -> f32 {
+/// Height of a message row for a `Preview lines` setting: sender/date line, subject line and
+/// `preview_lines` snippet lines. Rows are measured by the list, so this only has to match
+/// what [`frame`] lays out.
+pub fn message_row_height(preview_lines: u8) -> f32 {
     PAD_Y + 2. * LINE_H + PREVIEW_LINE_H * f32::from(preview_lines)
+}
+
+/// Preview lines a thread header shows for a `Preview lines` setting: the snippet of its
+/// newest message, capped so a header stays a header.
+pub fn thread_preview_lines(preview_lines: u8) -> u8 {
+    preview_lines.min(THREAD_PREVIEW_MAX)
+}
+
+/// Height of a thread header row: one compact line (sender, subject, participants, count,
+/// date) plus the preview lines [`thread_preview_lines`] allows. Always shorter than
+/// [`message_row_height`] for the same setting.
+pub fn thread_row_height(preview_lines: u8) -> f32 {
+    THREAD_PAD_Y + LINE_H + PREVIEW_LINE_H * f32::from(thread_preview_lines(preview_lines))
 }
 
 /// Width of the message list panel for a window `viewport` width, in pixels.
@@ -44,11 +65,11 @@ impl RowVisual {
     }
 }
 
-/// Apply the row geometry and the visual states of `v` to a row container.
-pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme, height: f32) -> crate::app::ui::Observable {
+/// Apply the row geometry and the visual states of `v` to a row container. The caller sets the
+/// height, so a thread header can be shorter than the message rows around it.
+pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Observable {
     let hover = t.hover;
     row.test_support().relative()
-        .h(px(height))
         .w_full()
         .flex()
         .items_center()

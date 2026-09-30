@@ -7,9 +7,11 @@
 //! covers the whole thread). Threads split across states show only the panel's messages.
 //! `]` / `[` walk the whole thread in date order regardless of the grouping setting.
 
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{ListMode, MailApp};
+use crate::app::row;
 use crate::model::MessageId;
 use crate::threads::{self, Row};
 
@@ -225,8 +227,10 @@ impl MailApp {
 }
 
 impl MailApp {
-    /// Thread header row: chevron, latest sender and subject, participants, count badge and
-    /// the newest date. Click selects it; the chevron expands/collapses.
+    /// Thread header row: chevron, latest sender, subject, participants, count badge, the
+    /// newest date and the snippet of the newest message while the Preview setting asks for
+    /// one. It sizes to that content, not to the message-row height. Click selects it; the
+    /// chevron expands/collapses.
     pub(super) fn render_group_header(
         &self,
         row: &Row,
@@ -250,11 +254,14 @@ impl MailApp {
         };
         let selected = visual.checked;
         let thread = *thread_id;
+        let preview = row::thread_preview_lines(self.preview_lines);
+        let snippet = latest.map(|m| crate::preview::snippet(&m.body)).unwrap_or_default();
         crate::app::row::frame(
-            div().id(("thread-row", thread as usize)),
+            div()
+                .id(("thread-row", thread as usize))
+                .h(px(self.thread_row_h())),
             visual,
             &t,
-            self.row_h(),
         )
             .child(self.row_checkbox(ix, selected, cx))
             .child(
@@ -277,29 +284,47 @@ impl MailApp {
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .items_center()
-                    .gap_2()
+                    .flex_col()
+                    .overflow_hidden()
                     .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         this.click_row(ix, ev, window, cx)
                     }))
                     .child(
                         div()
-                            .w(px(108.))
-                            .flex_none()
-                            .truncate()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(from),
+                            .h(px(row::LINE_H))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .w(px(108.))
+                                    .flex_none()
+                                    .truncate()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(from),
+                            )
+                            .child(div().flex_1().truncate().text_color(t.text_muted).child(subject))
+                            .child(
+                                div()
+                                    .w(px(90.))
+                                    .flex_none()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .text_color(t.text_muted)
+                                    .child(people),
+                            ),
                     )
-                    .child(div().flex_1().truncate().text_color(t.text_muted).child(subject))
-                    .child(
-                        div()
-                            .w(px(90.))
-                            .flex_none()
-                            .truncate()
-                            .text_size(px(11.))
-                            .text_color(t.text_muted)
-                            .child(people),
-                    ),
+                    .when(preview > 0, |d| {
+                        d.child(
+                            div()
+                                .h(px(row::PREVIEW_LINE_H * f32::from(preview)))
+                                .line_clamp(preview as usize)
+                                .text_size(px(12.))
+                                .line_height(px(row::PREVIEW_LINE_H))
+                                .text_color(t.text_muted)
+                                .child(snippet),
+                        )
+                    }),
             )
             .child(
                 div()

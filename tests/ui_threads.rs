@@ -3,11 +3,13 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds,
-    WindowOptions, base::Root, px, size,
+    Action, AnyWindowHandle, AppContext, Bounds, ElementId, Entity, Focusable, Pixels, Point,
+    ScrollDelta, TestAppContext, WindowBounds, WindowOptions, base::Root, point, px, size,
 };
+use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::MailApp;
-use mail_classifier::app::actions::bind_keys;
+use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
+use mail_classifier::app::row::{message_row_height, thread_row_height};
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, TriageState, TriageState::*};
 use mail_classifier::threads::Row;
@@ -71,6 +73,20 @@ impl Harness<'_> {
     fn keys(&mut self, keys: &str) {
         self.cx.simulate_keystrokes(self.window, keys);
         self.cx.run_until_parked();
+    }
+    fn dispatch(&mut self, action: impl Action + Clone) {
+        self.cx.dispatch_action(self.window, action);
+        self.cx.run_until_parked();
+    }
+    /// Laid-out bounds of a row in the real window.
+    fn bounds(&mut self, id: impl Into<ElementId>) -> Bounds<Pixels> {
+        self.cx
+            .update_window(self.window, |_, window, _| window.find(id).bounds())
+            .expect("window open")
+    }
+    /// Laid-out height of a row in the real window, in pixels.
+    fn row_height(&mut self, id: impl Into<ElementId>) -> Pixels {
+        self.bounds(id).size.height
     }
     fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
         self.cx.read_entity(&self.app, |a, _| f(a))
@@ -197,4 +213,81 @@ fn next_and_previous_in_thread_work_flat_and_grouped(cx: &mut TestAppContext) {
     assert_eq!(h.cursor(), Some(2), "thread expands so the message row is focused");
     h.keys("]");
     assert_eq!(h.opened(), Some(3));
+}
+
+#[gpui_kit::gpui::test]
+fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness_with(cx, threaded());
+    h.keys("g");
+    let message = h.row_height(("row", 4usize));
+    let header = h.row_height(("thread-row", 1usize));
+    assert!(header < message, "collapsed header ({header}) must be shorter than a message row ({message})");
+
+    // Expanding leaves the header alone and gives the children full message-row height.
+    h.keys("j right");
+    assert_eq!(h.row_height(("thread-row", 1usize)), header, "expanding does not resize the header");
+    assert_eq!(h.row_height(("row", 2usize)), message, "a child message row keeps message height");
+    h.keys("left");
+
+    // The header follows the preview setting, and stays shorter than a message row.
+    for _ in 0..4 {
+        h.dispatch(CyclePreviewLines);
+    }
+    assert_eq!(h.read(|a| a.preview_lines), 0, "cycled to Off");
+    let bare_message = h.row_height(("row", 4usize));
+    let bare_header = h.row_height(("thread-row", 1usize));
+    assert!(bare_message < message, "message rows shrink with the preview setting");
+    assert!(bare_header < header, "headers shrink with the preview setting too");
+    assert!(bare_header < bare_message, "and are still not padded to message height");
+    assert!(bare_header < px(40.), "a header with no preview is one compact line: {bare_header}");
+
+    // Back to the default: measured heights match what the row functions promise.
+    h.dispatch(CyclePreviewLines);
+    assert_eq!(h.read(|a| a.preview_lines), 1);
+    h.dispatch(CyclePreviewLines);
+    assert_eq!(h.read(|a| a.preview_lines), 2);
+    let message_again = h.row_height(("row", 4usize));
+    let header_again = h.row_height(("thread-row", 1usize));
+    assert_eq!(message_again, message, "no stale heights after cycling previews");
+    assert_eq!(header_again, header);
+    assert_eq!(message_again, px(message_row_height(2)));
+    assert_eq!(header_again, px(thread_row_height(2)));
+}
+
+/// Forty single-message threads, so the list is far taller than the window.
+fn long_list() -> Mailbox {
+    let msgs: Vec<String> = (1..=40u32)
+        .map(|i| msg(i, i, &format!("s{i}@x.com"), &format!("Subject {i}"), 1 + i % 28, "Inbox"))
+        .collect();
+    mailbox(&msgs)
+}
+
+#[gpui_kit::gpui::test]
+fn keyboard_and_wheel_scroll_the_variable_height_list(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, long_list());
+    let newest = h.read(|a| a.visible_ids()[0]) as usize;
+    let top_row = h.bounds(("row", newest));
+    assert!(top_row.bottom() < px(800.), "the first row starts inside the window: {top_row:?}");
+
+    for _ in 0..30 {
+        h.keys("j");
+    }
+    let cursor = h.cursor().expect("a cursor") as usize;
+    let cursor_bounds = h.bounds(("row", cursor));
+    assert!(
+        cursor_bounds.top() > px(0.) && cursor_bounds.bottom() < px(800.),
+        "j scrolled row {cursor} into view: {cursor_bounds:?}"
+    );
+
+    let before = h.bounds(("row", cursor));
+    h.cx
+        .update_window(h.window, |_, window, cx| {
+            window.scroll(("row", cursor), ScrollDelta::Pixels(point(px(0.), px(-800.))), cx);
+        })
+        .expect("window open");
+    h.cx.run_until_parked();
+    let after = h.bounds(("row", cursor));
+    assert!(after.top() < before.top(), "the wheel scrolled the list: {before:?} -> {after:?}");
 }

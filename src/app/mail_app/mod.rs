@@ -17,6 +17,7 @@ use crate::app::row::{self, RowVisual};
 use crate::app::overlay::overlay;
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::palette::{CommandPalette, PaletteEvent};
+use crate::app::menu::MenuPanel;
 use crate::app::panels::{
     RuleBanner, RulesEvent, RulesPanel, ScreenerHeader, SessionCard, SummaryCard,
 };
@@ -36,14 +37,22 @@ mod actions;
 mod grouping;
 mod help;
 mod list;
+mod menus;
 mod modals;
 mod mouse;
+pub mod panes;
 mod reader;
 mod render;
 mod rows;
+use menus::{MenuKind, OpenMenu};
+use panes::{Orientation as PaneLayout, Panes};
 use mouse::close_on_backdrop;
 use reader::format_when;
 
+/// Height of the quiet header row.
+const HEADER_H: f32 = 30.;
+/// Height of the contextual action bar.
+const BAR_H: f32 = 30.;
 const TOAST_MS: u64 = 4000;
 
 /// What the message list currently shows.
@@ -80,8 +89,13 @@ pub struct MailApp {
     pub preview_lines: u8,
     /// Messages that have been shown in the reader (everything else is unread).
     read: HashSet<MessageId>,
-    /// Width of the message list panel in pixels (drives how many row icons fit).
+    /// Width of the message list panel in pixels (drives how many row icons fit):
+    /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
+    /// Height of the message list panel in pixels when the panes are stacked.
+    list_h: f32,
+    /// How much room the list and the reader share, and how they are stacked.
+    pub panes: Panes,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -104,9 +118,16 @@ pub struct MailApp {
     summary: Option<(u32, ThreadSummary)>,
     toast_gen: u64,
     focus_handle: FocusHandle,
-    list_scroll: UniformListScrollHandle,
+    /// Variable-height message list: rows are measured, so thread headers can size to
+    /// their content.
+    list_state: ListState,
+    /// What `list_state` was last measured against, so a stale row height is re-measured.
+    list_shape: Option<list::ListShape>,
     help_scroll: ScrollHandle,
     _modal_sub: Option<Subscription>,
+    /// The open popup menu, if any.
+    menu: Option<OpenMenu>,
+    _menu_sub: Option<Subscription>,
 }
 
 impl MailApp {
@@ -141,7 +162,9 @@ impl MailApp {
             summaries_enabled: false,
             preview_lines: crate::preview::DEFAULT_LINES,
             read: HashSet::new(),
-            list_w: row::list_width(1200.),
+            list_w: 0.,
+            list_h: 0.,
+            panes: Panes::default(),
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,
@@ -160,9 +183,12 @@ impl MailApp {
             summary: None,
             toast_gen: 0,
             focus_handle: cx.focus_handle(),
-            list_scroll: UniformListScrollHandle::new(),
+            list_state: ListState::new(0, ListAlignment::Top, px(200.)),
+            list_shape: None,
             help_scroll: ScrollHandle::new(),
             _modal_sub: None,
+            menu: None,
+            _menu_sub: None,
         };
         app.classify_visible();
         app

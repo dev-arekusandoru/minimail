@@ -49,9 +49,14 @@ impl MailApp {
             .to_string()
     }
 
-    /// Uniform height of every list row (message rows and thread headers).
-    pub(super) fn row_h(&self) -> f32 {
-        row::row_height(self.preview_lines)
+    /// Height of a message row (sender/date, subject, preview): the rows the list measures.
+    pub(super) fn message_row_h(&self) -> f32 {
+        row::message_row_height(self.preview_lines)
+    }
+
+    /// Height of a thread header row: one compact line plus the preview lines it shows.
+    pub(super) fn thread_row_h(&self) -> f32 {
+        row::thread_row_height(self.preview_lines)
     }
 
     /// Cursor / open / checked state of the row for message `id`.
@@ -108,7 +113,7 @@ impl MailApp {
         let lines = self.preview_lines;
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
-        row::frame(div().id(("row", ix_id)), visual, &t, self.row_h())
+        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, &t)
             .child(self.row_checkbox(ix, visual.checked, cx))
             .child(row::status_icon(visual.open, unread, very_urgent, &t))
             .child(

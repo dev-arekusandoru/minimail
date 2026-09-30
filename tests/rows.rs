@@ -8,7 +8,9 @@ use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
 use mail_classifier::app::icons::{
     Glyph, GlyphInputs, glyphs_for, legend, max_icons, split_overflow,
 };
-use mail_classifier::app::row::{RowVisual, row_height};
+use mail_classifier::app::row::{
+    LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, thread_preview_lines, thread_row_height,
+};
 use mail_classifier::app::MailApp;
 use mail_classifier::judge::Kind;
 use mail_classifier::model::{MessageId, Tag};
@@ -79,12 +81,29 @@ fn preview_setting_cycles_from_off_to_five(cx: &mut TestAppContext) {
 }
 
 #[test]
-fn row_height_is_uniform_per_setting_and_grows_by_line() {
-    let base = row_height(0);
+fn message_row_height_grows_by_one_preview_line() {
+    let base = message_row_height(0);
     for n in 1..=5u8 {
-        assert_eq!(row_height(n) - base, 16. * f32::from(n));
+        assert_eq!(message_row_height(n) - base, PREVIEW_LINE_H * f32::from(n));
     }
     assert!(base >= 44., "room for sender and subject even with previews off");
+    assert!(base > 2. * LINE_H, "previews never squeeze out a line");
+}
+
+#[test]
+fn thread_header_sizes_to_its_own_content_and_never_matches_a_message_row() {
+    for n in 0..=5u8 {
+        let header = thread_row_height(n);
+        let message = message_row_height(n);
+        assert!(
+            header < message,
+            "a thread header at {n} preview lines ({header}) must be shorter than a message row ({message})"
+        );
+        assert_eq!(header, 24. + PREVIEW_LINE_H * f32::from(thread_preview_lines(n)));
+    }
+    assert!(thread_row_height(1) > thread_row_height(0), "it follows the preview setting");
+    assert_eq!(thread_preview_lines(0), 0, "no preview lines, no preview block");
+    assert_eq!(thread_row_height(5), thread_row_height(2), "a header caps its preview");
 }
 
 #[test]
