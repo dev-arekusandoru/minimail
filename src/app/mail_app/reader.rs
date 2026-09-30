@@ -1,5 +1,6 @@
-//! The reader pane: opened message, its thread below it on a state-colored rail, and the
-//! optional action toolbar. The pieces live in `reader_*.rs`.
+//! The reader pane: the opened thread as one chronological timeline (oldest first) on a
+//! state-colored rail, the opened message expanded in place, plus the optional action toolbar.
+//! The pieces live in `reader_*.rs`.
 
 use super::*;
 
@@ -45,6 +46,7 @@ impl MailApp {
         let look = Look::new(self.reader_toolbar, cx);
         let newest = self.newest();
         let others = crate::reading::thread_others(self.mailbox.messages(), msg);
+        let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
 
         // Thread messages in timeline order (oldest first). The opened one is the expanded
         // surface wherever it falls; it is never moved.
@@ -52,7 +54,6 @@ impl MailApp {
             // A lone message has no thread, so no rail: the surface takes the full width.
             (None, vec![self.message_surface(msg, Role::Opened, &look, cx)])
         } else {
-            let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
             let count = order.len();
             let rows = order
                 .iter()
@@ -78,14 +79,7 @@ impl MailApp {
         // opened message's child index is what `scroll_to_top_of_item` needs.
         let summary = self.summary_shown();
         let lead = usize::from(summary.is_some()) + usize::from(title.is_some());
-        let at = if others.is_empty() {
-            0
-        } else {
-            crate::threads::thread_order(self.mailbox.messages(), msg.thread_id)
-                .iter()
-                .position(|&id| id == msg.id)
-                .unwrap_or(0)
-        };
+        let at = order.iter().position(|&id| id == msg.id).unwrap_or(0);
         if self.reader_revealed.replace(Some(msg.id)) != Some(msg.id) {
             self.reader_scroll.scroll_to_top_of_item(lead + at);
         }
