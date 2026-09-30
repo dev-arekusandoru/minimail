@@ -38,7 +38,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
 | 🧵 **Group by thread** | `g` (or Settings, or the palette) shows one row per conversation: latest sender and subject, message count, participants and newest date. `right`/`enter` or the chevron expands it inline, `left` collapses. Actions (`e` `w` `i` `l`, `x`, shift-selection) on a thread row apply to every message of that thread *in the current panel* and undo as one step; sender-wide actions and mute are unchanged. A thread split across panels shows only that panel's messages in each. `]` / `[` step through the thread in date order in either mode (also clickable in the reader). |
-| 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, last row: space or `=`/`-` by keyboard, click by mouse). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
+| 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, Appearance / Theme section; click or use space / `=` / `-`). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
 | 👁️ **Readable rows** | Each row is sender + date on the first line, the **full-width subject** on the second, then an optional muted preview. Labels are icons, not text badges: at most a few fit (fewer in narrow windows) and the rest fold into a `+N` chip whose tooltip lists them. Hover any icon for its name; the `?` help ends with an **icon legend**. Unread mail is bold with a closed-envelope icon; an unaccepted AI suggestion is a single sparkle icon (click or `y` accepts, right-click or `n` rejects). Return times stay as text (`↩ Mon 5 Oct 08:00`). |
 | 🔎 **Preview lines** | Settings → *Preview lines* (or palette → *Cycle preview lines*): Off, 1–5 lines of plain-text snippet under the subject, like Apple Mail. Quoted text (`>`), signatures and reply headers are stripped. Every row has the same height for a given setting, so scrolling stays smooth. Default 2. |
 | 📍 **Open vs. cursor** | The row under the cursor has a ring and a highlight; the row open in the reader keeps a tint, a solid accent bar on its left edge and an open-envelope icon; both cues combine when they coincide. Both stay distinct from checked rows (accent wash + filled checkbox). A collapsed thread row shows the open indicator when the open message is inside it. |
@@ -58,6 +58,12 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `cmd-,` | Settings | `?` | All shortcuts |
 | `g` | Group by thread on/off | `]` / `[` | Next / previous message in thread |
 | `right` / `left` | Expand / collapse thread | | |
+
+### Settings
+
+Settings (`cmd-,`) uses a searchable two-pane layout: sections on the left and described setting rows on the right. Search with `/`; use `j`/`k` to move, Space to change values, and Ctrl-Tab / Ctrl-Shift-Tab to change sections. Escape clears the search before closing the panel. Current controls cover classifier modes and thresholds, thread summaries, theme, grouping, and preview lines.
+
+To add a setting, add its metadata (section, stable key, title, description, control type and options/range) to the settings schema in `src/app/settings.rs`, then connect its getter/setter to the existing owning model and emit the matching `SettingsEvent`. Search and section navigation should derive from that schema; keep persistence behavior unchanged.
 
 ### Icon legend
 
@@ -105,9 +111,10 @@ src/
 ├── theme.rs      # semantic color tokens, theme registry, JSON loader, active theme
 ├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
 └── app/          # GPUI views: main window, palette, compose, panels; icons.rs is the icon language table, row.rs the row frame
+    └── mail_app/ # MailApp split by concern: accessors, actions, modals, help, rows, list, reader, render (+ grouping, mouse)
 fixtures/         # mock mailbox + known contacts
 themes/           # built-in themes (JSON, embedded at build time)
-tests/            # integration and headless UI tests
+tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs)
 ```
 
 ### Adding a theme
