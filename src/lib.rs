@@ -7,5 +7,6 @@ pub mod model;
 pub mod rules;
 pub mod search;
 pub mod theme;
+pub mod reading;
 pub mod summary;
 pub mod threads;
