@@ -39,6 +39,8 @@ fn screener_is_newest_first_and_allow_moves_mail_to_its_state_view() {
     assert!(mb.undo());
     assert_eq!(mb.screener_ids(), vec![3, 2]);
     assert_invariant(&mb);
+}
+
 #[test]
 fn block_hides_without_deleting_and_beats_the_screener() {
     let mut mb = Mailbox::from_json_with_contacts(

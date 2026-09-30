@@ -1,5 +1,5 @@
 use mail_classifier::model::{Mailbox, Triage};
-use crate::helpers::{assert_invariant, mailbox, sample, four};
+use crate::helpers::{assert_invariant, mailbox, sample};
 use crate::helpers::State;
 
 // ------------------------------------------------------------------ cursor
