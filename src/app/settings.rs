@@ -81,8 +81,6 @@ enum SettingKey {
     Grouping,
     PreviewLines,
     FollowUp,
-    /// Blocked sender at this index in [`SettingsPanel::blocked`].
-    Blocked(usize),
     Classifier(QuestionKey),
     Threshold(QuestionKey),
 }
@@ -93,12 +91,10 @@ enum ControlKind {
     Toggle,
     /// A dropdown button over a fixed or registry-provided list of options.
     Choice,
-    /// A percent [`NumberInput`] that steps by `step`.
-    Stepper { min: u8, max: u8, step: u8 },
+    /// `question`'s confidence threshold, a percent [`NumberInput`] that steps by `step`.
+    Stepper { question: QuestionKey, min: u8, max: u8, step: u8 },
     /// The follow-up [`NumberInput`], whole days within `min..=max`.
     Days { min: u8, max: u8 },
-    /// Drawn by [`render_blocked`], not by the schema-driven rows.
-    Action,
 }
 
 #[derive(Clone, Copy)]
@@ -123,9 +119,8 @@ fn setting_spec(key: SettingKey) -> SettingSpec {
         SettingKey::Grouping => SettingSpec { section: Section::Inbox, key, title: "Group by thread", description: "Show one inbox row per conversation instead of per message.", control: ControlKind::Toggle },
         SettingKey::PreviewLines => SettingSpec { section: Section::Inbox, key, title: "Preview lines", description: "Snippet lines shown under each subject in the inbox.", control: ControlKind::Choice },
         SettingKey::FollowUp => SettingSpec { section: Section::Inbox, key, title: "Follow-up after", description: "Wait for a reply before flagging.", control: ControlKind::Days { min: 1, max: 14 } },
-        SettingKey::Blocked(_) => SettingSpec { section: Section::Blocked, key, title: "Blocked sender", description: "Mail from this sender is blocked.", control: ControlKind::Action },
         SettingKey::Classifier(question) => SettingSpec { section: Section::Classifier, key, title: question.label(), description: "Choose automatic handling or manual review.", control: ControlKind::Choice },
-        SettingKey::Threshold(_) => SettingSpec { section: Section::Classifier, key, title: "Confidence threshold", description: "Minimum confidence required for automatic handling.", control: ControlKind::Stepper { min: 0, max: 100, step: 5 } },
+        SettingKey::Threshold(question) => SettingSpec { section: Section::Classifier, key, title: "Confidence threshold", description: "Minimum confidence required for automatic handling.", control: ControlKind::Stepper { question, min: 0, max: 100, step: 5 } },
     }
 }
 
@@ -182,7 +177,6 @@ impl SettingSpec {
             (SettingKey::FollowUp, SettingChange::Step(delta)) => {
                 state.step_follow_up(if delta < 0. { -1 } else { 1 }, cx)
             }
-            (SettingKey::Blocked(index), SettingChange::Toggle) => state.unblock(index, cx),
             (SettingKey::Classifier(key), SettingChange::Toggle) => {
                 state.policy.toggle_mode(key);
                 state.changed(cx);
@@ -422,15 +416,14 @@ impl SettingsPanel {
             value if value == Self::group_row() => Some(SettingKey::Grouping),
             value if value == Self::preview_row() => Some(SettingKey::PreviewLines),
             value if value == Self::follow_up_row() => Some(SettingKey::FollowUp),
-            value if value >= Self::blocked_row(0) => {
-                Some(SettingKey::Blocked(value - Self::blocked_row(0)))
-            }
             _ => None,
         }
     }
 
     fn toggle(&mut self, cx: &mut Context<Self>) {
-        if let Some(key) = Self::row_key(self.cursor) {
+        if self.cursor >= Self::blocked_row(0) {
+            self.unblock(self.cursor - Self::blocked_row(0), cx);
+        } else if let Some(key) = Self::row_key(self.cursor) {
             setting_spec(key).apply(self, SettingChange::Toggle, cx);
         }
     }
@@ -624,7 +617,6 @@ fn setting_index(key: SettingKey) -> usize {
         SettingKey::Grouping => SettingsPanel::group_row(),
         SettingKey::PreviewLines => SettingsPanel::preview_row(),
         SettingKey::FollowUp => SettingsPanel::follow_up_row(),
-        SettingKey::Blocked(index) => SettingsPanel::blocked_row(index),
     }
 }
 
@@ -640,7 +632,6 @@ fn setting_id(key: SettingKey) -> ElementId {
         SettingKey::Grouping => "group-row".into(),
         SettingKey::PreviewLines => "preview-lines-row".into(),
         SettingKey::FollowUp => "follow-up-row".into(),
-        SettingKey::Blocked(index) => ("blocked-row", index).into(),
     }
 }
 
@@ -658,52 +649,78 @@ fn render_setting(
     match spec.control {
         ControlKind::Toggle => {
             // The Switch never takes focus: the row cursor keeps driving it from the keyboard.
-            let control = Switch::new(("settings-switch", index)).checked(state.is_on(key)).tab_stop(false)
+            let control = Switch::new(("settings-switch", index))
+                .checked(state.is_on(key))
+                .tab_stop(false)
                 .on_change(move |_, _, cx| {
                     weak.update(cx, |this, cx| {
                         this.cursor = index;
                         setting_spec(key).apply(this, SettingChange::Toggle, cx);
-                    }).ok();
+                    })
+                    .ok();
                 });
-            row(t, selected, spec.title, spec.description, div().id(id).test_support().child(control)).into_any_element()
+            let control = div().id(id).test_support().child(control);
+            row(t, selected, spec.title, spec.description, control).into_any_element()
         }
         ControlKind::Choice => {
             let (options, current) = state.choices(key, cx);
             let label = options.get(current).cloned().unwrap_or_default();
-            let menu = Button::new(("settings-choice", index)).label(label).xsmall().outline()
-                .dropdown_caret(true).border_color(t.border).text_color(t.text)
+            let menu = Button::new(("settings-choice", index))
+                .label(label)
+                .xsmall()
+                .outline()
+                .dropdown_caret(true)
+                .border_color(t.border)
+                .text_color(t.text)
                 .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
                     options.iter().enumerate().fold(menu, |menu, (ix, option)| {
                         let weak = weak.clone();
-                        menu.item(PopupMenuItem::new(option.clone()).checked(ix == current).on_click(move |_, _, cx| {
-                            weak.update(cx, |this, cx| this.pick(key, ix, cx)).ok();
-                        }))
+                        let item = PopupMenuItem::new(option.clone())
+                            .checked(ix == current)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.pick(key, ix, cx)).ok();
+                            });
+                        menu.item(item)
                     })
                 });
-            let control = div().flex().items_center().gap_2()
-                .when(matches!(key, SettingKey::Theme), |el| el.child(div().flex().gap_1()
-                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.surface))
-                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.accent))
-                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.selection))))
+            let dot = |color| div().w(px(9.)).h(px(9.)).rounded_full().bg(color);
+            let control = div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .when(matches!(key, SettingKey::Theme), |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(dot(t.surface))
+                            .child(dot(t.accent))
+                            .child(dot(t.selection)),
+                    )
+                })
                 .child(div().id(id).test_support().child(menu));
             row(t, selected, spec.title, spec.description, control).into_any_element()
         }
-        ControlKind::Stepper { min, max, step } => {
-            let SettingKey::Threshold(question) = key else { return row(t, selected, spec.title, spec.description, div()).into_any_element() };
+        ControlKind::Stepper { question, min, max, step } => {
             let at = QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0);
             let auto = matches!(state.policy.mode(question), Mode::Auto { .. });
-            let description: SharedString = format!("{} · range {min}–{max}%, step {step}%", spec.description).into();
-            let control = div().id(id).test_support().w(px(112.))
-                .child(NumberInput::new(&state.threshold_inputs[at]).xsmall().disabled(!auto));
+            let description: SharedString =
+                format!("{} · range {min}–{max}%, step {step}%", spec.description).into();
+            let control = div().id(id).test_support().w(px(112.)).child(
+                NumberInput::new(&state.threshold_inputs[at]).xsmall().disabled(!auto),
+            );
             row(t, selected, spec.title, description, control).into_any_element()
         }
         ControlKind::Days { min, max } => {
-            let description: SharedString = format!("{} · {min}–{max} days", spec.description).into();
-            let control = div().id(id).test_support().w(px(112.))
+            let description: SharedString =
+                format!("{} · {min}–{max} days", spec.description).into();
+            let control = div()
+                .id(id)
+                .test_support()
+                .w(px(112.))
                 .child(NumberInput::new(&state.follow_up_input).xsmall());
             row(t, selected, spec.title, description, control).into_any_element()
         }
-        ControlKind::Action => row(t, selected, spec.title, spec.description, div()).into_any_element(),
     }
 }
 
@@ -791,7 +808,7 @@ fn render_blocked(state: &SettingsPanel, t: &theme::Theme, cx: &mut Context<Sett
         let selected = state.cursor == row_index;
         let unblock = cx.listener(move |this, _, _, cx| {
             this.cursor = row_index;
-            setting_spec(SettingKey::Blocked(index)).apply(this, SettingChange::Toggle, cx);
+            this.unblock(index, cx);
         });
         list = list.child(
             div().id(("blocked-row", index)).test_support().flex().items_center().gap_2()
