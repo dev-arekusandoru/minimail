@@ -616,6 +616,15 @@ pub fn html_to_text(html: &str) -> String {
     t.finish()
 }
 
+/// The subject as the reader header shows it: `(no subject)` when blank.
+pub fn display_subject(msg: &Message) -> String {
+    if msg.subject.trim().is_empty() {
+        "(no subject)".to_owned()
+    } else {
+        msg.subject.clone()
+    }
+}
+
 /// The text to show for a message: its text part when it has any, else the
 /// HTML converted to text, else nothing.
 pub fn reader_text(msg: &Message) -> Cow<'_, str> {
@@ -771,6 +780,11 @@ impl ReaderView {
 
     pub fn toggle_recipients(&mut self, thread: u32, id: MessageId) {
         flip(&mut self.of(thread).recipients, id);
+    }
+
+    /// Show the quoted history of `id` (no-op when it is already shown).
+    pub fn show_quoted(&mut self, thread: u32, id: MessageId) {
+        self.of(thread).quoted.insert(id);
     }
 
     pub fn quoted_open(&self, thread: u32, id: MessageId) -> bool {
