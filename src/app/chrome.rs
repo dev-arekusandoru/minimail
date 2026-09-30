@@ -7,7 +7,7 @@ use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::{self, Theme};
 use gpui_kit::{
     assets::IconName,
-    component::{button::{Button, ButtonVariants as _}, label::Label, separator::Separator, Sizable as _},
+    component::{button::{Button, ButtonVariants as _}, label::Label, separator::Separator, status_bar::StatusBar, Sizable as _},
     prelude::FluentBuilder as _,
     *,
 };
@@ -101,8 +101,9 @@ impl HintBar {
     }
 }
 
-/// Horizontal padding (both sides) and gap before the first hint, in px.
-const BAR_PAD: f32 = 24.;
+/// Horizontal padding and inter-item gaps the [`StatusBar`] spends before hints get width:
+/// its `px_3` sides plus the two region gaps either side of the empty center.
+const BAR_PAD: f32 = 40.;
 /// Estimated width of the "N selected" label, in px.
 const SELECTED_LABEL_W: f32 = 80.;
 
@@ -116,21 +117,24 @@ impl RenderOnce for HintBar {
         let budget = f32::from(window.viewport_size().width) - BAR_PAD;
         let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. };
         let shown = fit_hints(&self.ctx, budget, reserved);
-        div()
+        let hints = div()
             .flex()
             .items_center()
             .gap_3()
-            .px_3()
-            .h(px(28.))
-            .flex_none()
+            .min_w_0()
             .overflow_hidden()
-            .border_t_1()
+            .children(shown.iter().map(|h| hint(&t, h.key, h.label, cx).into_any_element()));
+        StatusBar::new()
+            .h(px(28.))
+            .px_3()
+            .gap_3()
+            .flex_none()
             .border_color(t.border)
             .bg(t.sidebar)
-            .when_some(selected, |el, n| {
-                el.child(div().text_xs().text_color(t.accent).child(format!("{n} selected")))
+            .left(hints)
+            .when_some(selected, |bar, n| {
+                bar.right(div().text_xs().text_color(t.accent).child(format!("{n} selected")))
             })
-            .children(shown.iter().map(|h| hint(&t, h.key, h.label, cx).into_any_element()))
     }
 }
 

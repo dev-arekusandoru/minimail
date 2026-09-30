@@ -318,14 +318,7 @@ impl Render for MailApp {
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(28.))
-                    .border_t_1()
-                    .border_color(border)
-                    .child(HintBar::new(hint)),
-            )
+            .child(div().flex_none().child(HintBar::new(hint)))
             .when_some(self.toast.clone(), |d, text| {
                 d.child(
                     div()
