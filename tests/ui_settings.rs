@@ -29,7 +29,7 @@ fn panel(cx: &mut TestAppContext) -> PanelHarness<'_> {
                 panel
             },
         ).expect("open settings window");
-        let subscription = cx.subscribe(&panel, move |_, _, event: &SettingsEvent, _| {
+        let subscription = cx.subscribe(&panel, move |_, event: &SettingsEvent, _| {
             captured.borrow_mut().push(match event {
                 SettingsEvent::Changed(_, summaries) => format!("changed:{summaries}"),
                 SettingsEvent::Grouping(on) => format!("group:{on}"),
@@ -60,17 +60,17 @@ impl PanelHarness<'_> {
 #[gpui_kit::gpui::test]
 fn switching_sections_and_changing_toggle_enum_and_stepper_emit_events(cx: &mut TestAppContext) {
     let mut h = panel(cx);
-    h.click(("settings-section", "General"));
+    h.click(("settings-section", 0usize));
     h.click("summaries-row");
-    h.click(("settings-section", "Appearance / Theme"));
+    h.click(("settings-section", 1usize));
     h.click("theme-row");
-    h.click(("settings-section", "Inbox & Threads"));
+    h.click(("settings-section", 2usize));
     h.click("group-row");
     h.click("preview-lines-row");
     assert!(h.events.borrow().contains(&"changed:true".to_owned()));
     assert!(h.events.borrow().contains(&"group:true".to_owned()));
     assert!(h.events.borrow().iter().any(|e| e.starts_with("preview:")));
-    assert!(h.events.borrow().iter().any(|e| e == "changed:false"));
+    assert!(h.events.borrow().iter().filter(|event| *event == "changed:true").count() >= 2);
 }
 
 #[gpui_kit::gpui::test]
