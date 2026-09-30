@@ -152,9 +152,10 @@ impl Mailbox {
     pub fn unsubscribed(&self) -> &[String] {
         &self.unsubscribed
     }
+    /// Mail you sent is never from a new sender.
     pub fn is_new_sender(&self, id: MessageId) -> bool {
         self.get(id)
-            .is_some_and(|m| !self.known.contains(&lower(&m.from_email)))
+            .is_some_and(|m| !m.outgoing && !self.known.contains(&lower(&m.from_email)))
     }
     pub fn accounts(&self) -> &[Account] {
         &self.accounts
