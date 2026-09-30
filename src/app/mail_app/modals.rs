@@ -169,6 +169,7 @@ impl MailApp {
                 self.mailbox.unsubscribed().to_vec(),
                 self.mailbox.follow_up_timeout(),
             )
+            .reader_toolbar(self.reader_toolbar)
         });
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
@@ -191,6 +192,10 @@ impl MailApp {
                     if this.panes.orientation() != *orientation {
                         this.set_pane_layout(*orientation, window, cx);
                     }
+                }
+                SettingsEvent::ReaderToolbar(on) => {
+                    this.reader_toolbar = *on;
+                    cx.notify();
                 }
                 SettingsEvent::FollowUp(timeout) => {
                     this.mailbox.set_follow_up_timeout(*timeout);
