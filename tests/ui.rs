@@ -379,3 +379,28 @@ fn counts_always_sum_to_total(cx: &mut TestAppContext) {
         );
     }
 }
+
+#[gpui_kit::gpui::test]
+fn help_overlay_fits_window_and_scrolls_at_any_size(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("?");
+    for (w, ht) in [(1200., 800.), (420., 300.), (700., 500.), (1600., 1000.)] {
+        h.cx.simulate_window_resize(h.window, size(px(w), px(ht)));
+        h.cx
+            .update_window(h.window, |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        h.keys("");
+        let (b, max) = h.read(|a| a.help_metrics());
+        let (x0, y0) = (f32::from(b.origin.x), f32::from(b.origin.y));
+        let (x1, y1) = (x0 + f32::from(b.size.width), y0 + f32::from(b.size.height));
+        assert!(b.size.width > px(0.) && b.size.height > px(0.), "help body not laid out at {w}x{ht}");
+        assert!(x0 >= 0. && y0 >= 0. && x1 <= w && y1 <= ht, "help body {b:?} outside {w}x{ht}");
+        if ht <= 300. {
+            assert!(max > 0., "help must scroll in a {w}x{ht} window");
+        }
+    }
+    h.keys("pagedown j k pageup");
+    assert!(h.read(|a| a.help_open()));
+    h.keys("escape");
+    assert!(!h.read(|a| a.help_open()));
+}

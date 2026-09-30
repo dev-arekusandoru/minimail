@@ -2,16 +2,17 @@
 //! command palette, reply composer, snooze picker, settings/rules panels,
 //! screener, search and triage-session modes.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::tag::Tag as UiTag;
-use gpui_kit::component::theme::ActiveTheme;
+use crate::theme;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
 use crate::app::chrome::{EmptyState, HelpOverlay, HintBar, HintMode, ViewTabs, badges};
+use crate::app::overlay::overlay;
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{
@@ -25,6 +26,9 @@ use crate::model::{Mailbox, Message, MessageId, Triage, TriageState};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
+
+mod grouping;
+mod mouse;
 
 const ROW_H: f32 = 26.0;
 const TOAST_MS: u64 = 4000;
@@ -65,6 +69,13 @@ pub struct MailApp {
     mode: ListMode,
     /// Cursor for the non-`State` list modes.
     alt_cursor: usize,
+    /// One row per thread instead of per message (State panels).
+    pub group_threads: bool,
+    /// Threads whose messages are listed under their header.
+    expanded: HashSet<u32>,
+    /// Cursor over grouped rows.
+    row_cursor: usize,
+    row_anchor: Option<usize>,
     snooze: Option<Entity<SnoozePicker>>,
     settings: Option<Entity<SettingsPanel>>,
     rules_panel: Option<Entity<RulesPanel>>,
@@ -75,6 +86,7 @@ pub struct MailApp {
     toast_gen: u64,
     focus_handle: FocusHandle,
     list_scroll: UniformListScrollHandle,
+    help_scroll: ScrollHandle,
     _modal_sub: Option<Subscription>,
 }
 
@@ -113,6 +125,10 @@ impl MailApp {
             clock,
             mode: ListMode::State,
             alt_cursor: 0,
+            group_threads: false,
+            expanded: HashSet::new(),
+            row_cursor: 0,
+            row_anchor: None,
             snooze: None,
             settings: None,
             rules_panel: None,
@@ -123,6 +139,7 @@ impl MailApp {
             toast_gen: 0,
             focus_handle: cx.focus_handle(),
             list_scroll: UniformListScrollHandle::new(),
+            help_scroll: ScrollHandle::new(),
             _modal_sub: None,
         };
         app.classify_visible();
@@ -263,6 +280,9 @@ impl MailApp {
         if let Some(id) = self.session_current() {
             return Some(id);
         }
+        if self.grouped() {
+            return self.cursor_row().map(|r| r.primary());
+        }
         match self.mode {
             ListMode::State => self.triage.cursor(&self.mailbox),
             _ => {
@@ -273,6 +293,9 @@ impl MailApp {
     }
 
     fn cursor_ix(&self) -> usize {
+        if self.grouped() {
+            return self.row_cursor();
+        }
         match self.mode {
             ListMode::State => self.triage.cursor_index(),
             _ => self.alt_cursor,
@@ -281,6 +304,9 @@ impl MailApp {
 
     /// Ids an action applies to: session message, selection/cursor, or cursor.
     fn target_ids(&self) -> Vec<MessageId> {
+        if self.grouped() && self.triage.selected().is_empty() {
+            return self.cursor_row().map(|r| r.ids()).unwrap_or_default();
+        }
         if self.in_session() || self.mode != ListMode::State {
             return self.cursor_id().into_iter().collect();
         }
@@ -288,7 +314,11 @@ impl MailApp {
     }
 
     fn move_cursor(&mut self, delta: isize) {
-        if self.mode == ListMode::State {
+        if self.grouped() {
+            let len = self.rows().len();
+            let max = len.saturating_sub(1) as isize;
+            self.row_cursor = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
+        } else if self.mode == ListMode::State {
             self.triage.move_cursor(&self.mailbox, delta);
         } else {
             let len = self.visible_ids().len();
@@ -446,6 +476,8 @@ impl MailApp {
         self.end_session();
         self.mode = ListMode::State;
         self.triage.switch_view(view);
+        self.row_cursor = 0;
+        self.row_anchor = None;
         self.opened = None;
         self.scroll_to_cursor();
         cx.notify();
@@ -682,7 +714,8 @@ impl MailApp {
         if self.modal_open() {
             return;
         }
-        let panel = cx.new(|cx| SettingsPanel::new(self.policy.clone(), self.summaries_enabled, cx));
+        let group = self.group_threads;
+        let panel = cx.new(|cx| SettingsPanel::new(self.policy.clone(), self.summaries_enabled, group, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
             window,
@@ -690,6 +723,10 @@ impl MailApp {
                 SettingsEvent::Changed(policy, summaries) => {
                     this.policy = policy.clone();
                     this.summaries_enabled = *summaries;
+                    cx.notify();
+                }
+                SettingsEvent::Grouping(on) => {
+                    this.set_grouping(*on);
                     cx.notify();
                 }
                 SettingsEvent::Close => this.close_modals(window, cx),
@@ -798,8 +835,40 @@ impl MailApp {
         cx.notify();
     }
 
-    // ---- rendering helpers ----
+    // ---- help overlay ----
 
+    fn close_help(&mut self, cx: &mut Context<Self>) {
+        self.help = false;
+        cx.notify();
+    }
+
+    /// Scrolls the help body by `lines` text lines (positive = down), clamped to its extent.
+    fn scroll_help_lines(&mut self, lines: f32, cx: &mut Context<Self>) {
+        self.scroll_help_by(lines * 28., cx);
+    }
+
+    /// Scrolls the help body by `pages` viewport heights (positive = down).
+    fn scroll_help(&mut self, pages: f32, cx: &mut Context<Self>) {
+        if !self.help {
+            return;
+        }
+        let page = f32::from(self.help_scroll.bounds().size.height) * 0.9;
+        self.scroll_help_by(pages * page, cx);
+    }
+
+    fn scroll_help_by(&mut self, dy: f32, cx: &mut Context<Self>) {
+        let max = f32::from(self.help_scroll.max_offset().y);
+        let y = (f32::from(self.help_scroll.offset().y) - dy).clamp(-max, 0.);
+        self.help_scroll.set_offset(point(px(0.), px(y)));
+        cx.notify();
+    }
+
+    /// Help body viewport bounds and how far it can scroll (for headless tests).
+    pub fn help_metrics(&self) -> (Bounds<Pixels>, f32) {
+        (self.help_scroll.bounds(), f32::from(self.help_scroll.max_offset().y))
+    }
+
+    // ---- rendering helpers ----
     fn hint_mode(&self) -> HintMode {
         if self.compose.is_some() {
             HintMode::Compose
@@ -848,8 +917,8 @@ impl MailApp {
             .to_string()
     }
 
-    fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &App) -> Stateful<Div> {
-        let t = cx.theme();
+    fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> Stateful<Div> {
+        let t = theme::active(cx);
         let is_cursor = ix == self.cursor_ix();
         let selected = self.mode == ListMode::State && self.triage.is_selected(msg.id);
         let date = match self.mailbox.snoozed_until(msg.id) {
@@ -859,6 +928,10 @@ impl MailApp {
             _ => Self::clock_label(&msg.received, newest),
         };
         let pending = self.mailbox.pending(msg.id);
+        let hover = t.hover;
+        let row_click = |cx: &Context<Self>| {
+            cx.listener(move |this, ev: &ClickEvent, window, cx| this.click_row(ix, ev, window, cx))
+        };
         div()
             .id(("row", msg.id as usize))
             .h(px(ROW_H))
@@ -869,42 +942,72 @@ impl MailApp {
             .px_2()
             .text_size(px(13.))
             .border_l_2()
-            .border_color(if is_cursor { t.primary } else { t.transparent })
-            .when(selected, |d| d.bg(t.primary.opacity(0.16)))
-            .when(is_cursor && !selected, |d| d.bg(t.list_active))
+            .border_color(if is_cursor { t.accent } else { transparent_black() })
+            .when(selected, |d| d.bg(t.accent.opacity(0.16)))
+            .when(is_cursor && !selected, |d| d.bg(t.selection))
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .child(self.row_checkbox(ix, selected, cx))
             .child(
                 div()
-                    .w(px(10.))
-                    .text_color(t.primary)
-                    .child(if selected { "●" } else { "" }),
-            )
-            .child(
-                div()
-                    .w(px(120.))
-                    .flex_none()
-                    .truncate()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(msg.from_name.clone()),
-            )
-            .child(
-                div()
+                    .id(("row-body", msg.id as usize))
                     .flex_1()
-                    .truncate()
-                    .text_color(t.muted_foreground)
-                    .child(msg.subject.clone()),
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .on_click(row_click(cx))
+                    .child(
+                        div()
+                            .w(px(120.))
+                            .flex_none()
+                            .truncate()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(msg.from_name.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_color(t.text_muted)
+                            .child(msg.subject.clone()),
+                    ),
             )
-            .child(badges(self.mailbox.tags(msg.id), &pending))
             .child(
                 div()
+                    .id(("row-badges", msg.id as usize))
+                    .when(!pending.is_empty(), |d| {
+                        d.tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(
+                                "Accept AI labels (y) · right-click to reject (n)",
+                            )
+                            .build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                            this.suggestions_at(ix, true, w, cx)
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, _: &MouseDownEvent, w, cx| {
+                                this.suggestions_at(ix, false, w, cx)
+                            }),
+                        )
+                    })
+                    .child(badges(self.mailbox.tags(msg.id), &pending)),
+            )
+            .child(
+                div()
+                    .id(("row-date", msg.id as usize))
                     .flex_none()
                     .text_size(px(11.))
-                    .text_color(t.muted_foreground)
+                    .text_color(t.text_muted)
+                    .on_click(row_click(cx))
                     .child(date),
             )
     }
 
     fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let t = cx.theme();
+        let t = theme::active(cx);
         let count = self.visible_ids().len();
         let selected = self.triage.selected().len();
         let title = match &self.mode {
@@ -920,12 +1023,12 @@ impl MailApp {
             .justify_between()
             .px_3()
             .text_size(px(11.))
-            .text_color(t.muted_foreground)
+            .text_color(t.text_muted)
             .child(title)
             .when(selected > 0, |d| {
                 d.child(
                     div()
-                        .text_color(t.primary)
+                        .text_color(t.accent)
                         .child(format!("{selected} selected")),
                 )
             });
@@ -941,7 +1044,7 @@ impl MailApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(t.muted_foreground)
+                .text_color(t.text_muted)
                 .child(empty)
                 .into_any_element()
         } else {
@@ -981,7 +1084,7 @@ impl MailApp {
     }
 
     fn render_reader(&self, cx: &App) -> AnyElement {
-        let t = cx.theme();
+        let t = theme::active(cx);
         let pane = div().flex_1().h_full().min_w_0().flex().flex_col().px_5().py_4();
         if let Some((handled, secs)) = self.session_end {
             return pane
@@ -995,7 +1098,7 @@ impl MailApp {
                 .items_center()
                 .justify_center()
                 .text_size(px(13.))
-                .text_color(t.muted_foreground)
+                .text_color(t.text_muted)
                 .child("enter to open")
                 .into_any_element();
         };
@@ -1026,12 +1129,22 @@ impl MailApp {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(msg.subject.clone()),
                     )
-                    .child(UiTag::secondary().outline().child(state.label())),
+                    .child(
+                        div()
+                            .px_2()
+                            .rounded_sm()
+                            .text_xs()
+                            .border_1()
+                            .border_color(t.state_color(state).opacity(0.6))
+                            .text_color(t.state_color(state))
+                            .bg(t.state_color(state).opacity(0.12))
+                            .child(state.label()),
+                    ),
             )
             .child(
                 div()
                     .text_size(px(12.))
-                    .text_color(t.muted_foreground)
+                    .text_color(t.text_muted)
                     .child(format!(
                         "{} <{}> → {} · {}",
                         msg.from_name,
@@ -1064,7 +1177,7 @@ impl MailApp {
                             div()
                                 .pb_1()
                                 .text_size(px(11.))
-                                .text_color(t.muted_foreground)
+                                .text_color(t.text_muted)
                                 .child(format!("THREAD · {thread_len}")),
                         )
                         .children(thread.into_iter().map(|m| {
@@ -1074,7 +1187,7 @@ impl MailApp {
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .text_color(if here { t.foreground } else { t.muted_foreground })
+                                .text_color(if here { t.text } else { t.text_muted })
                                 .child(
                                     div()
                                         .w(px(110.))
@@ -1129,7 +1242,7 @@ impl Focusable for MailApp {
 }
 
 impl Render for MailApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let counts = TriageState::ALL.map(|s| (s, self.mailbox.count(s)));
         let screener_count = self.mailbox.screener_ids().len();
         let screener_active = self.mode == ListMode::Screener;
@@ -1146,20 +1259,22 @@ impl Render for MailApp {
             None => self.render_reader(cx),
         };
         let banner = self.pending_rule.clone();
-        let t = cx.theme();
-        let (bg, fg, border, muted, primary, sidebar) = (
-            t.background,
-            t.foreground,
-            t.border,
-            t.muted_foreground,
-            t.primary,
-            t.sidebar,
-        );
+        let t = theme::active(cx);
+        let (bg, fg, border, muted, sidebar) = (t.background, t.text, t.border, t.text_muted, t.sidebar);
         let active_view = self.triage.view;
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
             .when(!self.modal_open(), |d| d.key_context(MAIL_CONTEXT))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    // Clicking never steals key focus from the list (or a modal's input).
+                    if !this.modal_open() {
+                        window.focus(&this.focus_handle, cx);
+                    }
+                }),
+            )
             .relative()
             .size_full()
             .flex()
@@ -1168,41 +1283,45 @@ impl Render for MailApp {
             .text_color(fg)
             .text_size(px(13.))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| {
+                if this.help {
+                    return this.scroll_help_lines(1., cx);
+                }
                 this.move_cursor(1);
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| {
+                if this.help {
+                    return this.scroll_help_lines(-1., cx);
+                }
                 this.move_cursor(-1);
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ExtendNext, _, cx| {
                 if this.mode == ListMode::State && !this.in_session() {
-                    this.triage.extend(&this.mailbox, 1);
+                    this.extend_by(1);
                 }
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ExtendPrev, _, cx| {
                 if this.mode == ListMode::State && !this.in_session() {
-                    this.triage.extend(&this.mailbox, -1);
+                    this.extend_by(-1);
                 }
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleSelect, _, cx| {
                 if this.mode == ListMode::State && !this.in_session() {
-                    this.triage.toggle_select(&this.mailbox);
+                    this.toggle_select_cursor();
                 }
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ClearSelection, window, cx| this.escape(window, cx)))
             .on_action(cx.listener(|this, _: &OpenMessage, _, cx| {
-                if let Some(id) = this.cursor_id() {
-                    this.opened = Some(id);
-                    cx.notify();
-                }
+                this.open_cursor();
+                cx.notify();
             }))
             .on_action(cx.listener(|this, _: &MarkDone, w, cx| this.mark(TriageState::Done, w, cx)))
             .on_action(cx.listener(|this, _: &MarkWaiting, w, cx| this.mark(TriageState::Waiting, w, cx)))
@@ -1241,27 +1360,23 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ShowDone, _, cx| this.show_view(TriageState::Done, cx)))
             .on_action(cx.listener(|this, _: &ShowScreener, _, cx| this.show_screener(cx)))
             .on_action(cx.listener(|this, _: &ToggleHelp, _, cx| {
-                this.help = !this.help;
-                cx.notify();
+                if this.help {
+                    this.close_help(cx);
+                } else {
+                    this.help = true;
+                    this.help_scroll.set_offset(point(px(0.), px(0.)));
+                    cx.notify();
+                }
             }))
+            .on_action(cx.listener(|this, _: &HelpPageUp, _, cx| this.scroll_help(-1., cx)))
+            .on_action(cx.listener(|this, _: &HelpPageDown, _, cx| this.scroll_help(1., cx)))
             .on_action(cx.listener(|this, _: &OpenSnoozePicker, w, cx| {
                 if !this.modal_open() {
                     this.open_snooze(w, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| {
-                if let Some(id) = this.cursor_id() {
-                    let now = this.now();
-                    this.mailbox.accept_suggestions(id, now);
-                    cx.notify();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| {
-                if let Some(id) = this.cursor_id() {
-                    this.mailbox.reject_suggestions(id);
-                    cx.notify();
-                }
-            }))
+            .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
+            .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
             .on_action(cx.listener(|this, _: &AcceptRule, w, cx| this.accept_rule(w, cx)))
             .on_action(cx.listener(|this, _: &DismissRule, _, cx| this.dismiss_rule(cx)))
             .on_action(cx.listener(|this, _: &ToggleRules, w, cx| this.toggle_rules(w, cx)))
@@ -1276,6 +1391,20 @@ impl Render for MailApp {
                 let (auto, review) = this.classify_visible();
                 this.show_toast(format!("{auto} auto-applied · {review} to review"), w, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
+            .on_action(cx.listener(|this, _: &ExpandThread, _, cx| {
+                this.set_expanded(true);
+                this.scroll_to_cursor();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &CollapseThread, _, cx| {
+                this.set_expanded(false);
+                this.scroll_to_cursor();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &NextInThread, w, cx| this.step_thread(1, w, cx)))
+            .on_action(cx.listener(|this, _: &PrevInThread, w, cx| this.step_thread(-1, w, cx)))
+            .child(self.render_toolbar(cx))
             .child(
                 div()
                     .flex_1()
@@ -1322,8 +1451,8 @@ impl Render for MailApp {
                                 .px_3()
                                 .py_1()
                                 .rounded_md()
-                                .bg(primary)
-                                .text_color(bg)
+                                .bg(t.success)
+                                .text_color(t.on_accent)
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(text),
@@ -1331,8 +1460,10 @@ impl Render for MailApp {
                 )
             })
             .when(self.help, |d| {
+                let scroll = self.help_scroll.clone();
                 d.child(
                     div()
+                        .id("help-backdrop")
                         .absolute()
                         .inset_0()
                         .occlude()
@@ -1341,35 +1472,19 @@ impl Render for MailApp {
                         .justify_center()
                         .bg(bg.opacity(0.85))
                         .text_color(muted)
-                        .child(HelpOverlay::new()),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| this.close_help(cx)),
+                        )
+                        .child(HelpOverlay::new(
+                            scroll,
+                            cx.listener(|this, _, _, cx| this.close_help(cx)),
+                        )),
                 )
             })
-            .when_some(self.palette.clone(), |d, palette| {
-                d.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .occlude()
-                        .flex()
-                        .justify_center()
-                        .pt(px(80.))
-                        .child(palette),
-                )
-            })
-            .when_some(self.snooze.clone(), |d, picker| d.child(overlay(picker)))
-            .when_some(self.settings.clone(), |d, panel| d.child(overlay(panel)))
-            .when_some(self.rules_panel.clone(), |d, panel| d.child(overlay(panel)))
+            .when_some(self.palette.clone(), |d, palette| d.child(overlay(window, palette)))
+            .when_some(self.snooze.clone(), |d, picker| d.child(overlay(window, picker)))
+            .when_some(self.settings.clone(), |d, panel| d.child(overlay(window, panel)))
+            .when_some(self.rules_panel.clone(), |d, panel| d.child(overlay(window, panel)))
     }
-}
-
-/// Centered modal wrapper for a panel entity.
-fn overlay(view: impl IntoElement) -> Div {
-    div()
-        .absolute()
-        .inset_0()
-        .occlude()
-        .flex()
-        .justify_center()
-        .pt(px(80.))
-        .child(view)
 }

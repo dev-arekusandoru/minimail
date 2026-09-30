@@ -3,6 +3,7 @@
 //! Holds no business logic: presets and the duration parser are injected, the
 //! chosen return time leaves through [`SnoozeEvent`].
 
+use crate::app::overlay::FitViewport as _;
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use gpui_kit::{
@@ -14,12 +15,7 @@ use gpui_kit::{
 /// Key context of the picker (bind `1`/`2`/`3`/`4` under `SnoozePicker && !Input`, escape under `SnoozePicker`).
 pub const SNOOZE_CONTEXT: &str = "SnoozePicker";
 
-const BG: u32 = 0x16171a;
-const BORDER: u32 = 0x2a2c31;
-const MUTED: u32 = 0x80838a;
-const TEXT: u32 = 0xd9dadd;
-const ACCENT: u32 = 0x7dd3a8;
-const DANGER: u32 = 0xe08080;
+use crate::theme::{self, Theme};
 
 gpui_kit::actions!(
     snooze,
@@ -93,7 +89,8 @@ impl SnoozePicker {
         }
     }
 
-    fn row(key: &str, label: impl IntoElement, detail: impl IntoElement) -> Div {
+    fn row(t: &Theme, key: &str, label: impl IntoElement, detail: impl IntoElement) -> Div {
+        let hover = t.hover;
         div()
             .flex()
             .items_center()
@@ -101,15 +98,17 @@ impl SnoozePicker {
             .px_2()
             .py_1()
             .text_sm()
-            .text_color(rgb(TEXT))
+            .text_color(t.text)
+            .rounded_sm()
+            .hover(move |el| el.bg(hover))
             .child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().text_color(rgb(ACCENT)).child(SharedString::from(key.to_owned())))
+                    .child(div().text_color(t.accent).child(SharedString::from(key.to_owned())))
                     .child(label),
             )
-            .child(div().text_xs().text_color(rgb(MUTED)).child(detail))
+            .child(div().text_xs().text_color(t.text_muted).child(detail))
     }
 }
 
@@ -122,7 +121,8 @@ impl Focusable for SnoozePicker {
 impl EventEmitter<SnoozeEvent> for SnoozePicker {}
 
 impl Render for SnoozePicker {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme::active(cx);
         let invalid = self.invalid;
         div()
             .key_context(SNOOZE_CONTEXT)
@@ -138,22 +138,25 @@ impl Render for SnoozePicker {
             .on_action(cx.listener(|_, _: &SnoozeCancel, _, cx| cx.emit(SnoozeEvent::Cancel)))
             .flex()
             .flex_col()
-            .w(px(320.))
+            .fit_viewport(window, 320.)
             .p_2()
             .gap_1()
-            .bg(rgb(BG))
+            .bg(t.surface)
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
             .rounded_md()
-            .child(div().px_2().text_xs().text_color(rgb(MUTED)).child("Snooze until…"))
+            .id("snooze-panel")
+            .overflow_y_scroll()
+            .child(div().px_2().text_xs().text_color(t.text_muted).child("Snooze until…"))
             .children(self.presets.iter().enumerate().map(|(i, (label, ts))| {
                 Self::row(
+                    &t,
                     &(i + 1).to_string(),
                     label.clone(),
                     SharedString::from(format_time(*ts)),
                 )
             }))
-            .child(Self::row("4", "Custom", ""))
+            .child(Self::row(&t, "4", "Custom", ""))
             .when(self.custom, |el| {
                 el.child(Input::new(&self.input))
                     .when(invalid, |el| {
@@ -161,7 +164,7 @@ impl Render for SnoozePicker {
                             div()
                                 .px_2()
                                 .text_xs()
-                                .text_color(rgb(DANGER))
+                                .text_color(t.error)
                                 .child("Try 30m, 3h or 2d"),
                         )
                     })

@@ -6,9 +6,11 @@ pub mod actions;
 pub mod chrome;
 pub mod compose;
 pub mod mail_app;
+pub mod overlay;
 pub mod palette;
 pub mod panels;
 pub mod settings;
 pub mod snooze;
+pub mod ui;
 
 pub use mail_app::MailApp;

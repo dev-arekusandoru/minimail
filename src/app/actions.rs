@@ -39,6 +39,8 @@ gpui_kit::actions!(
         ShowLater,
         ShowDone,
         ToggleHelp,
+        HelpPageUp,
+        HelpPageDown,
         OpenSnoozePicker,
         AcceptSuggestions,
         RejectSuggestions,
@@ -54,7 +56,12 @@ gpui_kit::actions!(
         ToggleSettings,
         StartSession,
         OpenSearch,
-        ClassifyVisible
+        ClassifyVisible,
+        ToggleGrouping,
+        ExpandThread,
+        CollapseThread,
+        NextInThread,
+        PrevInThread
     ]
 );
 
@@ -100,6 +107,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("3", ShowLater, m),
         KeyBinding::new("4", ShowDone, m),
         KeyBinding::new("?", ToggleHelp, m),
+        KeyBinding::new("pageup", HelpPageUp, m),
+        KeyBinding::new("pagedown", HelpPageDown, m),
         KeyBinding::new("y", AcceptSuggestions, m),
         KeyBinding::new("n", RejectSuggestions, m),
         KeyBinding::new("shift-y", AcceptRule, m),
@@ -115,6 +124,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("t", StartSession, m),
         KeyBinding::new("/", OpenSearch, m),
         KeyBinding::new("c", ClassifyVisible, m),
+        KeyBinding::new("g", ToggleGrouping, m),
+        KeyBinding::new("right", ExpandThread, m),
+        KeyBinding::new("left", CollapseThread, m),
+        KeyBinding::new("]", NextInThread, m),
+        KeyBinding::new("[", PrevInThread, m),
         // Snooze picker.
         KeyBinding::new("1", SnoozePreset1, Some("SnoozePicker && !Input")),
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
@@ -208,5 +222,10 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Start triage session", "t", StartSession),
         cmd!("Search", "/", OpenSearch),
         cmd!("Classify visible mail", "c", ClassifyVisible),
+        cmd!("Toggle group by thread", "g", ToggleGrouping),
+        cmd!("Expand thread", "right", ExpandThread),
+        cmd!("Collapse thread", "left", CollapseThread),
+        cmd!("Next message in thread", "]", NextInThread),
+        cmd!("Previous message in thread", "[", PrevInThread),
     ]
 }

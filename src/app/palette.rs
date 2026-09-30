@@ -1,5 +1,6 @@
 //! Keyboard-first command palette.
 
+use crate::app::overlay::FitViewport as _;
 use crate::app::actions::{self, CommandSpec, PALETTE_CONTEXT};
 use crate::search::Query;
 use gpui_kit::{
@@ -11,11 +12,7 @@ use gpui_kit::{
     *,
 };
 
-const BG: u32 = 0x16171a;
-const BORDER: u32 = 0x2a2c31;
-const ROW_SELECTED: u32 = 0x25272c;
-const TEXT: u32 = 0xd9dadd;
-const ACCENT: u32 = 0x7dd3a8;
+use crate::theme;
 
 pub struct CommandPalette {
     input: Entity<InputState>,
@@ -89,9 +86,11 @@ impl Focusable for CommandPalette {
 impl EventEmitter<PaletteEvent> for CommandPalette {}
 
 impl Render for CommandPalette {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let indexes = self.visible();
         let selected = self.selected;
+        let t = theme::active(cx);
+        let hover = t.hover;
         div()
             .key_context(PALETTE_CONTEXT)
             .on_action(cx.listener(|this, _: &PaletteMoveUp, _, cx| {
@@ -115,23 +114,22 @@ impl Render for CommandPalette {
             .on_action(cx.listener(|_, _: &PaletteDismiss, _, cx| cx.emit(PaletteEvent::Dismiss)))
             .flex()
             .flex_col()
-            .w(px(440.))
-            .max_h(px(520.))
+            .fit_viewport(window, 440.)
             .p_2()
             .gap_1()
-            .bg(rgb(BG))
+            .bg(t.surface)
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
             .rounded_md()
             .child(Input::new(&self.input).appearance(false))
-            .child(div().h(px(1.)).bg(rgb(BORDER)))
+            .child(div().h(px(1.)).bg(t.border))
             .child(if Query::is_search(&self.query) {
                 div()
                     .px_2()
                     .py_1()
                     .text_sm()
-                    .text_color(rgb(ACCENT))
-                    .bg(rgb(ROW_SELECTED))
+                    .text_color(t.accent)
+                    .bg(t.selection)
                     .rounded_sm()
                     .child(SharedString::from(format!(
                         "Search: {}",
@@ -155,9 +153,10 @@ impl Render for CommandPalette {
                             .py_1()
                             .text_sm()
                             .rounded_sm()
-                            .text_color(rgb(TEXT))
+                            .text_color(t.text)
+                            .hover(move |el| el.bg(hover))
                             .when(row == selected, |el| {
-                                el.bg(rgb(ROW_SELECTED)).text_color(rgb(ACCENT))
+                                el.bg(t.selection).text_color(t.accent)
                             })
                             .child(command.name)
                             .when(!command.key.is_empty(), |el| {

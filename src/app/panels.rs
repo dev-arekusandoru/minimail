@@ -1,12 +1,15 @@
 //! Small presentational panels: rules list, session card, summary card, rule banner, screener header.
 
+use crate::app::overlay::FitViewport as _;
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
+use crate::app::actions::{AcceptRule, AllowSender, BlockSender, ClearSelection, DismissRule};
+use crate::app::ui::{button, run};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
-    component::{kbd::Kbd, separator::Separator},
+    component::separator::Separator,
     prelude::FluentBuilder as _,
     *,
 };
@@ -14,19 +17,9 @@ use gpui_kit::{
 /// Key context of the rules panel.
 pub const RULES_CONTEXT: &str = "RulesPanel";
 
-const BG: u32 = 0x16171a;
-const BORDER: u32 = 0x2a2c31;
-const ROW_SELECTED: u32 = 0x25272c;
-const MUTED: u32 = 0x80838a;
-const TEXT: u32 = 0xd9dadd;
-const ACCENT: u32 = 0x7dd3a8;
+use crate::theme;
 
 gpui_kit::actions!(rules_panel, [RulesNext, RulesPrev, RulesRevoke, RulesClose]);
-
-fn kbd(key: &str) -> Kbd {
-    Kbd::new(Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap()))
-        .appearance(false)
-}
 
 fn state_name(state: TriageState) -> String {
     state.label().to_lowercase()
@@ -70,7 +63,9 @@ impl Focusable for RulesPanel {
 impl EventEmitter<RulesEvent> for RulesPanel {}
 
 impl Render for RulesPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme::active(cx);
+        let hover = t.hover;
         let cursor = self.cursor;
         div()
             .key_context(RULES_CONTEXT)
@@ -91,21 +86,33 @@ impl Render for RulesPanel {
             .on_action(cx.listener(|_, _: &RulesClose, _, cx| cx.emit(RulesEvent::Close)))
             .flex()
             .flex_col()
-            .w(px(420.))
+            .fit_viewport(window, 420.)
             .p_3()
             .gap_1()
-            .bg(rgb(BG))
+            .bg(t.surface)
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
             .rounded_md()
-            .child(div().text_sm().text_color(rgb(ACCENT)).child("Rules"))
+            .id("rules-panel")
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().text_color(t.accent).child("Rules"))
+                    .child(
+                        button("rules-close", "Close", "Close", "escape", cx)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(RulesEvent::Close))),
+                    ),
+            )
             .child(Separator::horizontal())
             .when(self.rules.is_empty(), |el| {
                 el.child(
                     div()
                         .px_2()
                         .text_xs()
-                        .text_color(rgb(MUTED))
+                        .text_color(t.text_muted)
                         .child("No rules yet. Repeat a sender-wide action to get a suggestion."),
                 )
             })
@@ -119,14 +126,30 @@ impl Render for RulesPanel {
                     .py_1()
                     .rounded_sm()
                     .text_sm()
-                    .text_color(rgb(TEXT))
-                    .when(i == cursor, |el| el.bg(rgb(ROW_SELECTED)).text_color(rgb(ACCENT)))
+                    .text_color(t.text)
+                    .cursor_pointer()
+                    .hover(move |el| el.bg(hover))
+                    .when(i == cursor, |el| el.bg(t.selection).text_color(t.accent))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.cursor = i;
+                        cx.notify();
+                    }))
                     .child(SharedString::from(rule.sender.clone()))
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(rgb(MUTED))
-                            .child(SharedString::from(format!("→ {}", state_name(rule.state)))),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(t.state_color(rule.state))
+                                    .child(SharedString::from(format!("→ {}", state_name(rule.state)))),
+                            )
+                            .child(
+                                button(("rule-revoke", i), "Revoke", "Revoke rule", "backspace", cx)
+                                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(RulesEvent::Revoke(i)))),
+                            ),
                     )
             }))
     }
@@ -159,7 +182,8 @@ impl SessionCard {
 }
 
 impl RenderOnce for SessionCard {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let t = theme::active(cx);
         match (self.finished, self.progress) {
             (Some((handled, secs)), _) => div()
                 .flex()
@@ -167,28 +191,31 @@ impl RenderOnce for SessionCard {
                 .items_center()
                 .gap_1()
                 .p_6()
-                .child(div().text_color(rgb(ACCENT)).child("Session complete"))
+                .child(div().text_color(t.success).child("Session complete"))
                 .child(
                     div()
                         .text_sm()
-                        .text_color(rgb(TEXT))
+                        .text_color(t.text)
                         .child(SharedString::from(format!(
                             "{handled} handled · {}m {}s",
                             secs / 60,
                             secs % 60
                         ))),
                 )
-                .child(div().text_xs().text_color(rgb(MUTED)).child("Press escape to close")),
+                .child(div().text_xs().text_color(t.text_muted).child("Press escape to close"))
+                .child(button("session-close", "Close", "Close session summary", "escape", cx).on_click(run(ClearSelection))),
             (None, progress) => {
                 let (pos, total) = progress.unwrap_or((0, 0));
                 div()
                     .flex()
                     .items_center()
+                    .gap_3()
                     .px_3()
                     .py_1()
                     .text_xs()
-                    .text_color(rgb(MUTED))
+                    .text_color(t.text_muted)
                     .child(SharedString::from(format!("{pos}/{total}")))
+                    .child(button("session-end", "End session", "End the triage session", "escape", cx).on_click(run(ClearSelection)))
             }
         }
     }
@@ -209,16 +236,17 @@ impl SummaryCard {
 }
 
 impl RenderOnce for SummaryCard {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let t = theme::active(cx);
         let list = |title: &'static str, items: Vec<String>| {
             div().when(!items.is_empty(), |el| {
                 el.flex()
                     .flex_col()
-                    .child(div().text_xs().text_color(rgb(MUTED)).child(title))
+                    .child(div().text_xs().text_color(t.text_muted).child(title))
                     .children(items.into_iter().map(|i| {
                         div()
                             .text_sm()
-                            .text_color(rgb(TEXT))
+                            .text_color(t.text)
                             .child(SharedString::from(format!("• {i}")))
                     }))
             })
@@ -228,15 +256,15 @@ impl RenderOnce for SummaryCard {
             .flex_col()
             .gap_1()
             .p_3()
-            .bg(rgb(BG))
+            .bg(t.surface)
             .border_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
             .rounded_md()
-            .child(div().text_xs().text_color(rgb(ACCENT)).child("Summary"))
+            .child(div().text_xs().text_color(t.info).child("Summary"))
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(TEXT))
+                    .text_color(t.text)
                     .child(SharedString::from(self.summary.summary)),
             )
             .child(list("Action items", self.summary.action_items))
@@ -257,7 +285,8 @@ impl RuleBanner {
 }
 
 impl RenderOnce for RuleBanner {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let t = theme::active(cx);
         div()
             .flex()
             .items_center()
@@ -266,9 +295,10 @@ impl RenderOnce for RuleBanner {
             .px_3()
             .py_1()
             .border_b_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
+            .bg(t.accent.opacity(0.10))
             .text_sm()
-            .text_color(rgb(TEXT))
+            .text_color(t.text)
             .child(SharedString::from(format!(
                 "Always move mail from {} to {}?",
                 self.rule.sender,
@@ -279,12 +309,8 @@ impl RenderOnce for RuleBanner {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .text_xs()
-                    .text_color(rgb(MUTED))
-                    .child(kbd("shift-y"))
-                    .child("accept")
-                    .child(kbd("shift-n"))
-                    .child("dismiss"),
+                    .child(button("rule-accept", "Accept", "Accept rule", "shift-y", cx).on_click(run(AcceptRule)))
+                    .child(button("rule-dismiss", "Dismiss", "Dismiss rule", "shift-n", cx).on_click(run(DismissRule))),
             )
     }
 }
@@ -302,7 +328,8 @@ impl ScreenerHeader {
 }
 
 impl RenderOnce for ScreenerHeader {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let t = theme::active(cx);
         div()
             .flex()
             .items_center()
@@ -310,9 +337,10 @@ impl RenderOnce for ScreenerHeader {
             .px_3()
             .py_1()
             .border_b_1()
-            .border_color(rgb(BORDER))
+            .border_color(t.border)
+            .bg(t.state_screener.opacity(0.10))
             .text_xs()
-            .text_color(rgb(MUTED))
+            .text_color(t.state_screener)
             .child(SharedString::from(format!(
                 "Screener · {} from new senders",
                 self.count
@@ -322,10 +350,8 @@ impl RenderOnce for ScreenerHeader {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(kbd("a"))
-                    .child("allow")
-                    .child(kbd("b"))
-                    .child("block"),
+                    .child(button("screener-allow", "Allow", "Allow sender", "a", cx).on_click(run(AllowSender)))
+                    .child(button("screener-block", "Block", "Block sender", "b", cx).on_click(run(BlockSender))),
             )
     }
 }
