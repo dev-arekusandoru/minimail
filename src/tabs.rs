@@ -160,3 +160,16 @@ impl Tabs {
         self.tabs.iter().any(|t| !t.pinned)
     }
 }
+
+/// Tab label for a thread subject: `(no subject)` when blank, cut to `max` characters with `…`.
+pub fn title(subject: &str, max: usize) -> String {
+    let subject = subject.trim();
+    if subject.is_empty() {
+        return "(no subject)".to_owned();
+    }
+    if subject.chars().count() <= max {
+        return subject.to_owned();
+    }
+    let cut: String = subject.chars().take(max.saturating_sub(1)).collect();
+    format!("{}…", cut.trim_end())
+}

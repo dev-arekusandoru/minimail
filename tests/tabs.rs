@@ -124,3 +124,13 @@ fn pinning_and_set_msg_ignore_unknown_threads() {
     assert_eq!(threads(&t), vec![(1, false)]);
     assert_eq!(t.opened(), Some(11));
 }
+
+#[test]
+fn titles_are_trimmed_truncated_and_never_blank() {
+    use mail_classifier::tabs::title;
+    assert_eq!(title("  Lunch?  ", 20), "Lunch?");
+    assert_eq!(title("   ", 20), "(no subject)");
+    assert_eq!(title("abcdefghij", 10), "abcdefghij");
+    assert_eq!(title("abcdefghijk", 10), "abcdefghi…");
+    assert_eq!(title("ééééééééééé", 5), "éééé…", "cuts on characters, not bytes");
+}
