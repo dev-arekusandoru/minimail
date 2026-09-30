@@ -1,6 +1,7 @@
 //! Settings panel: declarative settings rows grouped into searchable sections.
 
 use crate::app::overlay::FitViewport as _;
+use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::button;
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::theme;
@@ -35,6 +36,7 @@ pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
     Grouping(bool),
     PreviewLines(u8),
+    PaneLayout(Orientation),
     Close,
 }
 
@@ -55,7 +57,7 @@ impl Section {
 }
 
 #[derive(Clone, Copy)]
-enum SettingKey { Summaries, Theme, Grouping, PreviewLines, Classifier(QuestionKey), Threshold(QuestionKey), Shortcuts }
+enum SettingKey { Summaries, Theme, PaneLayout, Grouping, PreviewLines, Classifier(QuestionKey), Threshold(QuestionKey), Shortcuts }
 
 #[derive(Clone, Copy)]
 enum ControlKind { Toggle, Choice(&'static [&'static str]), Stepper { min: u8, max: u8, step: u8 }, Action }
@@ -72,11 +74,13 @@ struct SettingSpec {
 const THEMES_CONTROL: &[&str] = &["theme registry"];
 const PREVIEW_OPTIONS: &[&str] = &["Off", "1 line", "2 lines", "3 lines", "4 lines", "5 lines"];
 const CLASSIFIER_OPTIONS: &[&str] = &["Auto", "Review"];
+const PANE_OPTIONS: &[&str] = &["Side by side", "Stacked"];
 
 fn setting_spec(key: SettingKey) -> SettingSpec {
     match key {
         SettingKey::Summaries => SettingSpec { section: Section::General, key, title: "Thread summaries", description: "Opt in to generated summaries above conversations.", control: ControlKind::Toggle },
         SettingKey::Theme => SettingSpec { section: Section::Appearance, key, title: "Theme", description: "Choose the color scheme used throughout the app.", control: ControlKind::Choice(THEMES_CONTROL) },
+        SettingKey::PaneLayout => SettingSpec { section: Section::Appearance, key, title: "Pane layout", description: "Stack the message list and the reader side by side or one above the other.", control: ControlKind::Choice(PANE_OPTIONS) },
         SettingKey::Grouping => SettingSpec { section: Section::Inbox, key, title: "Group by thread", description: "Show one inbox row per conversation instead of per message.", control: ControlKind::Toggle },
         SettingKey::PreviewLines => SettingSpec { section: Section::Inbox, key, title: "Preview lines", description: "Snippet lines shown under each subject in the inbox.", control: ControlKind::Choice(PREVIEW_OPTIONS) },
         SettingKey::Classifier(question) => SettingSpec { section: Section::Classifier, key, title: question.label(), description: "Choose automatic handling or manual review.", control: ControlKind::Choice(CLASSIFIER_OPTIONS) },
@@ -92,6 +96,7 @@ fn setting_specs() -> impl Iterator<Item = SettingSpec> {
     ]).chain([
         setting_spec(SettingKey::Summaries),
         setting_spec(SettingKey::Theme),
+        setting_spec(SettingKey::PaneLayout),
         setting_spec(SettingKey::Grouping),
         setting_spec(SettingKey::PreviewLines),
         setting_spec(SettingKey::Shortcuts),
@@ -106,6 +111,7 @@ impl SettingSpec {
             SettingKey::Summaries => if state.summaries { "on" } else { "off" }.into(),
             SettingKey::Theme => active_theme.to_owned(),
             SettingKey::Grouping => if state.group { "on" } else { "off" }.into(),
+            SettingKey::PaneLayout => state.orientation.label().into(),
             SettingKey::PreviewLines => PREVIEW_OPTIONS[state.preview_lines.min(5) as usize].into(),
             SettingKey::Classifier(question) => match state.policy.mode(question) {
                 Mode::Auto { threshold } => format!("auto ≥ {threshold:.2}"),
@@ -127,6 +133,12 @@ impl SettingSpec {
             }
             (SettingKey::Theme, SettingChange::Toggle) => state.cycle_theme(1, cx),
             (SettingKey::Theme, SettingChange::Step(delta)) => state.cycle_theme(if delta < 0. { -1 } else { 1 }, cx),
+            (SettingKey::PaneLayout, SettingChange::Toggle) => {
+                let next = state.orientation.toggled();
+                state.orientation = next;
+                cx.emit(SettingsEvent::PaneLayout(next));
+                cx.notify();
+            }
             (SettingKey::Grouping, SettingChange::Toggle) => {
                 state.group = !state.group;
                 cx.emit(SettingsEvent::Grouping(state.group));
@@ -159,6 +171,7 @@ pub struct SettingsPanel {
     summaries: bool,
     group: bool,
     preview_lines: u8,
+    orientation: Orientation,
     cursor: usize,
     section: Section,
     search: String,
@@ -170,6 +183,7 @@ impl SettingsPanel {
         summaries: bool,
         group: bool,
         preview_lines: u8,
+        orientation: Orientation,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -190,18 +204,20 @@ impl SettingsPanel {
             summaries,
             group,
             preview_lines,
+            orientation,
             cursor: 0,
             section: Section::Classifier,
             search: String::new(),
         }
     }
 
-    fn rows() -> usize { QuestionKey::ALL.len() * 2 + 4 }
+    fn rows() -> usize { QuestionKey::ALL.len() * 2 + 5 }
 
     fn summary_row() -> usize { QuestionKey::ALL.len() * 2 }
     fn theme_row() -> usize { Self::summary_row() + 1 }
-    fn group_row() -> usize { Self::summary_row() + 2 }
-    fn preview_row() -> usize { Self::summary_row() + 3 }
+    fn pane_row() -> usize { Self::summary_row() + 2 }
+    fn group_row() -> usize { Self::summary_row() + 3 }
+    fn preview_row() -> usize { Self::summary_row() + 4 }
 
     fn changed(&self, cx: &mut Context<Self>) {
         cx.emit(SettingsEvent::Changed(self.policy.clone(), self.summaries));
@@ -226,6 +242,7 @@ impl SettingsPanel {
         match row {
             value if value == Self::summary_row() => Some(SettingKey::Summaries),
             value if value == Self::theme_row() => Some(SettingKey::Theme),
+            value if value == Self::pane_row() => Some(SettingKey::PaneLayout),
             value if value == Self::group_row() => Some(SettingKey::Grouping),
             value if value == Self::preview_row() => Some(SettingKey::PreviewLines),
             _ => None,
@@ -265,11 +282,12 @@ impl SettingsPanel {
                 return index * 2 + 1;
             }
         }
-        let candidates: [(usize, &[&str]); 4] = [
+        let candidates: [(usize, &[&str]); 5] = [
             (Self::summary_row(), &["thread summaries", "opt in to generated summaries"]),
             (Self::theme_row(), &["theme", "appearance", "color scheme"]),
             (Self::group_row(), &["group by thread", "inbox", "threads"]),
             (Self::preview_row(), &["preview lines", "message snippet", "inbox"]),
+            (Self::pane_row(), &["pane layout", "side by side", "stacked", "layout", "appearance"]),
         ];
         candidates.into_iter().find(|(_, terms)| query_matches(&query, terms)).map_or(0, |(index, _)| index)
     }
@@ -280,7 +298,7 @@ impl SettingsPanel {
         }
         let (start, count) = match self.section {
             Section::General => (Self::summary_row(), 1),
-            Section::Appearance => (Self::theme_row(), 1),
+            Section::Appearance => (Self::theme_row(), 2),
             Section::Inbox => (Self::group_row(), 2),
             Section::Classifier => (0, QuestionKey::ALL.len() * 2),
             Section::Shortcuts => (0, 0),
@@ -324,6 +342,7 @@ fn setting_index(key: SettingKey) -> usize {
         SettingKey::Threshold(question) => QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0) * 2 + 1,
         SettingKey::Summaries => SettingsPanel::summary_row(),
         SettingKey::Theme => SettingsPanel::theme_row(),
+        SettingKey::PaneLayout => SettingsPanel::pane_row(),
         SettingKey::Grouping => SettingsPanel::group_row(),
         SettingKey::PreviewLines => SettingsPanel::preview_row(),
         SettingKey::Shortcuts => SettingsPanel::rows(),
@@ -389,6 +408,7 @@ fn render_clickable(
         }
         SettingKey::Summaries => div().id("summaries-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::Theme => div().id("theme-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
+        SettingKey::PaneLayout => div().id("pane-layout-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::Grouping => div().id("group-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::PreviewLines => div().id("preview-lines-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::Threshold(_) | SettingKey::Shortcuts => content.into_any_element(),

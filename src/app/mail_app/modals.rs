@@ -141,6 +141,7 @@ impl MailApp {
                 self.summaries_enabled,
                 group,
                 preview,
+                self.panes.orientation(),
                 window,
                 cx,
             )
@@ -161,6 +162,11 @@ impl MailApp {
                 SettingsEvent::PreviewLines(n) => {
                     this.preview_lines = (*n).min(5);
                     cx.notify();
+                }
+                SettingsEvent::PaneLayout(orientation) => {
+                    if this.panes.orientation() != *orientation {
+                        this.set_pane_layout(*orientation, window, cx);
+                    }
                 }
                 SettingsEvent::Close => this.close_modals(window, cx),
             },
@@ -250,6 +256,8 @@ impl MailApp {
     pub(super) fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.help {
             self.help = false;
+        } else if self.menu_open() {
+            self.close_menu(window, cx);
         } else if self.modal_open() {
             self.close_modals(window, cx);
         } else if matches!(self.mode, ListMode::Search(_)) {

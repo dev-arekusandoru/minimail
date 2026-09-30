@@ -16,13 +16,23 @@ impl Render for MailApp {
         if let Some(id) = self.opened {
             self.read.insert(id);
         }
-        self.list_w = row::list_width(f32::from(window.viewport_size().width));
+        let viewport = window.viewport_size();
+        let (pane_w, pane_h) = (
+            panes::available_width(f32::from(viewport.width)),
+            panes::available_height(f32::from(viewport.height)),
+        );
+        let stacked = self.panes.orientation() == PaneLayout::Stacked;
+        // Rows size themselves from the real pane: the divider's width side by
+        // side, the whole region when the panes are stacked.
+        self.list_w = if stacked { pane_w } else { self.panes.list_size(pane_w) };
+        self.list_h = if stacked { self.panes.list_size(pane_h) } else { 0. };
         let list = (!in_session).then(|| self.render_list(cx));
         let reader = match &self.compose {
             Some(compose) => div()
                 .flex_1()
-                .h_full()
                 .min_w_0()
+                .min_h_0()
+                .when(!stacked, |d| d.h_full())
                 .child(compose.clone())
                 .into_any_element(),
             None => self.render_reader(cx),
@@ -34,7 +44,9 @@ impl Render for MailApp {
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
-            .when(!self.modal_open(), |d| d.key_context(MAIL_CONTEXT))
+            .when(!self.modal_open() && !self.menu_open(), |d| {
+                d.key_context(MAIL_CONTEXT)
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
@@ -179,7 +191,12 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &NextInThread, w, cx| this.step_thread(1, w, cx)))
             .on_action(cx.listener(|this, _: &PrevInThread, w, cx| this.step_thread(-1, w, cx)))
-            .child(self.render_toolbar(cx))
+            .on_action(cx.listener(|this, _: &GrowListPane, w, cx| this.grow_list_pane(w, cx)))
+            .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
+            .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
+            .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
+            .child(self.render_header(cx))
+            .when(self.context_actions(), |d| d.child(self.render_context_bar(cx)))
             .child(
                 div()
                     .flex_1()
@@ -198,9 +215,38 @@ impl Render for MailApp {
                                     .screener(screener_count, screener_active),
                             ),
                     )
-                    .children(list)
-                    .child(reader),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .flex()
+                            .when(stacked, |d| d.flex_col())
+                            .when(!stacked, |d| d.flex_row())
+                            .children(list)
+                            .child(self.render_divider(cx))
+                            .child(reader),
+                    )
             )
+            // While the divider is held, a transparent sheet over the whole
+            // window keeps receiving the moves once the pointer leaves the band.
+            .when(self.panes.dragging(), |d| {
+                d.child(
+                    div()
+                        .id("pane-drag")
+                        .test_support()
+                        .absolute()
+                        .inset_0()
+                        .when(stacked, |el| el.cursor_row_resize())
+                        .when(!stacked, |el| el.cursor_col_resize())
+                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, w, cx| {
+                            this.drag_divider(ev, w, cx);
+                        }))
+                        .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.end_divider_drag(cx);
+                        })),
+                )
+            })
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
@@ -266,6 +312,7 @@ impl Render for MailApp {
                         )),
                 )
             })
+            .when_some(self.render_menu(cx), |d, menu| d.child(menu))
             .when_some(self.palette.clone(), |d, palette| {
                 d.child(overlay(window, palette).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
             })

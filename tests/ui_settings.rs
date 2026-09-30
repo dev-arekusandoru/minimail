@@ -5,6 +5,7 @@ use gpui_kit::{
     WindowOptions, base::Root, px, size,
 };
 use gpui_kit::test::TestWindowExt;
+use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::{app::{actions::bind_keys, settings::{SettingsEvent, SettingsPanel}}, judge::JudgePolicy};
 
 struct PanelHarness<'a> {
@@ -24,7 +25,7 @@ fn panel(cx: &mut TestAppContext) -> PanelHarness<'_> {
                 })),
                 ..Default::default()
             }, cx, |window, cx| {
-                let panel = cx.new(|cx| SettingsPanel::new(JudgePolicy::default(), false, false, 2, window, cx));
+                let panel = cx.new(|cx| SettingsPanel::new(JudgePolicy::default(), false, false, 2, Orientation::SideBySide, window, cx));
                 window.focus(&panel.focus_handle(cx), cx);
                 panel
             },
@@ -34,6 +35,7 @@ fn panel(cx: &mut TestAppContext) -> PanelHarness<'_> {
                 SettingsEvent::Changed(_, summaries) => format!("changed:{summaries}"),
                 SettingsEvent::Grouping(on) => format!("group:{on}"),
                 SettingsEvent::PreviewLines(n) => format!("preview:{n}"),
+                SettingsEvent::PaneLayout(o) => format!("layout:{}", o.label()),
                 SettingsEvent::Close => "close".into(),
             });
         });

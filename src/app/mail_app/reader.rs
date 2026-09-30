@@ -3,7 +3,10 @@ use super::*;
 impl MailApp {
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
         let t = theme::active(cx);
-        let pane = div().flex_1().h_full().min_w_0().flex().flex_col().px_5().py_4();
+        let stacked = self.panes.orientation() == PaneLayout::Stacked;
+        let pane = div().flex_1().min_w_0().min_h_0().flex().flex_col().px_5().py_4()
+            .when(!stacked, |d| d.h_full())
+            .when(stacked, |d| d.w_full());
         if let Some((handled, secs)) = self.session_end {
             return pane
                 .items_center()

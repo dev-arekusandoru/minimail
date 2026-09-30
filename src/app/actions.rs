@@ -7,6 +7,7 @@ use crate::app::settings::{
     SettingsSectionNext, SettingsSectionPrev, SettingsThresholdDown, SettingsThresholdUp,
     SettingsToggleMode,
 };
+use crate::app::menu::{MENU_CONTEXT, MenuBack, MenuCancel, MenuNext, MenuPrev, MenuRun};
 use crate::app::snooze::{
     SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
 };
@@ -63,7 +64,11 @@ gpui_kit::actions!(
         ExpandThread,
         CollapseThread,
         NextInThread,
-        PrevInThread
+        PrevInThread,
+        GrowListPane,
+        ShrinkListPane,
+        ResetPanes,
+        TogglePaneLayout
     ]
 );
 
@@ -131,6 +136,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("left", CollapseThread, m),
         KeyBinding::new("]", NextInThread, m),
         KeyBinding::new("[", PrevInThread, m),
+        // Pane divider.
+        KeyBinding::new("alt-right", GrowListPane, m),
+        KeyBinding::new("alt-left", ShrinkListPane, m),
+        KeyBinding::new("alt-r", ResetPanes, m),
+        KeyBinding::new("alt-l", TogglePaneLayout, m),
         // Snooze picker.
         KeyBinding::new("1", SnoozePreset1, Some("SnoozePicker && !Input")),
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
@@ -150,6 +160,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("/", SettingsSearch, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("ctrl-tab", SettingsSectionNext, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", SettingsSectionPrev, Some(SETTINGS_CONTEXT)),
+        // Menus.
+        KeyBinding::new("j", MenuNext, Some(MENU_CONTEXT)),
+        KeyBinding::new("down", MenuNext, Some(MENU_CONTEXT)),
+        KeyBinding::new("k", MenuPrev, Some(MENU_CONTEXT)),
+        KeyBinding::new("up", MenuPrev, Some(MENU_CONTEXT)),
+        KeyBinding::new("enter", MenuRun, Some(MENU_CONTEXT)),
+        KeyBinding::new("left", MenuBack, Some(MENU_CONTEXT)),
+        KeyBinding::new("backspace", MenuBack, Some(MENU_CONTEXT)),
+        KeyBinding::new("escape", MenuCancel, Some(MENU_CONTEXT)),
         // Rules panel.
         KeyBinding::new("j", RulesNext, Some(RULES_CONTEXT)),
         KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),
@@ -236,5 +255,9 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!("Collapse thread", "left", CollapseThread),
         cmd!("Next message in thread", "]", NextInThread),
         cmd!("Previous message in thread", "[", PrevInThread),
+        cmd!("Grow list pane", "alt-right", GrowListPane),
+        cmd!("Shrink list pane", "alt-left", ShrinkListPane),
+        cmd!("Reset pane sizes", "alt-r", ResetPanes),
+        cmd!("Toggle pane layout", "alt-l", TogglePaneLayout),
     ]
 }
