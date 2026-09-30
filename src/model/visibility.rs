@@ -63,14 +63,36 @@ impl Mailbox {
             .count()
     }
 
-    /// Let `email` through the Screener. False if already known.
+    /// Let `email` through the Screener and, when there is an address book,
+    /// remember the sender in it so the decision survives a restart. False if
+    /// the sender is already known.
     pub fn allow_sender(&mut self, email: &str) -> bool {
         let e = lower(email);
         if !self.known.insert(e.clone()) {
             return false;
         }
-        self.push_undo(vec![Change::Known(e, false)]);
+        // Undo removes exactly what this call added: a contact the Screener
+        // created disappears with it, an existing one only loses the address.
+        let created = self
+            .contacts
+            .as_ref()
+            .and_then(|store| {
+                store
+                    .upsert_from_email(&e, self.sender_name(&e), ContactSource::Screener)
+                    .ok()
+            })
+            .is_some_and(|(_, created)| created);
+        self.push_undo(vec![Change::Known(e, false, created)]);
         true
+    }
+
+    /// Display name of the newest message from `email`, for the address book.
+    fn sender_name(&self, email: &str) -> Option<&str> {
+        self.newest_first
+            .iter()
+            .filter_map(|id| self.get(*id))
+            .find(|m| lower(&m.from_email) == email)
+            .map(|m| m.from_name.as_str())
     }
 
     /// Hide every message from `email` (not deleted). False if already blocked.

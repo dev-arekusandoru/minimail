@@ -26,7 +26,11 @@ fn main() {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new(Mailbox::load_default(), window, cx));
+                let store = mail_classifier::contacts::open_default()
+                    .expect("contacts database at $MAIL_CLASSIFIER_DB");
+                let view = cx.new(|cx| {
+                    MailApp::new(Mailbox::load_default_with(std::rc::Rc::new(store)), window, cx)
+                });
                 let handle = view.read(cx).focus_handle().clone();
                 window.focus(&handle, cx);
                 cx.activate(true);

@@ -4,11 +4,13 @@
 //! No UI types live here, so all of it is headlessly testable.
 
 use std::collections::{HashMap, HashSet};
-
-use crate::clock::{DAY, HOUR, MINUTE, Timestamp};
-use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+
+use crate::clock::{DAY, HOUR, MINUTE, Timestamp};
+use crate::contacts::{ContactSource, ContactStore};
+use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
 
 mod replies;
 mod states;
@@ -117,7 +119,9 @@ struct Meta {
 enum Change {
     Msg(MessageId, TriageState, Meta),
     Muted(u32, bool),
-    Known(String, bool),
+    /// Sender allowed in the Screener: the email, whether it was known before,
+    /// and whether the address book created a contact for it.
+    Known(String, bool, bool),
     Blocked(String, bool),
     /// Sender was appended to `unsubscribed`; undo removes it.
     Unsubscribed(String),
@@ -147,6 +151,8 @@ pub struct Mailbox {
     meta: HashMap<MessageId, Meta>,
     /// Lowercased emails that skip the Screener.
     known: HashSet<String>,
+    /// The address book; `None` for a mailbox built without one.
+    contacts: Option<Rc<ContactStore>>,
     blocked: HashSet<String>,
     unsubscribed: Vec<String>,
     muted: HashSet<u32>,
@@ -161,12 +167,17 @@ impl Mailbox {
         Ok(mb)
     }
 
-    /// Load messages plus a JSON array of known sender emails; other senders
-    /// land in the Screener.
-    pub fn from_json_with_contacts(json: &str, contacts: &str) -> Result<Self, serde_json::Error> {
-        let contacts: Vec<String> = serde_json::from_str(contacts)?;
-        let known = contacts.iter().map(|c| lower(c)).collect();
-        Ok(Self::build(serde_json::from_str(json)?, known))
+    /// Load messages plus the addresses of `store`; every other sender lands
+    /// in the Screener. Later `allow_sender` calls are written back to the
+    /// store, so they survive a restart.
+    pub fn from_json_with_contacts(
+        json: &str,
+        store: Rc<ContactStore>,
+    ) -> Result<Self, serde_json::Error> {
+        let known = store.known_addresses().unwrap_or_default();
+        let mut mb = Self::build(serde_json::from_str(json)?, known);
+        mb.contacts = Some(store);
+        Ok(mb)
     }
 
     fn build(messages: Vec<Message>, known: HashSet<String>) -> Self {
@@ -194,18 +205,30 @@ impl Mailbox {
             meta: HashMap::new(),
             known,
             blocked: HashSet::new(),
+            contacts: None,
             unsubscribed: Vec::new(),
             muted: HashSet::new(),
             pending: Vec::new(),
         }
     }
 
+    /// The mock mailbox against an in-memory copy of the shipped address
+    /// book. The app passes its own database via [`Self::load_default_with`].
     pub fn load_default() -> Self {
-        Self::from_json_with_contacts(
-            include_str!("../../fixtures/mailbox.json"),
-            include_str!("../../fixtures/contacts.json"),
-        )
-        .expect("fixtures parse")
+        Self::load_default_with(Rc::new(
+            crate::contacts::open_seeded_in_memory().expect("contacts database"),
+        ))
+    }
+
+    /// [`Self::load_default`] against an explicit address book.
+    pub fn load_default_with(store: Rc<ContactStore>) -> Self {
+        Self::from_json_with_contacts(include_str!("../../fixtures/mailbox.json"), store)
+            .expect("fixtures parse")
+    }
+
+    /// The address book behind the Screener, if this mailbox has one.
+    pub fn contacts(&self) -> Option<&ContactStore> {
+        self.contacts.as_deref()
     }
 
     pub fn messages(&self) -> &[Message] {

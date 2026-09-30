@@ -2,6 +2,7 @@ use gpui_kit::{TestAppContext};
 use mail_classifier::model::{Mailbox};
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness_with, json, mailbox, msg};
+use mail_classifier::contacts::{ContactStore, NewContact};
 
 // ---------------------------------------------------------------- Rule suggestions
 
@@ -92,7 +93,9 @@ pub fn screener_box() -> Mailbox {
         msg(3, 3, "new1@a.io", "n1b", 23, "Inbox"),
         msg(4, 4, "new2@a.io", "n2", 22, "Inbox"),
     ]);
-    Mailbox::from_json_with_contacts(&msgs, r#"["known@a.io"]"#).unwrap()
+    let store = ContactStore::open_in_memory().unwrap();
+    store.create(NewContact::from_email("known@a.io", "Known")).unwrap();
+    Mailbox::from_json_with_contacts(&msgs, std::rc::Rc::new(store)).unwrap()
 }
 
 #[gpui_kit::gpui::test]

@@ -1,5 +1,5 @@
 use mail_classifier::model::{Mailbox};
-use crate::helpers::{assert_invariant, sample, threaded, msg};
+use crate::helpers::{assert_invariant, sample, store_with, threaded, msg};
 use crate::helpers::State;
 
 #[test]
@@ -27,7 +27,7 @@ fn screener_is_newest_first_and_allow_moves_mail_to_its_state_view() {
             msg(3, 3, "New@x.test", "2026-09-03T00:00:00Z"),
         ]))
         .unwrap(),
-        r#"["KNOWN@x.test"]"#,
+        store_with(&["KNOWN@x.test"]),
     )
     .unwrap();
     assert_eq!(mb.screener_ids(), vec![3, 2]);
@@ -49,7 +49,7 @@ fn block_hides_without_deleting_and_beats_the_screener() {
             msg(2, 2, "ok@x.test", "2026-09-02T00:00:00Z"),
         ]))
         .unwrap(),
-        r#"["ok@x.test"]"#,
+        store_with(&["ok@x.test"]),
     )
     .unwrap();
     assert!(mb.block_sender("new@x.test"));

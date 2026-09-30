@@ -1,0 +1,556 @@
+{
+  "version": 1,
+  "contacts": [
+    {
+      "display_name": "Ada Nkemelu",
+      "given_name": "Ada",
+      "family_name": "Nkemelu",
+      "organization": "Type Foundry",
+      "emails": [
+        {
+          "address": "ada@typefoundry.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Art Director"
+    },
+    {
+      "display_name": "Bank of West",
+      "organization": "Bank of West",
+      "emails": [
+        {
+          "address": "alerts@bankofwest.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Cloudflare",
+      "organization": "Cloudflare",
+      "emails": [
+        {
+          "address": "billing@cloudflare.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Cal Okonkwo",
+      "given_name": "Cal",
+      "family_name": "Okonkwo",
+      "organization": "Northwind",
+      "emails": [
+        {
+          "address": "cal@northwind.io",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Account Manager",
+      "urls": [
+        {
+          "url": "https://northwind.io/team/cal",
+          "label": "work"
+        }
+      ]
+    },
+    {
+      "display_name": "Calendar",
+      "organization": "Google",
+      "emails": [
+        {
+          "address": "calendar-notify@google.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Dag Nilsen",
+      "given_name": "Dag",
+      "family_name": "Nilsen",
+      "organization": "Fjordworks",
+      "emails": [
+        {
+          "address": "dag@fjordworks.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ]
+    },
+    {
+      "display_name": "Dana Whitfield",
+      "given_name": "Dana",
+      "family_name": "Whitfield",
+      "organization": "Whitfield",
+      "emails": [
+        {
+          "address": "dana@whitfield.dev",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "favorite": true,
+      "job_title": "Product Lead",
+      "department": "Product",
+      "birthday": "1988-04-12"
+    },
+    {
+      "display_name": "Esterifying Analytics",
+      "organization": "Esterifying",
+      "emails": [
+        {
+          "address": "digest@esterifying.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Newsletters"
+      ]
+    },
+    {
+      "display_name": "TLDR",
+      "organization": "TLDR",
+      "emails": [
+        {
+          "address": "digest@tldr.tech",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Newsletters"
+      ]
+    },
+    {
+      "display_name": "Changelog Weekly",
+      "organization": "Changelog Weekly",
+      "emails": [
+        {
+          "address": "editors@changelog.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Newsletters"
+      ]
+    },
+    {
+      "display_name": "Ines Duarte",
+      "given_name": "Ines",
+      "family_name": "Duarte",
+      "organization": "Whitfield",
+      "emails": [
+        {
+          "address": "ines@whitfield.dev",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Researcher"
+    },
+    {
+      "display_name": "Marcus Lee",
+      "given_name": "Marcus",
+      "family_name": "Lee",
+      "organization": "Hirestream",
+      "emails": [
+        {
+          "address": "marcus@hirestream.io",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Support Lead",
+      "addresses": [
+        {
+          "street": "18 Harbour Street",
+          "city": "Bristol",
+          "region": "Somerset",
+          "postal_code": "BS1 4RN",
+          "country": "UK",
+          "label": "work"
+        }
+      ]
+    },
+    {
+      "display_name": "Mum",
+      "emails": [
+        {
+          "address": "mum@whitfield.home",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Family"
+      ],
+      "favorite": true,
+      "nickname": "Mum",
+      "notes": "Family. Calls on Sunday evenings."
+    },
+    {
+      "display_name": "Nadia Farouk",
+      "given_name": "Nadia",
+      "family_name": "Farouk",
+      "organization": "Harbour Books",
+      "emails": [
+        {
+          "address": "nadia@harbourbooks.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Editor",
+      "notes": "Bookseller; invoices go to billing@."
+    },
+    {
+      "display_name": "1Password",
+      "organization": "1Password",
+      "emails": [
+        {
+          "address": "no-reply@1password.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Deliveroo",
+      "organization": "Deliveroo",
+      "emails": [
+        {
+          "address": "no-reply@deliveroo.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Figma",
+      "organization": "Figma",
+      "emails": [
+        {
+          "address": "no-reply@figma.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Hirestream",
+      "organization": "Hirestream",
+      "emails": [
+        {
+          "address": "no-reply@hirestream.io",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Zoom",
+      "organization": "Zoom",
+      "emails": [
+        {
+          "address": "no-reply@zoom.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "GitHub",
+      "organization": "GitHub",
+      "emails": [
+        {
+          "address": "notifications@github.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Slack",
+      "organization": "Slack",
+      "emails": [
+        {
+          "address": "notifications@slack.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Vercel",
+      "organization": "Vercel",
+      "emails": [
+        {
+          "address": "notifications@vercel.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Ola Wierzbicka",
+      "given_name": "Ola",
+      "family_name": "Wierzbicka",
+      "organization": "Quiet Metrics",
+      "emails": [
+        {
+          "address": "ola@quietmetrics.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ]
+    },
+    {
+      "display_name": "Priya Raman",
+      "given_name": "Priya",
+      "family_name": "Raman",
+      "organization": "Northwind",
+      "emails": [
+        {
+          "address": "priya@northwind.io",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "favorite": true,
+      "job_title": "Principal Designer",
+      "phones": [
+        {
+          "number": "+44 20 7946 0102",
+          "label": "work",
+          "primary": true
+        }
+      ]
+    },
+    {
+      "display_name": "Ravi Menon",
+      "given_name": "Ravi",
+      "family_name": "Menon",
+      "organization": "Menon",
+      "emails": [
+        {
+          "address": "ravi@menon.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Analyst"
+    },
+    {
+      "display_name": "Northwind Air",
+      "organization": "Northwind Air",
+      "emails": [
+        {
+          "address": "receipts@flyna.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Stripe",
+      "organization": "Stripe",
+      "emails": [
+        {
+          "address": "receipts@stripe.com",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Sam Behrends",
+      "given_name": "Sam",
+      "family_name": "Behrends",
+      "organization": "Northwind",
+      "emails": [
+        {
+          "address": "sam@northwind.io",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "favorite": true,
+      "job_title": "Engineer"
+    },
+    {
+      "display_name": "N26",
+      "organization": "N26",
+      "emails": [
+        {
+          "address": "service@n26.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Sofia Marin",
+      "given_name": "Sofia",
+      "family_name": "Marin",
+      "organization": "Marin Studio",
+      "emails": [
+        {
+          "address": "sofia@marin.studio",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Founder"
+    },
+    {
+      "display_name": "Old National Bank",
+      "organization": "Old National Bank",
+      "emails": [
+        {
+          "address": "statements@oldnational.example",
+          "label": "other",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Services"
+      ]
+    },
+    {
+      "display_name": "Tomas Lindqvist",
+      "given_name": "Tomas",
+      "family_name": "Lindqvist",
+      "organization": "Lindqvist",
+      "emails": [
+        {
+          "address": "tomas@lindqvist.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Consultant"
+    },
+    {
+      "display_name": "Yara Haddad",
+      "given_name": "Yara",
+      "family_name": "Haddad",
+      "organization": "Fieldnotes",
+      "emails": [
+        {
+          "address": "yara@fieldnotes.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Staff Writer"
+    },
+    {
+      "display_name": "Zoe Ruiz",
+      "given_name": "Zoe",
+      "family_name": "Ruiz",
+      "organization": "Ruiz Studio",
+      "emails": [
+        {
+          "address": "zoe@ruizstudio.example",
+          "label": "work",
+          "primary": true
+        }
+      ],
+      "groups": [
+        "Work"
+      ],
+      "job_title": "Photographer",
+      "photo": "https://cdn.example/ruizstudio/zoe.jpg"
+    }
+  ]
+}

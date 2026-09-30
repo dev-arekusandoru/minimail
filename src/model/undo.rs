@@ -39,8 +39,15 @@ impl Mailbox {
                         self.meta.insert(id, meta);
                     }
                 }
+                Change::Known(e, was, created) => {
+                    set_membership(&mut self.known, e.clone(), was);
+                    if !was && created
+                        && let Some(store) = &self.contacts
+                    {
+                        let _ = store.forget_address(&e);
+                    }
+                }
                 Change::Muted(t, was) => set_membership(&mut self.muted, t, was),
-                Change::Known(e, was) => set_membership(&mut self.known, e, was),
                 Change::Blocked(e, was) => set_membership(&mut self.blocked, e, was),
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
                 Change::Pending(p) => self.pending = p,

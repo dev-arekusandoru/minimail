@@ -1,3 +1,6 @@
+use std::rc::Rc;
+
+use mail_classifier::contacts::{ContactStore, NewContact};
 use mail_classifier::model::{Mailbox, TriageState, Tag};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 
@@ -37,6 +40,15 @@ pub fn sample() -> Mailbox {
         (4, "c@x.test", "2026-09-04T10:00:00Z", State::Done),
         (5, "a@x.test", "2026-09-05T10:00:00Z", State::Waiting),
     ])
+}
+
+/// An address book holding exactly `emails` as known senders.
+pub fn store_with(emails: &[&str]) -> Rc<ContactStore> {
+    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory contacts"));
+    for email in emails {
+        store.create(NewContact::from_email(*email, *email)).expect("seed sender");
+    }
+    store
 }
 
 pub fn assert_invariant(mb: &Mailbox) {
