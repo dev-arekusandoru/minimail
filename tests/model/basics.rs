@@ -58,10 +58,38 @@ fn location_chip_filter_and_account_selection() {
 #[test]
 fn fixture_invariant_and_accounts() {
     let mb = Mailbox::load_default();
-    assert_eq!(mb.messages().len(), 60);
     assert_eq!(mb.accounts().len(), 2);
     assert!(mb.folders("personal").len() >= 3);
     assert_invariant(&mb);
+}
+#[test]
+fn fixture_covers_every_triage_state_with_real_folders_and_wake_times() {
+    let mb = Mailbox::load_default();
+    for state in [State::Inbox, State::Snoozed, State::Archived, State::Deleted] {
+        assert!(
+            mb.messages().iter().any(|m| m.state == state),
+            "no fixture message is {state:?}"
+        );
+    }
+    let filed: Vec<_> = mb
+        .messages()
+        .iter()
+        .filter_map(|m| match m.state {
+            State::Filed(folder) => Some((m.account.as_str(), folder)),
+            _ => None,
+        })
+        .collect();
+    assert!(filed.len() >= 2, "filed fixtures: {filed:?}");
+    for (account, folder) in filed {
+        assert!(
+            mb.folders(account).iter().any(|f| f.id == folder),
+            "folder {folder} is not one of {account}'s folders"
+        );
+    }
+    for m in mb.messages().iter().filter(|m| m.state == State::Snoozed) {
+        assert!(mb.snoozed_until(m.id).is_some(), "snoozed message {} has no wake time", m.id);
+    }
+    assert!(mb.messages().iter().any(|m| m.outgoing && !m.bcc.is_empty()), "no sent mail with a Bcc");
 }
 #[test]
 fn empty_mailbox_views_are_empty() {

