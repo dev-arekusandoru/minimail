@@ -26,9 +26,12 @@ use crate::model::{Mailbox, Message, MessageId, Triage, TriageState};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
+use crate::app::ui::{button, run};
+use crate::threads::Row;
 
 mod grouping;
 mod mouse;
+use mouse::close_on_backdrop;
 
 const ROW_H: f32 = 26.0;
 const TOAST_MS: u64 = 4000;
@@ -1011,6 +1014,11 @@ impl MailApp {
         let count = self.visible_ids().len();
         let selected = self.triage.selected().len();
         let title = match &self.mode {
+            ListMode::State if self.grouped() => format!(
+                "{} · {count} · {} threads",
+                self.triage.view.label().to_uppercase(),
+                self.rows().iter().filter(|r| !matches!(r, Row::Child { .. })).count()
+            ),
             ListMode::State => format!("{} · {count}", self.triage.view.label().to_uppercase()),
             ListMode::Screener => format!("SCREENER · {count}"),
             ListMode::Search(q) => format!("search: {q} · {count}"),
@@ -1050,13 +1058,29 @@ impl MailApp {
         } else {
             uniform_list(
                 "messages",
-                count,
+                if self.grouped() { self.rows().len() } else { count },
                 cx.processor(|this, range: std::ops::Range<usize>, _window, cx| {
-                    let ids = this.visible_ids();
+                    let grouped = this.grouped();
+                    let ids = if grouped { Vec::new() } else { this.visible_ids() };
+                    let group_rows = if grouped { this.rows() } else { Vec::new() };
                     let newest = this.newest();
                     let mut rows = Vec::with_capacity(range.len());
                     for ix in range {
-                        if let Some(msg) = ids.get(ix).and_then(|id| this.mailbox.get(*id)) {
+                        if grouped {
+                            match group_rows.get(ix) {
+                                Some(row @ Row::Header { .. }) => {
+                                    rows.push(this.render_group_header(row, ix, &newest, cx));
+                                }
+                                Some(row) => {
+                                    if let Some(msg) = this.mailbox.get(row.primary()) {
+                                        let child = matches!(row, Row::Child { .. });
+                                        let r = this.render_row(msg, ix, &newest, cx);
+                                        rows.push(if child { r.pl(px(34.)) } else { r });
+                                    }
+                                }
+                                None => {}
+                            }
+                        } else if let Some(msg) = ids.get(ix).and_then(|id| this.mailbox.get(*id)) {
                             rows.push(this.render_row(msg, ix, &newest, cx));
                         }
                     }
@@ -1083,7 +1107,7 @@ impl MailApp {
             .into_any_element()
     }
 
-    fn render_reader(&self, cx: &App) -> AnyElement {
+    fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
         let t = theme::active(cx);
         let pane = div().flex_1().h_full().min_w_0().flex().flex_col().px_5().py_4();
         if let Some((handled, secs)) = self.session_end {
@@ -1099,7 +1123,7 @@ impl MailApp {
                 .justify_center()
                 .text_size(px(13.))
                 .text_color(t.text_muted)
-                .child("enter to open")
+                .child("Click a message or press enter to open")
                 .into_any_element();
         };
         let state = self.mailbox.state_of(msg.id).unwrap_or_default();
@@ -1110,8 +1134,9 @@ impl MailApp {
             .iter()
             .filter(|m| m.thread_id == msg.thread_id)
             .collect();
-        thread.sort_by(|a, b| a.received.cmp(&b.received));
+        thread.sort_by(|a, b| a.received.cmp(&b.received).then(a.id.cmp(&b.id)));
         let thread_len = thread.len();
+        let pos = thread.iter().position(|m| m.id == msg.id).unwrap_or(0);
         let summary = self.summary_shown();
         pane.gap_3()
             .when_some(self.session.as_ref(), |d, s| {
@@ -1176,9 +1201,25 @@ impl MailApp {
                         .child(
                             div()
                                 .pb_1()
+                                .flex()
+                                .items_center()
+                                .justify_between()
                                 .text_size(px(11.))
                                 .text_color(t.text_muted)
-                                .child(format!("THREAD · {thread_len}")),
+                                .child(format!("THREAD · {} of {thread_len}", pos + 1))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_1()
+                                        .child(
+                                            button("thread-prev", "‹ prev", "Previous message in thread", "[", cx)
+                                                .on_click(run(PrevInThread)),
+                                        )
+                                        .child(
+                                            button("thread-next", "next ›", "Next message in thread", "]", cx)
+                                                .on_click(run(NextInThread)),
+                                        ),
+                                ),
                         )
                         .children(thread.into_iter().map(|m| {
                             let here = m.id == msg.id;
@@ -1448,6 +1489,9 @@ impl Render for MailApp {
                         .justify_center()
                         .child(
                             div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
                                 .px_3()
                                 .py_1()
                                 .rounded_md()
@@ -1455,7 +1499,13 @@ impl Render for MailApp {
                                 .text_color(t.on_accent)
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(text),
+                                .child(text.clone())
+                                .when(text.contains("undo"), |d| {
+                                    d.child(
+                                        button("toast-undo", "Undo", "Undo", "u", cx)
+                                            .on_click(run(Undo)),
+                                    )
+                                }),
                         ),
                 )
             })
@@ -1482,9 +1532,17 @@ impl Render for MailApp {
                         )),
                 )
             })
-            .when_some(self.palette.clone(), |d, palette| d.child(overlay(window, palette)))
-            .when_some(self.snooze.clone(), |d, picker| d.child(overlay(window, picker)))
-            .when_some(self.settings.clone(), |d, panel| d.child(overlay(window, panel)))
-            .when_some(self.rules_panel.clone(), |d, panel| d.child(overlay(window, panel)))
+            .when_some(self.palette.clone(), |d, palette| {
+                d.child(overlay(window, palette).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
+            .when_some(self.snooze.clone(), |d, picker| {
+                d.child(overlay(window, picker).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
+            .when_some(self.settings.clone(), |d, panel| {
+                d.child(overlay(window, panel).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
+            .when_some(self.rules_panel.clone(), |d, panel| {
+                d.child(overlay(window, panel).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
+            })
     }
 }

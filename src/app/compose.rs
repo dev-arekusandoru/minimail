@@ -2,6 +2,7 @@
 
 use crate::app::actions::{CancelCompose, COMPOSE_CONTEXT, SendReply};
 use crate::app::chrome::{HintBar, HintMode};
+use crate::app::ui::button;
 use crate::model::{Message, MessageId};
 use gpui_kit::{
     component::{
@@ -64,6 +65,15 @@ impl ComposeReply {
     pub fn body(&self, cx: &App) -> String {
         self.body.read(cx).value().to_string()
     }
+
+    /// `cmd-enter` / the Send button: hand the draft to the owner.
+    fn send(&self, cx: &mut Context<Self>) {
+        let body = self.body.read(cx).value().to_string();
+        cx.emit(ComposeEvent::Send {
+            in_reply_to: self.in_reply_to,
+            body,
+        });
+    }
 }
 
 impl Focusable for ComposeReply {
@@ -88,13 +98,7 @@ impl Render for ComposeReply {
         let t = theme::active(cx);
         div()
             .key_context(COMPOSE_CONTEXT)
-            .on_action(cx.listener(|this, _: &SendReply, _, cx| {
-                let body = this.body.read(cx).value().to_string();
-                cx.emit(ComposeEvent::Send {
-                    in_reply_to: this.in_reply_to,
-                    body,
-                });
-            }))
+            .on_action(cx.listener(|this, _: &SendReply, _, cx| this.send(cx)))
             .on_action(cx.listener(|_, _: &CancelCompose, _, cx| cx.emit(ComposeEvent::Cancel)))
             .size_full()
             .flex()
@@ -106,6 +110,23 @@ impl Render for ComposeReply {
             .child(header(&t, "Subject", self.subject.clone()))
             .child(gpui_kit::component::separator::Separator::horizontal())
             .child(div().flex_1().child(Textarea::new(&self.body).h_full()))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        button("compose-cancel", "Cancel", "Discard the draft", "escape", cx)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Cancel))),
+                    )
+                    .child(
+                        button("compose-send", "Send", "Send (held 10s; undo recalls it)", "cmd-enter", cx)
+                            .bg(t.accent)
+                            .text_color(t.on_accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
+                    ),
+            )
             .child(HintBar::new(HintMode::Compose))
     }
 }

@@ -49,5 +49,9 @@ pub fn overlay(window: &Window, view: impl IntoElement) -> Div {
         .items_start()
         .justify_center()
         .pt(px(top_offset(window)))
-        .child(view)
+        .child(
+            div()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(view),
+        )
 }

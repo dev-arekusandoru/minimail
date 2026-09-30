@@ -4,6 +4,7 @@
 //! chosen return time leaves through [`SnoozeEvent`].
 
 use crate::app::overlay::FitViewport as _;
+use crate::app::ui::button;
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use gpui_kit::{
@@ -49,17 +50,8 @@ impl SnoozePicker {
         cx: &mut Context<Self>,
     ) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("3h, 2d, 30m"));
-        cx.subscribe(&input, |this, input, event: &InputEvent, cx| match event {
-            InputEvent::PressEnter { .. } => {
-                let text = input.read(cx).value().to_string();
-                match (this.parse)(text.trim(), this.now) {
-                    Some(ts) => cx.emit(SnoozeEvent::Pick(ts)),
-                    None => {
-                        this.invalid = true;
-                        cx.notify();
-                    }
-                }
-            }
+        cx.subscribe(&input, |this, _input, event: &InputEvent, cx| match event {
+            InputEvent::PressEnter { .. } => this.submit_custom(cx),
             InputEvent::Change => {
                 this.invalid = false;
                 cx.notify();
@@ -86,6 +78,25 @@ impl SnoozePicker {
     fn pick(&mut self, ix: usize, cx: &mut Context<Self>) {
         if let Some((_, ts)) = self.presets.get(ix) {
             cx.emit(SnoozeEvent::Pick(*ts));
+        }
+    }
+
+    /// `4`: show the custom duration input and focus it.
+    fn open_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.custom = true;
+        window.focus(&self.input.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    /// Enter in the custom input: parse it and pick, or flag it invalid.
+    fn submit_custom(&mut self, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).value().to_string();
+        match (self.parse)(text.trim(), self.now) {
+            Some(ts) => cx.emit(SnoozeEvent::Pick(ts)),
+            None => {
+                self.invalid = true;
+                cx.notify();
+            }
         }
     }
 
@@ -130,11 +141,7 @@ impl Render for SnoozePicker {
             .on_action(cx.listener(|this, _: &SnoozePreset1, _, cx| this.pick(0, cx)))
             .on_action(cx.listener(|this, _: &SnoozePreset2, _, cx| this.pick(1, cx)))
             .on_action(cx.listener(|this, _: &SnoozePreset3, _, cx| this.pick(2, cx)))
-            .on_action(cx.listener(|this, _: &SnoozeCustom, window, cx| {
-                this.custom = true;
-                window.focus(&this.input.focus_handle(cx), cx);
-                cx.notify();
-            }))
+            .on_action(cx.listener(|this, _: &SnoozeCustom, window, cx| this.open_custom(window, cx)))
             .on_action(cx.listener(|_, _: &SnoozeCancel, _, cx| cx.emit(SnoozeEvent::Cancel)))
             .flex()
             .flex_col()
@@ -155,10 +162,24 @@ impl Render for SnoozePicker {
                     label.clone(),
                     SharedString::from(format_time(*ts)),
                 )
+                .id(("snooze-preset", i))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| this.pick(i, cx)))
             }))
-            .child(Self::row(&t, "4", "Custom", ""))
+            .child(
+                Self::row(&t, "4", "Custom", "")
+                    .id("snooze-custom")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, window, cx| this.open_custom(window, cx))),
+            )
             .when(self.custom, |el| {
                 el.child(Input::new(&self.input))
+                    .child(
+                        div().flex().justify_end().child(
+                            button("snooze-set", "Set", "Snooze until the typed time", "enter", cx)
+                                .on_click(cx.listener(|this, _, _, cx| this.submit_custom(cx))),
+                        ),
+                    )
                     .when(invalid, |el| {
                         el.child(
                             div()

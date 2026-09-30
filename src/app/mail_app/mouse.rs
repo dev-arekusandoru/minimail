@@ -9,6 +9,14 @@ use super::{ListMode, MailApp};
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
+/// Mouse-down listener for a modal backdrop: clicking outside the panel closes the modal like
+/// `escape` does.
+pub(super) fn close_on_backdrop(
+    cx: &Context<MailApp>,
+) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+    cx.listener(|this: &mut MailApp, _: &MouseDownEvent, window, cx| this.close_modals(window, cx))
+}
+
 impl MailApp {
     /// Move the cursor to visible row `ix` (either list mode), clamped.
     pub(super) fn cursor_to(&mut self, ix: usize) {

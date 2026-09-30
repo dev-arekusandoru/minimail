@@ -125,6 +125,11 @@ impl Render for CommandPalette {
             .child(div().h(px(1.)).bg(t.border))
             .child(if Query::is_search(&self.query) {
                 div()
+                    .id("palette-search")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.emit(PaletteEvent::Search(this.query.clone()));
+                    }))
                     .px_2()
                     .py_1()
                     .text_sm()
@@ -155,6 +160,10 @@ impl Render for CommandPalette {
                             .rounded_sm()
                             .text_color(t.text)
                             .hover(move |el| el.bg(hover))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.emit(PaletteEvent::Run((this.commands[index].action)()));
+                            }))
                             .when(row == selected, |el| {
                                 el.bg(t.selection).text_color(t.accent)
                             })

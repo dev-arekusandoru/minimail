@@ -3,6 +3,7 @@
 //! Edits a local copy of the policy and reports every change; the owner applies it.
 
 use crate::app::overlay::FitViewport as _;
+use crate::app::ui::button;
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::theme;
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -142,11 +143,46 @@ impl Render for SettingsPanel {
         let t = theme::active(cx);
         let cursor = self.cursor;
         let questions = QuestionKey::ALL.iter().enumerate().map(|(i, &key)| {
-            let value = match self.policy.mode(key) {
+            let mode = self.policy.mode(key);
+            let value = match mode {
                 Mode::Auto { threshold } => format!("auto ≥ {threshold:.2}"),
                 Mode::Review => "review".to_owned(),
             };
-            row(&t, i == cursor, key.label(), value).into_any_element()
+            let auto = matches!(mode, Mode::Auto { .. });
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .id(("question-row", i))
+                        .flex_1()
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.cursor = i;
+                            this.toggle(cx);
+                        }))
+                        .child(row(&t, i == cursor, key.label(), value)),
+                )
+                .when(auto, |d| {
+                    d.child(
+                        button(("threshold-down", i), "−", "Lower threshold", "-", cx).on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.cursor = i;
+                                this.nudge(-STEP, cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        button(("threshold-up", i), "+", "Raise threshold", "=", cx).on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.cursor = i;
+                                this.nudge(STEP, cx);
+                            }),
+                        ),
+                    )
+                })
+                .into_any_element()
         });
         div()
             .key_context(SETTINGS_CONTEXT)
@@ -174,17 +210,36 @@ impl Render for SettingsPanel {
             .rounded_md()
             .id("settings-panel")
             .overflow_y_scroll()
-            .child(div().text_sm().text_color(t.accent).child("Settings"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().text_color(t.accent).child("Settings"))
+                    .child(
+                        button("settings-close", "Close", "Close", "escape", cx)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close))),
+                    ),
+            )
             .child(div().h(px(1.)).bg(t.border))
             .child(div().px_2().text_xs().text_color(t.text_muted).child("Classifier: auto-apply or review"))
             .children(questions)
             .child(div().h(px(1.)).bg(t.border))
-            .child(row(
-                &t,
-                cursor == QuestionKey::ALL.len(),
-                "Thread summaries",
-                if self.summaries { "on" } else { "off" }.to_owned(),
-            ))
+            .child(
+                div()
+                    .id("summaries-row")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.cursor = QuestionKey::ALL.len();
+                        this.toggle(cx);
+                    }))
+                    .child(row(
+                        &t,
+                        cursor == QuestionKey::ALL.len(),
+                        "Thread summaries",
+                        if self.summaries { "on" } else { "off" }.to_owned(),
+                    )),
+            )
             .child(
                 div()
                     .id("theme-row")
