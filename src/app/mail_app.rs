@@ -66,6 +66,10 @@ pub struct MailApp {
     pub toast: Option<SharedString>,
     /// Opt-in thread summaries (settings panel).
     pub summaries_enabled: bool,
+    /// Preview snippet lines under each subject (`crate::preview::OPTIONS`); 0 is Off.
+    pub preview_lines: u8,
+    /// Messages that have been shown in the reader (everything else is unread).
+    read: HashSet<MessageId>,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -123,6 +127,8 @@ impl MailApp {
             help: false,
             toast: None,
             summaries_enabled: false,
+            preview_lines: crate::preview::DEFAULT_LINES,
+            read: HashSet::new(),
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,

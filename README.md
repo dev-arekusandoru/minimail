@@ -36,6 +36,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
+| 🧵 **Group by thread** | `g` (or Settings, or the palette) shows one row per conversation: latest sender and subject, message count, participants and newest date. `right`/`enter` or the chevron expands it inline, `left` collapses. Actions (`e` `w` `i` `l`, `x`, shift-selection) on a thread row apply to every message of that thread *in the current panel* and undo as one step; sender-wide actions and mute are unchanged. A thread split across panels shows only that panel's messages in each. `]` / `[` step through the thread in date order in either mode (also clickable in the reader). |
 | 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, last row: space or `=`/`-` by keyboard, click by mouse). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
 
 ### Keys at a glance
@@ -51,6 +52,8 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `s` | Summarize thread | `t` | Start a triage session |
 | `m` / `shift-u` | Mute / unsubscribe | `1`–`5` | Inbox · Waiting · Later · Done · Screener |
 | `cmd-,` | Settings | `?` | All shortcuts |
+| `g` | Group by thread on/off | `]` / `[` | Next / previous message in thread |
+| `right` / `left` | Expand / collapse thread | | |
 
 ## 🛠️ Development
 
