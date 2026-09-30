@@ -217,7 +217,8 @@ fn reader_tops(h: &mut Harness<'_>, ids: &[MessageId], focused: MessageId) -> Ve
             if id == focused {
                 h.bounds("reader-body").top()
             } else {
-                h.bounds(("reader-thread-msg", id as usize)).top()
+                let expanded = h.read(move |a| a.reader_expanded(id));
+                h.bounds((if expanded { "reader-thread-body" } else { "reader-thread-msg" }, id as usize)).top()
             }
         })
         .collect()
@@ -244,18 +245,27 @@ fn reader_renders_the_thread_chronologically_and_stepping_does_not_reorder(
     let body = h.bounds("reader-body");
     assert!(body.top() >= px(0.) && body.bottom() <= px(800.), "focused message is visible: {body:?}");
 
-    // `]` expands the next message in place and collapses the previous one; order is fixed.
+    // `]` expands the next message in place and collapses nothing; order is fixed.
     h.keys("]");
     assert_eq!(h.opened(), Some(6));
     let tops = reader_tops(&mut h, &ids, 6);
     assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after ]: {tops:?}");
-    h.bounds(("reader-thread-msg", 5usize));
+    assert!(h.read(|a| a.reader_expanded(5)), "the message left behind stays expanded");
+    h.bounds(("reader-thread-body", 5usize));
+    assert!(h.read(|a| a.reader_expanded(6)), "the target is expanded too");
 
     h.keys("[ [");
     assert_eq!(h.opened(), Some(4));
     let tops = reader_tops(&mut h, &ids, 4);
     assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after [: {tops:?}");
-    h.bounds(("reader-thread-msg", 6usize));
+    for id in [5u32, 6] {
+        assert!(h.read(move |a| a.reader_expanded(id)), "{id} stays expanded after stepping away");
+        h.bounds(("reader-thread-body", id as usize));
+    }
+    for id in [1u32, 2, 3] {
+        assert!(!h.read(move |a| a.reader_expanded(id)));
+        h.bounds(("reader-thread-msg", id as usize));
+    }
 }
 
 #[gpui_kit::gpui::test]

@@ -43,7 +43,7 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 - Expanded earlier message: the same header as the opened message (subject, sender and address, labels, recipient disclosure), then the body.
 - Multiple messages can be open at once. `shift-o` expands all, or collapses all when every message is already expanded.
 - Expanding or collapsing never moves surfaces above the toggled one, and there is no height animation (the demo glitched with one).
-- `]` / `[` open the next or previous message in the thread. The target expands in place, the previous one collapses back, and the reader scrolls so the newly opened message's top is visible (`ScrollHandle::scroll_to_top_of_item`). Opening a message from the list does the same.
+- `]` / `[` open the next or previous message in the thread. The target expands in place and the message left behind stays expanded (stepping never collapses anything; it goes through the same expansion state as clicking a line). The reader scrolls so the newly opened message's top is visible (`ScrollHandle::scroll_to_top_of_item`). Opening a message from the list does the same.
 - Expansion, recipient, and quoted-text disclosure are view state, not undo steps. They reset when the reader opens a different thread.
 
 ## Actions

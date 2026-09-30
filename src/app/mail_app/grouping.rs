@@ -202,7 +202,8 @@ impl MailApp {
         cx.notify();
     }
 
-    /// `]` / `[`: open the next/previous message of the current thread in date order.
+    /// `]` / `[`: open the next/previous message of the current thread in date order. The message
+    /// left behind and the target both end up expanded; stepping never collapses anything.
     pub(super) fn step_thread(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(from) = self.opened.or_else(|| self.cursor_id()) else {
             return;
@@ -213,6 +214,8 @@ impl MailApp {
         let order = threads::thread_order(self.mailbox.messages(), thread);
         match threads::step(&order, from, delta) {
             Some(target) => {
+                self.reader.expand(thread, from);
+                self.reader.expand(thread, target);
                 self.opened = Some(target);
                 self.focus_message(target, true);
                 self.scroll_to_cursor();

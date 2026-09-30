@@ -743,6 +743,12 @@ impl ReaderView {
         flip(&mut self.expanded, id);
     }
 
+    /// Expand `id` (no-op when it already is); never collapses anything.
+    pub fn expand(&mut self, thread: u32, id: MessageId) {
+        self.enter(thread);
+        self.expanded.insert(id);
+    }
+
     /// Expand every id, unless all are already expanded: then collapse them.
     pub fn toggle_all(&mut self, thread: u32, ids: &[MessageId]) {
         self.enter(thread);
