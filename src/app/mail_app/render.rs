@@ -8,9 +8,10 @@ impl Focusable for MailApp {
 
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.reconcile_tabs();
         let hint = self.hint_context();
         let in_session = self.in_session() || self.session_end.is_some();
-        if let Some(id) = self.opened {
+        if let Some(id) = self.opened() {
             self.read.insert(id);
         }
         let viewport = window.viewport_size();
@@ -144,6 +145,9 @@ impl Render for MailApp {
                     this.open_compose(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, _, cx| this.cycle_tab(1, cx)))
+            .on_action(cx.listener(|this, _: &PrevTab, _, cx| this.cycle_tab(-1, cx)))
             .on_action(cx.listener(|this, _: &CancelCompose, window, cx| {
                 if this.compose.is_some() {
                     this.close_modals(window, cx);

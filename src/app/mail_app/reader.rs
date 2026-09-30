@@ -7,6 +7,8 @@ use super::*;
 mod message;
 #[path = "reader_parts.rs"]
 mod parts;
+#[path = "reader_tabbar.rs"]
+mod tabbar;
 #[path = "reader_thread.rs"]
 mod thread;
 
@@ -18,8 +20,36 @@ const READER_MAX_W: f32 = 860.;
 const DOT_FULL: f32 = 27.;
 const DOT_COLLAPSED: f32 = thread::COLLAPSED_H / 2.;
 
+/// What the reader remembers per tabbed thread besides its disclosure state: the scroll position,
+/// and the message it last scrolled to (a different opened message triggers a reveal).
+#[derive(Default)]
+pub(super) struct ReaderPane {
+    scroll: ScrollHandle,
+    revealed: Option<MessageId>,
+}
+
 impl MailApp {
+    /// The reader: the tab bar (outside a triage session) above the opened thread.
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
+        let pane = self.render_reader_pane(cx);
+        if self.in_session() || self.session_end.is_some() || self.tabs.is_empty() {
+            return pane;
+        }
+        let stacked = self.panes.orientation() == PaneLayout::Stacked;
+        div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .when(!stacked, |d| d.h_full())
+            .when(stacked, |d| d.w_full())
+            .child(self.tab_bar(&Look::new(cx), cx))
+            .child(pane)
+            .into_any_element()
+    }
+
+    fn render_reader_pane(&self, cx: &Context<Self>) -> AnyElement {
         let t = theme::active(cx);
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
         let pane = div().flex_1().min_w_0().min_h_0().flex().flex_col().px_5().py_4()
@@ -32,8 +62,7 @@ impl MailApp {
                 .child(SessionCard::finished(handled, secs))
                 .into_any_element();
         }
-        let Some(msg) = self.opened.and_then(|id| self.mailbox.get(id)) else {
-            self.reader_revealed.set(None);
+        let Some(msg) = self.opened().and_then(|id| self.mailbox.get(id)) else {
             return pane
                 .items_center()
                 .justify_center()
@@ -79,9 +108,14 @@ impl MailApp {
         let summary = self.summary_shown();
         let lead = usize::from(summary.is_some()) + usize::from(title.is_some());
         let at = order.iter().position(|&id| id == msg.id).unwrap_or(0);
-        if self.reader_revealed.replace(Some(msg.id)) != Some(msg.id) {
-            self.reader_scroll.scroll_to_top_of_item(lead + at);
-        }
+        let scroll = {
+            let mut panes = self.reader_panes.borrow_mut();
+            let pane = panes.entry(msg.thread_id).or_default();
+            if pane.revealed.replace(msg.id) != Some(msg.id) {
+                pane.scroll.scroll_to_top_of_item(lead + at);
+            }
+            pane.scroll.clone()
+        };
 
         let column = |el: AnyElement| div().w_full().max_w(px(READER_MAX_W)).child(el);
         pane.gap_3()
@@ -91,7 +125,11 @@ impl MailApp {
             .child(
                 div()
                     .id("reader-scroll")
-                    .track_scroll(&self.reader_scroll)
+                    // A click anywhere in the thread makes the tab permanent.
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                        this.pin_active_tab(cx);
+                    }))
+                    .track_scroll(&scroll)
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()

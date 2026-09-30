@@ -96,8 +96,16 @@ impl MailApp {
         self.menu.as_ref().map(|m| m.panel.clone())
     }
 
+    /// The message shown in the reader: the session's current one during a session, nothing
+    /// on the session end card, otherwise the active tab's message.
     pub fn opened(&self) -> Option<MessageId> {
-        self.opened
+        if self.session.is_some() {
+            self.session_current()
+        } else if self.session_end.is_some() {
+            None
+        } else {
+            self.tabs.opened()
+        }
     }
 
     /// `Some("search: …")` while a search is active.
@@ -125,7 +133,7 @@ impl MailApp {
 
     /// Summary displayed for the opened thread, if any.
     pub fn summary_shown(&self) -> Option<ThreadSummary> {
-        let thread = self.opened.and_then(|id| self.mailbox.get(id))?.thread_id;
+        let thread = self.opened().and_then(|id| self.mailbox.get(id))?.thread_id;
         match &self.summary {
             Some((t, s)) if *t == thread => Some(s.clone()),
             _ => None,

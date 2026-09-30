@@ -28,6 +28,25 @@ impl Look {
         Self { t: theme::active(cx), mono: mono_font(cx) }
     }
 
+    /// The sender's monogram (initials in a bordered rounded square) at `size` px: the one
+    /// avatar the reader has, shared by the message header and the tabs.
+    pub fn monogram(&self, name: &str, email: &str, size: f32) -> Div {
+        div()
+            .w(px(size))
+            .h(px(size))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_md()
+            .border_1()
+            .border_color(self.t.border)
+            .font_family(self.mono.clone())
+            .text_size(px((size * 0.4).round()))
+            .text_color(self.t.text_muted)
+            .child(crate::reading::initials(name, email))
+    }
+
     /// One line of mono metadata text.
     pub fn mono(&self, text: impl Into<SharedString>, color: Hsla) -> Div {
         div().font_family(self.mono.clone()).text_size(px(11.)).text_color(color).child(text.into())

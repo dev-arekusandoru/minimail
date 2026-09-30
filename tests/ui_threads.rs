@@ -101,7 +101,7 @@ impl Harness<'_> {
         self.read(|a| a.cursor_message())
     }
     fn opened(&mut self) -> Option<MessageId> {
-        self.read(|a| a.opened)
+        self.read(|a| a.opened())
     }
     fn toast(&mut self) -> String {
         self.read(|a| a.toast.as_ref().map(|t| t.to_string()).unwrap_or_default())

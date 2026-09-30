@@ -141,7 +141,7 @@ impl MailApp {
             self.expanded.insert(thread_id);
         }
         if let Some(id) = self.cursor_id() {
-            self.opened = Some(id);
+            self.open_message(id, true);
         }
     }
 
@@ -205,7 +205,10 @@ impl MailApp {
     /// `]` / `[`: open the next/previous message of the current thread in date order. The message
     /// left behind and the target both end up expanded; stepping never collapses anything.
     pub(super) fn step_thread(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(from) = self.opened.or_else(|| self.cursor_id()) else {
+        if self.in_session() {
+            return;
+        }
+        let Some(from) = self.opened().or_else(|| self.cursor_id()) else {
             return;
         };
         let Some(thread) = self.mailbox.get(from).map(|m| m.thread_id) else {
@@ -216,7 +219,7 @@ impl MailApp {
             Some(target) => {
                 self.reader.expand(thread, from);
                 self.reader.expand(thread, target);
-                self.opened = Some(target);
+                self.open_message(target, false);
                 self.focus_message(target, true);
                 self.scroll_to_cursor();
             }
@@ -261,7 +264,7 @@ impl MailApp {
         });
         let visual = crate::app::row::RowVisual {
             cursor: ix == self.cursor_ix(),
-            open: self.opened.is_some_and(|id| ids.contains(&id)),
+            open: self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
             partial: selected_count > 0 && selected_count < ids.len(),
             unread,

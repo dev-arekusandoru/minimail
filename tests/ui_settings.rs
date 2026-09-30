@@ -38,6 +38,7 @@ fn panel(cx: &mut TestAppContext) -> PanelHarness<'_> {
             captured.borrow_mut().push(match event {
                 SettingsEvent::Changed(_, summaries) => format!("changed:{summaries}"),
                 SettingsEvent::Grouping(on) => format!("group:{on}"),
+                SettingsEvent::TabAvatars(on) => format!("tab-avatars:{on}"),
                 SettingsEvent::PreviewLines(n) => format!("preview:{n}"),
                 SettingsEvent::PaneLayout(o) => format!("layout:{}", o.label()),
                 SettingsEvent::FollowUp(timeout) => format!("followup:{timeout}"),
@@ -145,3 +146,21 @@ fn unblocking_a_sender_from_settings_is_one_undoable_step(cx: &mut TestAppContex
     );
 }
 
+
+#[gpui_kit::gpui::test]
+fn the_tab_avatar_row_turns_the_setting_off_and_back_on(cx: &mut TestAppContext) {
+    let mut h = harness::harness_with(
+        cx,
+        harness::mailbox(&[harness::msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]),
+    );
+    assert!(h.read(|a| a.tab_avatars), "on by default");
+    h.keys("cmd-,");
+    h.click(("settings-section", 1usize));
+    h.click("tab-avatars-row");
+    assert!(!h.read(|a| a.tab_avatars));
+    // The panel reopens showing the current value, so the next click turns it back on.
+    h.keys("escape cmd-,");
+    h.click(("settings-section", 1usize));
+    h.click("tab-avatars-row");
+    assert!(h.read(|a| a.tab_avatars));
+}

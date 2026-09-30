@@ -4,7 +4,7 @@
 use super::*;
 
 impl MailApp {
-    fn thread_of(&self, id: MessageId) -> Option<u32> {
+    pub(super) fn thread_of(&self, id: MessageId) -> Option<u32> {
         self.mailbox.get(id).map(|m| m.thread_id)
     }
 
@@ -12,6 +12,7 @@ impl MailApp {
     pub(super) fn toggle_reader_expanded(&mut self, id: MessageId, cx: &mut Context<Self>) {
         if let Some(thread) = self.thread_of(id) {
             self.reader.toggle_expanded(thread, id);
+            self.tabs.pin(thread);
             cx.notify();
         }
     }
@@ -19,7 +20,7 @@ impl MailApp {
     /// Expand every other message of the opened thread, or collapse them all when they are
     /// already all expanded.
     pub(super) fn toggle_thread_expansion(&mut self, cx: &mut Context<Self>) {
-        let Some(opened) = self.opened.and_then(|id| self.mailbox.get(id)) else {
+        let Some(opened) = self.opened().and_then(|id| self.mailbox.get(id)) else {
             return;
         };
         let thread = opened.thread_id;
@@ -28,6 +29,7 @@ impl MailApp {
             return;
         }
         self.reader.toggle_all(thread, &others);
+        self.tabs.pin(thread);
         cx.notify();
     }
 
@@ -63,7 +65,7 @@ impl MailApp {
 
     /// `v`: Reader mode for the opened message.
     pub(super) fn toggle_opened_reader_mode(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self.opened {
+        if let Some(id) = self.opened() {
             self.toggle_reader_mode(id, cx);
         }
     }

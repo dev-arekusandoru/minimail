@@ -36,6 +36,7 @@ gpui_kit::actions!(
 pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
     Grouping(bool),
+    TabAvatars(bool),
     PreviewLines(u8),
     PaneLayout(Orientation),
     /// New global follow-up timeout, in seconds (`mailbox.set_follow_up_timeout`).
@@ -67,6 +68,7 @@ enum SettingKey {
     Summaries,
     Theme,
     PaneLayout,
+    TabAvatars,
     Grouping,
     PreviewLines,
     FollowUp,
@@ -99,6 +101,7 @@ fn setting_spec(key: SettingKey) -> SettingSpec {
         SettingKey::Summaries => SettingSpec { section: Section::General, key, title: "Thread summaries", description: "Opt in to generated summaries above conversations.", control: ControlKind::Toggle },
         SettingKey::Theme => SettingSpec { section: Section::Appearance, key, title: "Theme", description: "Choose the color scheme used throughout the app.", control: ControlKind::Choice(THEMES_CONTROL) },
         SettingKey::PaneLayout => SettingSpec { section: Section::Appearance, key, title: "Pane layout", description: "Stack the message list and the reader side by side or one above the other.", control: ControlKind::Choice(PANE_OPTIONS) },
+        SettingKey::TabAvatars => SettingSpec { section: Section::Appearance, key, title: "Show sender avatar in tabs", description: "Show the sender's monogram as each reader tab's icon.", control: ControlKind::Toggle },
         SettingKey::Grouping => SettingSpec { section: Section::Inbox, key, title: "Group by thread", description: "Show one inbox row per conversation instead of per message.", control: ControlKind::Toggle },
         SettingKey::PreviewLines => SettingSpec { section: Section::Inbox, key, title: "Preview lines", description: "Snippet lines shown under each subject in the inbox.", control: ControlKind::Choice(PREVIEW_OPTIONS) },
         SettingKey::FollowUp => SettingSpec { section: Section::Inbox, key, title: "Follow-up after", description: "Wait for a reply before flagging.", control: ControlKind::Days { min: 1, max: 14 } },
@@ -117,6 +120,7 @@ fn setting_specs() -> impl Iterator<Item = SettingSpec> {
         setting_spec(SettingKey::Summaries),
         setting_spec(SettingKey::Theme),
         setting_spec(SettingKey::PaneLayout),
+        setting_spec(SettingKey::TabAvatars),
         setting_spec(SettingKey::Grouping),
         setting_spec(SettingKey::PreviewLines),
         setting_spec(SettingKey::FollowUp),
@@ -131,6 +135,7 @@ impl SettingSpec {
         match self.key {
             SettingKey::Summaries => if state.summaries { "on" } else { "off" }.into(),
             SettingKey::Theme => active_theme.to_owned(),
+            SettingKey::TabAvatars => if state.tab_avatars { "on" } else { "off" }.into(),
             SettingKey::Grouping => if state.group { "on" } else { "off" }.into(),
             SettingKey::PaneLayout => state.orientation.label().into(),
             SettingKey::PreviewLines => PREVIEW_OPTIONS[state.preview_lines.min(5) as usize].into(),
@@ -164,6 +169,11 @@ impl SettingSpec {
                 let next = state.orientation.toggled();
                 state.orientation = next;
                 cx.emit(SettingsEvent::PaneLayout(next));
+                cx.notify();
+            }
+            (SettingKey::TabAvatars, SettingChange::Toggle) => {
+                state.tab_avatars = !state.tab_avatars;
+                cx.emit(SettingsEvent::TabAvatars(state.tab_avatars));
                 cx.notify();
             }
             (SettingKey::Grouping, SettingChange::Toggle) => {
@@ -202,6 +212,7 @@ pub struct SettingsPanel {
     policy: JudgePolicy,
     summaries: bool,
     group: bool,
+    tab_avatars: bool,
     preview_lines: u8,
     orientation: Orientation,
     /// Blocked sender addresses, sorted; `Unblock` removes one and emits [`SettingsEvent::Unblock`].
@@ -241,6 +252,7 @@ impl SettingsPanel {
             policy,
             summaries,
             group,
+            tab_avatars: true,
             preview_lines,
             orientation,
             blocked: Vec::new(),
@@ -250,6 +262,12 @@ impl SettingsPanel {
             section: Section::Classifier,
             search: String::new(),
         }
+    }
+
+    /// Whether tabs show the sender's avatar (the row's initial value).
+    pub fn tab_avatars(mut self, on: bool) -> Self {
+        self.tab_avatars = on;
+        self
     }
 
     /// Seed the mailbox-backed rows: the blocked-sender list, the read-only unsubscribed list and
@@ -270,12 +288,13 @@ impl SettingsPanel {
     fn summary_row() -> usize { Self::classifier_rows() }
     fn theme_row() -> usize { Self::summary_row() + 1 }
     fn pane_row() -> usize { Self::summary_row() + 2 }
-    fn group_row() -> usize { Self::summary_row() + 3 }
-    fn preview_row() -> usize { Self::summary_row() + 4 }
-    fn follow_up_row() -> usize { Self::summary_row() + 5 }
-    fn blocked_row(index: usize) -> usize { Self::summary_row() + 6 + index }
+    fn tab_avatar_row() -> usize { Self::summary_row() + 3 }
+    fn group_row() -> usize { Self::summary_row() + 4 }
+    fn preview_row() -> usize { Self::summary_row() + 5 }
+    fn follow_up_row() -> usize { Self::summary_row() + 6 }
+    fn blocked_row(index: usize) -> usize { Self::summary_row() + 7 + index }
     /// Total rows of the schema-driven sections (the blocked list adds one row per sender).
-    fn rows() -> usize { Self::summary_row() + 6 }
+    fn rows() -> usize { Self::summary_row() + 7 }
 
     /// Step the follow-up timeout by `delta` days, clamped to `1..=14`; emits the new timeout.
     fn step_follow_up(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -325,6 +344,7 @@ impl SettingsPanel {
             value if value == Self::summary_row() => Some(SettingKey::Summaries),
             value if value == Self::theme_row() => Some(SettingKey::Theme),
             value if value == Self::pane_row() => Some(SettingKey::PaneLayout),
+            value if value == Self::tab_avatar_row() => Some(SettingKey::TabAvatars),
             value if value == Self::group_row() => Some(SettingKey::Grouping),
             value if value == Self::preview_row() => Some(SettingKey::PreviewLines),
             value if value == Self::follow_up_row() => Some(SettingKey::FollowUp),
@@ -369,9 +389,10 @@ impl SettingsPanel {
                 return index * 2 + 1;
             }
         }
-        let candidates: [(usize, &[&str]); 7] = [
+        let candidates: [(usize, &[&str]); 8] = [
             (Self::summary_row(), &["thread summaries", "opt in to generated summaries"]),
             (Self::theme_row(), &["theme", "appearance", "color scheme"]),
+            (Self::tab_avatar_row(), &["show sender avatar in tabs", "avatar", "monogram", "tab icon", "appearance"]),
             (Self::group_row(), &["group by thread", "inbox", "threads"]),
             (Self::preview_row(), &["preview lines", "message snippet", "inbox"]),
             (Self::follow_up_row(), &["follow-up after", "follow up", "wait for a response", "flag"]),
@@ -388,7 +409,7 @@ impl SettingsPanel {
         }
         let (start, count) = match self.section {
             Section::General => (Self::summary_row(), 1),
-            Section::Appearance => (Self::theme_row(), 2),
+            Section::Appearance => (Self::theme_row(), 3),
             Section::Inbox => (Self::group_row(), 3),
             Section::Blocked => (Self::blocked_row(0), self.blocked.len()),
             Section::Classifier => (0, QuestionKey::ALL.len() * 2),
@@ -434,6 +455,7 @@ fn setting_index(key: SettingKey) -> usize {
         SettingKey::Summaries => SettingsPanel::summary_row(),
         SettingKey::Theme => SettingsPanel::theme_row(),
         SettingKey::PaneLayout => SettingsPanel::pane_row(),
+        SettingKey::TabAvatars => SettingsPanel::tab_avatar_row(),
         SettingKey::Grouping => SettingsPanel::group_row(),
         SettingKey::PreviewLines => SettingsPanel::preview_row(),
         SettingKey::FollowUp => SettingsPanel::follow_up_row(),
@@ -503,6 +525,7 @@ fn render_clickable(
         SettingKey::Summaries => div().id("summaries-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::Theme => div().id("theme-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::PaneLayout => div().id("pane-layout-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
+        SettingKey::TabAvatars => div().id("tab-avatars-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::Grouping => div().id("group-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::PreviewLines => div().id("preview-lines-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
         SettingKey::FollowUp | SettingKey::Blocked(_) | SettingKey::Threshold(_) | SettingKey::Shortcuts => {

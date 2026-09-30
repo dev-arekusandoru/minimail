@@ -32,6 +32,7 @@ use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
+use crate::tabs::Tabs;
 use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
 
@@ -49,6 +50,7 @@ pub mod panes;
 mod reader;
 mod render;
 mod reader_state;
+mod reader_tabs;
 mod sidebar;
 mod titlebar;
 mod rows;
@@ -83,8 +85,11 @@ struct Session {
 pub struct MailApp {
     pub mailbox: Mailbox,
     pub triage: Triage,
-    /// Message shown in the reader pane.
-    pub opened: Option<MessageId>,
+    /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
+    /// (see [`MailApp::opened`]).
+    pub tabs: Tabs,
+    /// Show the sender's monogram as each tab's icon (settings).
+    pub tab_avatars: bool,
     pub palette: Option<Entity<CommandPalette>>,
     pub compose: Option<Entity<ComposeReply>>,
     pub help: bool,
@@ -145,10 +150,9 @@ pub struct MailApp {
     /// What `list_state` was last measured against, so a stale row height is re-measured.
     list_shape: Option<list::ListShape>,
     help_scroll: ScrollHandle,
-    /// Scroll state of the reader pane, so the opened message can be scrolled into view.
-    reader_scroll: ScrollHandle,
-    /// The message the reader last scrolled to; a different opened message triggers a reveal.
-    reader_revealed: std::cell::Cell<Option<MessageId>>,
+    /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
+    /// opened message can be scrolled into view.
+    reader_panes: RefCell<HashMap<u32, reader::ReaderPane>>,
     _modal_sub: Option<Subscription>,
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
@@ -183,7 +187,8 @@ impl MailApp {
         let mut app = Self {
             mailbox,
             triage: Triage::new(View::default()),
-            opened: None,
+            tabs: Tabs::default(),
+            tab_avatars: true,
             palette: None,
             compose: None,
             help: false,
@@ -222,8 +227,7 @@ impl MailApp {
             list_state: ListState::new(0, ListAlignment::Top, px(200.)),
             list_shape: None,
             help_scroll: ScrollHandle::new(),
-            reader_scroll: ScrollHandle::new(),
-            reader_revealed: std::cell::Cell::new(None),
+            reader_panes: RefCell::new(HashMap::new()),
             _modal_sub: None,
             menu: None,
             _menu_sub: None,

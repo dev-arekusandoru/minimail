@@ -70,6 +70,9 @@ impl MailApp {
                 // ids when they open.
                 MenuEvent::Run(action) => {
                     let target = this.menu.as_ref().and_then(|m| m.target.clone());
+                    if let Some(id) = target.as_ref().and_then(|ids| ids.first()) {
+                        this.pin_thread_of(*id);
+                    }
                     this.close_menu(window, cx);
                     this.menu_target = target;
                     window.dispatch_action(action.boxed_clone(), cx);

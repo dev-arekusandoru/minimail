@@ -17,7 +17,7 @@ impl MailApp {
             HintMode::NewSenders
         } else {
             match self.triage.selected().len() {
-                0 if self.opened.is_some() => HintMode::Reader,
+                0 if self.opened().is_some() => HintMode::Reader,
                 0 => HintMode::List,
                 n => HintMode::Selection(n),
             }
@@ -27,7 +27,7 @@ impl MailApp {
     /// The mode plus the facts about the focused message that decide which keys apply.
     pub fn hint_context(&self) -> HintContext {
         let mut ctx = HintContext::new(self.hint_mode());
-        let focused = self.opened.or_else(|| self.cursor_id());
+        let focused = self.opened().or_else(|| self.cursor_id());
         ctx.empty = focused.is_none();
         ctx.outside_inbox = !matches!(
             self.triage.view.location,
@@ -91,7 +91,7 @@ impl MailApp {
         });
         RowVisual {
             cursor: self.cursor_id() == Some(id),
-            open: self.opened == Some(id),
+            open: self.opened() == Some(id),
             selected: self.mode == ListMode::State && self.triage.is_selected(id),
             partial: false,
             unread,

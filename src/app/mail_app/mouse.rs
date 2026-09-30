@@ -41,7 +41,7 @@ impl MailApp {
             self.triage.clear_selection();
             self.cursor_to(ix);
             if let Some(id) = self.cursor_id() {
-                self.opened = Some(id);
+                self.open_message(id, event.click_count() >= 2);
             }
         }
         self.scroll_to_cursor();

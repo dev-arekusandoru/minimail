@@ -53,9 +53,6 @@ impl MailApp {
             let handled = s.handled;
             self.session = None;
             self.session_end = Some((handled, elapsed));
-            self.opened = None;
-        } else {
-            self.opened = self.session_current();
         }
     }
 
@@ -146,7 +143,6 @@ impl MailApp {
         self.triage.switch_view(view);
         self.row_cursor = 0;
         self.row_anchor = None;
-        self.opened = None;
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -288,7 +284,6 @@ impl MailApp {
         }
         self.mode = ListMode::State;
         self.triage.switch_view(View::default());
-        self.opened = ids.first().copied();
         self.session_end = None;
         self.session = Some(Session {
             ids,
@@ -346,7 +341,7 @@ impl MailApp {
         match StubSummarizer.summarize(&thread) {
             Ok(s) => {
                 self.summary = Some((msg.thread_id, s));
-                self.opened = Some(msg.id);
+                self.open_message(msg.id, false);
             }
             Err(e) => self.show_toast(format!("Summary failed: {e:?}"), window, cx),
         }

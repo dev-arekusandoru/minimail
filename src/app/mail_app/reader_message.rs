@@ -110,22 +110,7 @@ impl MailApp {
             .flex()
             .items_center()
             .gap_2()
-            .child(
-                div()
-                    .w(px(28.))
-                    .h(px(28.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(t.border)
-                    .font_family(look.mono.clone())
-                    .text_size(px(11.))
-                    .text_color(t.text_muted)
-                    .child(reading::initials(&m.from_name, &m.from_email)),
-            )
+            .child(look.monogram(&m.from_name, &m.from_email, 28.))
             .child(
                 div()
                     .flex_1()

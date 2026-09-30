@@ -28,7 +28,6 @@ impl MailApp {
         self.end_session();
         self.mode = ListMode::Search(q);
         self.alt_cursor = 0;
-        self.opened = None;
         cx.notify();
     }
 
@@ -56,7 +55,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.opened = Some(msg.id);
+        self.pin_message(msg.id);
         let compose = cx.new(|cx| {
             let mut c = ComposeReply::new(msg, window, cx);
             if let Some(body) = body {
@@ -176,6 +175,7 @@ impl MailApp {
                 window,
                 cx,
             )
+            .tab_avatars(self.tab_avatars)
             .mailbox_state(
                 self.mailbox.blocked(),
                 self.mailbox.unsubscribed().to_vec(),
@@ -189,6 +189,10 @@ impl MailApp {
                 SettingsEvent::Changed(policy, summaries) => {
                     this.policy = policy.clone();
                     this.summaries_enabled = *summaries;
+                    cx.notify();
+                }
+                SettingsEvent::TabAvatars(on) => {
+                    this.tab_avatars = *on;
                     cx.notify();
                 }
                 SettingsEvent::Grouping(on) => {
@@ -296,10 +300,8 @@ impl MailApp {
             if s.handled > 0 {
                 self.session_end = Some((s.handled, self.now() - s.started));
             }
-            self.opened = None;
         } else if self.session_end.is_some() {
             self.end_session();
-            self.opened = None;
         } else {
             self.triage.clear_selection();
         }
