@@ -1,11 +1,12 @@
-//! Mouse entry points of the root view: row clicks, checkboxes, suggestion badges and the
-//! toolbar. Buttons dispatch the same actions the keys do; row clicks reuse the cursor and
-//! selection primitives behind `j`/`k`/`shift-j`/`x`.
+//! Mouse entry points of the root view: row clicks, checkboxes, suggestion badges, the
+//! quiet header and the contextual action bar. Buttons dispatch the same actions the keys
+//! do; row clicks reuse the cursor and selection primitives behind `j`/`k`/`shift-j`/`x`.
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{ListMode, MailApp};
+use super::{BAR_H, HEADER_H, ListMode, MailApp, MenuKind, PaneLayout};
+use crate::model::TriageState;
 use crate::app::actions::*;
 use crate::app::ui::{button, run};
 
@@ -123,18 +124,13 @@ impl MailApp {
             .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)))
     }
 
-    /// Search box, global buttons and the message/selection action bar.
-    pub(super) fn render_toolbar(&self, cx: &Context<Self>) -> AnyElement {
+    /// The quiet header: search on the left, pane layout, Triage and the overflow menu
+    /// on the right. One row, no wrapping.
+    pub(super) fn render_header(&self, cx: &Context<Self>) -> AnyElement {
         let t = crate::theme::active(cx);
         let searching = matches!(self.mode, ListMode::Search(_));
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
-        let sep = || div().flex_none().w(px(1.)).h(px(14.)).bg(t.border);
-        let label = |text: &'static str| {
-            div().flex_none().text_size(px(11.)).text_color(t.text_muted).child(text)
-        };
-        let b = |id: &'static str, text: &'static str, tip: &str, key: &str| {
-            button(id, text, tip, key, cx)
-        };
+        let more_open = self.menu_is(MenuKind::Global);
 
         let search = div()
             .id("search-box")
@@ -156,60 +152,125 @@ impl MailApp {
             .child(div().text_color(t.text_muted).child("/"))
             .on_click(run(OpenSearch));
 
-        let top = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
-            .child(search)
-            .when(searching, |d| {
-                d.child(b("search-clear", "Clear search", "Leave search", "escape").on_click(run(ClearSelection)))
-            })
-            .child(sep())
-            .child(b("btn-palette", "Commands", "Command palette", "cmd-k").on_click(run(ToggleCommandPalette)))
-            .child(b("btn-session", "Triage session", "Start a triage session", "t").on_click(run(StartSession)))
-            .child(b("btn-undo", "Undo", "Undo (recalls an unsent reply first)", "u").on_click(run(Undo)))
-            .child(b("btn-classify", "Classify", "Classify visible mail again", "c").on_click(run(ClassifyVisible)))
-            .child(b("btn-rules", "Rules", "Sender rules", "shift-r").on_click(run(ToggleRules)))
-            .child(b("btn-settings", "Settings", "Settings", "cmd-,").on_click(run(ToggleSettings)))
-            .child(b("btn-help", "?", "All shortcuts", "?").on_click(run(ToggleHelp)));
-
-        let actions = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
-            .child(b("btn-done", "Done", "Mark done", "e").on_click(run(MarkDone)))
-            .child(b("btn-waiting", "Waiting", "Mark waiting", "w").on_click(run(MarkWaiting)))
-            .child(b("btn-inbox", "Inbox", "Move to inbox", "i").on_click(run(MoveToInbox)))
-            .child(b("btn-later", "Later…", "Later, with a return time", "l").on_click(run(OpenSnoozePicker)))
-            .child(b("btn-select", "Select", "Toggle select", "x").on_click(run(ToggleSelect)))
-            .child(sep())
-            .child(b("btn-reply", "Reply", "Reply", "r").on_click(run(Reply)))
-            .child(b("btn-summarize", "Summarize", "Summarize thread", "s").on_click(run(SummarizeThread)))
-            .child(b("btn-accept", "Accept AI", "Accept AI badges", "y").on_click(run(AcceptSuggestions)))
-            .child(b("btn-reject", "Reject AI", "Reject AI badges", "n").on_click(run(RejectSuggestions)))
-            .child(b("btn-mute", "Mute", "Mute thread", "m").on_click(run(MuteThread)))
-            .child(b("btn-unsubscribe", "Unsubscribe", "Unsubscribe from sender", "shift-u").on_click(run(Unsubscribe)))
-            .child(sep())
-            .child(label("All from sender:"))
-            .child(b("btn-sender-done", "Done", "Mark all from sender done", "shift-e").on_click(run(SenderDone)))
-            .child(b("btn-sender-waiting", "Waiting", "Mark all from sender waiting", "shift-w").on_click(run(SenderWaiting)))
-            .child(b("btn-sender-inbox", "Inbox", "Move all from sender to inbox", "shift-i").on_click(run(SenderInbox)))
-            .child(b("btn-sender-later", "Later", "Mark all from sender later", "shift-l").on_click(run(SenderLater)));
-
         div()
             .flex()
-            .flex_col()
             .flex_none()
-            .gap_1()
+            .items_center()
+            .gap_2()
+            .h(px(HEADER_H))
             .px_3()
-            .py_2()
             .bg(t.sidebar)
             .border_b_1()
             .border_color(t.border)
-            .child(top)
-            .child(actions)
+            .child(search)
+            .when(searching, |d| {
+                d.child(button("search-clear", "Clear", "Leave search", "escape", cx).on_click(run(ClearSelection)))
+            })
+            .child(div().flex_1())
+            .child(
+                button("btn-layout", self.layout_glyph(), "Stack the panes the other way", "alt-l", cx)
+                    .on_click(run(TogglePaneLayout)),
+            )
+            .child(button("btn-session", "Triage", "Start a triage session", "t", cx).on_click(run(StartSession)))
+            .child(
+                button("btn-more", "More ▾", "More actions", "", cx)
+                    .when(more_open, |b| b.bg(t.selection))
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
+            )
             .into_any_element()
+    }
+
+    /// Actions for whatever the list targets: the core triage buttons and the selection
+    /// count, then — only where they apply — the AI suggestions, Reply and the rest.
+    pub(super) fn render_context_bar(&self, cx: &Context<Self>) -> AnyElement {
+        let t = crate::theme::active(cx);
+        let selected = self.triage.selected().len();
+        let pending = self.pending_suggestions();
+        let more_open = self.menu_is(MenuKind::Message);
+
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .h(px(BAR_H))
+            .px_3()
+            .bg(t.sidebar)
+            .border_b_1()
+            .border_color(t.border)
+            .child(button("btn-done", "Done", "Mark done", "e", cx).on_click(run(MarkDone)))
+            .child(button("btn-waiting", "Waiting", "Mark waiting", "w", cx).on_click(run(MarkWaiting)))
+            .when(self.triage.view != TriageState::Inbox, |d| {
+                d.child(button("btn-inbox", "Inbox", "Move to inbox", "i", cx).on_click(run(MoveToInbox)))
+            })
+            .child(button("btn-later", "Later…", "Later, with a return time", "l", cx).on_click(run(OpenSnoozePicker)))
+            .when(selected > 0, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(t.accent)
+                        .child(format!("{selected} selected")),
+                )
+            })
+            .child(div().flex_1())
+            .when(pending > 0, |d| {
+                d.child(
+                    button("btn-accept", "Accept AI", "Accept the AI suggestions on this message", "y", cx)
+                        .on_click(run(AcceptSuggestions)),
+                )
+                .child(
+                    button("btn-reject", "Reject AI", "Reject the AI suggestions on this message", "n", cx)
+                        .on_click(run(RejectSuggestions)),
+                )
+            })
+            .when(self.opened.is_some(), |d| {
+                d.child(button("btn-reply", "Reply", "Reply to the open message", "r", cx).on_click(run(Reply)))
+            })
+            .child(
+                button("btn-message-more", "More ▾", "More actions for this message", "", cx)
+                    .when(more_open, |b| b.bg(t.selection))
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Message, window, cx))),
+            )
+            .into_any_element()
+    }
+
+    /// The popup menu layer: a backdrop that dismisses on a click, plus the open panel
+    /// tucked under the bar whose trigger opened it.
+    pub(super) fn render_menu(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let panel = self.menu_panel()?;
+        let top = if self.menu_is(MenuKind::Global) {
+            HEADER_H
+        } else {
+            HEADER_H + BAR_H
+        };
+        Some(
+            div()
+                .id("menu-backdrop")
+                .test_support()
+                .inset_0()
+                .occlude()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.close_menu(window, cx)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(top))
+                        .right(px(12.))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(panel),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Toolbar glyph for the pane layout button: what pressing it switches to.
+    pub(super) fn layout_glyph(&self) -> &'static str {
+        match self.panes.orientation() {
+            PaneLayout::SideBySide => "▤",
+            PaneLayout::Stacked => "▥",
+        }
     }
 }
