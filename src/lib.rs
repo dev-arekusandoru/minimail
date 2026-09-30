@@ -4,4 +4,6 @@ pub mod judge;
 pub mod model;
 pub mod rules;
 pub mod search;
+pub mod theme;
 pub mod summary;
+pub mod threads;

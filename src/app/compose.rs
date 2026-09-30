@@ -11,9 +11,7 @@ use gpui_kit::{
     *,
 };
 
-const BG: u32 = 0x16171a;
-const MUTED: u32 = 0x80838a;
-const TEXT: u32 = 0xd9dadd;
+use crate::theme::{self, Theme};
 
 pub enum ComposeEvent {
     Send { in_reply_to: MessageId, body: String },
@@ -76,17 +74,18 @@ impl Focusable for ComposeReply {
 
 impl EventEmitter<ComposeEvent> for ComposeReply {}
 
-fn header(name: &'static str, value: String) -> impl IntoElement {
+fn header(t: &Theme, name: &'static str, value: String) -> impl IntoElement {
     div()
         .flex()
         .gap_2()
         .text_sm()
-        .child(div().w(px(56.)).text_color(rgb(MUTED)).child(name))
-        .child(div().text_color(rgb(TEXT)).child(Label::new(value)))
+        .child(div().w(px(56.)).text_color(t.text_muted).child(name))
+        .child(div().text_color(t.text).child(Label::new(value)))
 }
 
 impl Render for ComposeReply {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme::active(cx);
         div()
             .key_context(COMPOSE_CONTEXT)
             .on_action(cx.listener(|this, _: &SendReply, _, cx| {
@@ -102,9 +101,9 @@ impl Render for ComposeReply {
             .flex_col()
             .gap_2()
             .p_4()
-            .bg(rgb(BG))
-            .child(header("To", self.to.clone()))
-            .child(header("Subject", self.subject.clone()))
+            .bg(t.background)
+            .child(header(&t, "To", self.to.clone()))
+            .child(header(&t, "Subject", self.subject.clone()))
             .child(gpui_kit::component::separator::Separator::horizontal())
             .child(div().flex_1().child(Textarea::new(&self.body).h_full()))
             .child(HintBar::new(HintMode::Compose))

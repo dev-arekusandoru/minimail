@@ -36,6 +36,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
+| 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, last row: space or `=`/`-` by keyboard, click by mouse). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
 
 ### Keys at a glance
 
@@ -67,16 +68,25 @@ The UI tests run headless. They drive the real views with simulated keystrokes a
 
 ```
 src/
-├── model.rs      # triage states, undo, snooze, screener, outbox (pure logic)
-├── judge.rs      # System 1 classifier interface + stub provider
+├── model/        # triage states, undo, snooze, screener, outbox (pure logic; split by concern)
+├── judge/        # System 1 classifier interface, stub provider, routing policy
 ├── summary.rs    # thread summarizer interface + stub
 ├── search.rs     # query parser
 ├── rules.rs      # rule suggestions
 ├── clock.rs      # injectable clock
+├── theme.rs      # semantic color tokens, theme registry, JSON loader, active theme
 └── app/          # GPUI views: main window, palette, compose, panels
 fixtures/         # mock mailbox + known contacts
+themes/           # built-in themes (JSON, embedded at build time)
 tests/            # integration and headless UI tests
 ```
+
+### Adding a theme
+
+A theme is a JSON file: `{ "name": "My Theme", "colors": { "<token>": "#rrggbb", … } }` with every token from `themes/one-dark-pro.json` (background, surface, sidebar, border, text, text_muted, accent, on_accent, selection, hover, spam, needs_reply, urgent, kind, state_*, success, warning, error, info).
+
+- **Built-in:** add `themes/<name>.json` and list it in `BUILTIN` in `src/theme.rs`.
+- **User:** put the file in `~/.config/mail-classifier/themes/`; it appears in the Settings picker. A theme with an existing name replaces it; an unknown theme name falls back to One Dark Pro.
 
 ## 🗺️ Roadmap
 
