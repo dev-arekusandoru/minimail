@@ -59,12 +59,20 @@ impl MailApp {
         row::thread_row_height(self.preview_lines)
     }
 
-    /// Cursor / open / checked state of the row for message `id`.
+    /// Cursor / open / selected / unread state of the row for message `id`.
     pub fn row_visual(&self, id: MessageId) -> RowVisual {
+        let unread = !self.read.contains(&id)
+            && self.mailbox.state_of(id) == Some(TriageState::Inbox);
+        let urgent = self.mailbox.tags(id).iter().any(|tag| {
+            matches!(tag, crate::model::Tag::Urgent(_))
+        });
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened == Some(id),
-            checked: self.mode == ListMode::State && self.triage.is_selected(id),
+            selected: self.mode == ListMode::State && self.triage.is_selected(id),
+            partial: false,
+            unread,
+            urgent,
         }
     }
 
@@ -104,18 +112,15 @@ impl MailApp {
             }
             _ => Self::clock_label(&msg.received, newest),
         };
-        let pending = self.mailbox.pending(msg.id);
-        let unread = !self.read.contains(&msg.id)
-            && self.mailbox.state_of(msg.id) == Some(TriageState::Inbox);
+        let unread = visual.unread;
         let (shown, hidden) = self.row_icons(msg.id, self.list_w);
-        let very_urgent = shown.contains(&Glyph::UrgentHigh);
+        let pending = self.mailbox.pending(msg.id);
         let emphasis = if unread || visual.open { FontWeight::SEMIBOLD } else { FontWeight::NORMAL };
         let lines = self.preview_lines;
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
         row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, &t)
-            .child(self.row_checkbox(ix, visual.checked, cx))
-            .child(row::status_icon(visual.open, unread, very_urgent, &t))
+            .child(self.row_selection_target(ix, cx))
             .child(
                 div()
                     .id(("row-body", ix_id))
@@ -140,7 +145,7 @@ impl MailApp {
                             .h(px(18.))
                             .truncate()
                             .text_color(t.text)
-                            .font_weight(if unread { FontWeight::MEDIUM } else { FontWeight::NORMAL })
+                            .font_weight(emphasis)
                             .child(msg.subject.clone()),
                     )
                     .when(lines > 0, |d| {

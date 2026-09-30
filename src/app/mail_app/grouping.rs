@@ -247,12 +247,23 @@ impl MailApp {
             .map(|m| (m.from_name.clone(), m.subject.clone(), Self::clock_label(&m.received, newest)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
+        let selected_count = ids.iter().filter(|id| self.triage.is_selected(**id)).count();
+        let unread = ids.iter().any(|id| {
+            !self.read.contains(id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
+        });
+        let urgent = unread && ids.iter().any(|id| {
+            !self.read.contains(id)
+                && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
+                && self.mailbox.tags(*id).iter().any(|tag| matches!(tag, crate::model::Tag::Urgent(_)))
+        });
         let visual = crate::app::row::RowVisual {
             cursor: ix == self.cursor_ix(),
-            open: !*expanded && self.opened.is_some_and(|id| ids.contains(&id)),
-            checked: self.row_selected(row),
+            open: self.opened.is_some_and(|id| ids.contains(&id)),
+            selected: selected_count == ids.len() && selected_count > 0,
+            partial: selected_count > 0 && selected_count < ids.len(),
+            unread,
+            urgent,
         };
-        let selected = visual.checked;
         let thread = *thread_id;
         let preview = row::thread_preview_lines(self.preview_lines);
         let snippet = latest.map(|m| crate::preview::snippet(&m.body)).unwrap_or_default();
@@ -263,7 +274,7 @@ impl MailApp {
             visual,
             &t,
         )
-            .child(self.row_checkbox(ix, selected, cx))
+            .child(self.row_selection_target(ix, cx))
             .child(
                 div()
                     .id(("thread-chevron", thread as usize))

@@ -1,9 +1,7 @@
 //! Shared look of a list row: geometry that depends on the preview setting, the panel width,
-//! and the cursor / open / checked visual states. Message rows and thread headers both use
-//! [`frame`] so the states read the same everywhere; each row sets its own height, derived
-//! from its content by [`message_row_height`] or [`thread_row_height`].
+//! and cursor / open / selection visual states.
+//! [`frame`] keeps those states consistent across message rows and thread headers.
 
-use crate::app::icons::{self, Glyph};
 use crate::theme::Theme;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
@@ -44,19 +42,44 @@ pub fn list_width(viewport: f32) -> f32 {
     (viewport * 0.42).clamp(360., 560.)
 }
 
-/// Which of the three independent row states apply.
+/// Which independent row states apply.
 ///
-/// - `cursor`: keyboard/mouse focus. Ring in the accent color plus the cursor background.
-/// - `open`: message shown in the reader. Persistent tint, solid accent bar on the left edge,
-///   open-envelope icon.
-/// - `checked`: ticked for a bulk action. Accent wash plus a filled checkbox.
-///
-/// Cursor and open on the same row combine: ring + bar + open tint.
+/// `cursor` is keyboard/mouse focus (ring + cursor background); `open` is shown in the
+/// reader with the same selected-bar treatment; `selected` marks bulk selection. Partial
+/// thread selection uses a dimmer bar; unread uses the unread or urgency color.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RowVisual {
     pub cursor: bool,
     pub open: bool,
-    pub checked: bool,
+    pub selected: bool,
+    pub partial: bool,
+    pub unread: bool,
+    pub urgent: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarState {
+    None,
+    Unread,
+    Urgent,
+    Selected,
+    Partial,
+}
+
+impl RowVisual {
+    pub fn bar_state(self) -> BarState {
+        if self.selected || self.open {
+            BarState::Selected
+        } else if self.partial {
+            BarState::Partial
+        } else if self.unread && self.urgent {
+            BarState::Urgent
+        } else if self.unread {
+            BarState::Unread
+        } else {
+            BarState::None
+        }
+    }
 }
 
 impl RowVisual {
@@ -74,14 +97,18 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Obs
         .flex()
         .items_center()
         .gap_2()
-        .px_2()
-        .text_size(px(13.))
+        .pl(px(10.))
+        .pr_2()
         .border_1()
-        .border_color(if v.cursor { t.accent.opacity(0.75) } else { transparent_black() })
-        .when(v.cursor && !v.open, |d| d.bg(t.row_cursor))
-        .when(v.open, |d| d.bg(t.row_open))
-        .when(v.checked, |d| d.bg(t.accent.opacity(0.16)))
-        .when(v.open, |d| {
+        .border_color(if v.cursor { t.selected.opacity(0.8) } else { transparent_black() })
+        .when(v.bar_state() != BarState::None, |d| {
+            let color = match v.bar_state() {
+                BarState::None => unreachable!(),
+                BarState::Unread => t.unread,
+                BarState::Urgent => t.urgent,
+                BarState::Selected => t.selected,
+                BarState::Partial => t.selected.opacity(0.45),
+            };
             d.child(
                 div()
                     .absolute()
@@ -89,23 +116,19 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &Theme) -> crate::app::ui::Obs
                     .top_0()
                     .bottom_0()
                     .w(px(3.))
-                    .bg(t.accent),
+                    .bg(color),
             )
         })
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover))
+        .when(v.cursor, |d| d.bg(t.row_cursor))
+        .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.selected.opacity(0.14)))
+        .hover(move |s| {
+            s.bg(if v.cursor {
+                t.row_cursor
+            } else if v.selected || v.open {
+                t.selected.opacity(0.14)
+            } else {
+                hover
+            })
+        })
 }
 
-/// Leading status slot: open envelope for the open row, closed envelope for unread mail
-/// (urgent-tinted when very urgent), empty otherwise.
-pub fn status_icon(open: bool, unread: bool, very_urgent: bool, t: &Theme) -> Div {
-    let slot = div().w(px(14.)).flex_none().flex().items_center().justify_center();
-    if open {
-        slot.child(icons::icon(Glyph::Open, t, 13.))
-    } else if unread {
-        let tint = if very_urgent { t.urgent } else { t.accent };
-        slot.child(icons::icon(Glyph::Unread, t, 13.).text_color(tint))
-    } else {
-        slot
-    }
-}

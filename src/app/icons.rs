@@ -17,8 +17,8 @@ use gpui_kit::*;
 gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
-        Mail, MailOpen, SquareCheck, ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt,
-        Newspaper, Bell, Tag, Sparkles, BellOff, UserPlus, Hourglass, AlarmClock, Paperclip
+        ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
+        BellOff, UserPlus, Hourglass, AlarmClock, Paperclip
     ]
 );
 
@@ -75,11 +75,6 @@ impl Token {
 /// One concept of the icon language.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Glyph {
-    // Row status (leading slot / checkbox), never in the right-hand cluster.
-    Unread,
-    Open,
-    Selected,
-    // Right-hand cluster.
     Suggestion,
     Spam,
     UrgentHigh,
@@ -128,10 +123,7 @@ const fn spec(
 }
 
 impl Glyph {
-    pub const ALL: [Glyph; 19] = [
-        Glyph::Unread,
-        Glyph::Open,
-        Glyph::Selected,
+    pub const ALL: [Glyph; 16] = [
         Glyph::Suggestion,
         Glyph::Spam,
         Glyph::UrgentHigh,
@@ -154,9 +146,6 @@ impl Glyph {
     pub const fn spec(self) -> Spec {
         use Token::*;
         match self {
-            Glyph::Unread => spec(IconName::Mail, Accent, "Unread", "Not opened yet; sender and subject are bold.", "Row state", 100, false),
-            Glyph::Open => spec(IconName::MailOpen, Accent, "Open", "Shown in the reader pane; the row keeps a tint and a bar on its left edge.", "Row state", 100, false),
-            Glyph::Selected => spec(IconName::SquareCheck, Accent, "Selected", "Checked for a bulk action (x, or click the checkbox).", "Row state", 100, false),
             Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
             Glyph::Spam => spec(IconName::ShieldAlert, Spam, "Spam", "Classified as spam.", "Classifier labels", 1, false),
             Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
@@ -335,6 +324,33 @@ pub fn cluster(
 
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &Theme) -> Div {
+    let row_states = [
+        ("Unread", t.unread, "Yellow bar; sender and subject are bold."),
+        ("Urgent unread", t.urgent, "Red bar; the urgency icon remains in the icon cluster."),
+        ("Selected / open", t.selected, "Blue bar; opening a message uses the same treatment as a one-item selection."),
+        ("Partial thread selection", t.selected.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
+    ];
+    let row_state_section = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(div().text_xs().text_color(t.accent).child("Row states"))
+        .children(row_states.into_iter().map(|(label, color, description)| {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_xs()
+                .child(div().w(px(3.)).h(px(12.)).bg(color))
+                .child(div().w(px(112.)).flex_none().text_color(t.text).child(label))
+                .child(div().flex_1().text_color(t.text_muted).child(description))
+        }))
+        .child(
+            div()
+                .text_xs()
+                .text_color(t.text_muted)
+                .child("Cursor: row_cursor background and outline. Click the left edge to select; cmd-click toggles and shift-click range-selects."),
+        );
     let sections = legend().into_iter().map(|(group, glyphs)| {
         div()
             .flex()
@@ -353,5 +369,5 @@ pub fn legend_view(t: &Theme) -> Div {
                     .child(div().flex_1().text_color(t.text_muted).child(s.description))
             }))
     });
-    div().flex().flex_col().gap_2().children(sections)
+    div().flex().flex_col().gap_2().child(row_state_section).children(sections)
 }

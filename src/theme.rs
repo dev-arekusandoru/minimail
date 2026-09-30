@@ -86,8 +86,10 @@ tokens! {
     hover,
     /// Background of the row under the keyboard cursor / mouse focus.
     row_cursor,
-    /// Persistent tint of the row whose message is open in the reader.
-    row_open,
+    /// Selection fill and bar.
+    selected,
+    /// Unread status bar.
+    unread,
     spam,
     needs_reply,
     urgent,

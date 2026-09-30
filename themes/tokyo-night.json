@@ -25,6 +25,7 @@
     "error": "#f7768e",
     "info": "#7aa2f7",
     "row_cursor": "#283457",
-    "row_open": "#1f3352"
+    "selected": "#7aa2f7",
+    "unread": "#e0af68"
   }
 }

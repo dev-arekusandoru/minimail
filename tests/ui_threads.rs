@@ -127,6 +127,8 @@ fn grouping_shows_one_row_per_thread_and_off_restores_messages(cx: &mut TestAppC
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0], Row::Single(4));
     assert!(matches!(&rows[1], Row::Header { ids, expanded: false, .. } if ids == &[3, 2, 1]));
+    let edge = h.bounds(("row-select", 1usize));
+    assert_eq!(edge.size.width, px(10.), "thread header exposes the same left-edge hit area");
     assert_eq!(h.read(|a| a.visible_ids()), vec![4, 3, 2, 1]);
     h.keys("j");
     assert_eq!(h.cursor(), Some(3), "header stands for its newest message");
