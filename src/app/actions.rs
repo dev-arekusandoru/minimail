@@ -93,6 +93,8 @@ pub const MAIL_CONTEXT: &str = "MailApp";
 /// Binding predicate for the list keymap: `MailApp` but not while a text input has focus
 /// (a focused kit `Input` sets context `Input`; bare-letter bindings would otherwise steal typing).
 const MAIL_BINDING: &str = "MailApp && !Input";
+/// Settings panel bare-key bindings: not while the search or a number input has focus.
+const SETTINGS_BINDING: &str = "SettingsPanel && !Input";
 /// Key context of the command palette.
 pub const PALETTE_CONTEXT: &str = "CommandPalette";
 /// Key context of the reader's find bar.
@@ -206,16 +208,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", DialogConfirm, Some("ChoiceDialog && !Input")),
         KeyBinding::new("escape", DialogCancel, Some(DIALOG_CONTEXT)),
         // Settings panel.
-        KeyBinding::new("j", SettingsNext, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("down", SettingsNext, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("k", SettingsPrev, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("up", SettingsPrev, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("space", SettingsToggleMode, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("enter", SettingsToggleMode, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("=", SettingsThresholdUp, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("-", SettingsThresholdDown, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("j", SettingsNext, Some(SETTINGS_BINDING)),
+        KeyBinding::new("down", SettingsNext, Some(SETTINGS_BINDING)),
+        KeyBinding::new("k", SettingsPrev, Some(SETTINGS_BINDING)),
+        KeyBinding::new("up", SettingsPrev, Some(SETTINGS_BINDING)),
+        KeyBinding::new("space", SettingsToggleMode, Some(SETTINGS_BINDING)),
+        KeyBinding::new("enter", SettingsToggleMode, Some(SETTINGS_BINDING)),
+        KeyBinding::new("=", SettingsThresholdUp, Some(SETTINGS_BINDING)),
+        KeyBinding::new("-", SettingsThresholdDown, Some(SETTINGS_BINDING)),
         KeyBinding::new("escape", SettingsClose, Some(SETTINGS_CONTEXT)),
-        KeyBinding::new("/", SettingsSearch, Some(SETTINGS_CONTEXT)),
+        KeyBinding::new("/", SettingsSearch, Some(SETTINGS_BINDING)),
         KeyBinding::new("ctrl-tab", SettingsSectionNext, Some(SETTINGS_CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", SettingsSectionPrev, Some(SETTINGS_CONTEXT)),
         // Menus.

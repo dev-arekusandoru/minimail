@@ -1,14 +1,24 @@
-//! Settings panel: declarative settings rows grouped into searchable sections.
+//! Settings panel: declarative settings rows grouped into searchable sections, drawn with
+//! gpui-kit widgets (Switch, dropdown Button, NumberInput, TabBar, GroupBox) and driven by the
+//! keyboard row cursor.
 
-use crate::app::overlay::FitViewport as _;
 use crate::app::mail_app::panes::Orientation;
-use crate::app::ui::{button, shortcut};
+use crate::app::overlay::FitViewport as _;
+use crate::app::ui::button;
 use crate::clock::{Timestamp, DAY};
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::theme;
 use gpui_kit::{
-    component::input::{Input, InputEvent, InputState},
-    component::scroll::ScrollableElement as _,
+    component::{
+        button::Button,
+        group_box::GroupBox,
+        input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
+        menu::{DropdownMenu as _, PopupMenuItem},
+        scroll::ScrollableElement as _,
+        switch::Switch,
+        tab::{Tab, TabBar},
+        Disableable as _, Sizable as _,
+    },
     prelude::FluentBuilder as _,
     *,
 };
@@ -47,10 +57,10 @@ pub enum SettingsEvent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Section { General, Appearance, Inbox, Blocked, Classifier, Shortcuts }
+enum Section { General, Appearance, Inbox, Blocked, Classifier }
 
 impl Section {
-    const ALL: [Self; 6] = [Self::General, Self::Appearance, Self::Inbox, Self::Blocked, Self::Classifier, Self::Shortcuts];
+    const ALL: [Self; 5] = [Self::General, Self::Appearance, Self::Inbox, Self::Blocked, Self::Classifier];
     fn label(self) -> &'static str {
         match self {
             Self::General => "General",
@@ -58,7 +68,6 @@ impl Section {
             Self::Inbox => "Inbox & Threads",
             Self::Blocked => "Blocked senders",
             Self::Classifier => "Classifier / AI",
-            Self::Shortcuts => "Keyboard / Shortcuts",
         }
     }
 }
@@ -76,11 +85,21 @@ enum SettingKey {
     Blocked(usize),
     Classifier(QuestionKey),
     Threshold(QuestionKey),
-    Shortcuts,
 }
 
 #[derive(Clone, Copy)]
-enum ControlKind { Toggle, Choice(&'static [&'static str]), Stepper { min: u8, max: u8, step: u8 }, Days { min: u8, max: u8 }, Action }
+enum ControlKind {
+    /// A [`Switch`].
+    Toggle,
+    /// A dropdown button over a fixed or registry-provided list of options.
+    Choice,
+    /// A percent [`NumberInput`] that steps by `step`.
+    Stepper { min: u8, max: u8, step: u8 },
+    /// The follow-up [`NumberInput`], whole days within `min..=max`.
+    Days { min: u8, max: u8 },
+    /// Drawn by [`render_blocked`], not by the schema-driven rows.
+    Action,
+}
 
 #[derive(Clone, Copy)]
 struct SettingSpec {
@@ -91,7 +110,6 @@ struct SettingSpec {
     control: ControlKind,
 }
 
-const THEMES_CONTROL: &[&str] = &["theme registry"];
 const PREVIEW_OPTIONS: &[&str] = &["Off", "1 line", "2 lines", "3 lines", "4 lines", "5 lines"];
 const CLASSIFIER_OPTIONS: &[&str] = &["Auto", "Review"];
 const PANE_OPTIONS: &[&str] = &["Side by side", "Stacked"];
@@ -99,16 +117,15 @@ const PANE_OPTIONS: &[&str] = &["Side by side", "Stacked"];
 fn setting_spec(key: SettingKey) -> SettingSpec {
     match key {
         SettingKey::Summaries => SettingSpec { section: Section::General, key, title: "Thread summaries", description: "Opt in to generated summaries above conversations.", control: ControlKind::Toggle },
-        SettingKey::Theme => SettingSpec { section: Section::Appearance, key, title: "Theme", description: "Choose the color scheme used throughout the app.", control: ControlKind::Choice(THEMES_CONTROL) },
-        SettingKey::PaneLayout => SettingSpec { section: Section::Appearance, key, title: "Pane layout", description: "Stack the message list and the reader side by side or one above the other.", control: ControlKind::Choice(PANE_OPTIONS) },
+        SettingKey::Theme => SettingSpec { section: Section::Appearance, key, title: "Theme", description: "Choose the color scheme used throughout the app.", control: ControlKind::Choice },
+        SettingKey::PaneLayout => SettingSpec { section: Section::Appearance, key, title: "Pane layout", description: "Stack the message list and the reader side by side or one above the other.", control: ControlKind::Choice },
         SettingKey::TabAvatars => SettingSpec { section: Section::Appearance, key, title: "Show sender avatar in tabs", description: "Show the sender's monogram as each reader tab's icon.", control: ControlKind::Toggle },
         SettingKey::Grouping => SettingSpec { section: Section::Inbox, key, title: "Group by thread", description: "Show one inbox row per conversation instead of per message.", control: ControlKind::Toggle },
-        SettingKey::PreviewLines => SettingSpec { section: Section::Inbox, key, title: "Preview lines", description: "Snippet lines shown under each subject in the inbox.", control: ControlKind::Choice(PREVIEW_OPTIONS) },
+        SettingKey::PreviewLines => SettingSpec { section: Section::Inbox, key, title: "Preview lines", description: "Snippet lines shown under each subject in the inbox.", control: ControlKind::Choice },
         SettingKey::FollowUp => SettingSpec { section: Section::Inbox, key, title: "Follow-up after", description: "Wait for a reply before flagging.", control: ControlKind::Days { min: 1, max: 14 } },
         SettingKey::Blocked(_) => SettingSpec { section: Section::Blocked, key, title: "Blocked sender", description: "Mail from this sender is blocked.", control: ControlKind::Action },
-        SettingKey::Classifier(question) => SettingSpec { section: Section::Classifier, key, title: question.label(), description: "Choose automatic handling or manual review.", control: ControlKind::Choice(CLASSIFIER_OPTIONS) },
+        SettingKey::Classifier(question) => SettingSpec { section: Section::Classifier, key, title: question.label(), description: "Choose automatic handling or manual review.", control: ControlKind::Choice },
         SettingKey::Threshold(_) => SettingSpec { section: Section::Classifier, key, title: "Confidence threshold", description: "Minimum confidence required for automatic handling.", control: ControlKind::Stepper { min: 0, max: 100, step: 5 } },
-        SettingKey::Shortcuts => SettingSpec { section: Section::Shortcuts, key, title: "Keyboard shortcuts", description: "Keyboard navigation and actions for this panel.", control: ControlKind::Action },
     }
 }
 
@@ -124,40 +141,15 @@ fn setting_specs() -> impl Iterator<Item = SettingSpec> {
         setting_spec(SettingKey::Grouping),
         setting_spec(SettingKey::PreviewLines),
         setting_spec(SettingKey::FollowUp),
-        setting_spec(SettingKey::Shortcuts),
     ])
 }
 
 enum SettingChange { Toggle, Step(f32) }
 
 impl SettingSpec {
-    fn get(self, state: &SettingsPanel, active_theme: &str) -> String {
-        match self.key {
-            SettingKey::Summaries => if state.summaries { "on" } else { "off" }.into(),
-            SettingKey::Theme => active_theme.to_owned(),
-            SettingKey::TabAvatars => if state.tab_avatars { "on" } else { "off" }.into(),
-            SettingKey::Grouping => if state.group { "on" } else { "off" }.into(),
-            SettingKey::PaneLayout => state.orientation.label().into(),
-            SettingKey::PreviewLines => PREVIEW_OPTIONS[state.preview_lines.min(5) as usize].into(),
-            SettingKey::FollowUp => if state.follow_up_days == 1 {
-                "1 day".into()
-            } else {
-                format!("{} days", state.follow_up_days)
-            },
-            SettingKey::Blocked(_) => String::new(),
-            SettingKey::Classifier(question) => match state.policy.mode(question) {
-                Mode::Auto { threshold } => format!("auto ≥ {threshold:.2}"),
-                Mode::Review => "review".into(),
-            },
-            SettingKey::Threshold(question) => match state.policy.mode(question) {
-                Mode::Auto { threshold } => format!("{:.0}%", threshold * 100.),
-                Mode::Review => "—".into(),
-            },
-            SettingKey::Shortcuts => String::new(),
-        }
-    }
-
     fn apply(self, state: &mut SettingsPanel, change: SettingChange, cx: &mut Context<SettingsPanel>) {
+        // Whatever the source (key, dropdown, stepper), the number inputs re-read the model.
+        state.resync = true;
         match (self.key, change) {
             (SettingKey::Summaries, SettingChange::Toggle) => {
                 state.summaries = !state.summaries;
@@ -209,6 +201,12 @@ impl SettingSpec {
 pub struct SettingsPanel {
     focus: FocusHandle,
     input: Entity<InputState>,
+    /// Number inputs: follow-up days, and one confidence threshold (percent) per question.
+    follow_up_input: Entity<InputState>,
+    threshold_inputs: Vec<Entity<InputState>>,
+    /// The model changed outside the number inputs' own typing: rewrite their text.
+    resync: bool,
+    _subscriptions: Vec<Subscription>,
     policy: JudgePolicy,
     summaries: bool,
     group: bool,
@@ -237,18 +235,61 @@ impl SettingsPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings…"));
-        cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
+        let mut subscriptions = vec![cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| match event {
+            InputEvent::Change => {
                 this.search = input.read(cx).value().to_string();
                 if !this.search.is_empty() {
                     this.cursor = this.first_search_match();
                 }
                 cx.notify();
             }
-        }).detach();
+            // Enter hands the keyboard from the search box to the filtered rows.
+            InputEvent::PressEnter { .. } => window.focus(&this.focus, cx),
+            _ => {}
+        })];
+        // No `.step(..)`: the inputs then emit `NumberInputEvent::Step` for +/-, the arrow keys and
+        // the stepper buttons, and the panel applies the step to its own model.
+        let number_input = |window: &mut Window, cx: &mut Context<Self>| {
+            cx.new(|cx| InputState::new(window, cx).placeholder("—"))
+        };
+        let follow_up_input = number_input(window, cx);
+        let threshold_inputs: Vec<_> = QuestionKey::ALL.iter().map(|_| number_input(window, cx)).collect();
+        let watched = std::iter::once((SettingKey::FollowUp, follow_up_input.clone())).chain(
+            QuestionKey::ALL.iter().zip(&threshold_inputs)
+                .map(|(question, input)| (SettingKey::Threshold(*question), input.clone())),
+        );
+        for (key, number) in watched {
+            subscriptions.push(cx.subscribe_in(&number, window, move |this, number, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    let text = number.read(cx).value().to_string();
+                    this.typed(key, &text, cx);
+                }
+                InputEvent::Blur => {
+                    this.resync = true;
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.resync = true;
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                }
+                InputEvent::Focus => {}
+            }));
+            subscriptions.push(cx.subscribe(&number, move |this, _, event: &NumberInputEvent, cx| {
+                let NumberInputEvent::Step(action) = event;
+                let sign = if *action == StepAction::Increment { 1. } else { -1. };
+                let delta = if matches!(key, SettingKey::FollowUp) { sign } else { sign * STEP };
+                this.cursor = setting_index(key);
+                setting_spec(key).apply(this, SettingChange::Step(delta), cx);
+            }));
+        }
         Self {
             focus: cx.focus_handle(),
             input,
+            follow_up_input,
+            threshold_inputs,
+            resync: true,
+            _subscriptions: subscriptions,
             policy,
             summaries,
             group,
@@ -281,6 +322,7 @@ impl SettingsPanel {
         self.blocked = blocked;
         self.unsubscribed = unsubscribed;
         self.follow_up_days = (follow_up_timeout.div_euclid(DAY)).clamp(1, 14) as u8;
+        self.resync = true;
         self
     }
 
@@ -293,18 +335,50 @@ impl SettingsPanel {
     fn preview_row() -> usize { Self::summary_row() + 5 }
     fn follow_up_row() -> usize { Self::summary_row() + 6 }
     fn blocked_row(index: usize) -> usize { Self::summary_row() + 7 + index }
-    /// Total rows of the schema-driven sections (the blocked list adds one row per sender).
-    fn rows() -> usize { Self::summary_row() + 7 }
 
-    /// Step the follow-up timeout by `delta` days, clamped to `1..=14`; emits the new timeout.
-    fn step_follow_up(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let next = (isize::from(self.follow_up_days) + delta).clamp(1, 14) as u8;
+    /// Set the follow-up timeout to `days` (clamped to `1..=14`); emits the new timeout on change.
+    fn set_follow_up(&mut self, days: i64, cx: &mut Context<Self>) {
+        let next = days.clamp(1, 14) as u8;
         if next == self.follow_up_days {
             return;
         }
         self.follow_up_days = next;
         cx.emit(SettingsEvent::FollowUp(i64::from(next) * DAY));
         cx.notify();
+    }
+
+    fn step_follow_up(&mut self, delta: isize, cx: &mut Context<Self>) {
+        self.set_follow_up(i64::from(self.follow_up_days) + delta as i64, cx);
+    }
+
+    /// Threshold of `question` as a whole percent, `None` while the question is in Review.
+    fn threshold_percent(&self, question: QuestionKey) -> Option<i64> {
+        match self.policy.mode(question) {
+            Mode::Auto { threshold } => Some((threshold * 100.).round() as i64),
+            Mode::Review => None,
+        }
+    }
+
+    /// A number input's text changed by typing: write a parsable, in-range value to the model.
+    /// Half-typed text (`""`, `"-"`) is left alone; an out-of-range number is clamped and shown.
+    fn typed(&mut self, key: SettingKey, text: &str, cx: &mut Context<Self>) {
+        let Ok(number) = text.trim().parse::<i64>() else { return };
+        match key {
+            SettingKey::FollowUp => {
+                self.resync |= !(1..=14).contains(&number);
+                self.set_follow_up(number, cx);
+            }
+            SettingKey::Threshold(question) => {
+                let Some(current) = self.threshold_percent(question) else { return };
+                let percent = number.clamp(0, 100);
+                self.resync |= percent != number;
+                if percent != current {
+                    self.policy.set_threshold(question, percent as f32 / 100.);
+                    self.changed(cx);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Remove blocked sender `index` from the local list and ask the app to unblock it.
@@ -366,17 +440,23 @@ impl SettingsPanel {
             setting_spec(key).apply(self, SettingChange::Step(delta), cx);
         }
     }
-    fn move_section(&mut self, delta: isize) {
-        let index = Section::ALL.iter().position(|section| *section == self.section).unwrap_or(0) as isize;
-        let next = (index + delta).rem_euclid(Section::ALL.len() as isize) as usize;
-        self.section = Section::ALL[next];
-        self.cursor = match self.section {
+
+    /// Show `section` with the cursor on its first row.
+    fn select_section(&mut self, section: Section) {
+        self.section = section;
+        self.cursor = match section {
             Section::General => Self::summary_row(),
             Section::Appearance => Self::theme_row(),
             Section::Inbox => Self::group_row(),
             Section::Blocked => Self::blocked_row(0),
-            Section::Classifier | Section::Shortcuts => 0,
+            Section::Classifier => 0,
         };
+    }
+
+    fn move_section(&mut self, delta: isize) {
+        let index = Section::ALL.iter().position(|section| *section == self.section).unwrap_or(0) as isize;
+        let next = (index + delta).rem_euclid(Section::ALL.len() as isize) as usize;
+        self.select_section(Section::ALL[next]);
     }
 
     fn first_search_match(&self) -> usize {
@@ -401,6 +481,7 @@ impl SettingsPanel {
         ];
         candidates.into_iter().find(|(_, terms)| query_matches(&query, terms)).map_or(0, |(index, _)| index)
     }
+
     fn move_row(&mut self, delta: isize) {
         if !self.search.is_empty() {
             let last = Self::blocked_row(self.blocked.len()).saturating_sub(1);
@@ -413,7 +494,6 @@ impl SettingsPanel {
             Section::Inbox => (Self::group_row(), 3),
             Section::Blocked => (Self::blocked_row(0), self.blocked.len()),
             Section::Classifier => (0, QuestionKey::ALL.len() * 2),
-            Section::Shortcuts => (0, 0),
         };
         if count > 0 {
             let end = start + count - 1;
@@ -421,8 +501,92 @@ impl SettingsPanel {
         }
     }
 
-}
+    /// Current state of a [`ControlKind::Toggle`] row.
+    fn is_on(&self, key: SettingKey) -> bool {
+        match key {
+            SettingKey::Summaries => self.summaries,
+            SettingKey::TabAvatars => self.tab_avatars,
+            SettingKey::Grouping => self.group,
+            _ => false,
+        }
+    }
 
+    /// Option labels and the current option of a [`ControlKind::Choice`] row.
+    fn choices(&self, key: SettingKey, cx: &App) -> (Vec<SharedString>, usize) {
+        let fixed = |options: &[&'static str], current: usize| {
+            (options.iter().map(|option| SharedString::from(*option)).collect(), current)
+        };
+        match key {
+            SettingKey::Theme => {
+                let names = theme::names(cx);
+                let current = theme::active(cx).name.clone();
+                let at = names.iter().position(|name| *name == current).unwrap_or(0);
+                (names.into_iter().map(SharedString::from).collect(), at)
+            }
+            SettingKey::PaneLayout => fixed(PANE_OPTIONS, usize::from(self.orientation == Orientation::Stacked)),
+            SettingKey::PreviewLines => fixed(PREVIEW_OPTIONS, usize::from(self.preview_lines.min(5))),
+            SettingKey::Classifier(question) => {
+                fixed(CLASSIFIER_OPTIONS, usize::from(matches!(self.policy.mode(question), Mode::Review)))
+            }
+            _ => (Vec::new(), 0),
+        }
+    }
+
+    /// Choose option `ix` of a [`ControlKind::Choice`] row (from its dropdown menu).
+    fn pick(&mut self, key: SettingKey, ix: usize, cx: &mut Context<Self>) {
+        self.cursor = setting_index(key);
+        match key {
+            SettingKey::Theme => {
+                if let Some(name) = theme::names(cx).get(ix) {
+                    theme::set_active(cx, name);
+                    self.changed(cx);
+                }
+            }
+            SettingKey::PaneLayout => {
+                let next = if ix == 1 { Orientation::Stacked } else { Orientation::SideBySide };
+                if next != self.orientation {
+                    self.orientation = next;
+                    cx.emit(SettingsEvent::PaneLayout(next));
+                    cx.notify();
+                }
+            }
+            SettingKey::PreviewLines => {
+                let lines = ix.min(5) as u8;
+                if lines != self.preview_lines {
+                    self.preview_lines = lines;
+                    cx.emit(SettingsEvent::PreviewLines(lines));
+                    cx.notify();
+                }
+            }
+            SettingKey::Classifier(question)
+                if matches!(self.policy.mode(question), Mode::Review) != (ix == 1) =>
+            {
+                self.resync = true;
+                self.policy.toggle_mode(question);
+                self.changed(cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Rewrite the number inputs' text from the model (after a key, menu or step change).
+    fn sync_numbers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.resync) {
+            return;
+        }
+        let days = self.follow_up_days.to_string();
+        self.follow_up_input.update(cx, |input, cx| input.set_value(days, window, cx));
+        for (question, input) in QuestionKey::ALL.iter().zip(&self.threshold_inputs) {
+            let text = self.threshold_percent(*question).map(|percent| percent.to_string()).unwrap_or_default();
+            input.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
+    }
+
+    fn number_focused(&self, window: &Window, cx: &App) -> bool {
+        std::iter::once(&self.follow_up_input).chain(&self.threshold_inputs)
+            .any(|input| input.focus_handle(cx).is_focused(window))
+    }
+}
 
 impl Focusable for SettingsPanel {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -432,20 +596,21 @@ impl Focusable for SettingsPanel {
 
 impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
+/// One settings row: title and description on the left, the `control` widget on the right.
 fn row(
     t: &theme::Theme,
     selected: bool,
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
-    value: String,
+    control: impl IntoElement,
 ) -> Div {
     let hover = t.hover;
-    div().flex().items_center().justify_between().px_2().py_1().rounded_sm().text_sm()
+    div().flex().items_center().justify_between().gap_2().px_2().py_1().rounded_sm().text_sm()
         .text_color(t.text).hover(move |el| el.bg(hover))
         .when(selected, |el| el.bg(t.selection).text_color(t.accent))
         .child(div().flex().flex_col().min_w_0().child(title.into())
             .child(div().text_xs().text_color(t.text_muted).truncate().child(description.into())))
-        .child(div().text_xs().text_color(t.text_muted).child(SharedString::from(value)))
+        .child(control)
 }
 
 fn setting_index(key: SettingKey) -> usize {
@@ -460,7 +625,22 @@ fn setting_index(key: SettingKey) -> usize {
         SettingKey::PreviewLines => SettingsPanel::preview_row(),
         SettingKey::FollowUp => SettingsPanel::follow_up_row(),
         SettingKey::Blocked(index) => SettingsPanel::blocked_row(index),
-        SettingKey::Shortcuts => SettingsPanel::rows(),
+    }
+}
+
+/// Element id of a setting's control (what headless tests click).
+fn setting_id(key: SettingKey) -> ElementId {
+    match key {
+        SettingKey::Classifier(question) => ("question-row", QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0)).into(),
+        SettingKey::Threshold(question) => ("threshold-row", QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0)).into(),
+        SettingKey::Summaries => "summaries-row".into(),
+        SettingKey::Theme => "theme-row".into(),
+        SettingKey::PaneLayout => "pane-layout-row".into(),
+        SettingKey::TabAvatars => "tab-avatars-row".into(),
+        SettingKey::Grouping => "group-row".into(),
+        SettingKey::PreviewLines => "preview-lines-row".into(),
+        SettingKey::FollowUp => "follow-up-row".into(),
+        SettingKey::Blocked(index) => ("blocked-row", index).into(),
     }
 }
 
@@ -470,152 +650,66 @@ fn render_setting(
     t: &theme::Theme,
     cx: &mut Context<SettingsPanel>,
 ) -> AnyElement {
-    match spec.control {
-        ControlKind::Toggle => render_toggle(spec, state, t, cx),
-        ControlKind::Choice(options) => render_choice(spec, options, state, t, cx),
-        ControlKind::Stepper { min, max, step } => render_stepper(spec, min, max, step, state, t, cx),
-        ControlKind::Days { min, max } => render_days(spec, min, max, state, t, cx),
-        ControlKind::Action => render_action(spec, t),
-    }
-}
-
-fn render_toggle(spec: SettingSpec, state: &SettingsPanel, t: &theme::Theme, cx: &mut Context<SettingsPanel>) -> AnyElement {
-    render_clickable(spec, state, t, cx)
-}
-
-fn render_choice(
-    spec: SettingSpec,
-    options: &'static [&'static str],
-    state: &SettingsPanel,
-    t: &theme::Theme,
-    cx: &mut Context<SettingsPanel>,
-) -> AnyElement {
-    let _declared_options = options;
-    let mut element = render_clickable(spec, state, t, cx);
-    if matches!(spec.key, SettingKey::Theme) {
-        element = div().flex().items_center().gap_2().child(element)
-            .child(div().flex().gap_1()
-                .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.surface))
-                .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.accent))
-                .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.selection)))
-            .into_any_element();
-    }
-    element
-}
-
-fn render_clickable(
-    spec: SettingSpec,
-    state: &SettingsPanel,
-    t: &theme::Theme,
-    cx: &mut Context<SettingsPanel>,
-) -> AnyElement {
-    let index = setting_index(spec.key);
-    let value = spec.get(state, &t.name);
+    let key = spec.key;
+    let index = setting_index(key);
     let selected = state.cursor == index;
-    let click = cx.listener(move |this, _, _, cx| {
-        this.cursor = index;
-        setting_spec(spec.key).apply(this, SettingChange::Toggle, cx);
-    });
-    let content = row(t, selected, spec.title, spec.description, value);
-    match spec.key {
-        SettingKey::Classifier(question) => {
-            let ix = QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0);
-            div().id(("question-row", ix)).cursor_pointer().on_click(click).child(content).test_support().into_any_element()
+    let weak = cx.entity().downgrade();
+    let id = setting_id(key);
+    match spec.control {
+        ControlKind::Toggle => {
+            // The Switch never takes focus: the row cursor keeps driving it from the keyboard.
+            let control = Switch::new(("settings-switch", index)).checked(state.is_on(key)).tab_stop(false)
+                .on_change(move |_, _, cx| {
+                    weak.update(cx, |this, cx| {
+                        this.cursor = index;
+                        setting_spec(key).apply(this, SettingChange::Toggle, cx);
+                    }).ok();
+                });
+            row(t, selected, spec.title, spec.description, div().id(id).test_support().child(control)).into_any_element()
         }
-        SettingKey::Summaries => div().id("summaries-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::Theme => div().id("theme-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::PaneLayout => div().id("pane-layout-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::TabAvatars => div().id("tab-avatars-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::Grouping => div().id("group-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::PreviewLines => div().id("preview-lines-row").cursor_pointer().on_click(click).child(content).test_support().into_any_element(),
-        SettingKey::FollowUp | SettingKey::Blocked(_) | SettingKey::Threshold(_) | SettingKey::Shortcuts => {
-            content.into_any_element()
+        ControlKind::Choice => {
+            let (options, current) = state.choices(key, cx);
+            let label = options.get(current).cloned().unwrap_or_default();
+            let menu = Button::new(("settings-choice", index)).label(label).xsmall().outline()
+                .dropdown_caret(true).border_color(t.border).text_color(t.text)
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                    options.iter().enumerate().fold(menu, |menu, (ix, option)| {
+                        let weak = weak.clone();
+                        menu.item(PopupMenuItem::new(option.clone()).checked(ix == current).on_click(move |_, _, cx| {
+                            weak.update(cx, |this, cx| this.pick(key, ix, cx)).ok();
+                        }))
+                    })
+                });
+            let control = div().flex().items_center().gap_2()
+                .when(matches!(key, SettingKey::Theme), |el| el.child(div().flex().gap_1()
+                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.surface))
+                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.accent))
+                    .child(div().w(px(9.)).h(px(9.)).rounded_full().bg(t.selection))))
+                .child(div().id(id).test_support().child(menu));
+            row(t, selected, spec.title, spec.description, control).into_any_element()
         }
+        ControlKind::Stepper { min, max, step } => {
+            let SettingKey::Threshold(question) = key else { return row(t, selected, spec.title, spec.description, div()).into_any_element() };
+            let at = QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0);
+            let auto = matches!(state.policy.mode(question), Mode::Auto { .. });
+            let description: SharedString = format!("{} · range {min}–{max}%, step {step}%", spec.description).into();
+            let control = div().id(id).test_support().w(px(112.))
+                .child(NumberInput::new(&state.threshold_inputs[at]).xsmall().disabled(!auto));
+            row(t, selected, spec.title, description, control).into_any_element()
+        }
+        ControlKind::Days { min, max } => {
+            let description: SharedString = format!("{} · {min}–{max} days", spec.description).into();
+            let control = div().id(id).test_support().w(px(112.))
+                .child(NumberInput::new(&state.follow_up_input).xsmall());
+            row(t, selected, spec.title, description, control).into_any_element()
+        }
+        ControlKind::Action => row(t, selected, spec.title, spec.description, div()).into_any_element(),
     }
-}
-
-fn render_stepper(
-    spec: SettingSpec,
-    min: u8,
-    max: u8,
-    step: u8,
-    state: &SettingsPanel,
-    t: &theme::Theme,
-    cx: &mut Context<SettingsPanel>,
-) -> AnyElement {
-    let SettingKey::Threshold(question) = spec.key else { return render_action(spec, t); };
-    let ix = QuestionKey::ALL.iter().position(|key| *key == question).unwrap_or(0);
-    let index = setting_index(spec.key);
-    let can_step = matches!(state.policy.mode(question), Mode::Auto { .. });
-    let description: SharedString = format!("{} · range {min}–{max}%, step {step}%", spec.description).into();
-    div().flex().items_center().gap_1()
-        .child(div().id(("threshold-row", ix)).test_support().flex_1()
-            .child(row(t, state.cursor == index, spec.title, description, spec.get(state, &t.name))))
-        .when(can_step, |el| el
-            .child(button(("threshold-down", ix), "−", "Lower threshold", "-", cx).on_click(cx.listener(move |this, _, _, cx| {
-                this.cursor = index;
-                setting_spec(spec.key).apply(this, SettingChange::Step(-(step as f32 / 100.)), cx);
-            })))
-            .child(button(("threshold-up", ix), "+", "Raise threshold", "=", cx).on_click(cx.listener(move |this, _, _, cx| {
-                this.cursor = index;
-                setting_spec(spec.key).apply(this, SettingChange::Step(step as f32 / 100.), cx);
-            }))))
-        .into_any_element()
-}
-
-/// `Follow-up after` stepper: `−`/`+` move one day within `min..=max`, clamped.
-fn render_days(
-    spec: SettingSpec,
-    min: u8,
-    max: u8,
-    state: &SettingsPanel,
-    t: &theme::Theme,
-    cx: &mut Context<SettingsPanel>,
-) -> AnyElement {
-    let index = setting_index(spec.key);
-    let description: SharedString = format!("{} · {min}–{max} days", spec.description).into();
-    div().flex().items_center().gap_1()
-        .child(div().id("follow-up-row").test_support().flex_1()
-            .child(row(t, state.cursor == index, spec.title, description, spec.get(state, &t.name))))
-        .child(button("follow-up-down", "−", "One day less", "-", cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.cursor = index;
-                setting_spec(spec.key).apply(this, SettingChange::Step(-1.), cx);
-            })))
-        .child(button("follow-up-up", "+", "One day more", "=", cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.cursor = index;
-                setting_spec(spec.key).apply(this, SettingChange::Step(1.), cx);
-            })))
-        .into_any_element()
-}
-
-/// One settings help line: `true` marks a keystroke, drawn as a keycap pill; `false` is text.
-fn legend(t: &theme::Theme, parts: &[(&str, bool)]) -> Div {
-    let mut row = div().flex().items_center().gap_1().text_sm().text_color(t.text_muted);
-    for &(text, is_key) in parts {
-        row = if is_key {
-            row.child(shortcut(text))
-        } else {
-            row.child(SharedString::from(text.to_owned()))
-        };
-    }
-    row
-}
-
-fn render_action(spec: SettingSpec, t: &theme::Theme) -> AnyElement {
-    div().id("settings-shortcuts").test_support().flex().flex_col().gap_1()
-        .child(row(t, false, spec.title, spec.description, String::new()))
-        .child(legend(t, &[("j", true), ("or", false), ("down", true), ("— next ·", false),
-            ("k", true), ("or", false), ("up", true), ("— previous", false)]))
-        .child(legend(t, &[("space", true), ("or", false), ("enter", true), ("— change value", false)]))
-        .child(legend(t, &[("ctrl-tab", true), ("or", false), ("ctrl-shift-tab", true), ("— switch section", false)]))
-        .child(legend(t, &[("/", true), ("— focus search ·", false), ("escape", true), ("— clear, then close", false)]))
-        .into_any_element()
 }
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_numbers(window, cx);
         let t = theme::active(cx);
         let query = self.search.trim().to_lowercase();
         let searching = !query.is_empty();
@@ -628,10 +722,18 @@ impl Render for SettingsPanel {
             Section::Blocked => blocked_match,
             _ => setting_specs().any(|spec| spec.section == *section && matches(&spec)),
         }).collect();
-        let sections: Vec<_> = visible.iter()
-            .map(|section| section_nav(*section, *section == self.section, cx).into_any_element()).collect();
-        let narrow_sections: Vec<_> = visible.iter()
-            .map(|section| section_nav(*section, *section == self.section, cx).into_any_element()).collect();
+        let selected_tab = visible.iter().position(|section| *section == self.section).unwrap_or(0);
+        let tabs = TabBar::new("settings-sections").underline().selected_index(selected_tab)
+            .children(visible.iter().map(|section| {
+                let section = *section;
+                let ix = Section::ALL.iter().position(|item| *item == section).unwrap_or(0);
+                Tab::new()
+                    .child(div().id(("settings-section", ix)).test_support().child(section.label()))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.select_section(section);
+                        cx.notify();
+                    }))
+            }));
         let filtered: Vec<_> = setting_specs().filter(|spec| {
             matches(spec) && (searching || spec.section == self.section)
         }).map(|spec| render_setting(spec, self, &t, cx)).collect();
@@ -640,7 +742,7 @@ impl Render for SettingsPanel {
         let no_results = searching
             && !blocked_match
             && !setting_specs().any(|spec| matches(&spec));
-        let narrow = f32::from(window.viewport_size().width) < 620.;
+        let title = if searching { "Search results" } else { self.section.label() };
         div().key_context(SETTINGS_CONTEXT).track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &SettingsNext, _, cx| { this.move_row(1); cx.notify(); }))
             .on_action(cx.listener(|this, _: &SettingsPrev, _, cx| { this.move_row(-1); cx.notify(); }))
@@ -655,6 +757,9 @@ impl Render for SettingsPanel {
                     this.search.clear();
                     this.input.update(cx, |input, cx| input.set_value("", window, cx));
                     cx.notify();
+                } else if this.number_focused(window, cx) {
+                    // Leave the number input for the row cursor; the next escape closes.
+                    window.focus(&this.focus, cx);
                 } else { cx.emit(SettingsEvent::Close); }
             }))
             .flex().flex_col().fit_viewport(window, 760.).p_3().gap_2()
@@ -662,18 +767,13 @@ impl Render for SettingsPanel {
             .child(div().flex().items_center().justify_between().child(div().text_sm().text_color(t.accent).child("Settings"))
                 .child(button("settings-close", "Close", "Close", "escape", cx).on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)))))
             .child(div().id("settings-search").test_support().child(Input::new(&self.input).appearance(false)))
-            .when(narrow, |el| el.child(div().flex().flex_row().gap_1().children(narrow_sections)))
-            .child(div().flex().gap_3().flex_1()
-                .when(!narrow, |el| el.child(div().w(px(190.)).flex().flex_col().gap_1().children(sections)))
-                .child(div().flex_1().flex().flex_col().gap_1().overflow_y_scrollbar()
-                    .child(div().text_sm().text_color(t.accent).child(if searching { "Search results" } else { self.section.label() }))
-                    .child(div().h(px(1.)).bg(t.border))
-                    .children(filtered)
-                    .when_some(blocked, |el, block| el.child(block))
-                    .when(no_results, |el| el.child(div().text_sm().text_color(t.text_muted).child("No matching settings"))))
-            )
+            .child(tabs)
+            .child(div().flex_1().flex().flex_col().gap_2().overflow_y_scrollbar()
+                .when(!filtered.is_empty(), |el| el.child(GroupBox::new().title(title).children(filtered)))
+                .when_some(blocked, |el, block| el.child(GroupBox::new().title(Section::Blocked.label()).child(block)))
+                .when(no_results, |el| el.child(div().text_sm().text_color(t.text_muted).child("No matching settings"))))
             .child(div().h(px(1.)).bg(t.border))
-            .child(div().text_xs().text_color(t.text_muted).child("↑/↓ or j/k move · Space change · Ctrl-Tab sections · / search · Esc clear / close"))
+            .child(div().text_xs().text_color(t.text_muted).child("↑/↓ or j/k move · Space change · Ctrl-Tab sections · / search (Enter: results) · Esc clear / close"))
     }
 }
 
@@ -695,7 +795,7 @@ fn render_blocked(state: &SettingsPanel, t: &theme::Theme, cx: &mut Context<Sett
         });
         list = list.child(
             div().id(("blocked-row", index)).test_support().flex().items_center().gap_2()
-                .child(div().flex_1().child(row(t, selected, email.clone(), "Blocked sender", String::new())))
+                .child(div().flex_1().child(row(t, selected, email.clone(), "Blocked sender", div())))
                 .child(button(("blocked-unblock", index), "Unblock", "Allow mail from this sender again", "", cx).on_click(unblock)),
         );
     }
@@ -719,23 +819,4 @@ fn render_blocked(state: &SettingsPanel, t: &theme::Theme, cx: &mut Context<Sett
 
 fn query_matches(query: &str, terms: &[&str]) -> bool {
     terms.iter().any(|term| term.to_lowercase().contains(query))
-}
-
-fn section_nav(section: Section, selected: bool, cx: &mut Context<SettingsPanel>) -> impl IntoElement {
-    let ix = Section::ALL.iter().position(|item| *item == section).unwrap_or(0);
-    div().id(("settings-section", ix)).px_2().py_2().rounded_sm().cursor_pointer().text_xs()
-        .when(selected, |el| el.bg(theme::active(cx).selection).text_color(theme::active(cx).accent))
-        .child(section.label())
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.section = section;
-            this.cursor = match section {
-                Section::General => SettingsPanel::summary_row(),
-                Section::Appearance => SettingsPanel::theme_row(),
-                Section::Inbox => SettingsPanel::group_row(),
-                Section::Blocked => SettingsPanel::blocked_row(0),
-                Section::Classifier | Section::Shortcuts => 0,
-            };
-            cx.notify();
-        }))
-        .test_support()
 }

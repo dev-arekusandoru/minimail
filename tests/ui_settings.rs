@@ -6,6 +6,7 @@ use gpui_kit::{
 };
 use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::mail_app::panes::Orientation;
+use mail_classifier::clock::DAY;
 use mail_classifier::{app::{actions::bind_keys, settings::{SettingsEvent, SettingsPanel}}, judge::JudgePolicy};
 
 #[path = "ui_ext/harness.rs"]
@@ -60,6 +61,11 @@ impl PanelHarness<'_> {
         self.cx.run_until_parked();
     }
 
+    fn keys(&mut self, keys: &str) {
+        self.cx.simulate_keystrokes(self.window, keys);
+        self.cx.run_until_parked();
+    }
+
     fn type_text(&mut self, text: &str) {
         self.cx.update_window(self.window, |_, window, cx| window.input(text, cx)).expect("window alive");
         self.cx.run_until_parked();
@@ -67,19 +73,25 @@ impl PanelHarness<'_> {
 }
 
 #[gpui_kit::gpui::test]
-fn switching_sections_and_changing_toggle_enum_and_stepper_emit_events(cx: &mut TestAppContext) {
+fn switches_and_keyboard_driven_dropdowns_emit_events(cx: &mut TestAppContext) {
     let mut h = panel(cx);
     h.click(("settings-section", 0usize));
     h.click("summaries-row");
-    h.click(("settings-section", 1usize));
-    h.click("theme-row");
     h.click(("settings-section", 2usize));
     h.click("group-row");
-    h.click("preview-lines-row");
+    // Section clicks leave the cursor on the first row; `j` then space cycles Preview lines 2 -> 3.
+    h.keys("j space");
     assert!(h.events.borrow().contains(&"changed:true".to_owned()));
     assert!(h.events.borrow().contains(&"group:true".to_owned()));
-    assert!(h.events.borrow().iter().any(|e| e.starts_with("preview:")));
-    assert!(h.events.borrow().iter().filter(|event| *event == "changed:true").count() >= 2);
+    assert!(h.events.borrow().contains(&"preview:3".to_owned()), "{:?}", h.events.borrow());
+}
+
+#[gpui_kit::gpui::test]
+fn space_toggles_the_switch_under_the_cursor(cx: &mut TestAppContext) {
+    let mut h = panel(cx);
+    h.click(("settings-section", 2usize));
+    h.keys("space space");
+    assert_eq!(*h.events.borrow(), ["group:true", "group:false"]);
 }
 
 #[gpui_kit::gpui::test]
@@ -87,8 +99,41 @@ fn search_filters_across_sections(cx: &mut TestAppContext) {
     let mut h = panel(cx);
     h.click("settings-search");
     h.type_text("theme");
-    h.click("theme-row");
+    // Enter leaves the search box with the match under the cursor; space cycles the theme.
+    h.keys("enter space");
     assert!(h.events.borrow().iter().any(|e| e.starts_with("changed:")));
+}
+
+#[gpui_kit::gpui::test]
+fn typing_in_search_does_not_trigger_row_keys(cx: &mut TestAppContext) {
+    let mut h = panel(cx);
+    h.click("settings-search");
+    h.keys("space = - j k");
+    assert!(h.events.borrow().is_empty(), "keys typed into search acted on rows: {:?}", h.events.borrow());
+}
+
+#[gpui_kit::gpui::test]
+fn number_input_buttons_step_the_follow_up_days(cx: &mut TestAppContext) {
+    let mut h = panel(cx);
+    h.click(("settings-section", 2usize));
+    h.click("decrement");
+    h.click("increment");
+    assert_eq!(*h.events.borrow(), [format!("followup:{}", 2 * DAY), format!("followup:{}", 3 * DAY)]);
+}
+
+#[gpui_kit::gpui::test]
+fn number_input_is_keyboard_steppable_and_escape_leaves_it_before_closing(cx: &mut TestAppContext) {
+    let mut h = panel(cx);
+    h.click(("settings-section", 2usize));
+    // Follow-up row: two rows below the first; `-` steps the number input down a day (3 -> 2).
+    h.keys("j j -");
+    assert_eq!(*h.events.borrow(), [format!("followup:{}", 2 * DAY)]);
+    // Clicking the number input focuses it: `-` is typed there, not applied to the row.
+    h.click("follow-up-row");
+    h.keys("escape");
+    assert!(!h.events.borrow().contains(&"close".to_owned()), "first escape leaves the input");
+    h.keys("escape");
+    assert_eq!(h.events.borrow().last().map(String::as_str), Some("close"));
 }
 
 #[gpui_kit::gpui::test]
@@ -111,8 +156,7 @@ fn lowering_follow_up_after_resurfaces_a_waiting_thread_on_tick(cx: &mut TestApp
     // Settings → Inbox & Threads → Follow-up after: 3 days down to 1.
     h.keys("cmd-,");
     h.click(("settings-section", 2usize));
-    h.click("follow-up-down");
-    h.click("follow-up-down");
+    h.keys("j j - -");
     assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), DAY, "the stepper writes the timeout");
     h.keys("escape");
 

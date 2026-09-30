@@ -248,9 +248,10 @@ fn settings_pane_layout_entry_switches_the_orientation(cx: &mut TestAppContext) 
     h.click("settings-search");
     h.cx.update_window(h.window, |_, window, cx| window.input("pane layout", cx)).expect("window alive");
     h.cx.run_until_parked();
-    h.click("pane-layout-row");
+    // Enter leaves the search box for the matching row; space flips the dropdown's value.
+    h.keys("enter space");
     assert_eq!(h.orientation(), Orientation::Stacked);
-    h.click("pane-layout-row");
+    h.keys("space");
     assert_eq!(h.orientation(), Orientation::SideBySide);
 }
 #[gpui_kit::gpui::test]
