@@ -281,7 +281,7 @@ impl MailApp {
                 .id(("thread-row", thread as usize))
                 .h(px(self.thread_row_h())),
             visual,
-            &t,
+            t,
         )
             .child(self.row_selection_target(ix, cx))
             .child(

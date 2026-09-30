@@ -1,4 +1,5 @@
 //! App-owned, Zed-style window titlebar.
+use gpui_kit::component::ActiveTheme as _;
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,9 +15,9 @@ use crate::app::ui::{icon_button, primary_button, run, shortcut};
 
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let t = crate::theme::active(cx);
+        let t = cx.theme().colors;
         let searching = matches!(self.mode, ListMode::Search(_));
-        let title_fg = if window.is_window_active() { t.text } else { t.text_muted };
+        let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
         let moving = window.use_keyed_state("titlebar-moving", cx, |_, _| Rc::new(Cell::new(false))).read(cx).clone();
         let view: SharedString = match &self.mode {
@@ -39,9 +40,9 @@ impl MailApp {
             .rounded_sm()
             .border_1()
             .border_color(t.border)
-            .bg(t.surface)
+            .bg(t.secondary)
             .text_size(px(11.))
-            .text_color(if searching { t.text } else { t.text_muted })
+            .text_color(if searching { t.foreground } else { t.muted_foreground })
             .cursor_pointer()
             .tooltip(move |window, cx| {
                 Tooltip::new(search_tip.clone())
@@ -58,7 +59,7 @@ impl MailApp {
                     })
                     .into_any_element()
             } else {
-                div().flex_none().text_color(t.text_muted).child("/").into_any_element()
+                div().flex_none().text_color(t.muted_foreground).child("/").into_any_element()
             })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(run(OpenSearch));
@@ -108,7 +109,7 @@ impl MailApp {
             .child(
                 no_drag(
                     icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx)
-                        .when(self.menu_is(MenuKind::Global), |b| b.bg(t.selection))
+                        .when(self.menu_is(MenuKind::Global), |b| b.bg(t.list_active))
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
                 )
                 .relative()

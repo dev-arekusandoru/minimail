@@ -124,7 +124,7 @@ impl RenderOnce for HintBar {
             .gap_3()
             .min_w_0()
             .overflow_hidden()
-            .children(shown.iter().map(|h| hint(&t, h.key, h.label, cx).into_any_element()));
+            .children(shown.iter().map(|h| hint(t, h.key, h.label, cx).into_any_element()));
         StatusBar::new()
             .h(px(28.))
             .px_3()
@@ -238,7 +238,7 @@ impl RenderOnce for HelpOverlay {
                     .child(div().flex().gap_4().children(columns))
                     .child(div().flex_none().child(Separator::horizontal()))
                     .child(div().text_sm().text_color(t.primary).child("Icon legend"))
-                    .child(crate::app::icons::legend_view(&t)),
+                    .child(crate::app::icons::legend_view(t)),
             )
     }
 }

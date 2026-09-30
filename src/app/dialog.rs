@@ -175,7 +175,7 @@ impl Render for ChoiceDialog {
                 )
             })
             .children(self.options.iter().enumerate().map(|(i, option)| {
-                Self::row(&t, option)
+                Self::row(t, option)
                     .id(("dialog-option", i))
                     .test_support()
                     .cursor_pointer()

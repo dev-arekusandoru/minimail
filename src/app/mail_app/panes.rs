@@ -6,6 +6,7 @@
 //! reader, `Stacked` puts it above. Every group owns a [`ResizableState`], and each
 //! orientation has its own, so each remembers its list size. Minimums are per-panel size
 //! ranges; the flex layout copes when a window is too small for all of them.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::*;
 
@@ -258,7 +259,7 @@ impl MailApp {
         window: &Window,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let orientation = self.panes.orientation;
         let stacked = orientation == Orientation::Stacked;
         let viewport = window.viewport_size();

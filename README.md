@@ -38,7 +38,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
 | 🧵 **Group by thread** | `ctrl-g` (or Settings, or the palette) shows one row per conversation: latest sender and subject, message count, participants and newest date, sized to that content (plus the newest snippet while previews are on). `right`/`enter` or the chevron expands it inline, `left` collapses. Actions (`e` `f` `d` `s` `i`, `x`, shift-selection) on a thread row apply to every message of that thread *in the current panel* and undo as one step; sender-wide actions and mute are unchanged. A thread split across panels shows only that panel's messages in each. `]` / `[` step through the thread in date order in either mode (also clickable in the reader). |
-| 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, Appearance page, Theme dropdown). Your own JSON themes load from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
+| 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, Appearance page, Theme dropdown). Your own gpui-kit theme files load (and hot-reload) from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
 | 👁️ **Readable rows** | Each row is sender + date on the first line, the **full-width subject** on the second, then an optional muted preview. In **All Inboxes** each row leads with its account's color dot; outgoing mail is labelled `To: <recipient>` instead of a sender. Triage tags (Needs Reply, Awaiting Reply, Follow Up, Reminder, New Sender, Possible Spam, Urgent, Kind) are distinct icons in their own theme colors, not text badges: at most a few fit (fewer in narrow windows) and the rest fold into a `+N` chip whose tooltip lists them. Hover any icon for its name; the `?` help ends with an **icon legend**. Unread mail is bold with a yellow left bar (red when urgent); an unaccepted AI suggestion is a single sparkle icon (click or `y` accepts, right-click or `n` rejects). Snoozed rows show their wake time as text (`↩ Mon 5 Oct 08:00`). |
 | 🔎 **Preview lines** | Settings → *Preview lines* (or palette → *Cycle preview lines*): Off, 1–5 lines of plain-text snippet under the subject, like Apple Mail. Quoted text (`>`), signatures and reply headers are stripped. Message rows are that tall, and a thread header sizes to its own content: one compact line (sender, subject, participants, count, date) plus at most two preview lines, so a collapsed thread reads as a group header rather than a full row. Rows are measured, not padded, and scrolling, `j`/`k` and the wheel follow the cursor. Default 2. |
 | 🗂️ **Reader tabs** | The reader has editor-style tabs, one per thread. Opening a message (click or `enter`) shows it in the *preview* tab (italic title), which the next open replaces; open a message of a thread that already has a tab and that tab comes forward instead. Double-click a tab, click inside the message, expand a collapsed thread message, reply, use a message **⋯** action, or press `enter` on the previewed message to pin it. `cmd-w` closes the active tab (or click its ×); `ctrl-tab` / `ctrl-shift-tab` and `cmd-shift-]` / `cmd-shift-[` switch, and the list cursor follows (selection untouched). Archiving, deleting or snoozing the last message of a previewed thread out of the list closes the preview; a pinned tab stays. Each tab keeps its own expansion, quoted-text, Reader-mode and scroll state; nothing persists across launches. A triage session hides the tab bar and shows only its message; the tabs come back afterwards. Each tab shows the monogram of the thread's latest sender (Settings → Appearance → *Show sender avatar in tabs*, on by default). |
@@ -164,7 +164,7 @@ src/
 ├── search.rs     # query parser
 ├── rules.rs      # rule suggestions
 ├── clock.rs      # injectable clock
-├── theme.rs      # semantic color tokens, theme registry, JSON loader, active theme
+├── theme.rs      # gpui-kit theme setup (built-ins, user dir watcher, apply) and derived triage colors
 ├── find.rs       # find in a thread: matching (case / word / regex) and the per-tab query state (pure)
 ├── tabs.rs       # reader tab state: preview and pinned tabs, one per thread (pure)
 ├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
@@ -185,10 +185,10 @@ The window's root view is gpui-kit's `Root` (`gpui_kit::open_window` wraps `Mail
 
 ### Adding a theme
 
-A theme is a JSON file: `{ "name": "My Theme", "colors": { "<token>": "#rrggbb", … } }` with every token from `themes/one-dark-pro.json` (background, surface, sidebar, border, text, text_muted, accent, on_accent, selection, hover, row_cursor, selected, unread, needs_reply, awaiting, follow_up, reminder, possible_spam, new_sender, urgent, kind, state_*, success, warning, error, info).
+Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": …, "mode": "dark", "colors": { "background": "#…", … } }] }`; see `themes/one-dark-pro.json` for a fully authored example). Views read colors from `cx.theme()`; any key a theme omits falls back to the kit's default palette, so author tabs, buttons, inputs, popover, list, sidebar, title/status bar and scrollbar keys too. Triage colors (state, unread, urgent, spam, …) are derived from the kit's `primary`, `danger`, `warning` and `base.red/yellow/magenta/cyan/blue` colors, so a theme restyles them through those keys.
 
 - **Built-in:** add `themes/<name>.json` and list it in `BUILTIN` in `src/theme.rs`.
-- **User:** put the file in `~/.config/mail-classifier/themes/`; it appears in the Settings picker. A theme with an existing name replaces it; an unknown theme name falls back to One Dark Pro.
+- **User:** put the file in `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`); it is watched and appears in the Settings picker. The kit does not replace a theme name that is already registered.
 
 ## 🗺️ Roadmap
 

@@ -272,7 +272,7 @@ impl Render for MenuPanel {
             .rounded_md()
             .when(nested, |d| {
                 d.child(
-                    row(&t, "‹ Back".into(), "left", false)
+                    row(t, "‹ Back".into(), "left", false)
                         .id("menu-back")
                         .test_support()
                         .cursor_pointer()
@@ -294,7 +294,7 @@ impl Render for MenuPanel {
                 let is_selected = selected == ix;
                 match item {
                     MenuItem::Separator => div().h(px(1.)).my_1().bg(border).into_any_element(),
-                    MenuItem::Action { id, label, key, action } => row(&t, label, key, is_selected)
+                    MenuItem::Action { id, label, key, action } => row(t, label, key, is_selected)
                         .id(id)
                         .test_support()
                         .cursor_pointer()
@@ -303,7 +303,7 @@ impl Render for MenuPanel {
                             cx.emit(MenuEvent::Run((action)()))
                         }))
                         .into_any_element(),
-                    MenuItem::Submenu { id, label, .. } => row(&t, label, "right", is_selected)
+                    MenuItem::Submenu { id, label, .. } => row(t, label, "right", is_selected)
                         .id(id)
                         .test_support()
                         .cursor_pointer()

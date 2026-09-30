@@ -1,5 +1,6 @@
 //! Mouse entry points for row clicks, left-edge selection, suggestion badges and the
 //! popup menu layer.
+use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::*;
 
@@ -95,8 +96,8 @@ impl MailApp {
 
     /// Full-height selection hit target at the row's left edge.
     pub(super) fn row_selection_target(&self, ix: usize, cx: &Context<Self>) -> crate::app::ui::Observable {
-        let t = crate::theme::active(cx);
-        let hover = t.selected.opacity(0.2);
+        let t = cx.theme();
+        let hover = t.primary.opacity(0.2);
         div()
             .id(("row-select", ix))
             .absolute()

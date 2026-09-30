@@ -108,8 +108,8 @@ impl Render for ComposeReply {
             .gap_2()
             .p_4()
             .bg(t.background)
-            .child(header(&t, "To", self.to.clone()))
-            .child(header(&t, "Subject", self.subject.clone()))
+            .child(header(t, "To", self.to.clone()))
+            .child(header(t, "Subject", self.subject.clone()))
             .child(gpui_kit::component::separator::Separator::horizontal())
             .child(div().flex_1().child(Textarea::new(&self.body).h_full()))
             .child(

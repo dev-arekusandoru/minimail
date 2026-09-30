@@ -1,3 +1,4 @@
+use gpui_kit::component::ActiveTheme as _;
 use super::*;
 
 impl Focusable for MailApp {
@@ -28,8 +29,8 @@ impl Render for MailApp {
             window.request_animation_frame();
         }
         let banner = self.pending_rule.clone();
-        let t = theme::active(cx);
-        let (bg, fg, muted) = (t.background, t.text, t.text_muted);
+        let t = cx.theme().colors;
+        let (bg, fg, muted) = (t.background, t.foreground, t.muted_foreground);
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -259,7 +260,7 @@ impl Render for MailApp {
                                 .py_1()
                                 .rounded_md()
                                 .bg(t.success)
-                                .text_color(t.on_accent)
+                                .text_color(t.primary_foreground)
                                 .text_size(px(12.))
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(text.clone())

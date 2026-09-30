@@ -159,7 +159,7 @@ impl Render for SnoozePicker {
             .child(div().px_2().text_xs().text_color(t.muted_foreground).child("Snooze until…"))
             .children(self.presets.iter().enumerate().map(|(i, (label, ts))| {
                 Self::row(
-                    &t,
+                    t,
                     &(i + 1).to_string(),
                     label.clone(),
                     SharedString::from(format_time(*ts)),
@@ -170,7 +170,7 @@ impl Render for SnoozePicker {
                 .on_click(cx.listener(move |this, _, _, cx| this.pick(i, cx)))
             }))
             .child(
-                Self::row(&t, "4", "Custom", "")
+                Self::row(t, "4", "Custom", "")
                     .id("snooze-custom")
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, window, cx| this.open_custom(window, cx))),

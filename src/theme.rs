@@ -10,7 +10,6 @@
 
 pub use gpui_kit::component::theme::ThemeColor;
 use gpui_kit::component::theme::{Theme as KitTheme, ThemeRegistry};
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{App, Hsla, SharedString, rgba};
 use std::path::PathBuf;
 
@@ -173,82 +172,4 @@ pub fn urgent(c: &ThemeColor) -> Hsla {
 
 pub fn kind(c: &ThemeColor) -> Hsla {
     c.cyan
-}
-
-// ---- TEMPORARY legacy adapter (removed once the layout files migrate) ----
-
-/// Old token names over the kit theme, for files not yet migrated.
-pub struct Theme {
-    pub colors: ThemeColor,
-    pub name: String,
-    pub text: Hsla,
-    pub text_muted: Hsla,
-    pub surface: Hsla,
-    pub accent: Hsla,
-    pub on_accent: Hsla,
-    pub selection: Hsla,
-    pub hover: Hsla,
-    pub row_cursor: Hsla,
-    pub selected: Hsla,
-    pub unread: Hsla,
-    pub needs_reply: Hsla,
-    pub awaiting: Hsla,
-    pub follow_up: Hsla,
-    pub reminder: Hsla,
-    pub possible_spam: Hsla,
-    pub new_sender: Hsla,
-    pub urgent: Hsla,
-    pub kind: Hsla,
-    pub state_inbox: Hsla,
-    pub state_snoozed: Hsla,
-    pub state_archived: Hsla,
-    pub state_filed: Hsla,
-    pub state_deleted: Hsla,
-    pub error: Hsla,
-}
-
-impl std::ops::Deref for Theme {
-    type Target = ThemeColor;
-    fn deref(&self) -> &ThemeColor {
-        &self.colors
-    }
-}
-
-impl Theme {
-    pub fn state_color(&self, state: crate::model::TriageState) -> Hsla {
-        state_color(&self.colors, state)
-    }
-}
-
-pub fn active(cx: &App) -> std::sync::Arc<Theme> {
-    let k = cx.theme();
-    let c = &k.colors;
-    std::sync::Arc::new(Theme {
-        colors: *c,
-        name: k.theme_name().to_string(),
-        text: c.foreground,
-        text_muted: c.muted_foreground,
-        surface: c.secondary,
-        accent: c.primary,
-        on_accent: c.primary_foreground,
-        selection: c.list_active,
-        hover: c.list_hover,
-        row_cursor: c.list_active,
-        selected: c.primary,
-        unread: unread(c),
-        needs_reply: needs_reply(c),
-        awaiting: awaiting(c),
-        follow_up: follow_up(c),
-        reminder: reminder(c),
-        possible_spam: spam(c),
-        new_sender: new_sender(c),
-        urgent: urgent(c),
-        kind: kind(c),
-        state_inbox: inbox(c),
-        state_snoozed: snoozed(c),
-        state_archived: archived(c),
-        state_filed: filed(c),
-        state_deleted: deleted(c),
-        error: c.danger,
-    })
 }

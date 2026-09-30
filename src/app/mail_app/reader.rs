@@ -1,5 +1,6 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
 //! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::*;
 
@@ -67,7 +68,7 @@ impl MailApp {
     }
 
     fn render_reader_pane(&self, cx: &Context<Self>) -> AnyElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
         let pane = div().flex_1().min_w_0().min_h_0().flex().flex_col().px_5().py_4()
             .when(!stacked, |d| d.h_full())
@@ -86,7 +87,7 @@ impl MailApp {
                 .flex()
                 .gap_1()
                 .text_size(px(13.))
-                .text_color(t.text_muted)
+                .text_color(t.muted_foreground)
                 .child("Click a message or press")
                 .child(crate::app::ui::shortcut("enter"))
                 .child("to open")
@@ -109,7 +110,7 @@ impl MailApp {
                 .filter_map(|id| self.mailbox.get(*id))
                 .enumerate()
                 .map(|(i, m)| {
-                    let color = t.state_color(m.state);
+                    let color = theme::state_color(t, m.state);
                     let (dot, el) = if m.id == msg.id {
                         (DOT_FULL, self.message_surface(m, Role::Opened, &look, cx))
                     } else if self.reader.is_expanded(m.thread_id, m.id) {
@@ -117,7 +118,7 @@ impl MailApp {
                     } else {
                         (DOT_COLLAPSED, self.collapsed_line(m, &newest, &look, cx))
                     };
-                    rail_row(&t, Some((dot, color)), i == 0, i + 1 == count, el)
+                    rail_row(t, Some((dot, color)), i == 0, i + 1 == count, el)
                         .into_any_element()
                 })
                 .collect();

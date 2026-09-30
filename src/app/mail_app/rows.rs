@@ -1,3 +1,4 @@
+use gpui_kit::component::ActiveTheme as _;
 use super::*;
 
 impl MailApp {
@@ -126,7 +127,7 @@ impl MailApp {
 
     /// Message row: sender + date, full-width subject, optional preview, icon cluster.
     pub(super) fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> crate::app::ui::Observable {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let mut visual = self.row_visual(msg.id);
         visual.cursor = ix == self.cursor_ix();
         let date = match self.mailbox.snoozed_until(msg.id) {
@@ -150,7 +151,7 @@ impl MailApp {
         } else {
             None
         };
-        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, &t)
+        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
                 div()
@@ -177,7 +178,7 @@ impl MailApp {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_color(t.text)
+                                    .text_color(t.foreground)
                                     .font_weight(emphasis)
                                     .child(sender),
                             ),
@@ -186,7 +187,7 @@ impl MailApp {
                         div()
                             .h(px(18.))
                             .truncate()
-                            .text_color(t.text)
+                            .text_color(t.foreground)
                             .font_weight(emphasis)
                             .child(msg.subject.clone()),
                     )
@@ -197,7 +198,7 @@ impl MailApp {
                                 .line_clamp(lines as usize)
                                 .text_size(px(12.))
                                 .line_height(px(row::PREVIEW_LINE_H))
-                                .text_color(t.text_muted)
+                                .text_color(t.muted_foreground)
                                 .child(crate::preview::snippet(&crate::reading::reader_text(msg))),
                         )
                     }),
@@ -218,7 +219,7 @@ impl MailApp {
                             .flex()
                             .items_center()
                             .text_size(px(11.))
-                            .text_color(if unread { t.accent } else { t.text_muted })
+                            .text_color(if unread { t.primary } else { t.muted_foreground })
                             .on_click(Self::row_click(ix, cx))
                             .child(date),
                     )
@@ -239,7 +240,7 @@ impl MailApp {
                                     }),
                                 )
                             })
-                            .child(icons::cluster(&shown, &hidden, &hint, &t, ix_id)),
+                            .child(icons::cluster(&shown, &hidden, &hint, t, ix_id)),
                     ),
             )
     }

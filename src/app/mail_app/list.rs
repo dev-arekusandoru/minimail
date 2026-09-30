@@ -1,9 +1,10 @@
+use gpui_kit::component::ActiveTheme as _;
 use super::*;
 use gpui_kit::assets::IconName;
 
 impl MailApp {
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let t = theme::active(cx);
+        let t = cx.theme().colors;
         let count = self.visible_ids().len();
         let row_count = if self.grouped() { self.rows().len() } else { count };
         self.sync_list(row_count, cx);
@@ -31,7 +32,7 @@ impl MailApp {
             .gap_2()
             .px_3()
             .text_size(px(11.))
-            .text_color(t.text_muted)
+            .text_color(t.muted_foreground)
             .child(div().flex_1().min_w_0().truncate().child(title))
             .when(selected > 0, |d| {
                 d.child(
@@ -40,7 +41,7 @@ impl MailApp {
                         .flex_none()
                         .items_center()
                         .gap_2()
-                        .text_color(t.accent)
+                        .text_color(t.primary)
                         .child(format!("{selected} selected"))
                         .child(
                             button("btn-clear-selection", "Clear", "Clear selection", "escape", cx)
@@ -61,7 +62,7 @@ impl MailApp {
                                 "",
                                 cx,
                             )
-                            .when(self.menu_is(MenuKind::Selection), |b| b.bg(t.selection))
+                            .when(self.menu_is(MenuKind::Selection), |b| b.bg(t.list_active))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_menu(MenuKind::Selection, window, cx)
                             })),
@@ -75,7 +76,7 @@ impl MailApp {
                     .flex_none()
                     .child(
                         button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
-                            .when(filter_active, |b| b.bg(t.selection).text_color(t.accent))
+                            .when(filter_active, |b| b.bg(t.list_active).text_color(t.primary))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_menu(MenuKind::Filter, window, cx)
                             })),
@@ -92,7 +93,7 @@ impl MailApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(t.text_muted)
+                .text_color(t.muted_foreground)
                 .child(empty)
                 .into_any_element()
         } else {

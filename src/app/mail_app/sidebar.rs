@@ -10,9 +10,10 @@
 //! folder (accent). Hover/active highlight is a rounded pill starting at the row's icon; the
 //! active one has a thin bar in the account's colour. A folder with children carries its fold
 //! caret at the right end of its pill.
+use gpui_kit::component::ActiveTheme as _;
 
 use super::*;
-use crate::theme::Theme;
+use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable as _};
 
@@ -121,19 +122,19 @@ impl MailApp {
     /// The sidebar: All Inboxes, then per account a foldable section (its locations and the
     /// top-level folders, whose subfolders form the only trees).
     pub(super) fn render_sidebar(&self, cx: &Context<Self>) -> AnyElement {
-        let t = theme::active(cx);
+        let t = cx.theme();
         let mailbox = &self.mailbox;
         let active = &self.triage.view.location;
         let chain = active_chain(mailbox, active);
         let all = Location::AllInboxes;
         let mut rows: Vec<AnyElement> =
-            vec![nav_row(&t, &all, "All Inboxes", active, Some(mailbox.count_at(&all)), t.accent)];
+            vec![nav_row(t, &all, "All Inboxes", active, Some(mailbox.count_at(&all)), t.primary)];
         for account in mailbox.accounts() {
-            let color = crate::theme::parse_color(&account.color).unwrap_or(t.accent);
+            let color = crate::theme::parse_color(&account.color).unwrap_or(t.primary);
             let folded = self.collapsed_accounts.contains(&account.id);
             let inbox = Location::Inbox(account.id.clone());
             rows.push(account_header(
-                &t,
+                t,
                 &account.id,
                 &account.name,
                 folded,
@@ -151,13 +152,13 @@ impl MailApp {
             ];
             for (loc, counted) in account_locations {
                 let count = counted.then(|| mailbox.count_at(&loc));
-                rows.push(nav_row(&t, &loc, location_name(&loc), active, count, color));
+                rows.push(nav_row(t, &loc, location_name(&loc), active, count, color));
             }
             let folders = mailbox.folders(&account.id);
             if folders.iter().any(|f| f.parent.is_none()) {
                 let mut through = Vec::new();
                 let ctx = FolderCtx {
-                    t: &t,
+                    t,
                     folders: &folders,
                     active,
                     chain: &chain,
@@ -223,22 +224,22 @@ struct Branch<'a> {
 }
 
 /// Icon and tint of a location.
-fn location_icon(loc: &Location, t: &Theme, open: bool) -> (IconName, Hsla) {
+fn location_icon(loc: &Location, t: &ThemeColor, open: bool) -> (IconName, Hsla) {
     match loc {
-        Location::AllInboxes => (IconName::Mails, t.accent),
-        Location::Inbox(_) => (IconName::Inbox, t.state_inbox),
-        Location::Snoozed(_) => (IconName::AlarmClock, t.state_snoozed),
+        Location::AllInboxes => (IconName::Mails, t.primary),
+        Location::Inbox(_) => (IconName::Inbox, theme::inbox(t)),
+        Location::Snoozed(_) => (IconName::AlarmClock, theme::snoozed(t)),
         Location::Sent(_) => (IconName::Send, t.info),
-        Location::Archive(_) => (IconName::Archive, t.state_archived),
-        Location::Trash(_) => (IconName::Trash, t.state_deleted),
-        Location::Folder(_) if open => (IconName::FolderOpen, t.state_filed),
-        Location::Folder(_) => (IconName::Folder, t.state_filed),
+        Location::Archive(_) => (IconName::Archive, theme::archived(t)),
+        Location::Trash(_) => (IconName::Trash, theme::deleted(t)),
+        Location::Folder(_) if open => (IconName::FolderOpen, theme::filed(t)),
+        Location::Folder(_) => (IconName::Folder, theme::filed(t)),
     }
 }
 
 /// Colour of a rail: faint grey, or the accent on the path to the active folder.
-fn rail_color(t: &Theme, hot: bool) -> Hsla {
-    if hot { t.accent } else { t.border.opacity(RAIL_FAINT) }
+fn rail_color(t: &ThemeColor, hot: bool) -> Hsla {
+    if hot { t.primary } else { t.border.opacity(RAIL_FAINT) }
 }
 
 /// A 1px vertical rail centred in a [`RAIL`]-wide column, inset `top`/`bottom` from the row edges.
@@ -265,7 +266,7 @@ fn stem(color: Hsla) -> Div {
 /// The rail columns left of a subfolder's pill: pass-through rails of its ancestors, then its
 /// own elbow. The wrapper is offset by [`PAD`] and the elbow column is [`PAD`] narrower, so
 /// each rail sits under its parent's icon centre and the pill starts where the stub ends.
-fn rails(t: &Theme, branch: Branch) -> Div {
+fn rails(t: &ThemeColor, branch: Branch) -> Div {
     let mid = ROW_H / 2.;
     let mut cols: Vec<AnyElement> = branch
         .through
@@ -297,7 +298,7 @@ fn rails(t: &Theme, branch: Branch) -> Div {
 
 /// The fold toggle of a folder with children, at the pill's right end; folding never opens
 /// the folder.
-fn caret_button(t: &Theme, id: FolderId, folded: bool) -> impl IntoElement {
+fn caret_button(t: &ThemeColor, id: FolderId, folded: bool) -> impl IntoElement {
     let icon = if folded { IconName::ChevronRight } else { IconName::ChevronDown };
     div()
         .id(("folder-caret", id as usize))
@@ -314,7 +315,7 @@ fn caret_button(t: &Theme, id: FolderId, folded: bool) -> impl IntoElement {
             cx.stop_propagation();
             window.dispatch_action(Box::new(ToggleFolder { folder: id }), cx);
         })
-        .child(Icon::new(icon).with_size(px(12.)).text_color(t.text_muted))
+        .child(Icon::new(icon).with_size(px(12.)).text_color(t.muted_foreground))
 }
 
 /// The icon slot of a row; `stem_down` continues the rail (in that colour) to the row's children.
@@ -328,22 +329,22 @@ fn icon_slot(icon: IconName, color: Hsla, stem_down: Option<Hsla>) -> Div {
 }
 
 /// A pill badge with a message count.
-fn count_badge(t: &Theme, n: usize, highlighted: bool) -> Div {
+fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Div {
     div()
         .flex_none()
         .ml_2()
         .px(px(6.))
         .rounded_full()
         .text_size(px(10.))
-        .when(highlighted, |d| d.bg(t.accent).text_color(t.on_accent))
-        .when(!highlighted, |d| d.bg(t.surface).text_color(t.text_muted))
+        .when(highlighted, |d| d.bg(t.primary).text_color(t.primary_foreground))
+        .when(!highlighted, |d| d.bg(t.secondary).text_color(t.muted_foreground))
         .child(n.to_string())
 }
 
 /// An account's section label: the name, a fold chevron that appears on hover, and — while
 /// folded — the account's Inbox count. Clicking anywhere on it folds the account.
 fn account_header(
-    t: &Theme,
+    t: &ThemeColor,
     id: &str,
     name: &str,
     folded: bool,
@@ -352,7 +353,7 @@ fn account_header(
     let group = SharedString::from(format!("account-head-{id}"));
     let chevron = if folded { IconName::ChevronRight } else { IconName::ChevronDown };
     let account = id.to_owned();
-    let hover = t.hover;
+    let hover = t.list_hover;
     div()
         .id(SharedString::from(format!("account-{id}")))
         .test_support()
@@ -375,7 +376,7 @@ fn account_header(
                 .truncate()
                 .text_size(px(10.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.text_muted)
+                .text_color(t.muted_foreground)
                 .child(SharedString::from(name.to_uppercase())),
         )
         .when(folded && inbox_count > 0, |d| {
@@ -391,7 +392,7 @@ fn account_header(
                 .ml_1()
                 .opacity(0.)
                 .group_hover(group, |s| s.opacity(1.))
-                .child(Icon::new(chevron).with_size(px(12.)).text_color(t.text_muted)),
+                .child(Icon::new(chevron).with_size(px(12.)).text_color(t.muted_foreground)),
         )
         .into_any_element()
 }
@@ -399,8 +400,8 @@ fn account_header(
 /// Clickable, rounded pill shared by every location row: highlight, navigation. Active rows
 /// get a soft fill and a thin `bar` at the left edge. Callers add `.test_support()` once the
 /// pill is complete and wrap it with [`row`].
-fn pill(t: &Theme, loc: &Location, is_active: bool, bar: Hsla) -> Stateful<Div> {
-    let hover = t.hover;
+fn pill(t: &ThemeColor, loc: &Location, is_active: bool, bar: Hsla) -> Stateful<Div> {
+    let hover = t.list_hover;
     div()
         .id(SharedString::from(location_id(loc)))
         .relative()
@@ -413,9 +414,9 @@ fn pill(t: &Theme, loc: &Location, is_active: bool, bar: Hsla) -> Stateful<Div> 
         .pr_2()
         .rounded_md()
         .text_size(px(12.))
-        .text_color(t.text)
+        .text_color(t.foreground)
         .when(is_active, |d| {
-            d.bg(t.selection).child(
+            d.bg(t.list_active).child(
                 div()
                     .absolute()
                     .left_0()
@@ -448,7 +449,7 @@ fn row_label(label: impl Into<SharedString>) -> Div {
 
 /// One root location row; counts show only when non-zero, `bar` tints the active marker.
 fn nav_row(
-    t: &Theme,
+    t: &ThemeColor,
     loc: &Location,
     label: &str,
     active: &Location,
@@ -467,7 +468,7 @@ fn nav_row(
 
 /// What [`fold_rows`] needs to draw one account's folder tree.
 struct FolderCtx<'a> {
-    t: &'a Theme,
+    t: &'a ThemeColor,
     folders: &'a [&'a Folder],
     active: &'a Location,
     /// Path from the top-level folder to the active folder (see [`active_chain`]).
