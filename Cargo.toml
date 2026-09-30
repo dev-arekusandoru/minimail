@@ -11,3 +11,6 @@ gpui-kit = "0.7"
 
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }
+
+[profile.dev]
+debug = "line-tables-only"
