@@ -1,4 +1,22 @@
+//! The reader pane: opened message, its thread below it on a state-colored rail, and the
+//! optional action toolbar. The pieces live in `reader_*.rs`.
+
 use super::*;
+
+#[path = "reader_message.rs"]
+mod message;
+#[path = "reader_parts.rs"]
+mod parts;
+#[path = "reader_thread.rs"]
+mod thread;
+
+use parts::{rail_row, Look, Role};
+
+/// Widest the reader column grows; longer lines stop being readable.
+const READER_MAX_W: f32 = 860.;
+/// Rail dot centers: inside a full surface (first line of its header) and in a collapsed line.
+const DOT_FULL: f32 = 27.;
+const DOT_COLLAPSED: f32 = thread::COLLAPSED_H / 2.;
 
 impl MailApp {
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
@@ -23,206 +41,89 @@ impl MailApp {
                 .child("Click a message or press enter to open")
                 .into_any_element();
         };
-        let state = self.mailbox.state_of(msg.id).unwrap_or_default();
+        let look = Look::new(self.reader_toolbar, cx);
         let newest = self.newest();
-        let new_sender = self.mailbox.is_new_sender(msg.id);
-        let spam = self.mailbox.tags(msg.id).contains(&Tag::PossibleSpam);
-        let mut thread: Vec<&Message> = self
-            .mailbox
-            .messages()
-            .iter()
-            .filter(|m| m.thread_id == msg.thread_id)
-            .collect();
-        thread.sort_by(|a, b| a.received.cmp(&b.received).then(a.id.cmp(&b.id)));
-        let thread_len = thread.len();
-        let pos = thread.iter().position(|m| m.id == msg.id).unwrap_or(0);
-        let summary = self.summary_shown();
+        let others = crate::reading::thread_others(self.mailbox.messages(), msg);
+
+        // A lone message has no thread, so no rail: the surface takes the full width.
+        let opened = self.message_surface(msg, Role::Opened, &look, cx);
+        let body = if others.is_empty() {
+            opened
+        } else {
+            // Rail rows, top to bottom: the opened message, the thread title, the other messages.
+            let mut rows: Vec<(Option<(f32, Hsla)>, AnyElement)> =
+                vec![(Some((DOT_FULL, t.state_color(msg.state))), opened)];
+            rows.push((None, self.thread_title(msg, &others, &look, cx)));
+            for other in others.iter().filter_map(|id| self.mailbox.get(*id)) {
+                let color = t.state_color(other.state);
+                rows.push(if self.reader.is_expanded(other.thread_id, other.id) {
+                    (
+                        Some((DOT_FULL, color)),
+                        self.message_surface(other, Role::Thread, &look, cx),
+                    )
+                } else {
+                    (
+                        Some((DOT_COLLAPSED, color)),
+                        self.collapsed_line(other, &newest, &look, cx),
+                    )
+                });
+            }
+            let count = rows.len();
+            div()
+                .flex()
+                .flex_col()
+                .children(
+                    rows.into_iter()
+                        .enumerate()
+                        .map(|(i, (dot, el))| rail_row(&t, dot, i == 0, i + 1 == count, el)),
+                )
+                .into_any_element()
+        };
+
         pane.gap_3()
             .when_some(self.session.as_ref(), |d, s| {
                 d.child(SessionCard::new(s.index + 1, s.ids.len()))
             })
+            .when(self.reader_toolbar, |d| d.child(self.reader_toolbar_row(&look, cx)))
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_size(px(16.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(msg.subject.clone()),
-                    )
-                    .child(
-                        div()
-                            .px_2()
-                            .rounded_sm()
-                            .text_xs()
-                            .border_1()
-                            .border_color(t.state_color(state).opacity(0.6))
-                            .text_color(t.state_color(state))
-                            .bg(t.state_color(state).opacity(0.12))
-                            .child(state.label()),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(t.text_muted)
-                    .child(format!(
-                        "{} <{}> → {} · {}",
-                        msg.from_name,
-                        msg.from_email,
-                        msg.to,
-                        Self::clock_label(&msg.received, &newest)
-                    )),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(button("btn-reader-archive", "Archive", "Archive", "e", cx).on_click(run(Archive)))
-                    .child(button("btn-reader-file", "File", "File into a folder", "f", cx).on_click(run(File)))
-                    .child(button("btn-reader-delete", "Delete", "Delete", "d", cx).on_click(run(Delete)))
-                    .child(
-                        button("btn-reader-snooze", "Snooze…", "Snooze", "s", cx)
-                            .on_click(run(OpenSnoozePicker)),
-                    ),
-            )
-            .when(new_sender, |d| {
-                d.child(
-                    div()
-                        .id("banner-new-sender")
-                        .test_support()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_3()
-                        .py_2()
-                        .rounded_sm()
-                        .bg(t.new_sender.opacity(0.15))
-                        .border_1()
-                        .border_color(t.new_sender.opacity(0.5))
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_xs()
-                                .child(format!("New sender · {} <{}>", msg.from_name, msg.from_email)),
-                        )
-                        .child(
-                            button("btn-banner-allow", "Allow", "Allow this sender", "a", cx)
-                                .on_click(run(AllowSender)),
-                        )
-                        .child(
-                            button("btn-banner-block", "Block", "Block this sender", "b", cx)
-                                .on_click(run(BlockSender)),
-                        ),
-                )
-            })
-            .when(spam, |d| {
-                d.child(
-                    div()
-                        .id("banner-possible-spam")
-                        .test_support()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_3()
-                        .py_2()
-                        .rounded_sm()
-                        .bg(t.possible_spam.opacity(0.15))
-                        .border_1()
-                        .border_color(t.possible_spam.opacity(0.5))
-                        .child(div().flex_1().text_xs().child("Possible spam"))
-                        .child(
-                            button(
-                                "btn-banner-spam-block",
-                                "Block & Delete",
-                                "Block the sender and delete this message",
-                                "",
-                                cx,
-                            )
-                            .on_click(run(SpamBlock)),
-                        )
-                        .child(
-                            button("btn-banner-spam-delete", "Delete", "Delete this message", "d", cx)
-                                .on_click(run(Delete)),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .id("reader-body")
+                    .id(("reader-scroll", msg.id as usize))
                     .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
-                    .text_size(px(13.))
-                    .line_height(relative(1.5))
-                    .child(msg.body.clone()),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .w_full()
+                            .max_w(px(READER_MAX_W))
+                            .when_some(self.summary_shown(), |d, s| d.child(SummaryCard::new(&s)))
+                            .child(body),
+                    ),
             )
-            .when_some(summary, |d, s| d.child(SummaryCard::new(&s)))
-            .when(thread_len > 1, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .pt_2()
-                        .border_t_1()
-                        .border_color(t.border)
-                        .flex()
-                        .flex_col()
-                        .text_size(px(12.))
-                        .child(
-                            div()
-                                .pb_1()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .text_size(px(11.))
-                                .text_color(t.text_muted)
-                                .child(format!("THREAD · {} of {thread_len}", pos + 1))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_1()
-                                        .child(
-                                            button("thread-prev", "‹ prev", "Previous message in thread", "[", cx)
-                                                .on_click(run(PrevInThread)),
-                                        )
-                                        .child(
-                                            button("thread-next", "next ›", "Next message in thread", "]", cx)
-                                                .on_click(run(NextInThread)),
-                                        ),
-                                ),
-                        )
-                        .children(thread.into_iter().map(|m| {
-                            let here = m.id == msg.id;
-                            div()
-                                .h(px(22.))
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .text_color(if here { t.text } else { t.text_muted })
-                                .child(
-                                    div()
-                                        .w(px(110.))
-                                        .flex_none()
-                                        .truncate()
-                                        .child(m.from_name.clone()),
-                                )
-                                .child(div().flex_1().truncate().child(m.body.replace('\n', " ")))
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_size(px(11.))
-                                        .child(Self::clock_label(&m.received, &newest)),
-                                )
-                        })),
-                )
-            })
             .into_any_element()
+    }
+
+    /// Thread-level actions with their keys. Only drawn when the toolbar setting is on; the
+    /// footer hint bar carries the same keys otherwise.
+    fn reader_toolbar_row(&self, look: &Look, cx: &Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(look.action_button("btn-reader-archive", "Archive", "Archive", "e", Archive, cx))
+            .child(look.action_button("btn-reader-file", "File", "File into a folder", "f", File, cx))
+            .child(look.action_button("btn-reader-delete", "Delete", "Delete", "d", Delete, cx))
+            .child(look.action_button(
+                "btn-reader-snooze",
+                "Snooze…",
+                "Snooze",
+                "s",
+                OpenSnoozePicker,
+                cx,
+            ))
     }
 }
 

@@ -1,0 +1,78 @@
+//! The other messages of the opened thread: the section title and the compact collapsed line.
+//! Expanded messages reuse `message_surface`.
+
+use super::super::*;
+use super::parts::Look;
+use crate::reading;
+
+/// Height of a collapsed thread line.
+pub(super) const COLLAPSED_H: f32 = 46.;
+
+impl MailApp {
+    /// `THREAD · N MORE` with the expand-all / collapse-all toggle (`shift-o`).
+    pub(super) fn thread_title(&self, opened: &Message, others: &[MessageId], look: &Look, cx: &Context<Self>) -> AnyElement {
+        let t = &look.t;
+        let all_open = others.iter().all(|id| self.reader.is_expanded(opened.thread_id, *id));
+        div()
+            .h(px(22.))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(look.mono(format!("THREAD · {} MORE", others.len()), t.text_muted))
+            .child(
+                look.link(
+                    "reader-thread-toggle",
+                    if all_open { "COLLAPSE ALL" } else { "EXPAND ALL" },
+                    Some("shift-o"),
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_thread_expansion(cx))),
+            )
+            .into_any_element()
+    }
+
+    /// One compact line: sender, muted snippet, paperclip when it has attachments, mono date.
+    pub(super) fn collapsed_line(&self, m: &Message, newest: &str, look: &Look, cx: &Context<Self>) -> AnyElement {
+        let t = &look.t;
+        let mid = m.id;
+        let hover = t.hover;
+        let text = reading::reader_text(m);
+        div()
+            .id(("reader-thread-msg", m.id as usize))
+            .test_support()
+            .h(px(COLLAPSED_H))
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .rounded_md()
+            .border_1()
+            .border_color(t.border)
+            .bg(t.surface)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
+            .child(
+                div()
+                    .w(px(150.))
+                    .flex_none()
+                    .truncate()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.text)
+                    .child(row::sender_label(m)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.))
+                    .text_color(t.text_muted)
+                    .child(crate::preview::snippet(&text)),
+            )
+            .when(!m.attachments.is_empty(), |d| d.child(icons::icon(Glyph::Attachment, t, 13.)))
+            .child(look.mono(Self::clock_label(&m.received, newest), t.text_muted).flex_none())
+            .into_any_element()
+    }
+}

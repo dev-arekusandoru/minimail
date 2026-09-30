@@ -15,6 +15,13 @@ pub fn run<A: Action + Clone>(
     move |_, window, cx| window.dispatch_action(Box::new(action.clone()), cx)
 }
 
+/// Monospace family for metadata. Read from the kit theme, which keeps it on a font the machine
+/// has (GPUI panics when it lays text out in a missing family).
+pub fn mono_font(cx: &App) -> SharedString {
+    cx.try_global::<gpui_kit::component::theme::Theme>()
+        .map_or_else(|| SharedString::from(".SystemUIFont"), |k| k.mono_font_family.clone())
+}
+
 /// Small clickable button. `key` (a shortcut such as `"shift-e"`, or empty) is shown in the
 /// tooltip. Attach behavior with `.on_click(..)` or [`run`].
 pub fn button(
