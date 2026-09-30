@@ -27,9 +27,10 @@ impl MailApp {
             .id("search-box")
             .test_support()
             .flex()
-            .flex_1()
+            .flex_none()
+            .w(px(260.))
+            .max_w_full()
             .min_w(px(80.))
-            .max_w(px(260.))
             .items_center()
             .justify_between()
             .h(px(22.))
@@ -43,42 +44,47 @@ impl MailApp {
             .cursor_pointer()
             .tooltip(move |window, cx| Tooltip::new(search_tip.clone()).build(window, cx))
             .child(search_text)
-            .child(div().text_color(t.text_muted).child("/"))
+            .child(if searching {
+                div()
+                    .id("search-clear")
+                    .test_support()
+                    .flex_none()
+                    .text_color(t.text_muted)
+                    .hover(|d| d.text_color(t.text))
+                    .child("×")
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(|event, window, cx| {
+                        run(ClearSelection)(event, window, cx);
+                        cx.stop_propagation();
+                    })
+                    .into_any_element()
+            } else {
+                div().flex_none().text_color(t.text_muted).child("/").into_any_element()
+            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(run(OpenSearch));
 
         let width = f32::from(window.viewport_size().width);
-        let titlebar = div()
-            .id("mail-titlebar")
-            .test_support()
+        let left = div().flex().flex_1().flex_basis(px(0.)).min_w_0().overflow_hidden().h_full().child(
+            div()
+                .flex()
+                .items_center()
+                .min_w_0()
+                .h_full()
+                .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
+                .pr_3()
+                .text_size(px(12.))
+                .text_color(title_fg)
+                .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(view)),
+        );
+        let right_buttons = div()
             .flex()
             .flex_none()
             .items_center()
             .gap_3()
-            .h(px(36.))
-            .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
+            .h_full()
+            .pl_3()
             .pr_3()
-            .bg(t.sidebar)
-            .border_b_1()
-            .border_color(t.border)
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(12.))
-                    .text_color(title_fg)
-                    .child("Mail")
-                    .child(div().text_color(t.text_muted).child("·"))
-                    .child(div().text_color(t.text_muted).child(view)),
-            )
-            .child(div().flex_1().h_full())
-            .child(search)
-            .when(searching, |d| {
-                d.child(no_drag(button("search-clear", "×", "Leave search", "escape", cx).on_click(run(ClearSelection))))
-            })
-            .child(div().flex_1().h_full())
             .child(no_drag(button("btn-palette", "Commands", "Command palette", "cmd-k", cx).on_click(run(ToggleCommandPalette))))
             .child(no_drag(button("btn-undo", "Undo", "Undo", "u", cx).on_click(run(Undo))))
             .when(width >= 760., |d| {
@@ -101,6 +107,30 @@ impl MailApp {
                         .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
                 ))
             });
+        let right = div()
+            .flex()
+            .flex_1()
+            .flex_basis(px(0.))
+            .min_w_0()
+            .overflow_hidden()
+            .justify_end()
+            .h_full()
+            .child(right_buttons);
+        // Left and right regions share the leftover width equally (flex-basis 0), so the fixed-size
+        // search box between them is always centered in the bar.
+        let titlebar = div()
+            .id("mail-titlebar")
+            .test_support()
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(px(36.))
+            .bg(t.sidebar)
+            .border_b_1()
+            .border_color(t.border)
+            .child(left)
+            .child(search)
+            .child(right);
         drag_region(titlebar, &moving).into_any_element()
     }
 }

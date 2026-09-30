@@ -316,3 +316,30 @@ fn session_button_starts_a_session(cx: &mut TestAppContext) {
     h.click("session-end");
     assert!(h.read(|a| a.session_progress()).is_none());
 }
+
+#[gpui_kit::gpui::test]
+fn titlebar_search_box_stays_centered_while_searching_and_resizing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    for width in [1400., 900.] {
+        h.cx.simulate_window_resize(h.window, size(px(width), px(900.)));
+        h.cx.run_until_parked();
+        for searching in [false, true] {
+            if searching {
+                h.keys("/");
+                h.keys("i n b o x");
+                h.keys("enter");
+                assert!(h.has("search-clear"), "clear button lives inside the search box");
+            }
+            let b = h
+                .cx
+                .update_window(h.window, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.find("search-box").bounds()
+                })
+                .expect("window alive");
+            let center = f32::from(b.origin.x + b.size.width / 2.);
+            assert!((center - width / 2.).abs() < 0.5, "width {width}, searching {searching}: center {center}");
+        }
+        h.keys("escape");
+    }
+}
