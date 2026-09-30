@@ -1,5 +1,5 @@
-//! Mouse entry points for row clicks, left-edge selection, suggestion badges, the quiet
-//! header and the contextual action bar.
+//! Mouse entry points for row clicks, left-edge selection, suggestion badges and
+//! the contextual action bar.
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -120,62 +120,6 @@ impl MailApp {
             .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)))
     }
 
-    /// The quiet header: search on the left, pane layout, Triage and the overflow menu
-    /// on the right. One row, no wrapping.
-    pub(super) fn render_header(&self, cx: &Context<Self>) -> AnyElement {
-        let t = crate::theme::active(cx);
-        let searching = matches!(self.mode, ListMode::Search(_));
-        let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
-        let more_open = self.menu_is(MenuKind::Global);
-
-        let search = div()
-            .id("search-box")
-            .test_support()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_between()
-            .w(px(260.))
-            .h(px(22.))
-            .px_2()
-            .rounded_sm()
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .text_size(px(11.))
-            .text_color(if searching { t.text } else { t.text_muted })
-            .cursor_pointer()
-            .child(search_text)
-            .child(div().text_color(t.text_muted).child("/"))
-            .on_click(run(OpenSearch));
-
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .h(px(HEADER_H))
-            .px_3()
-            .bg(t.sidebar)
-            .border_b_1()
-            .border_color(t.border)
-            .child(search)
-            .when(searching, |d| {
-                d.child(button("search-clear", "Clear", "Leave search", "escape", cx).on_click(run(ClearSelection)))
-            })
-            .child(div().flex_1())
-            .child(
-                button("btn-layout", self.layout_glyph(), "Stack the panes the other way", "alt-l", cx)
-                    .on_click(run(TogglePaneLayout)),
-            )
-            .child(button("btn-session", "Triage", "Start a triage session", "t", cx).on_click(run(StartSession)))
-            .child(
-                button("btn-more", "More ▾", "More actions", "", cx)
-                    .when(more_open, |b| b.bg(t.selection))
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
-            )
-            .into_any_element()
-    }
 
     /// Actions for whatever the list targets: the core triage buttons and the selection
     /// count, then — only where they apply — the AI suggestions, Reply and the rest.

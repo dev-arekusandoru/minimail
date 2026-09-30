@@ -195,7 +195,7 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
-            .child(self.render_header(cx))
+            .child(self.render_titlebar(window, cx))
             .when(self.context_actions(), |d| d.child(self.render_context_bar(cx)))
             .child(
                 div()

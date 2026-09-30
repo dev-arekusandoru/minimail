@@ -128,7 +128,7 @@ fn left_edge_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn done_button_marks_selection_and_undo_menu_row_restores(cx: &mut TestAppContext) {
+fn done_button_marks_selection_and_titlebar_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let start = (h.count(Inbox), h.count(Done));
     let ids = h.ids();
@@ -138,7 +138,7 @@ fn done_button_marks_selection_and_undo_menu_row_restores(cx: &mut TestAppContex
     assert_eq!(h.state_of(ids[0]), Done);
     assert_eq!(h.state_of(ids[1]), Done);
     assert_eq!((h.count(Inbox), h.count(Done)), (start.0 - 2, start.1 + 2));
-    h.menu("btn-more", "btn-undo");
+    h.click("btn-undo");
     assert_eq!((h.count(Inbox), h.count(Done)), (start.0, start.1));
 }
 
@@ -192,15 +192,22 @@ fn sidebar_tabs_switch_views(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn palette_opens_from_the_more_menu_and_runs_a_clicked_command(cx: &mut TestAppContext) {
+fn titlebar_commands_button_opens_palette_and_runs_a_clicked_command(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert!(!h.has("btn-palette"), "Commands lives in the overflow, not on the header");
-    h.menu("btn-more", "btn-palette");
-    assert!(!h.read(|a| a.menu_open()), "choosing a row closes the menu");
+    assert!(h.has("btn-palette"));
+    assert!(h.has("btn-undo"));
+    assert!(h.has("btn-settings"));
+    assert!(h.has("btn-help"));
+    assert!(h.has("btn-layout"));
+    h.click("search-box");
+    assert!(h.read(|a| a.palette_open()), "search opens the command/search palette");
+    h.keys("escape");
+    h.click("btn-palette");
     assert!(h.read(|a| a.palette_open()));
     let ix = commands().iter().position(|c| c.name == "Show waiting").unwrap();
     h.click(("command", ix));
     assert!(!h.read(|a| a.palette_open()));
+    assert_eq!(h.read(|a| a.triage.view), Waiting);
 }
 
 /// Escape must dismiss without running anything — the menu takes focus, so this is the
@@ -322,13 +329,13 @@ fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn settings_and_help_menu_rows_toggle_their_panels(cx: &mut TestAppContext) {
+fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.menu("btn-more", "btn-settings");
+    h.click("btn-settings");
     assert!(h.read(|a| a.settings_open()));
     h.click("settings-close");
     assert!(!h.read(|a| a.settings_open()));
-    h.menu("btn-more", "btn-help");
+    h.click("btn-help");
     assert!(h.read(|a| a.help_open()));
     h.keys("escape");
     assert!(!h.read(|a| a.help_open()));

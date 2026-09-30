@@ -19,9 +19,11 @@ fn main() {
         gpui_kit::open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Mail".into()),
-                    ..Default::default()
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(9.), px(9.))),
                 }),
+                app_owns_titlebar_drag: true,
                 ..Default::default()
             },
             cx,

@@ -37,6 +37,12 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
+| 🪟 **Custom titlebar** | A compact app-owned top bar holds search and global controls, with macOS traffic lights and draggable empty space. |
+
+### Layout
+
+The top titlebar identifies the current mailbox view and keeps search, Commands, Undo, Settings, shortcuts, and pane layout close at hand. Message-specific triage actions remain in the action row below it; the mailbox rail and reader/list panes sit beneath both.
+
 
 ### Keys at a glance
 

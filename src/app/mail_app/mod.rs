@@ -43,14 +43,15 @@ mod mouse;
 pub mod panes;
 mod reader;
 mod render;
+mod titlebar;
 mod rows;
 use menus::{MenuKind, OpenMenu};
 use panes::{Orientation as PaneLayout, Panes};
 use mouse::close_on_backdrop;
 use reader::format_when;
 
-/// Height of the quiet header row.
-const HEADER_H: f32 = 30.;
+/// Height of the app-owned titlebar (also anchors the global menu below it).
+const HEADER_H: f32 = 36.;
 /// Height of the contextual action bar.
 const BAR_H: f32 = 30.;
 const TOAST_MS: u64 = 4000;
