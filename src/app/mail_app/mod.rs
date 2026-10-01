@@ -162,10 +162,6 @@ pub struct MailApp {
     /// The open popup menu, if any.
     menu: Option<OpenMenu>,
     _menu_sub: Option<Subscription>,
-    /// Folders whose children are folded away in the sidebar.
-    collapsed_folders: HashSet<FolderId>,
-    /// Accounts whose sections are folded away in the sidebar.
-    collapsed_accounts: HashSet<AccountId>,
 }
 
 impl MailApp {
@@ -241,8 +237,6 @@ impl MailApp {
             _modal_sub: None,
             menu: None,
             _menu_sub: None,
-            collapsed_folders: HashSet::new(),
-            collapsed_accounts: HashSet::new(),
         };
         app.classify_visible();
         app

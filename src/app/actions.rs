@@ -8,7 +8,7 @@ use crate::app::menu::{
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::judge::Kind;
-use crate::model::{AccountId, FolderId, Location, TagFilter};
+use crate::model::{AccountId, Location, TagFilter};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -389,20 +389,6 @@ gpui_kit::actions!(
 #[action(namespace = mail, no_json)]
 pub struct ShowLocation {
     pub location: Location,
-}
-
-/// Fold or unfold a folder's children in the sidebar.
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct ToggleFolder {
-    pub folder: FolderId,
-}
-
-/// Fold or unfold an account's section in the sidebar.
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct ToggleAccount {
-    pub account: AccountId,
 }
 
 /// Add or remove one tag from the Filter ▾ menu's tag list.
