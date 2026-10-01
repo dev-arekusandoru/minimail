@@ -1,23 +1,27 @@
 use super::*;
 
 impl MailApp {
-    /// Host `view` in a top-anchored kit dialog `width` wide. Escape and backdrop clicks close
-    /// it through the dialog itself and land in [`Self::dialog_dismissed`]; the owner closes it
-    /// programmatically through [`Self::close_modals`].
-    fn host_in_dialog<V: Render>(
+    /// Host `view` in a top-anchored kit dialog `width(viewport_width)` wide. Escape and
+    /// backdrop clicks close it through the dialog itself and land in
+    /// [`Self::dialog_dismissed`]; the owner closes it programmatically through
+    /// [`Self::close_modals`].
+    pub(super) fn host_in_dialog<V: Render>(
         &mut self,
         view: Entity<V>,
-        width: f32,
+        width: fn(f32) -> f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let app = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             let (view, app) = (view.clone(), app.clone());
             dialog
                 .close_button(false)
+                // `enter` belongs to the hosted view (it propagates out of an input); the view
+                // closes the dialog itself once it has acted on it.
+                .on_ok(|_, _, _| false)
                 .p_0()
-                .w(px(width))
+                .w(px(width(f32::from(window.viewport_size().width))))
                 .on_close(move |_, _, cx| {
                     app.update(cx, |this, cx| this.dialog_dismissed(cx)).ok();
                 })
@@ -29,6 +33,11 @@ impl MailApp {
     fn dialog_dismissed(&mut self, cx: &mut Context<Self>) {
         self.palette = None;
         self.folder_picker = None;
+        self.snooze = None;
+        self.settings = None;
+        self.rules_panel = None;
+        self.dialog = None;
+        self.help = None;
         self._modal_sub = None;
         cx.notify();
     }
@@ -48,7 +57,7 @@ impl MailApp {
             },
         ));
         self.palette = Some(palette.clone());
-        self.host_in_dialog(palette.clone(), 480., window, cx);
+        self.host_in_dialog(palette.clone(), |vw| 480f32.min(vw * 0.9), window, cx);
         palette.update(cx, |p, cx| p.focus(window, cx));
         cx.notify();
     }
@@ -161,27 +170,24 @@ impl MailApp {
             &picker,
             window,
             move |this, _, event: &SnoozeEvent, window, cx| {
-                let pick = match event {
-                    SnoozeEvent::Pick(ts) => Some(*ts),
-                    SnoozeEvent::Cancel => None,
-                };
+                let SnoozeEvent::Pick(until) = event;
+                let until = *until;
                 this.close_modals(window, cx);
-                if let Some(until) = pick {
-                    let ids = &ids;
-                    let now = this.now();
-                    let n = this.mailbox.snooze(ids, until, now);
-                    this.triage.clear_selection();
-                    this.show_toast(
-                        format!("Snoozed {n} until {} · u to undo", format_when(until)),
-                        window,
-                        cx,
-                    );
-                    this.scroll_to_cursor();
-                }
+                let ids = &ids;
+                let now = this.now();
+                let n = this.mailbox.snooze(ids, until, now);
+                this.triage.clear_selection();
+                this.show_toast(
+                    format!("Snoozed {n} until {} · u to undo", format_when(until)),
+                    window,
+                    cx,
+                );
+                this.scroll_to_cursor();
             },
         ));
+        self.snooze = Some(picker.clone());
+        self.host_in_dialog(picker.clone(), |vw| 320f32.min(vw * 0.9), window, cx);
         window.focus(&picker.focus_handle(cx), cx);
-        self.snooze = Some(picker);
         cx.notify();
     }
 
@@ -249,8 +255,9 @@ impl MailApp {
                 SettingsEvent::Close => this.close_modals(window, cx),
             },
         ));
+        self.settings = Some(panel.clone());
+        self.host_in_dialog(panel.clone(), |vw| 760f32.min(vw * 0.9), window, cx);
         window.focus(&panel.focus_handle(cx), cx);
-        self.settings = Some(panel);
         cx.notify();
     }
 
@@ -278,8 +285,9 @@ impl MailApp {
                 RulesEvent::Close => this.close_modals(window, cx),
             },
         ));
+        self.rules_panel = Some(panel.clone());
+        self.host_in_dialog(panel.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
         window.focus(&panel.focus_handle(cx), cx);
-        self.rules_panel = Some(panel);
         cx.notify();
     }
 
@@ -318,9 +326,7 @@ impl MailApp {
     }
 
     pub(super) fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.help {
-            self.help = false;
-        } else if self.menu_open() {
+        if self.menu_open() {
             self.close_menu(window, cx);
         } else if self.modal_open() {
             self.close_modals(window, cx);
@@ -478,19 +484,15 @@ impl MailApp {
             &dialog,
             window,
             move |this, _, event: &DialogEvent, window, cx| {
-                let choice = match event {
-                    DialogEvent::Choose(ix) => Some(*ix),
-                    DialogEvent::Cancel => None,
-                };
+                let DialogEvent::Choose(ix) = event;
                 this.close_modals(window, cx);
-                if let Some(ix) = choice {
-                    on_choose(this, ix, window, cx);
-                }
+                on_choose(this, *ix, window, cx);
                 cx.notify();
             },
         ));
+        self.dialog = Some(dialog.clone());
+        self.host_in_dialog(dialog.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
         window.focus(&dialog.focus_handle(cx), cx);
-        self.dialog = Some(dialog);
         cx.notify();
     }
 
@@ -555,7 +557,7 @@ impl MailApp {
             },
         ));
         self.folder_picker = Some(picker.clone());
-        self.host_in_dialog(picker.clone(), 420., window, cx);
+        self.host_in_dialog(picker.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
         picker.update(cx, |p, cx| p.focus(window, cx));
         cx.notify();
     }

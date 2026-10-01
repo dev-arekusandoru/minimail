@@ -1,16 +1,12 @@
 //! Actions (namespace `mail`), keymap and the command list shown in the palette/help.
 
-use crate::app::panels::{RULES_CONTEXT, RulesClose, RulesNext, RulesPrev, RulesRevoke};
-use crate::app::settings::{SETTINGS_CONTEXT, SettingsClose};
+use crate::app::chrome::HELP_CONTEXT;
+use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::menu::{
     MENU_CONTEXT, MenuBack, MenuCancel, MenuNext, MenuOpen, MenuPrev, MenuRun,
 };
-use crate::app::snooze::{
-    SNOOZE_CONTEXT, SnoozeCancel, SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3,
-};
-use crate::app::dialog::{
-    Choice1, Choice2, Choice3, Choice4, Choice5, DIALOG_CONTEXT, DialogCancel, DialogConfirm,
-};
+use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
+use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::judge::Kind;
 use crate::model::{AccountId, FolderId, Location, TagFilter};
 use gpui_kit::*;
@@ -141,8 +137,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("g a", GoArchive, m),
         KeyBinding::new("g d", GoTrash, m),
         KeyBinding::new("?", ToggleHelp, m),
-        KeyBinding::new("pageup", HelpPageUp, m),
-        KeyBinding::new("pagedown", HelpPageDown, m),
         KeyBinding::new("y", AcceptSuggestions, m),
         KeyBinding::new("n", RejectSuggestions, m),
         KeyBinding::new("shift-y", AcceptRule, m),
@@ -194,17 +188,21 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
         KeyBinding::new("3", SnoozePreset3, Some("SnoozePicker && !Input")),
         KeyBinding::new("4", SnoozeCustom, Some("SnoozePicker && !Input")),
-        KeyBinding::new("escape", SnoozeCancel, Some(SNOOZE_CONTEXT)),
-        // Choice dialog: one key per option, enter = default, escape = cancel.
+        // Choice dialog: one key per option, enter = default; escape is the dialog's.
         KeyBinding::new("1", Choice1, Some("ChoiceDialog && !Input")),
         KeyBinding::new("2", Choice2, Some("ChoiceDialog && !Input")),
         KeyBinding::new("3", Choice3, Some("ChoiceDialog && !Input")),
         KeyBinding::new("4", Choice4, Some("ChoiceDialog && !Input")),
         KeyBinding::new("5", Choice5, Some("ChoiceDialog && !Input")),
         KeyBinding::new("enter", DialogConfirm, Some("ChoiceDialog && !Input")),
-        KeyBinding::new("escape", DialogCancel, Some(DIALOG_CONTEXT)),
-        // Settings panel.
-        KeyBinding::new("escape", SettingsClose, Some(SETTINGS_CONTEXT)),
+        // Help panel: scroll keys and `?` to close; escape is the dialog's.
+        KeyBinding::new("?", ToggleHelp, Some(HELP_CONTEXT)),
+        KeyBinding::new("j", SelectNext, Some(HELP_CONTEXT)),
+        KeyBinding::new("down", SelectNext, Some(HELP_CONTEXT)),
+        KeyBinding::new("k", SelectPrev, Some(HELP_CONTEXT)),
+        KeyBinding::new("up", SelectPrev, Some(HELP_CONTEXT)),
+        KeyBinding::new("pageup", HelpPageUp, Some(HELP_CONTEXT)),
+        KeyBinding::new("pagedown", HelpPageDown, Some(HELP_CONTEXT)),
         // Menus.
         KeyBinding::new("j", MenuNext, Some(MENU_CONTEXT)),
         KeyBinding::new("down", MenuNext, Some(MENU_CONTEXT)),
@@ -220,7 +218,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),
         KeyBinding::new("backspace", RulesRevoke, Some(RULES_CONTEXT)),
         KeyBinding::new("d", RulesRevoke, Some(RULES_CONTEXT)),
-        KeyBinding::new("escape", RulesClose, Some(RULES_CONTEXT)),
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),

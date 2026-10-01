@@ -46,17 +46,28 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
 
 impl Harness<'_> {
     fn keys(&mut self, keys: &str) {
+        let was_open = self.read(|a| a.modal_open());
         if !keys.is_empty() {
             self.cx.simulate_keystrokes(self.window, keys);
         }
-        self.cx.run_until_parked();
+        self.settle(was_open);
     }
     fn click(&mut self, id: impl Into<ElementId>) {
         let id = id.into();
+        let was_open = self.read(|a| a.modal_open());
         self.cx
             .update_window(self.window, |_, window, cx| window.click(id, cx))
             .expect("window alive");
+        self.settle(was_open);
+    }
+    /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
+    /// next click aims at them.
+    fn settle(&mut self, was_open: bool) {
         self.cx.run_until_parked();
+        if !was_open && self.read(|a| a.modal_open()) {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            self.cx.update_window(self.window, |_, window, cx| window.draw(cx).clear(cx)).unwrap();
+        }
     }
     fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
         self.cx.read_entity(&self.app, |a, _| f(a))

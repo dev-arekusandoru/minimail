@@ -10,7 +10,7 @@ impl MailApp {
     }
 
     pub fn help_open(&self) -> bool {
-        self.help
+        self.help.is_some()
     }
 
     pub fn snooze_open(&self) -> bool {
@@ -251,14 +251,20 @@ impl MailApp {
         }
     }
 
-    pub(super) fn modal_open(&self) -> bool {
+    /// A modal view lives in a kit dialog (everything but the composer).
+    pub(super) fn dialog_hosted(&self) -> bool {
         self.palette.is_some()
-            || self.compose.is_some()
+            || self.help.is_some()
             || self.snooze.is_some()
             || self.settings.is_some()
             || self.rules_panel.is_some()
             || self.dialog.is_some()
             || self.folder_picker.is_some()
+    }
+
+    /// Any modal (the composer or a dialog-hosted view) is open.
+    pub fn modal_open(&self) -> bool {
+        self.compose.is_some() || self.dialog_hosted()
     }
 
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state

@@ -10,7 +10,6 @@ pub mod dialog;
 pub mod folder_picker;
 pub mod mail_app;
 pub mod menu;
-pub mod overlay;
 pub mod row;
 pub mod palette;
 pub mod panels;

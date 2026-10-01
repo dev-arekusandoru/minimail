@@ -4,7 +4,6 @@
 use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::mail_app::panes::Orientation;
-use crate::app::overlay::{fit_height, fit_width, top_offset};
 use crate::app::ui::button;
 use crate::clock::{DAY, Timestamp};
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
@@ -18,8 +17,6 @@ use gpui_kit::{
 
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
-
-gpui_kit::actions!(settings, [SettingsClose]);
 
 pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
@@ -453,21 +450,16 @@ impl Render for SettingsPanel {
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
-        let height = fit_height(window, top_offset(window));
+        let height = f32::from(window.viewport_size().height) * 0.8;
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
-            .on_action(cx.listener(|_, _: &SettingsClose, _, cx| cx.emit(SettingsEvent::Close)))
             .flex()
             .flex_col()
-            .w(px(fit_width(window, 760.)))
+            .w_full()
             .h(px(height))
             .p_3()
             .gap_2()
-            .bg(t.secondary)
-            .border_1()
-            .border_color(t.border)
-            .rounded_md()
             .child(
                 div()
                     .flex()

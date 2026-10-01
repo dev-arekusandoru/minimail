@@ -1,29 +1,27 @@
 //! Generic keyboard-first choice dialog: a title, a one-line message, and two to
 //! five options, each with its own single-key shortcut.
 //!
-//! `enter` picks the default option, `escape` cancels. The dialog holds no
+//! `enter` picks the default option; the hosting kit `Dialog` owns `escape` (cancel). The dialog holds no
 //! business logic: it reports the chosen index through [`DialogEvent`] and the
 //! owner decides what that index means.
 use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::overlay::FitViewport as _;
 use crate::app::ui::shortcut;
 use crate::theme::ThemeColor;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 /// Key context of a choice dialog. `1`–`5` are bound under `ChoiceDialog && !Input`,
-/// `enter`/`escape` under the bare context.
+/// `enter` under the same context.
 pub const DIALOG_CONTEXT: &str = "ChoiceDialog";
 
 gpui_kit::actions!(
     dialog,
-    [Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm, DialogCancel]
+    [Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm]
 );
 
 pub enum DialogEvent {
     /// Index into the option list the dialog was built with.
     Choose(usize),
-    Cancel,
 }
 
 /// One option: the key that picks it, a label and an optional detail line.
@@ -130,7 +128,7 @@ impl Focusable for ChoiceDialog {
 impl EventEmitter<DialogEvent> for ChoiceDialog {}
 
 impl Render for ChoiceDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let default = self.default;
         let footer = self
@@ -147,19 +145,13 @@ impl Render for ChoiceDialog {
             .on_action(cx.listener(|this, _: &Choice4, _, cx| this.choose(3, cx)))
             .on_action(cx.listener(|this, _: &Choice5, _, cx| this.choose(4, cx)))
             .on_action(cx.listener(move |this, _: &DialogConfirm, _, cx| this.choose(default, cx)))
-            .on_action(cx.listener(|_, _: &DialogCancel, _, cx| cx.emit(DialogEvent::Cancel)))
             .flex()
             .flex_col()
             .gap_2()
             .p_3()
-            .fit_viewport(window, 420.)
-            .bg(t.secondary)
-            .border_1()
-            .border_color(t.border)
-            .rounded_md()
+            .w_full()
             .id("choice-dialog")
             .test_support()
-            .overflow_y_scroll()
             .child(
                 div()
                     .text_sm()

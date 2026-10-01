@@ -54,7 +54,8 @@ pub fn snooze_custom_duration_and_escape(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.snooze_open()));
     assert_eq!(h.state_of(id), Inbox, "escape cancels the picker");
 
-    h.keys("s 4");
+    h.keys("s");
+    h.keys("4");
     h.type_text("3h");
     h.keys("enter");
     assert_eq!(h.state_of(id), Snoozed);
@@ -66,7 +67,8 @@ pub fn snooze_custom_duration_and_escape(cx: &mut TestAppContext) {
     assert_eq!(h.state_of(id), Inbox);
 
     // Undo of a snooze restores the message immediately.
-    h.keys("s 4");
+    h.keys("s");
+    h.keys("4");
     h.type_text("30m");
     h.keys("enter");
     assert_eq!(h.state_of(id), Snoozed);

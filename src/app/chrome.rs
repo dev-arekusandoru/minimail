@@ -1,7 +1,7 @@
 //! Stateless chrome: hint bar, help overlay, view tabs, empty state.
 use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::actions::commands;
+use crate::app::actions::{HelpPageDown, HelpPageUp, SelectNext, SelectPrev, ToggleHelp, commands};
 use crate::app::ui::shortcut_chips;
 use crate::clock::{Timestamp, DAY};
 use crate::hints::{fit_hints, HintContext, HintMode};
@@ -149,31 +149,59 @@ pub fn help_columns(panel_w: f32) -> usize {
     (((panel_w - 2. * HELP_PAD) / HELP_COLUMN_W).floor() as usize).clamp(1, 3)
 }
 
-type CloseHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-
-/// Shortcut overlay panel: constrained to the window, multi-column when wide,
-/// scrolling its body (via `scroll`) when the content is taller than the window.
-#[derive(IntoElement)]
-pub struct HelpOverlay {
-    scroll: ScrollHandle,
-    on_close: CloseHandler,
+/// Width of the help dialog in a window of `viewport_w` px.
+pub fn help_width(viewport_w: f32) -> f32 {
+    (viewport_w * 0.9).min(HELP_MAX_W)
 }
 
-impl HelpOverlay {
-    pub fn new(
-        scroll: ScrollHandle,
-        on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        Self { scroll, on_close: Box::new(on_close) }
+/// Key context of the help panel (`?`, arrows/`j`/`k` and page keys, bound under it).
+pub const HELP_CONTEXT: &str = "HelpPanel";
+
+pub enum HelpEvent {
+    Close,
+}
+
+/// Shortcut panel hosted in a kit `Dialog`: multi-column when wide, scrolling its body (via
+/// the shared `scroll` handle) when the content is taller than the window. The dialog owns
+/// the backdrop and `escape`; the panel owns the scroll keys.
+pub struct HelpPanel {
+    scroll: ScrollHandle,
+    focus: FocusHandle,
+}
+
+impl HelpPanel {
+    pub fn new(scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
+        scroll.set_offset(point(px(0.), px(0.)));
+        Self { scroll, focus: cx.focus_handle() }
+    }
+
+    fn scroll_by(&mut self, dy: f32, cx: &mut Context<Self>) {
+        let max = f32::from(self.scroll.max_offset().y);
+        let y = (f32::from(self.scroll.offset().y) - dy).clamp(-max, 0.);
+        self.scroll.set_offset(point(px(0.), px(y)));
+        cx.notify();
+    }
+
+    fn scroll_pages(&mut self, pages: f32, cx: &mut Context<Self>) {
+        let page = f32::from(self.scroll.bounds().size.height) * 0.9;
+        self.scroll_by(pages * page, cx);
     }
 }
 
-impl RenderOnce for HelpOverlay {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+impl Focusable for HelpPanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl EventEmitter<HelpEvent> for HelpPanel {}
+
+impl Render for HelpPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let size = window.viewport_size();
         let (vw, vh) = (f32::from(size.width), f32::from(size.height));
-        let width = (vw * 0.9).min(HELP_MAX_W);
+        let width = help_width(vw);
         let cols = help_columns(width);
         let specs = commands();
         let per_col = specs.len().div_ceil(cols).max(1);
@@ -198,17 +226,19 @@ impl RenderOnce for HelpOverlay {
         });
         div()
             .id("help-panel")
+            .key_context(HELP_CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|_, _: &ToggleHelp, _, cx| cx.emit(HelpEvent::Close)))
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.scroll_by(28., cx)))
+            .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.scroll_by(-28., cx)))
+            .on_action(cx.listener(|this, _: &HelpPageDown, _, cx| this.scroll_pages(1., cx)))
+            .on_action(cx.listener(|this, _: &HelpPageUp, _, cx| this.scroll_pages(-1., cx)))
             .flex()
             .flex_col()
-            .w(px(width))
-            .max_h(px(vh * 0.9))
+            .w_full()
+            .max_h(px(vh * 0.8))
             .p(px(HELP_PAD))
             .gap_1()
-            .bg(t.secondary)
-            .border_1()
-            .border_color(t.border)
-            .rounded_md()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex()
@@ -221,7 +251,7 @@ impl RenderOnce for HelpOverlay {
                             .icon(IconName::Close)
                             .ghost()
                             .xsmall()
-                            .on_click(self.on_close),
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(HelpEvent::Close))),
                     ),
             )
             .child(div().flex_none().child(Separator::horizontal()))

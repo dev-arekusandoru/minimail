@@ -1,10 +1,10 @@
 //! Snooze picker: three presets plus a custom duration input ("3h", "2d", "30m").
 //!
 //! Holds no business logic: presets and the duration parser are injected, the
-//! chosen return time leaves through [`SnoozeEvent`].
+//! chosen return time leaves through [`SnoozeEvent`]. Hosted in a kit `Dialog`, which owns
+//! the surface, backdrop and `escape`.
 use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::overlay::FitViewport as _;
 use crate::app::ui::{button, shortcut};
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
@@ -14,19 +14,18 @@ use gpui_kit::{
     *,
 };
 
-/// Key context of the picker (bind `1`/`2`/`3`/`4` under `SnoozePicker && !Input`, escape under `SnoozePicker`).
+/// Key context of the picker (bind `1`/`2`/`3`/`4` under `SnoozePicker && !Input`).
 pub const SNOOZE_CONTEXT: &str = "SnoozePicker";
 
 use crate::theme::ThemeColor;
 
 gpui_kit::actions!(
     snooze,
-    [SnoozePreset1, SnoozePreset2, SnoozePreset3, SnoozeCustom, SnoozeCancel]
+    [SnoozePreset1, SnoozePreset2, SnoozePreset3, SnoozeCustom]
 );
 
 pub enum SnoozeEvent {
     Pick(Timestamp),
-    Cancel,
 }
 
 /// Parses a custom duration relative to `now` (e.g. `model::parse_snooze`).
@@ -134,7 +133,7 @@ impl Focusable for SnoozePicker {
 impl EventEmitter<SnoozeEvent> for SnoozePicker {}
 
 impl Render for SnoozePicker {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let invalid = self.invalid;
         div()
@@ -144,18 +143,12 @@ impl Render for SnoozePicker {
             .on_action(cx.listener(|this, _: &SnoozePreset2, _, cx| this.pick(1, cx)))
             .on_action(cx.listener(|this, _: &SnoozePreset3, _, cx| this.pick(2, cx)))
             .on_action(cx.listener(|this, _: &SnoozeCustom, window, cx| this.open_custom(window, cx)))
-            .on_action(cx.listener(|_, _: &SnoozeCancel, _, cx| cx.emit(SnoozeEvent::Cancel)))
             .flex()
             .flex_col()
-            .fit_viewport(window, 320.)
+            .w_full()
             .p_2()
             .gap_1()
-            .bg(t.secondary)
-            .border_1()
-            .border_color(t.border)
-            .rounded_md()
             .id("snooze-panel")
-            .overflow_y_scroll()
             .child(div().px_2().text_xs().text_color(t.muted_foreground).child("Snooze until…"))
             .children(self.presets.iter().enumerate().map(|(i, (label, ts))| {
                 Self::row(

@@ -30,7 +30,7 @@ impl Render for MailApp {
         }
         let banner = self.pending_rule.clone();
         let t = cx.theme();
-        let (bg, fg, muted) = (t.background, t.foreground, t.muted_foreground);
+        let (bg, fg) = (t.background, t.foreground);
         let (success, on_primary) = (t.success, t.primary_foreground);
         div()
             .id("mail-app")
@@ -55,17 +55,11 @@ impl Render for MailApp {
             .text_color(fg)
             .text_size(px(13.))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| {
-                if this.help {
-                    return this.scroll_help_lines(1., cx);
-                }
                 this.move_cursor(1);
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| {
-                if this.help {
-                    return this.scroll_help_lines(-1., cx);
-                }
                 this.move_cursor(-1);
                 this.scroll_to_cursor();
                 cx.notify();
@@ -179,17 +173,7 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, ev: &SetFilterKind, _, cx| this.set_filter_kind(ev.kind, cx)))
             .on_action(cx.listener(|this, ev: &SetFilterAccount, _, cx| this.set_filter_account(ev.account.clone(), cx)))
             .on_action(cx.listener(|this, _: &ClearFilters, _, cx| this.clear_filters(cx)))
-            .on_action(cx.listener(|this, _: &ToggleHelp, _, cx| {
-                if this.help {
-                    this.close_help(cx);
-                } else {
-                    this.help = true;
-                    this.help_scroll.set_offset(point(px(0.), px(0.)));
-                    cx.notify();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &HelpPageUp, _, cx| this.scroll_help(-1., cx)))
-            .on_action(cx.listener(|this, _: &HelpPageDown, _, cx| this.scroll_help(1., cx)))
+            .on_action(cx.listener(|this, _: &ToggleHelp, w, cx| this.toggle_help(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSnoozePicker, w, cx| {
                 if !this.modal_open() {
                     this.open_snooze(w, cx);
@@ -274,41 +258,6 @@ impl Render for MailApp {
                         ),
                 )
             })
-            .when(self.help, |d| {
-                let scroll = self.help_scroll.clone();
-                d.child(
-                    div()
-                        .id("help-backdrop")
-                        .absolute()
-                        .inset_0()
-                        .occlude()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(bg.opacity(0.85))
-                        .text_color(muted)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| this.close_help(cx)),
-                        )
-                        .child(HelpOverlay::new(
-                            scroll,
-                            cx.listener(|this, _, _, cx| this.close_help(cx)),
-                        )),
-                )
-            })
             .when_some(self.render_menu(window, cx), |d, menu| d.child(menu))
-            .when_some(self.snooze.clone(), |d, picker| {
-                d.child(overlay(window, picker).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
-            .when_some(self.settings.clone(), |d, panel| {
-                d.child(overlay(window, panel).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
-            .when_some(self.rules_panel.clone(), |d, panel| {
-                d.child(overlay(window, panel).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
-            .when_some(self.dialog.clone(), |d, dialog| {
-                d.child(overlay(window, dialog).on_mouse_down(MouseButton::Left, close_on_backdrop(cx)))
-            })
     }
 }

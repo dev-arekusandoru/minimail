@@ -13,11 +13,10 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::app::actions::*;
-use crate::app::chrome::{HelpOverlay, HintBar};
+use crate::app::chrome::{HelpEvent, HelpPanel, HintBar};
 use crate::hints::{HintContext, HintMode};
 use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::row::{self, RowVisual};
-use crate::app::overlay::overlay;
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
@@ -58,7 +57,6 @@ mod titlebar;
 mod rows;
 use menus::{MenuKind, OpenMenu};
 use panes::{Orientation as PaneLayout, Panes};
-use mouse::close_on_backdrop;
 use reader::format_when;
 
 /// Height of the app-owned titlebar (where a menu lands when its trigger has no bounds yet).
@@ -94,7 +92,7 @@ pub struct MailApp {
     pub tab_avatars: bool,
     pub palette: Option<Entity<CommandPalette>>,
     pub compose: Option<Entity<ComposeReply>>,
-    pub help: bool,
+    help: Option<Entity<HelpPanel>>,
     /// Toast text, if visible.
     pub toast: Option<SharedString>,
     /// Opt-in thread summaries (settings panel).
@@ -200,7 +198,7 @@ impl MailApp {
             tab_avatars: true,
             palette: None,
             compose: None,
-            help: false,
+            help: None,
             toast: None,
             summaries_enabled: false,
             preview_lines: crate::preview::DEFAULT_LINES,

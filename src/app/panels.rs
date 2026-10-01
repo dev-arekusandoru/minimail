@@ -1,7 +1,6 @@
 //! Small presentational panels: rules list, session card, summary card, rule banner.
 use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::overlay::FitViewport as _;
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use crate::model::TriageState;
@@ -20,7 +19,7 @@ pub const RULES_CONTEXT: &str = "RulesPanel";
 
 use crate::theme;
 
-gpui_kit::actions!(rules_panel, [RulesNext, RulesPrev, RulesRevoke, RulesClose]);
+gpui_kit::actions!(rules_panel, [RulesNext, RulesPrev, RulesRevoke]);
 
 fn state_name(state: TriageState) -> String {
     state.label().to_lowercase()
@@ -84,16 +83,12 @@ impl Render for RulesPanel {
                     cx.emit(RulesEvent::Revoke(this.cursor));
                 }
             }))
-            .on_action(cx.listener(|_, _: &RulesClose, _, cx| cx.emit(RulesEvent::Close)))
             .flex()
             .flex_col()
-            .fit_viewport(window, 420.)
+            .w_full()
+            .max_h(px(f32::from(window.viewport_size().height) * 0.8))
             .p_3()
             .gap_1()
-            .bg(t.secondary)
-            .border_1()
-            .border_color(t.border)
-            .rounded_md()
             .id("rules-panel")
             .overflow_y_scroll()
             .child(

@@ -181,7 +181,7 @@ The window's root view is gpui-kit's `Root` (`gpui_kit::open_window` wraps `Mail
 
 **Dock was evaluated and deferred.** It is a workspace system (draggable tab groups, edge docks, persisted `DockAreaState`), and adopting it would turn the sidebar, list and reader into `Panel` entities and force our reader tabs (preview/pin semantics, `src/tabs.rs`) to be reconciled with Dock's tab groups. That is a much larger lift than this fixed three-pane layout needs; it could be a later fit if we want persisted or rearrangeable layouts.
 
-**Root overlay migration is also deferred.** The toast, help overlay, snooze picker, settings, rules panel, dialogs and context menus are still our own absolutely positioned layers in `render.rs` / `overlay.rs`. Moving the toast to `push_notification` and the rest to `open_dialog` would change how focus and the `MailApp` key context behave while they are open (`modal_open()` / `menu_open()` gate many actions), and the tests that assert on those states would need rewriting, so it is a separate change.
+**Modals are kit dialogs.** The palette, folder picker, `?` help, snooze picker, Settings, rules panel and the choice/confirm dialogs are all views hosted by `MailApp::host_in_dialog` (`window.open_dialog`): the kit owns the backdrop, the surface, the slide-in and `escape`/backdrop-click dismissal (which lands in `dialog_dismissed`), while each hosted view keeps its own key context (`SnoozePicker`, `ChoiceDialog`, `RulesPanel`, `SettingsPanel`, `HelpPanel`) for its keys. `modal_open()` / `dialog_hosted()` still gate the `MailApp` actions. The toast and context menus are still our own layers.
 
 ### Adding a theme
 
