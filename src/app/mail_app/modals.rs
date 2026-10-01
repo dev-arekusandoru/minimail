@@ -274,17 +274,34 @@ impl MailApp {
 
     /// Rows for the settings Accounts page.
     pub(super) fn account_rows(&self) -> Vec<AccountRow> {
+        let now = self.now();
         self.mailbox
             .accounts()
             .iter()
-            .map(|a| AccountRow {
-                id: a.id.clone(),
-                name: a.name.clone(),
-                email: a.email.clone(),
-                color: a.color.clone(),
-                icon: crate::account_style::icon_key(a),
-                nickname: a.nickname.clone().unwrap_or_default(),
-                gmail: a.provider == crate::model::ProviderKind::Gmail,
+            .map(|a| {
+                let gmail = a.provider == crate::model::ProviderKind::Gmail;
+                let (sync, sync_problem) = if gmail {
+                    let facts = crate::sync_status::SyncFacts {
+                        last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&a.id).ok().flatten()),
+                        syncing: self.older_in_flight.contains(&a.id),
+                        signed_in: self.providers.contains_key(&a.id),
+                        error: self.account_errors.get(&a.id).map(String::as_str),
+                    };
+                    crate::sync_status::describe(&crate::sync_status::status(&facts), now)
+                } else {
+                    ("Demo data, replaced when you add Gmail".to_owned(), false)
+                };
+                AccountRow {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                    email: a.email.clone(),
+                    color: a.color.clone(),
+                    icon: crate::account_style::icon_key(a),
+                    nickname: a.nickname.clone().unwrap_or_default(),
+                    gmail,
+                    sync,
+                    sync_problem,
+                }
             })
             .collect()
     }

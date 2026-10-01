@@ -540,6 +540,28 @@ fn a_cache_from_before_account_icons_loads_with_no_icon_and_keeps_its_color() {
 }
 
 #[test]
+fn the_last_completed_check_is_stored_and_old_caches_start_with_none() {
+    let path = std::env::temp_dir().join(format!("mc-synced-migration-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE accounts(id TEXT PRIMARY KEY, provider TEXT NOT NULL, name TEXT NOT NULL,
+                email TEXT NOT NULL, color TEXT NOT NULL, icon TEXT, nickname TEXT, cursor TEXT);
+             INSERT INTO accounts VALUES('a', '\"Gmail\"', 'A', 'a@x.io', '#e06c75', NULL, NULL, 'c1');",
+        )
+        .unwrap();
+    }
+    let cache = Cache::open(&path).unwrap();
+    assert_eq!(cache.synced_at("a").unwrap(), None, "an old account never recorded a check");
+    cache.set_synced_at("a", 1_790_000_000).unwrap();
+    assert_eq!(cache.synced_at("a").unwrap(), Some(1_790_000_000));
+    cache.upsert_account(&Account { id: "a".into(), ..account() }).unwrap();
+    assert_eq!(cache.synced_at("a").unwrap(), Some(1_790_000_000), "restyling keeps it");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn a_cache_from_before_read_sync_is_reconciled_against_the_window() {
     // A cache file in the old schema (no remote_read column) holding one message.
     let path = std::env::temp_dir().join(format!("mc-read-migration-{}.db", std::process::id()));

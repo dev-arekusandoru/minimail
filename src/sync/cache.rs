@@ -136,6 +136,15 @@ impl Cache {
         if !has_nickname {
             conn.execute_batch("ALTER TABLE accounts ADD COLUMN nickname TEXT")?;
         }
+        // Caches from before the sync status line never recorded a completed check (NULL).
+        let has_synced_at: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name='synced_at'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_synced_at {
+            conn.execute_batch("ALTER TABLE accounts ADD COLUMN synced_at INTEGER")?;
+        }
         Ok(Self { conn })
     }
 
@@ -214,6 +223,23 @@ impl Cache {
             params![account, cursor],
         )?;
         Ok(())
+    }
+
+    /// Record when a server check of `account` last completed without error.
+    pub fn set_synced_at(&self, account: &str, at: Timestamp) -> rusqlite::Result<()> {
+        self.conn.execute("UPDATE accounts SET synced_at=?2 WHERE id=?1", params![account, at])?;
+        Ok(())
+    }
+
+    /// When `account`'s last error-free server check completed; `None` if it never has.
+    pub fn synced_at(&self, account: &str) -> rusqlite::Result<Option<Timestamp>> {
+        let at = self
+            .conn
+            .query_row("SELECT synced_at FROM accounts WHERE id=?1", [account], |row| {
+                row.get::<_, Option<Timestamp>>(0)
+            })
+            .optional()?;
+        Ok(at.flatten())
     }
 
     pub fn cursor(&self, account: &str) -> rusqlite::Result<Option<String>> {

@@ -2,7 +2,7 @@
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, TestAppContext};
-use mail_classifier::account_style::ICONS;
+use mail_classifier::account_style::{COLORS, ICONS};
 
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
@@ -41,23 +41,26 @@ fn has_row(h: &mut Harness<'_>, message: usize) -> bool {
 }
 
 #[gpui_kit::gpui::test]
-fn picking_an_icon_in_settings_stores_it_on_the_account(cx: &mut TestAppContext) {
+fn picking_an_icon_and_color_in_the_style_popover_stores_them_on_the_account(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let before = h.read(|a| a.mailbox.accounts().iter().map(|a| a.icon.clone()).collect::<Vec<_>>());
-    assert_eq!(before[0].as_deref(), Some("mail"));
+    let style = |h: &mut Harness<'_>| {
+        h.read(|a| a.mailbox.accounts().iter().map(|a| (a.icon.clone(), a.color.clone())).collect::<Vec<_>>())
+    };
+    let before = style(&mut h);
+    assert_eq!(before[0].0.as_deref(), Some("mail"));
 
     h.keys("cmd-,");
     h.click(format!("0-{ACCOUNTS}"));
-    // Item 1 is the first account's style picker; choose its fourth icon.
-    let picked = ICONS[3].0;
-    h.cx.update_window(h.window, |_, window, cx| {
-        window.within("group-0").within("item-1").click(("account-icon", 3usize), cx)
-    })
-    .expect("window alive");
+    // The picker only exists once the first account's tile has opened its popover.
+    h.click(("account-style", 0usize));
+    h.cx.run_until_parked();
+    let (icon, color) = (ICONS[3].0, COLORS[4]);
+    h.click(("account-icon", 3usize));
+    h.click(("account-color", 4usize));
     h.cx.run_until_parked();
 
-    let after = h.read(|a| a.mailbox.accounts().iter().map(|a| a.icon.clone()).collect::<Vec<_>>());
-    assert_eq!(after[0].as_deref(), Some(picked));
+    let after = style(&mut h);
+    assert_eq!(after[0], (Some(icon.to_owned()), color.to_owned()));
     assert_eq!(after[1], before[1], "other accounts keep theirs");
 }
 
@@ -74,7 +77,7 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
     h.click(format!("0-{ACCOUNTS}"));
     let focus_nickname = |h: &mut Harness<'_>| {
         h.cx.update_window(h.window, |_, window, cx| {
-            window.within("group-0").within("item-1").click(("account-nickname", 0usize), cx)
+            window.within("group-0").within("item-0").click(("account-nickname", 0usize), cx)
         })
         .expect("window alive");
         h.cx.run_until_parked();

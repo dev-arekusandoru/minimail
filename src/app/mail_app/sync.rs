@@ -77,7 +77,13 @@ impl MailApp {
                 // means there is nothing due yet, not that the loop should end: it
                 // must stay alive to wake on the next `wake_sync` (Fetch mail, sign-in)
                 // or scheduled check.
-                let step = match wake_step(this.update(cx, |this, _| this.sync_prepare())) {
+                let step = match wake_step(this.update(cx, |this, cx| {
+                    let jobs = this.sync_prepare();
+                    if jobs.is_some() {
+                        this.refresh_account_rows(cx);
+                    }
+                    jobs
+                })) {
                     Wake::Run(jobs) => jobs,
                     Wake::Idle => {
                         wait = TICK;
@@ -153,6 +159,17 @@ impl MailApp {
             let summary = sync::apply_round(&mut self.mailbox, &cache, result);
             more |= summary.more;
             throttled |= summary.throttled;
+            match &summary.error {
+                Some(e) => {
+                    self.account_errors.insert(account.clone(), e.clone());
+                }
+                None if summary.checked => {
+                    self.account_errors.remove(&account);
+                    // A failed write only loses the "Synced …" time; syncing itself is unaffected.
+                    cache.set_synced_at(&account, self.now()).ok();
+                }
+                None => {}
+            }
             if let Some(e) = summary.error {
                 error.get_or_insert(e);
             }
@@ -187,6 +204,7 @@ impl MailApp {
         self.classify_visible();
         let bodies = self.body_targets();
         self.fetch_bodies(bodies, cx);
+        self.refresh_account_rows(cx);
         cx.notify();
         let wait = if more {
             Duration::ZERO
@@ -471,6 +489,7 @@ impl MailApp {
         }
         self.older_queue.remove(id);
         self.older_in_flight.remove(id);
+        self.account_errors.remove(id);
         let mut problems = Vec::new();
         if let Some(cache) = &self.cache
             && let Err(e) = cache.delete_account(id)

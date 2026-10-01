@@ -168,6 +168,8 @@ pub struct MailApp {
     providers: HashMap<AccountId, crate::sync::SharedProvider>,
     /// Last sync error shown, so each distinct error toasts once.
     sync_error: Option<String>,
+    /// Latest round error per account, cleared by its next error-free round (Accounts settings).
+    account_errors: HashMap<AccountId, String>,
     /// The mailbox came from fixtures (replaced on first Gmail sign-in).
     demo: bool,
     /// Run a server change check on the next round (Fetch mail, sign-in).
@@ -266,6 +268,7 @@ impl MailApp {
             cache: None,
             providers: HashMap::new(),
             sync_error: None,
+            account_errors: HashMap::new(),
             demo: true,
             force_check: true,
             check_at: 0,

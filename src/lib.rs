@@ -2,6 +2,7 @@ pub mod account_style;
 pub mod app;
 pub mod fuzzy;
 pub mod preview;
+pub mod sync_status;
 pub mod clock;
 pub mod draft;
 pub mod find;
