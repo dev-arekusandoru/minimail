@@ -16,6 +16,7 @@ mod replies;
 mod states;
 mod suggestions;
 mod timing;
+mod remote;
 mod triage;
 mod undo;
 mod visibility;
@@ -104,12 +105,20 @@ fn personal_account() -> AccountId {
 }
 pub type AccountId = String;
 pub type FolderId = u32;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ProviderKind {
+    #[default]
+    Mock,
+    Gmail,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub id: AccountId,
     pub name: String,
     pub email: String,
     pub color: String,
+    #[serde(default)]
+    pub provider: ProviderKind,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Folder {
@@ -256,6 +265,33 @@ struct UndoStep {
     changes: Vec<Change>,
 }
 
+fn fixture_accounts() -> (Vec<Account>, Vec<Folder>) {
+    let data: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../fixtures/accounts.json")).expect("account fixture");
+    let accounts = data
+        .iter()
+        .map(|v| serde_json::from_value(v.clone()).expect("account"))
+        .collect();
+    let folders = data
+        .iter()
+        .flat_map(|v| {
+            let account = v["id"].as_str().unwrap_or_default().to_owned();
+            v["folders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |f| Folder {
+                    id: f["id"].as_u64().unwrap_or_default() as FolderId,
+                    account: account.clone(),
+                    name: f["name"].as_str().unwrap_or_default().to_owned(),
+                    parent: f["parent"].as_u64().map(|n| n as FolderId),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    (accounts, folders)
+}
+
 pub struct Mailbox {
     messages: Vec<Message>,
     index: HashMap<MessageId, usize>,
@@ -283,7 +319,13 @@ pub struct Mailbox {
 impl Mailbox {
     /// Load messages; without a contact store, senders are not assumed known.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        Ok(Self::build(serde_json::from_str(json)?, HashSet::new()))
+        let (accounts, folders) = fixture_accounts();
+        Ok(Self::build(
+            serde_json::from_str(json)?,
+            HashSet::new(),
+            accounts,
+            folders,
+        ))
     }
 
     /// Load messages plus the known addresses in `store`.
@@ -292,12 +334,18 @@ impl Mailbox {
         store: Rc<ContactStore>,
     ) -> Result<Self, serde_json::Error> {
         let known = store.known_addresses().unwrap_or_default();
-        let mut mb = Self::build(serde_json::from_str(json)?, known);
+        let (accounts, folders) = fixture_accounts();
+        let mut mb = Self::build(serde_json::from_str(json)?, known, accounts, folders);
         mb.contacts = Some(store);
         Ok(mb)
     }
 
-    fn build(mut messages: Vec<Message>, known: HashSet<String>) -> Self {
+    fn build(
+        mut messages: Vec<Message>,
+        known: HashSet<String>,
+        accounts: Vec<Account>,
+        folders: Vec<Folder>,
+    ) -> Self {
         for message in &mut messages {
             if message.state == TriageState::Snoozed
                 && message.snooze.as_deref().and_then(parse_rfc3339).is_none()
@@ -351,39 +399,25 @@ impl Mailbox {
             unsubscribed: Vec::new(),
             muted: HashSet::new(),
             pending: Vec::new(),
-            accounts: {
-                let data: Vec<serde_json::Value> =
-                    serde_json::from_str(include_str!("../../fixtures/accounts.json"))
-                        .expect("account fixture");
-                data.iter()
-                    .map(|v| serde_json::from_value(v.clone()).expect("account"))
-                    .collect()
-            },
-            folders: {
-                let data: Vec<serde_json::Value> =
-                    serde_json::from_str(include_str!("../../fixtures/accounts.json"))
-                        .expect("account fixture");
-                data.iter()
-                    .flat_map(|v| {
-                        let account = v["id"].as_str().unwrap_or_default().to_owned();
-                        v["folders"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(move |f| Folder {
-                                id: f["id"].as_u64().unwrap_or_default() as FolderId,
-                                account: account.clone(),
-                                name: f["name"].as_str().unwrap_or_default().to_owned(),
-                                parent: f["parent"].as_u64().map(|n| n as FolderId),
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect()
-            },
+            accounts,
+            folders,
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
             post_send: HashMap::new(),
             sent_ids: HashMap::new(),
         }
+    }
+
+    /// Build from pre-loaded parts (e.g. the sync cache) plus an address book.
+    pub fn from_parts(
+        messages: Vec<Message>,
+        accounts: Vec<Account>,
+        folders: Vec<Folder>,
+        store: Rc<ContactStore>,
+    ) -> Self {
+        let known = store.known_addresses().unwrap_or_default();
+        let mut mb = Self::build(messages, known, accounts, folders);
+        mb.contacts = Some(store);
+        mb
     }
 
     /// The mock mailbox against an in-memory copy of the shipped address
@@ -450,7 +484,7 @@ fn set_membership<T: std::hash::Hash + Eq>(set: &mut HashSet<T>, value: T, prese
 
 /// Parse an RFC3339 timestamp into whole seconds since the Unix epoch.
 /// Returns `None` for anything unreadable; such messages sort last.
-fn parse_rfc3339(s: &str) -> Option<i64> {
+pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     if b.len() < 19 {
         return None;
@@ -503,10 +537,39 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
 }
+/// Inverse of [`parse_rfc3339`]: `2026-09-29T07:41:00Z`.
+pub fn format_rfc3339(ts: Timestamp) -> String {
+    let days = ts.div_euclid(86_400);
+    let secs = ts.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        secs / 3600,
+        secs % 3600 / 60,
+        secs % 60
+    )
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rfc3339_round_trips() {
+        let leap = parse_rfc3339("2028-02-29T23:59:59Z").unwrap();
+        for t in [0, 1_790_000_000, leap] {
+            assert_eq!(parse_rfc3339(&format_rfc3339(t)), Some(t));
+        }
+        assert_eq!(format_rfc3339(leap), "2028-02-29T23:59:59Z");
+    }
 
     #[test]
     fn rfc3339_handles_offsets() {
