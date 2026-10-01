@@ -458,3 +458,22 @@ fn titlebar_search_box_stays_centered_while_searching_and_resizing(cx: &mut Test
         h.keys("escape");
     }
 }
+
+/// The kit adds its own inset to the bar in fullscreen; the search box still centres on the window.
+#[gpui_kit::gpui::test]
+fn titlebar_search_box_stays_centered_in_fullscreen(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.update_window(h.window, |_, window, _| window.toggle_fullscreen()).unwrap();
+    h.cx.run_until_parked();
+    let fullscreen = h.cx.update_window(h.window, |_, window, _| window.is_fullscreen()).unwrap();
+    assert!(fullscreen, "the test window can be made fullscreen");
+    let (b, width) = h
+        .cx
+        .update_window(h.window, |_, window, cx| {
+            window.render_frame(cx);
+            (window.find("search-box").bounds(), f32::from(window.viewport_size().width))
+        })
+        .expect("window alive");
+    let center = f32::from(b.origin.x + b.size.width / 2.);
+    assert!((center - width / 2.).abs() < 0.5, "fullscreen: center {center} of {width}");
+}

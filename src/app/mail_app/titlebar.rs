@@ -11,6 +11,10 @@ use super::{ListMode, MailApp, MenuKind};
 use crate::app::actions::*;
 use crate::app::ui::{icon_button, primary_button, run, shortcut};
 
+/// Width kept clear on each side of the search box for the sidebar toggle and title (left, past
+/// the traffic lights) and the global buttons (right).
+const SEARCH_SIDE: f32 = 190.;
+
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
@@ -117,15 +121,29 @@ impl MailApp {
             .justify_end()
             .h_full()
             .child(right_buttons);
-        // Left and right regions share the leftover width equally (flex-basis 0), so the fixed-size
-        // search box between them is always centered in the bar. The kit `TitleBar` owns the bar
-        // itself (window move, double-click zoom, platform window controls, background); its own
-        // left inset is dropped (`pl_0`) so the `left` region keeps the traffic-light clearance.
+        // The search box is laid over the whole bar rather than placed between the left and
+        // right regions, so it is centred on the window whatever the kit's inset (fullscreen)
+        // or platform window controls take. The overlay reserves `SEARCH_SIDE` on both sides
+        // for the regions it must not cover, and has no handlers, so it never blocks a drag.
+        // The kit `TitleBar` owns the bar itself (window move, double-click zoom, window
+        // controls, background); its own left inset is dropped (`pl_0`) so `left` keeps the
+        // traffic-light clearance.
         let titlebar = div()
             .id("mail-titlebar")
             .test_support()
+            .relative()
             .flex_none()
-            .child(TitleBar::new().pl_0().child(left).child(search).child(right));
+            .child(TitleBar::new().pl_0().child(left).child(right))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px(px(SEARCH_SIDE))
+                    .child(search),
+            );
         titlebar.into_any_element()
     }
 }
