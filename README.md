@@ -172,13 +172,43 @@ account is linked, the demo mail is dropped. Fetched mail is cached in
 `~/Library/Application Support/mail-classifier/mail.db`, and later launches
 start from that cache.
 
-Sync runs every 2 s and pushes triage changes back to Gmail. Archive removes
-`INBOX`, delete moves the message to Trash, and filing applies a label (Gmail
-creates the label if it doesn't exist; nested folders become `Parent/Child`).
-Snooze archives the message in Gmail and wakes it locally. Remote changes are
-pulled every 60 s. The first import fetches the newest 500 non-spam, non-draft
-messages. Not supported yet: sending from Gmail, and read/unread state, which
-stays local.
+#### How syncing works
+
+Sync is built to stay fast and inside Gmail's quotas, so it is deliberately
+incremental rather than a full refresh:
+
+- **Inbox first.** On connect the app backfills the **last 30 days**, one page
+  per round, and walks the scopes in order: inbox, then Archive, then Trash,
+  then each user label sorted by path. The inbox fills in first, so the app is
+  useful long before the rest has landed.
+- **A check at startup, then every 60 s.** Each check takes a fresh cursor and
+  reads Gmail's history from the last one. The loop otherwise wakes every 2 s
+  to push local triage and to continue the backfill; *Fetch mail* forces a
+  check right away.
+- **History deltas, no re-downloading.** Read/unread, archive, trash and label
+  changes made elsewhere are applied straight from the history's label ids.
+  Cached messages are never fetched again, and a downloaded body is never
+  replaced by a snippet.
+- **A reconcile when the cursor expires.** If Gmail no longer knows the cursor
+  (or the cache predates read sync), the app lists the ids of the whole 30-day
+  window, applies their flags, drops what has vanished, takes a fresh cursor
+  and re-lists what the window shows. Still no per-message gets.
+- **Headers-only lists.** Listings are id pages; bodies are downloaded when a
+  message is opened, with the next two rows of the list prefetched. Each list
+  shows a muted *Loading message…* until the body lands.
+- **Scroll to load older mail.** Reaching the end of a list (or moving the
+  cursor near it) asks for the next page *before* the 30-day cutoff, for that
+  view's scope, while the list shows a muted *Loading older mail…* footer.
+- **A client-side quota budget.** A round is deliberately small — pending
+  moves and reads, one check, one load-more page, one backfill page — and the
+  provider batches its gets, tracks a quota budget and retries with backoff
+  before reporting a rate limit. When it still comes back throttled, rounds
+  pause for about a minute without a toast.
+
+Triage pushes back to Gmail as before: archive removes `INBOX`, delete moves
+the message to Trash, filing applies a label (created if missing; nested
+folders become `Parent/Child`), and snooze archives remotely and wakes locally.
+Not supported yet: sending from Gmail.
 
 ### Project layout
 
@@ -226,4 +256,4 @@ Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": 
 - [ ] Review queue alongside the inline badges
 - [ ] Folders or streams driven by classifier labels
 - [ ] IMAP/SMTP accounts (behind `MailProvider`, like Gmail)
-- [ ] Sending from Gmail; syncing Gmail read/unread
+- [ ] Sending from Gmail

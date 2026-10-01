@@ -210,6 +210,15 @@ impl MailApp {
             .when_some(strip, |d, s| d.child(s))
             .child(self.message_body(m, role, look, cx))
             .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
+            // A message synced from headers only still holds just its snippet.
+            .when(m.partial, |d| {
+                d.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(t.muted_foreground)
+                        .child("Loading message…"),
+                )
+            })
             .into_any_element()
     }
 

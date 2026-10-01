@@ -5,6 +5,28 @@
 //! snoozes; `remote_state` is the serialized [`RemoteState`] the provider last
 //! confirmed, which is what pending triage is diffed against.
 
+use crate::clock::{DAY, Timestamp};
+use crate::provider::Scope;
+
+/// How far back one scope's backfill reaches, and how far it has got.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Backfill {
+    /// Fixed cutoff chosen when the account was first synced.
+    pub since: Timestamp,
+    /// Next page token of the `Since(since)` pass; `None` starts at the first page.
+    pub recent_page: Option<String>,
+    pub recent_done: bool,
+    /// Next page token of the `Before(since)` pass, for load-more.
+    pub older_page: Option<String>,
+    pub older_done: bool,
+}
+
+impl Backfill {
+    pub fn new(since: Timestamp) -> Self {
+        Self { since, recent_page: None, recent_done: false, older_page: None, older_done: false }
+    }
+}
+
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -57,6 +79,16 @@ CREATE TABLE IF NOT EXISTS messages(
     json TEXT NOT NULL,
     remote_state TEXT NOT NULL,
     UNIQUE(account, remote_id)
+);
+CREATE TABLE IF NOT EXISTS backfill(
+    account TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    since INTEGER NOT NULL,
+    recent_page TEXT,
+    recent_done INTEGER NOT NULL,
+    older_page TEXT,
+    older_done INTEGER NOT NULL,
+    PRIMARY KEY(account, scope)
 );
 ";
 
@@ -376,15 +408,128 @@ impl Cache {
             .collect())
     }
 
+    /// Cached folders of `account` with the remote label they map to, if any.
+    pub fn folder_list(&self, account: &str) -> rusqlite::Result<Vec<CachedFolder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, parent, remote_id FROM folders WHERE account=?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([account], |row| {
+            Ok((
+                row.get::<_, i64>(0)? as FolderId,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?.map(|p| p as FolderId),
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Ids of every cached account.
+    pub fn account_ids(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM accounts ORDER BY rowid")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    pub fn has_account(&self, account: &str) -> rusqlite::Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE id=?1",
+            [account],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Backfill progress of one scope. An unseen scope starts at the first page
+    /// with a zero cutoff, which the caller replaces before the first listing.
+    pub fn backfill(&self, account: &str, scope: &Scope) -> rusqlite::Result<Backfill> {
+        let row = self.conn.query_row(
+            "SELECT since, recent_page, recent_done, older_page, older_done
+             FROM backfill WHERE account=?1 AND scope=?2",
+            params![account, scope_json(scope)],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            },
+        );
+        let Ok((since, recent_page, recent_done, older_page, older_done)) = row else {
+            return Ok(Backfill::new(0));
+        };
+        Ok(Backfill { since, recent_page, recent_done, older_page, older_done })
+    }
+
+    /// The cutoff every scope of `account` is measured against: the one its first
+    /// backfill chose, else `now - WINDOW_DAYS` days.
+    pub fn window_since(&self, account: &str, now: Timestamp) -> rusqlite::Result<Timestamp> {
+        let since: Option<i64> = self.conn.query_row(
+            "SELECT MIN(since) FROM backfill WHERE account=?1",
+            [account],
+            |row| row.get(0),
+        )?;
+        Ok(since.unwrap_or(now - crate::sync::WINDOW_DAYS * DAY))
+    }
+
+    pub fn save_backfill(
+        &self,
+        account: &str,
+        scope: &Scope,
+        state: &Backfill,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO backfill(account, scope, since, recent_page, recent_done, older_page, older_done)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(account, scope) DO UPDATE SET
+                since=excluded.since, recent_page=excluded.recent_page,
+                recent_done=excluded.recent_done, older_page=excluded.older_page,
+                older_done=excluded.older_done",
+            params![
+                account,
+                scope_json(scope),
+                state.since,
+                state.recent_page,
+                state.recent_done,
+                state.older_page,
+                state.older_done,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Forget every scope's recent progress, so the next backfill re-lists the window.
+    pub fn reset_recent(&self, account: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE backfill SET recent_page=NULL, recent_done=0 WHERE account=?1",
+            [account],
+        )?;
+        Ok(())
+    }
+
+    /// Whether any cached row of `account` still has an unknown server read state
+    /// (rows written before read sync existed).
+    pub fn has_unknown_read(&self, account: &str) -> rusqlite::Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE account=?1 AND remote_read IS NULL",
+            [account],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+
     pub fn delete_message(&self, id: MessageId) -> rusqlite::Result<()> {
         self.conn
             .execute("DELETE FROM messages WHERE id=?1", [id as i64])?;
         Ok(())
     }
 
-    /// Drops the account and everything cached for it (messages, folders, threads, cursor).
+    /// Drops the account and everything cached for it.
     pub fn delete_account(&self, account: &str) -> rusqlite::Result<()> {
-        for table in ["messages", "folders", "threads"] {
+        for table in ["messages", "folders", "threads", "backfill"] {
             self.conn
                 .execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
         }
@@ -415,4 +560,12 @@ impl Cache {
             .flatten();
         Ok(max.map_or(1, |m| (m + 1) as u32))
     }
+}
+
+/// A cached folder row: its local id, name, parent and remote label.
+pub type CachedFolder = (FolderId, String, Option<FolderId>, Option<String>);
+
+/// [`Scope`] as the JSON stored in the `backfill` table's key.
+fn scope_json(scope: &Scope) -> String {
+    serde_json::to_string(scope).unwrap_or_default()
 }

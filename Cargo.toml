@@ -19,6 +19,7 @@ futures = "0.3"
 
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }
+parking_lot = "0.12"
 
 [profile.dev]
 debug = "line-tables-only"

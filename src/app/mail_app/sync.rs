@@ -1,69 +1,39 @@
-//! Remote mail sync: a background loop that pushes pending triage moves and
-//! pulls changes, plus the "Add Gmail account" sign-in flow.
-
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+//! Remote mail sync: a wakeable background loop that pushes pending triage and
+//! runs one sync round per account (server check, load-more, one backfill page),
+//! downloads message bodies as they are opened, plus the sign-in flow.
 
 use super::*;
 use crate::model::{Account, ProviderKind};
 use crate::provider::gmail::{ClientConfig, GmailProvider, auth};
-use crate::provider::secrets::{KeyringStore, SecretStore};
-use crate::provider::{MailProvider, ProviderError, RemoteId};
-use crate::sync::cache::Cache;
-use crate::sync::{self, Move, Pull, ReadChange};
+use std::sync::{Arc, Mutex};
 
-pub(super) type SharedProvider = Arc<Mutex<Box<dyn MailProvider>>>;
+use futures::StreamExt as _;
+
+use crate::provider::secrets::{KeyringStore, SecretStore};
+use crate::provider::{Body, MailProvider, ProviderError, Scope};
+use crate::sync::cache::Cache;
+use crate::sync::{self, SharedProvider};
 
 const PALETTE: [&str; 6] = ["#61afef", "#c678dd", "#98c379", "#e5c07b", "#e06c75", "#56b6c2"];
-/// Loop period; a pull happens every `PULL_EVERY` iterations (60 s).
+/// How long the loop waits before running a round that has nothing due.
 const TICK: Duration = Duration::from_secs(2);
-const PULL_EVERY: u32 = 30;
-/// Loop iterations to pause after a rate-limit response (~1 minute).
-const RATE_LIMIT_BACKOFF: u32 = 30;
-/// Cached messages re-fetched per tick to learn their server read state.
-const READ_BACKFILL: usize = 25;
+/// How often the server is checked for changes.
+const CHECK_EVERY: Duration = Duration::from_secs(60);
+/// How long rounds pause after the provider reported a rate limit.
+const THROTTLE_BACKOFF: Duration = Duration::from_secs(60);
+/// Messages after the opened one whose body is prefetched.
+const BODY_PREFETCH: usize = 2;
 
-/// Work for one account, run on a background thread.
+/// One account's round, run on a background thread.
 struct AccountJob {
     account: AccountId,
     provider: SharedProvider,
-    moves: Vec<Move>,
-    reads: Vec<ReadChange>,
-    pull: Option<PullJob>,
+    round: sync::Round,
 }
 
-struct PullJob {
-    /// `None` = initial import (or its continuation).
-    cursor: Option<String>,
-    /// Remote ids already cached, skipped by the import.
-    known: HashSet<RemoteId>,
-    /// Cached messages to fetch again (read state unknown).
-    refresh: Vec<RemoteId>,
-}
-
-struct AccountOutcome {
-    account: AccountId,
-    results: Vec<(Move, Result<Option<crate::provider::RemoteFolder>, ProviderError>)>,
-    reads: Vec<(ReadChange, Result<(), ProviderError>)>,
-    pull: Option<Result<Pull, ProviderError>>,
-}
-
-fn is_throttled<T>(result: &Result<T, ProviderError>) -> bool {
-    matches!(result, Err(ProviderError::RateLimited))
-}
-
-fn run_job(job: AccountJob) -> AccountOutcome {
-    let mut provider = job.provider.lock().unwrap_or_else(|e| e.into_inner());
-    let results = sync::run_moves(provider.as_mut(), job.moves);
-    // Throttled while pushing: don't spend more quota this round.
-    let mut stop = results.iter().any(|(_, r)| is_throttled(r));
-    let reads = if stop { Vec::new() } else { sync::run_reads(provider.as_mut(), job.reads) };
-    stop |= reads.iter().any(|(_, r)| is_throttled(r));
-    let pull = job
-        .pull
-        .filter(|_| !stop)
-        .map(|pull| sync::background_pull(provider.as_mut(), pull.cursor, &pull.known, &pull.refresh));
-    AccountOutcome { account: job.account, results, reads, pull }
+fn run_job(job: AccountJob) -> (AccountId, sync::RoundResult) {
+    let account = job.account;
+    (account.clone(), sync::run_round(&job.provider, job.round))
 }
 
 impl MailApp {
@@ -72,8 +42,13 @@ impl MailApp {
         self.cache = Some(cache);
         self.demo = demo;
         let client = ClientConfig::from_env();
-        let accounts: Vec<Account> =
-            self.mailbox.accounts().iter().filter(|a| a.provider == ProviderKind::Gmail).cloned().collect();
+        let accounts: Vec<Account> = self
+            .mailbox
+            .accounts()
+            .iter()
+            .filter(|a| a.provider == ProviderKind::Gmail)
+            .cloned()
+            .collect();
         for account in accounts {
             let token = KeyringStore.get(&account.email);
             match (&client, token) {
@@ -88,25 +63,26 @@ impl MailApp {
                 }
             }
         }
+        let (wake, mut rx) = futures::channel::mpsc::unbounded::<()>();
+        self.sync_wake = Some(wake);
         let executor = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
-            let mut iteration = 0u32;
+            // The first round runs at once, with a check: cached mail shows
+            // instantly and the server is asked what changed since.
+            let mut wait = Duration::ZERO;
             loop {
-                executor.timer(TICK).await;
-                let due = iteration.is_multiple_of(PULL_EVERY);
-                iteration += 1;
-                let Ok(jobs) = this.update(cx, |this, _| this.sync_prepare(due)) else {
+                // Sleep until the next round is due, or until something wakes us.
+                let _ = futures::future::select(Box::pin(executor.timer(wait)), Box::pin(rx.next())).await;
+                let Ok(Some(jobs)) = this.update(cx, |this, _| this.sync_prepare()) else {
                     break;
                 };
-                if jobs.is_empty() {
-                    continue;
-                }
-                let outcomes = executor
+                let results = executor
                     .spawn(async move { jobs.into_iter().map(run_job).collect::<Vec<_>>() })
                     .await;
-                if this.update_in(cx, |this, window, cx| this.sync_finish(outcomes, window, cx)).is_err() {
+                let Ok(step) = this.update_in(cx, |this, window, cx| this.sync_finish(results, window, cx)) else {
                     break;
-                }
+                };
+                wait = step.wait;
             }
         })
         .detach();
@@ -116,84 +92,69 @@ impl MailApp {
         self.providers.insert(account.to_owned(), Arc::new(Mutex::new(provider)));
     }
 
-    /// Main-thread half of one loop iteration: persist local state, then compute the work.
-    fn sync_prepare(&mut self, pull_due: bool) -> Vec<AccountJob> {
-        let Some(cache) = self.cache.clone() else {
-            return Vec::new();
-        };
+    /// Main-thread half of one loop iteration: persist local state, then plan
+    /// every account's round. `None` means there is nothing to do.
+    fn sync_prepare(&mut self) -> Option<Vec<AccountJob>> {
+        let cache = self.cache.clone()?;
         sync::persist_local(&self.mailbox, &cache);
-        if self.sync_backoff > 0 {
-            // Rate limited: send nothing until the quota window has passed.
-            self.sync_backoff -= 1;
-            return Vec::new();
+        let now = self.now();
+        if let Some(until) = self.throttled_until
+            && now < until
+        {
+            return None;
         }
-        let force = std::mem::take(&mut self.pull_now);
-        // A forced pull (Fetch mail, or the first import after sign-in) reports what it brought in.
-        if force && !self.providers.is_empty() && self.fetch_baseline.is_none() {
-            self.fetch_baseline = Some(self.mailbox.messages().len());
+        let check = self.force_check || now >= self.check_at;
+        if check {
+            self.force_check = false;
+            self.check_at = now + CHECK_EVERY.as_secs() as i64;
         }
         let mut jobs = Vec::new();
         for (account, provider) in &self.providers {
-            let moves = sync::pending_moves(&self.mailbox, &cache, account);
-            let reads = sync::pending_reads(&self.mailbox, &cache, account);
-            let cursor = cache.cursor(account).ok().flatten();
-            // Cached rows whose server read state is unknown get re-fetched a few at a time.
-            let refresh = cache.unknown_read(account, READ_BACKFILL).unwrap_or_default();
-            // An unfinished initial import (or read backfill) continues every tick, one chunk at a time.
-            let pull = (pull_due || force || cursor.is_none() || !refresh.is_empty()).then(|| PullJob {
-                known: if cursor.is_none() { cache.remote_ids(account).unwrap_or_default() } else { HashSet::new() },
-                cursor,
-                refresh,
-            });
-            if moves.is_empty() && reads.is_empty() && pull.is_none() {
+            let older = self.older_queue.get(account).cloned().unwrap_or_default();
+            let round = sync::plan_round(&self.mailbox, &cache, account, now, check, &older);
+            if round.is_empty() && older.is_empty() {
                 continue;
             }
-            jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), moves, reads, pull });
+            self.older_in_flight.insert(account.clone());
+            jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), round });
         }
-        jobs
+        (!jobs.is_empty()).then_some(jobs)
     }
 
-    /// Main-thread half: fold results into the mailbox and cache, toast new errors.
-    fn sync_finish(&mut self, outcomes: Vec<AccountOutcome>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Main-thread half: fold the rounds into the mailbox and cache, toast new
+    /// errors, and say when to run the next round.
+    fn sync_finish(
+        &mut self,
+        results: Vec<(AccountId, sync::RoundResult)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Step {
         let Some(cache) = self.cache.clone() else {
-            return;
+            return Step { wait: TICK };
         };
-        let mut error: Option<String> = None;
-        let mut importing = false;
+        let mut more = false;
         let mut throttled = false;
-        for outcome in outcomes {
-            // The account was removed while this batch was in flight.
-            if !self.providers.contains_key(&outcome.account) {
+        let mut error: Option<String> = None;
+        for (account, result) in results {
+            // The account was removed while this round was in flight.
+            if !self.providers.contains_key(&account) {
                 continue;
             }
-            throttled |= outcome.results.iter().any(|(_, r)| is_throttled(r))
-                || outcome.reads.iter().any(|(_, r)| is_throttled(r));
-            if let Some(e) = sync::apply_moves(&self.mailbox, &cache, &outcome.results) {
+            let summary = sync::apply_round(&mut self.mailbox, &cache, result);
+            more |= summary.more;
+            throttled |= summary.throttled;
+            if let Some(e) = summary.error {
                 error.get_or_insert(e);
             }
-            if let Some(e) = sync::apply_reads(&cache, &outcome.reads) {
-                error.get_or_insert(e);
-            }
-            match outcome.pull {
-                Some(Ok(pull)) => {
-                    importing |= pull.importing();
-                    if let Err(e) = sync::apply_fetched(&mut self.mailbox, &cache, &outcome.account, &pull) {
-                        error.get_or_insert(e);
-                    }
-                }
-                Some(Err(e)) => {
-                    throttled |= matches!(e, ProviderError::RateLimited);
-                    error.get_or_insert(e.to_string());
-                }
-                None => {}
-            }
+            self.older_in_flight.remove(&account);
+            // A load-more request is answered by its page; the next one is made
+            // when the list is scrolled near its end again.
+            self.older_queue.remove(&account);
         }
-        if throttled {
-            self.sync_backoff = RATE_LIMIT_BACKOFF;
-        }
-        // Report a requested fetch once it has finished (an initial import spans many pulls).
+        self.throttled_until = throttled.then(|| self.now() + THROTTLE_BACKOFF.as_secs() as i64);
+        // Report a requested fetch once the rounds it asked for have landed.
         if let Some(baseline) = self.fetch_baseline
-            && (error.is_some() || !importing)
+            && (error.is_some() || !more)
         {
             self.fetch_baseline = None;
             if error.is_none() {
@@ -214,21 +175,141 @@ impl MailApp {
             None => self.sync_error = None,
         }
         self.classify_visible();
+        let bodies = self.body_targets();
+        self.fetch_bodies(bodies, cx);
         cx.notify();
+        let wait = if more {
+            Duration::ZERO
+        } else if throttled {
+            THROTTLE_BACKOFF
+        } else {
+            TICK
+        };
+        Step { wait }
     }
 
     pub(super) fn has_remote_accounts(&self) -> bool {
         !self.providers.is_empty()
     }
 
-    /// Pull every linked account on the next sync tick (within ~2 s), then report the result.
+    /// Ask the server for changes on the next round (within ~2 s), then report the result.
     pub(super) fn fetch_mail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.providers.is_empty() {
             self.show_toast("No Gmail account linked — add one with the sidebar +".into(), window, cx);
             return;
         }
-        self.pull_now = true;
+        self.force_check = true;
+        self.fetch_baseline = Some(self.mailbox.messages().len());
         self.show_toast("Fetching mail…".into(), window, cx);
+        self.wake_sync();
+    }
+
+    /// The list is near its end: queue a page of older mail and wake the loop.
+    pub(super) fn maybe_load_older(&mut self, near_end: bool) {
+        if !near_end || self.loading_older() {
+            return;
+        }
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        let location = self.triage.view.location.clone();
+        let scopes: Vec<(AccountId, Scope)> = sync::scopes_for(&self.mailbox, &cache, &location)
+            .into_iter()
+            .filter(|(account, scope)| sync::has_older(&cache, account, scope))
+            .collect();
+        for (account, scope) in scopes {
+            if self.older_in_flight.contains(&account) {
+                continue;
+            }
+            let queue = self.older_queue.entry(account).or_default();
+            if !queue.contains(&scope) {
+                queue.push(scope);
+            }
+        }
+        self.wake_sync();
+    }
+
+    /// Whether a load-more page is queued or running: the footer says so.
+    pub(super) fn loading_older(&self) -> bool {
+        !self.older_queue.is_empty() || !self.older_in_flight.is_empty()
+    }
+
+    fn wake_sync(&mut self) {
+        if let Some(wake) = &self.sync_wake {
+            wake.unbounded_send(()).ok();
+        }
+    }
+
+    /// The opened message and the next few rows of the list.
+    pub(super) fn body_targets(&self) -> Vec<MessageId> {
+        let opened = self.opened();
+        let visible = self.visible_ids();
+        let start = opened.and_then(|id| visible.iter().position(|v| *v == id)).unwrap_or(0);
+        let mut ids: Vec<MessageId> = visible[start..].iter().take(BODY_PREFETCH + 1).copied().collect();
+        if let Some(id) = opened
+            && !ids.contains(&id)
+        {
+            ids.insert(0, id);
+        }
+        ids
+    }
+
+    /// Download the bodies of `ids` in the background, storing each as it lands.
+    pub(super) fn fetch_bodies(&mut self, ids: Vec<MessageId>, cx: &mut Context<Self>) {
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        for id in ids {
+            if self.bodies_in_flight.contains(&id) {
+                continue;
+            }
+            let Some(req) = sync::body_request(&self.mailbox, &cache, id) else {
+                continue;
+            };
+            let Some(provider) = self.providers.get(&req.account).cloned() else {
+                continue;
+            };
+            self.bodies_in_flight.insert(id);
+            // The blocking get runs off-thread; the merge happens back on the UI thread.
+            let task = cx.background_spawn(async move { sync::run_body(&provider, req) });
+            cx.spawn(async move |this, cx| {
+                let (req, result) = task.await;
+                this.update(cx, |this, cx| this.finish_body(req, result, cx)).ok();
+            })
+            .detach();
+        }
+    }
+
+    fn finish_body(
+        &mut self,
+        req: sync::BodyRequest,
+        result: Result<Body, ProviderError>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        let cache = cache.as_ref();
+        self.bodies_in_flight.remove(&req.id);
+        match result {
+            Ok(body) => {
+                if let Err(e) = sync::apply_body(&mut self.mailbox, cache, &req, body) {
+                    self.toast_sync_error(e);
+                }
+            }
+            // A rate limit is expected and self-healing: the body is requested again.
+            Err(ProviderError::RateLimited) => {}
+            Err(e) => self.toast_sync_error(e.to_string()),
+        }
+        cx.notify();
+    }
+
+    fn toast_sync_error(&mut self, e: String) {
+        if self.sync_error.as_deref() == Some(&e) {
+            return;
+        }
+        self.sync_error = Some(e.clone());
+        self.pending_toast = Some(format!("Gmail sync: {e}"));
     }
 
     /// Drop everything shown for demo data and reset view state.
@@ -325,7 +406,9 @@ impl MailApp {
         let label = account.email.clone();
         self.mailbox.add_account(account);
         self.register_provider(&id, Box::new(GmailProvider::new(client, refresh)));
-        self.pull_now = true;
+        self.force_check = true;
+        self.fetch_baseline = Some(self.mailbox.messages().len());
+        self.wake_sync();
         self.show_toast(format!("Gmail connected: {label}"), window, cx);
         self.refresh_account_rows(cx);
         self.classify_visible();
@@ -347,6 +430,8 @@ impl MailApp {
             return;
         };
         self.providers.remove(id);
+        self.older_queue.remove(id);
+        self.older_in_flight.remove(id);
         let mut problems = Vec::new();
         if let Some(cache) = &self.cache
             && let Err(e) = cache.delete_account(id)
@@ -368,4 +453,9 @@ impl MailApp {
         self.refresh_account_rows(cx);
         cx.notify();
     }
+}
+
+/// What the sync loop should do after a round.
+struct Step {
+    wait: Duration,
 }
