@@ -20,6 +20,7 @@ mod model;
 mod read;
 mod schema;
 mod seed;
+mod settings;
 mod write;
 
 use std::path::Path;
