@@ -2,17 +2,18 @@
 //! attachments. The opened message and every expanded thread message share it.
 
 use super::super::*;
-use super::parts::{stamp, Look, Role};
+use super::parts::{selectable_verbatim, stamp, Look, Role};
 use crate::app::chrome::humanize_time;
 use crate::find::Segment;
 use crate::judge::QuestionKey;
 use crate::reading;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::text::TextView;
+use gpui_kit::component::text::{Text, TextView};
 use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
@@ -69,7 +70,13 @@ impl MailApp {
             .flex_none()
             .items_center()
             .gap_3()
-            .when(total > 1, |d| d.child(look.mono(format!("MSG {pos:02} / {total:02}"), t.muted_foreground)))
+            .when(total > 1, |d| {
+                d.child(look.mono_selectable(
+                    ("reader-sel-msgno", id),
+                    format!("MSG {pos:02} / {total:02}"),
+                    t.muted_foreground,
+                ))
+            })
             .when(!opened, |d| d.child(look.mono("COLLAPSE", t.muted_foreground)))
             .child({
                 let tip = m
@@ -79,7 +86,7 @@ impl MailApp {
                     .id(("reader-msg-stamp", id))
                     .text_size(px(13.))
                     .text_color(t.muted_foreground)
-                    .child(reading::received_label(&m.received))
+                    .child(SelectableText::new(("reader-sel-stamp", id), reading::received_label(&m.received)))
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
             .child(self.message_buttons(m.id, cx));
@@ -107,17 +114,22 @@ impl MailApp {
             .items_center()
             .h(px(18.))
             .cursor_pointer()
-            .truncate()
             .text_size(px(13.))
             .text_color(t.muted_foreground)
             .hover(move |s| s.text_color(hover))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_recipients(mid, cx)))
-            .child(format!(
-                "{} {}",
-                reading::recipient_line(m, me),
-                if recipients_open { "▴" } else { "▾" }
-            ));
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if TextSelection::selected_text(window, cx).is_empty() {
+                    this.toggle_recipients(mid, cx);
+                }
+            }))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .child(SelectableText::new(("reader-sel-recipients", id), reading::recipient_line(m, me))),
+            )
+            .child(div().flex_none().pl_1().child(if recipients_open { "▴" } else { "▾" }));
 
         let sender = div()
             .id(head_id)
@@ -127,7 +139,12 @@ impl MailApp {
             .gap_3()
             .when(!opened, |d| {
                 d.cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        // A drag that selected text is not a click on the header.
+                        if TextSelection::selected_text(window, cx).is_empty() {
+                            this.toggle_reader_expanded(mid, cx);
+                        }
+                    }))
             })
             .child(look.monogram(&m.from_name, &m.from_email, 40.))
             .child(
@@ -151,7 +168,7 @@ impl MailApp {
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(t.foreground)
-                                    .child(m.from_name.clone()),
+                                    .child(SelectableText::new(("reader-sel-name", id), m.from_name.clone())),
                             )
                             .child(
                                 div()
@@ -160,7 +177,7 @@ impl MailApp {
                                     .truncate()
                                     .text_size(px(13.))
                                     .text_color(t.muted_foreground)
-                                    .child(m.from_email.clone()),
+                                    .child(SelectableText::new(("reader-sel-email", id), m.from_email.clone())),
                             ),
                     )
                     .child(recipient_toggle),
@@ -244,7 +261,8 @@ impl MailApp {
     fn recipient_rows(&self, m: &Message) -> Div {
         let fields = [("To:", &m.to), ("Cc:", &m.cc), ("Bcc:", &m.bcc)];
         let mut list = DescriptionList::horizontal().columns(1).label_width(px(32.)).bordered(false);
-        for (label, field) in fields {
+        for (row, (label, field)) in fields.into_iter().enumerate() {
+            let row = row as u64;
             let recipients = reading::parse_recipients(field);
             if recipients.is_empty() {
                 continue;
@@ -257,7 +275,8 @@ impl MailApp {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            list = list.item(label, text, 1);
+            let value = selectable_verbatim(("reader-sel-recipient-row", u64::from(m.id) * 4 + row), &text);
+            list = list.item(label, value.into_any_element(), 1);
         }
         div().flex().flex_col().gap_1().child(Separator::horizontal()).child(list)
     }
@@ -281,7 +300,10 @@ impl MailApp {
             out.push(row(
                 Alert::warning(
                     "banner-new-sender",
-                    format!("New sender · {} <{}>", m.from_name, m.from_email),
+                    Text::from(selectable_verbatim(
+                        ("reader-sel-new-sender", u64::from(m.id)),
+                        &format!("New sender · {} <{}>", m.from_name, m.from_email),
+                    )),
                 )
                 .banner(),
                 actions()
@@ -305,7 +327,11 @@ impl MailApp {
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
             out.push(row(
-                Alert::error("banner-possible-spam", "Possible spam").banner(),
+                Alert::error(
+                    "banner-possible-spam",
+                    Text::from(selectable_verbatim(("reader-sel-spam", u64::from(m.id)), "Possible spam")),
+                )
+                .banner(),
                 actions()
                     .child(look.action_button(
                         "btn-banner-spam-block",
@@ -369,9 +395,13 @@ impl MailApp {
                 .bg(t.primary.opacity(0.08))
                 .child(icons::icon(Glyph::Suggestion, t, 12.))
                 .child(
-                    look.mono(format!("Suggested: {}", parts.join(" · ")), t.foreground)
-                        .flex_1()
-                        .min_w_0(),
+                    look.mono_selectable(
+                        ("reader-sel-suggestions", u64::from(m.id)),
+                        format!("Suggested: {}", parts.join(" · ")),
+                        t.foreground,
+                    )
+                    .flex_1()
+                    .min_w_0(),
                 )
                 .child(
                     div()
@@ -435,7 +465,7 @@ impl MailApp {
                 div()
                     .w_full()
                     .min_w_0()
-                    .child(TextView::html(("reader-html", id), safe.html))
+                    .child(TextView::html(("reader-html", id), safe.html).selectable(true))
                     .into_any_element()
             }
             _ => self.text_content(m, look, cx),
@@ -519,7 +549,8 @@ impl MailApp {
     /// Attachment chips: paperclip, file name, mono size.
     fn attachment_chips(m: &Message, look: &Look<'_>) -> Div {
         let t = &look.t;
-        div().flex().flex_wrap().gap_2().children(m.attachments.iter().map(|a| {
+        div().flex().flex_wrap().gap_2().children(m.attachments.iter().enumerate().map(|(i, a)| {
+            let att_id = u64::from(m.id) * 1024 + i as u64;
             div()
                 .flex()
                 .items_center()
@@ -530,8 +561,16 @@ impl MailApp {
                 .border_1()
                 .border_color(t.border)
                 .child(icons::icon(Glyph::Attachment, t, 12.))
-                .child(div().text_size(px(12.)).child(a.name.clone()))
-                .child(look.mono(reading::format_size(a.size), t.muted_foreground))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .child(SelectableText::new(("reader-sel-attachment", att_id), a.name.clone())),
+                )
+                .child(look.mono_selectable(
+                    ("reader-sel-attachment-size", att_id),
+                    reading::format_size(a.size),
+                    t.muted_foreground,
+                ))
         }))
     }
 }

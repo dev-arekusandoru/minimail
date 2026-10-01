@@ -6,6 +6,7 @@ use gpui_kit::component::ActiveTheme as _;
 use super::reader::FindReveal;
 use super::*;
 use crate::find::{self, Find, Match, Options, Segment};
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::input::{InputEvent, InputState, SelectAll};
 use std::ops::Range;
 
@@ -250,7 +251,15 @@ impl MailApp {
         cx: &App,
     ) -> AnyElement {
         let Some(highlights) = self.find_highlights(thread, msg, segment, cx) else {
-            return text.to_owned().into_any_element();
+            // Highlighted text is a plain `StyledText`, which the window selection cannot see;
+            // without matches the text is selectable.
+            let name = match segment {
+                Segment::Subject => "reader-sel-subject",
+                Segment::Main => "reader-sel-main",
+                Segment::Quoted => "reader-sel-quoted",
+            };
+            return SelectableText::new(ElementId::NamedInteger(name.into(), u64::from(msg)), text.to_owned())
+                .into_any_element();
         };
         let styled = StyledText::new(text.to_owned()).with_highlights(highlights);
         if self.find_current(thread).is_some_and(|m| m.msg == msg && m.segment == segment) {

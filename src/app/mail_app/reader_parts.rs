@@ -1,7 +1,8 @@
 //! Small shared pieces of the reader: mono metadata text, keycaps, badges, key-labelled buttons
 //! and the thread rail.
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::ActiveTheme as _;
-
+use gpui_kit::component::text::TextView;
 use super::super::*;
 use crate::app::ui::{mono_font, shortcut};
 use crate::theme::ThemeColor;
@@ -43,6 +44,16 @@ impl<'a> Look<'a> {
     /// One line of mono metadata text.
     pub fn mono(&self, text: impl Into<SharedString>, color: Hsla) -> Div {
         div().font_family(self.mono.clone()).text_size(px(11.)).text_color(color).child(text.into())
+    }
+
+    /// [`Self::mono`] whose text takes part in the window's text selection. `id` must be stable
+    /// and unique among the selectable texts on screen.
+    pub fn mono_selectable(&self, id: impl Into<ElementId>, text: impl Into<SharedString>, color: Hsla) -> Div {
+        div()
+            .font_family(self.mono.clone())
+            .text_size(px(11.))
+            .text_color(color)
+            .child(SelectableText::new(id, text))
     }
 
     /// A keycap for `key` (`"e"`, `"shift-o"`), the same pill the footer hint bar uses.
@@ -102,6 +113,19 @@ impl<'a> Look<'a> {
             .when(!key.is_empty(), |b| b.child(self.keycap(key)))
             .on_click(run(action))
     }
+}
+
+/// Markdown text that shows `text` verbatim (every ASCII punctuation mark backslash-escaped) in a
+/// selectable kit `TextView`, for kit components that take their text as `Text`.
+pub(super) fn selectable_verbatim(id: impl Into<ElementId>, text: &str) -> TextView {
+    let mut escaped = String::with_capacity(text.len() * 2);
+    for c in text.chars() {
+        if c.is_ascii_punctuation() {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    TextView::markdown(id, escaped).selectable(true)
 }
 
 /// `2026-09-29 07:41` from an RFC 3339 timestamp, as written (no clock, no zone math).
