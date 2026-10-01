@@ -183,6 +183,7 @@ fn local(id: MessageId, account: &str) -> Message {
         html: None,
         attachments: Vec::new(),
         read: false,
+        partial: false,
     }
 }
 

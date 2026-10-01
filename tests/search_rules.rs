@@ -22,6 +22,7 @@ fn msg(name: &str, email: &str, subject: &str, body: &str, received: &str) -> Me
         html: None,
         attachments: Vec::new(),
         read: false,
+        partial: false,
     }
 }
 

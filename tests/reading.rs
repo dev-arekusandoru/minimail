@@ -23,6 +23,7 @@ fn msg(id: u32, thread_id: u32, received: &str) -> Message {
         html: None,
         attachments: Vec::new(),
         read: false,
+        partial: false,
     }
 }
 

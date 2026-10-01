@@ -447,6 +447,7 @@ pub fn apply_fetched(
             html: remote.html.clone(),
             attachments: remote.attachments.clone(),
             read,
+            partial: false,
         };
         mb.upsert_remote(message.clone());
         cache

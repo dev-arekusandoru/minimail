@@ -87,6 +87,10 @@ pub struct Message {
     /// Opened (here, or on the server for synced mail). Persisted for synced accounts.
     #[serde(default)]
     pub read: bool,
+    /// Only headers and the server snippet are known (`body` holds the snippet);
+    /// the full body is downloaded when the message is opened.
+    #[serde(default)]
+    pub partial: bool,
 }
 
 impl Message {
@@ -463,6 +467,17 @@ impl Mailbox {
     pub fn mark_read(&mut self, id: MessageId) {
         if let Some(&i) = self.index.get(&id) {
             self.messages[i].read = true;
+        }
+    }
+
+    /// Store a downloaded body and clear `partial`. Not an undo step.
+    pub fn set_body(&mut self, id: MessageId, body: String, html: Option<String>, attachments: Vec<Attachment>) {
+        if let Some(&i) = self.index.get(&id) {
+            let m = &mut self.messages[i];
+            m.body = body;
+            m.html = html;
+            m.attachments = attachments;
+            m.partial = false;
         }
     }
 }
