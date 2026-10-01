@@ -42,6 +42,7 @@ pub struct RemoteMessage {
     pub attachments: Vec<Attachment>,
     pub state: RemoteState,
     pub outgoing: bool,
+    pub unread: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,4 +90,6 @@ pub trait MailProvider: Send + 'static {
         from: &RemoteState,
         to: &RemoteState,
     ) -> Result<(), ProviderError>;
+    /// Mark the message read (`true`) or unread on the server.
+    fn set_read(&mut self, id: &RemoteId, read: bool) -> Result<(), ProviderError>;
 }

@@ -114,6 +114,7 @@ impl Mailbox {
                 bcc: String::new(),
                 html: None,
                 attachments: Vec::new(),
+                read: true,
             };
             self.index.insert(id, self.messages.len());
             self.newest_first.insert(0, id);

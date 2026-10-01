@@ -10,7 +10,7 @@ use crate::provider::gmail::{ClientConfig, GmailProvider, auth};
 use crate::provider::secrets::{KeyringStore, SecretStore};
 use crate::provider::{MailProvider, ProviderError, RemoteId};
 use crate::sync::cache::Cache;
-use crate::sync::{self, Move, Pull};
+use crate::sync::{self, Move, Pull, ReadChange};
 
 pub(super) type SharedProvider = Arc<Mutex<Box<dyn MailProvider>>>;
 
@@ -20,12 +20,15 @@ const TICK: Duration = Duration::from_secs(2);
 const PULL_EVERY: u32 = 30;
 /// Loop iterations to pause after a rate-limit response (~1 minute).
 const RATE_LIMIT_BACKOFF: u32 = 30;
+/// Cached messages re-fetched per tick to learn their server read state.
+const READ_BACKFILL: usize = 25;
 
 /// Work for one account, run on a background thread.
 struct AccountJob {
     account: AccountId,
     provider: SharedProvider,
     moves: Vec<Move>,
+    reads: Vec<ReadChange>,
     pull: Option<PullJob>,
 }
 
@@ -34,24 +37,33 @@ struct PullJob {
     cursor: Option<String>,
     /// Remote ids already cached, skipped by the import.
     known: HashSet<RemoteId>,
+    /// Cached messages to fetch again (read state unknown).
+    refresh: Vec<RemoteId>,
 }
 
 struct AccountOutcome {
     account: AccountId,
     results: Vec<(Move, Result<Option<crate::provider::RemoteFolder>, ProviderError>)>,
+    reads: Vec<(ReadChange, Result<(), ProviderError>)>,
     pull: Option<Result<Pull, ProviderError>>,
+}
+
+fn is_throttled<T>(result: &Result<T, ProviderError>) -> bool {
+    matches!(result, Err(ProviderError::RateLimited))
 }
 
 fn run_job(job: AccountJob) -> AccountOutcome {
     let mut provider = job.provider.lock().unwrap_or_else(|e| e.into_inner());
     let results = sync::run_moves(provider.as_mut(), job.moves);
-    // Throttled while pushing: don't spend more quota on a pull.
-    let throttled = results.iter().any(|(_, r)| matches!(r, Err(ProviderError::RateLimited)));
+    // Throttled while pushing: don't spend more quota this round.
+    let mut stop = results.iter().any(|(_, r)| is_throttled(r));
+    let reads = if stop { Vec::new() } else { sync::run_reads(provider.as_mut(), job.reads) };
+    stop |= reads.iter().any(|(_, r)| is_throttled(r));
     let pull = job
         .pull
-        .filter(|_| !throttled)
-        .map(|pull| sync::background_pull(provider.as_mut(), pull.cursor, &pull.known));
-    AccountOutcome { account: job.account, results, pull }
+        .filter(|_| !stop)
+        .map(|pull| sync::background_pull(provider.as_mut(), pull.cursor, &pull.known, &pull.refresh));
+    AccountOutcome { account: job.account, results, reads, pull }
 }
 
 impl MailApp {
@@ -123,16 +135,20 @@ impl MailApp {
         let mut jobs = Vec::new();
         for (account, provider) in &self.providers {
             let moves = sync::pending_moves(&self.mailbox, &cache, account);
+            let reads = sync::pending_reads(&self.mailbox, &cache, account);
             let cursor = cache.cursor(account).ok().flatten();
-            // An unfinished initial import continues every tick, one chunk at a time.
-            let pull = (pull_due || force || cursor.is_none()).then(|| PullJob {
+            // Cached rows whose server read state is unknown get re-fetched a few at a time.
+            let refresh = cache.unknown_read(account, READ_BACKFILL).unwrap_or_default();
+            // An unfinished initial import (or read backfill) continues every tick, one chunk at a time.
+            let pull = (pull_due || force || cursor.is_none() || !refresh.is_empty()).then(|| PullJob {
                 known: if cursor.is_none() { cache.remote_ids(account).unwrap_or_default() } else { HashSet::new() },
                 cursor,
+                refresh,
             });
-            if moves.is_empty() && pull.is_none() {
+            if moves.is_empty() && reads.is_empty() && pull.is_none() {
                 continue;
             }
-            jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), moves, pull });
+            jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), moves, reads, pull });
         }
         jobs
     }
@@ -150,8 +166,12 @@ impl MailApp {
             if !self.providers.contains_key(&outcome.account) {
                 continue;
             }
-            throttled |= outcome.results.iter().any(|(_, r)| matches!(r, Err(ProviderError::RateLimited)));
+            throttled |= outcome.results.iter().any(|(_, r)| is_throttled(r))
+                || outcome.reads.iter().any(|(_, r)| is_throttled(r));
             if let Some(e) = sync::apply_moves(&self.mailbox, &cache, &outcome.results) {
+                error.get_or_insert(e);
+            }
+            if let Some(e) = sync::apply_reads(&cache, &outcome.reads) {
                 error.get_or_insert(e);
             }
             match outcome.pull {
@@ -215,7 +235,6 @@ impl MailApp {
     fn reset_view_state(&mut self) {
         self.triage = Triage::new(View::default());
         self.tabs = Tabs::default();
-        self.read.clear();
         self.expanded.clear();
         self.reader_panes.borrow_mut().clear();
         self.finds.clear();

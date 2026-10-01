@@ -170,6 +170,63 @@ pub fn run_moves(
     results
 }
 
+/// A read/unread change waiting to be pushed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadChange {
+    pub id: MessageId,
+    pub remote_id: RemoteId,
+    pub read: bool,
+}
+
+/// Messages of `account` whose read state differs from what the server last confirmed.
+/// Rows with an unknown server state are skipped until a pull fills it in.
+pub fn pending_reads(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<ReadChange> {
+    mb.messages()
+        .iter()
+        .filter(|m| m.account == account)
+        .filter_map(|m| {
+            let confirmed = cache.remote_read(m.id).ok().flatten()?;
+            if confirmed == m.read {
+                return None;
+            }
+            let (_, remote_id, _) = cache.remote_state(m.id).ok().flatten()?;
+            Some(ReadChange { id: m.id, remote_id, read: m.read })
+        })
+        .collect()
+}
+
+/// Push read changes, stopping at the first `Auth`/`Network`/rate-limit failure.
+pub fn run_reads(
+    p: &mut dyn MailProvider,
+    changes: Vec<ReadChange>,
+) -> Vec<(ReadChange, Result<(), ProviderError>)> {
+    let mut results = Vec::with_capacity(changes.len());
+    for change in changes {
+        let result = p.set_read(&change.remote_id, change.read);
+        let stop = result.as_ref().is_err_and(is_fatal);
+        results.push((change, result));
+        if stop {
+            break;
+        }
+    }
+    results
+}
+
+/// Record confirmed read changes; returns the first error, if any.
+pub fn apply_reads(cache: &Cache, results: &[(ReadChange, Result<(), ProviderError>)]) -> Option<String> {
+    let mut first = None;
+    for (change, result) in results {
+        let outcome = match result {
+            Ok(()) => cache.set_remote_read(change.id, change.read).map_err(err),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = outcome {
+            first.get_or_insert(e);
+        }
+    }
+    first
+}
+
 /// Errors that make the rest of a batch pointless.
 fn is_fatal(e: &ProviderError) -> bool {
     matches!(e, ProviderError::Auth(_) | ProviderError::Network(_) | ProviderError::RateLimited)
@@ -232,10 +289,12 @@ impl Pull {
 /// longer knows it), the next chunk of the initial import: the newest
 /// `INITIAL_LIMIT` messages minus those already in `known`, `IMPORT_CHUNK` at a
 /// time so each pull stays within provider rate limits and lands progressively.
+/// `refresh` are cached messages to fetch again regardless (e.g. read state unknown).
 pub fn background_pull(
     p: &mut dyn MailProvider,
     cursor: Option<String>,
     known: &HashSet<RemoteId>,
+    refresh: &[RemoteId],
 ) -> Result<Pull, ProviderError> {
     let folders = p.folders()?;
     let changes = match cursor.as_deref() {
@@ -246,14 +305,27 @@ pub fn background_pull(
         },
         None => None,
     };
+    let with_refresh = |mut ids: Vec<RemoteId>| {
+        for id in refresh {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        ids
+    };
     let (fetched, removed, cursor) = match changes {
-        Some(changes) => (p.fetch(&changes.changed)?, changes.removed, Some(changes.cursor)),
+        Some(changes) => {
+            let removed = changes.removed;
+            let ids: Vec<RemoteId> =
+                with_refresh(changes.changed).into_iter().filter(|id| !removed.contains(id)).collect();
+            (p.fetch(&ids)?, removed, Some(changes.cursor))
+        }
         None => {
             let (ids, cursor) = p.recent(INITIAL_LIMIT)?;
             let missing: Vec<RemoteId> = ids.into_iter().filter(|id| !known.contains(id)).collect();
-            let chunk = &missing[..missing.len().min(IMPORT_CHUNK)];
+            let chunk = missing[..missing.len().min(IMPORT_CHUNK)].to_vec();
             let done = chunk.len() == missing.len();
-            (p.fetch(chunk)?, Vec::new(), done.then_some(cursor))
+            (p.fetch(&with_refresh(chunk))?, Vec::new(), done.then_some(cursor))
         }
     };
     Ok(Pull {
@@ -346,6 +418,16 @@ pub fn apply_fetched(
                 mb.next_thread_id().max(cache.next_thread_id().unwrap_or(1))
             })
             .map_err(err)?;
+        let remote_read = !remote.unread;
+        let read = match &existing {
+            // A local read the server has not confirmed yet wins; unknown (pre-migration)
+            // rows take the server's value.
+            Some(existing) => match cache.remote_read(existing.id).map_err(err)? {
+                Some(confirmed) if confirmed != existing.read => existing.read,
+                _ => remote_read,
+            },
+            None => remote_read,
+        };
         let snooze = mb.snoozed_until(id).map(format_rfc3339);
         let message = Message {
             id,
@@ -364,9 +446,12 @@ pub fn apply_fetched(
             bcc: remote.bcc.clone(),
             html: remote.html.clone(),
             attachments: remote.attachments.clone(),
+            read,
         };
         mb.upsert_remote(message.clone());
-        cache.upsert_message(&message, &remote.id, &remote.state).map_err(err)?;
+        cache
+            .upsert_message(&message, &remote.id, &remote.state, remote_read)
+            .map_err(err)?;
     }
 
     for rid in &pull.removed {
@@ -426,7 +511,7 @@ fn err(e: rusqlite::Error) -> String {
     e.to_string()
 }
 
-/// Write local-only changes (pending states and snoozes) back to the cache so
+/// Write local-only changes (pending states, snoozes, reads) back to the cache so
 /// they survive a restart.
 pub fn persist_local(mb: &Mailbox, cache: &Cache) {
     let Ok(cached) = cache.cached_messages() else {
@@ -438,7 +523,7 @@ pub fn persist_local(mb: &Mailbox, cache: &Cache) {
         let Some(old) = by_id.get(&message.id) else {
             continue;
         };
-        if old.state == message.state && old.snooze == message.snooze {
+        if old.state == message.state && old.snooze == message.snooze && old.read == message.read {
             continue;
         }
         let mut next = message.clone();

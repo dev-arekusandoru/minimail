@@ -13,7 +13,8 @@ use mail_classifier::provider::{
 };
 use mail_classifier::sync::cache::Cache;
 use mail_classifier::sync::{
-    Pull, apply_fetched, apply_moves, background_pull, pending_moves, persist_local, run_moves,
+    Pull, apply_fetched, apply_moves, apply_reads, background_pull, pending_moves, pending_reads,
+    persist_local, run_moves, run_reads,
 };
 
 const ACCOUNT: &str = "gmail:a@x.io";
@@ -30,6 +31,7 @@ struct FakeProvider {
     created: Vec<String>,
     fail_move: Option<ProviderError>,
     expire_cursor: bool,
+    reads: Vec<(RemoteId, bool)>,
 }
 
 impl FakeProvider {
@@ -43,6 +45,7 @@ impl FakeProvider {
             created: Vec::new(),
             fail_move: None,
             expire_cursor: false,
+            reads: Vec::new(),
         }
     }
 
@@ -125,6 +128,14 @@ impl MailProvider for FakeProvider {
         }
         Ok(())
     }
+
+    fn set_read(&mut self, id: &RemoteId, read: bool) -> Result<(), ProviderError> {
+        self.reads.push((id.clone(), read));
+        if let Some(m) = self.messages.iter_mut().find(|m| &m.id == id) {
+            m.unread = !read;
+        }
+        Ok(())
+    }
 }
 
 fn clone_error(e: &ProviderError) -> ProviderError {
@@ -171,6 +182,7 @@ fn local(id: MessageId, account: &str) -> Message {
         bcc: String::new(),
         html: None,
         attachments: Vec::new(),
+        read: false,
     }
 }
 
@@ -190,6 +202,7 @@ fn remote(id: &str, thread: &str, received: Timestamp) -> RemoteMessage {
         attachments: Vec::new(),
         state: RemoteState::Inbox,
         outgoing: false,
+        unread: true,
     }
 }
 
@@ -216,7 +229,7 @@ fn pull_all(mb: &mut Mailbox, cache: &Cache, p: &mut FakeProvider, cursor: Optio
         None => cache.remote_ids(ACCOUNT).unwrap(),
         Some(_) => HashSet::new(),
     };
-    let pull = background_pull(p, cursor, &known).expect("pull");
+    let pull = background_pull(p, cursor, &known, &[]).expect("pull");
     apply_fetched(mb, cache, ACCOUNT, &pull).expect("apply");
 }
 
@@ -234,6 +247,95 @@ fn flush(mb: &Mailbox, cache: &Cache, p: &mut FakeProvider) {
     let results = run_moves(p, moves);
     let error = apply_moves(mb, cache, &results);
     assert_eq!(error, None, "apply_moves failed");
+}
+
+// --------------------------------------------------------------------- read
+
+/// The local id of remote message `rid`.
+fn local_id(cache: &Cache, rid: &str) -> MessageId {
+    cache.message_by_remote(ACCOUNT, rid).unwrap().expect("cached")
+}
+
+#[test]
+fn server_read_state_is_imported_and_follows_server_changes() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut mb = mailbox(Vec::new());
+    let mut seen = remote("m1", "t1", 1_790_000_000);
+    seen.unread = false;
+    let mut p = FakeProvider::new(vec![seen, remote("m2", "t2", 1_790_000_100)]);
+    cache.upsert_account(&account()).unwrap();
+
+    pull_all(&mut mb, &cache, &mut p, None);
+    let (m1, m2) = (local_id(&cache, "m1"), local_id(&cache, "m2"));
+    assert!(mb.is_read(m1) && !mb.is_read(m2));
+
+    // Read m2 and mark m1 unread in Gmail web.
+    p.messages[1].unread = false;
+    p.messages[0].unread = true;
+    pull_all(&mut mb, &cache, &mut p, Some("1".to_owned()));
+    assert!(!mb.is_read(m1) && mb.is_read(m2));
+    assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty(), "server changes are not echoed back");
+}
+
+#[test]
+fn reading_locally_is_pushed_once_and_survives_a_pull_before_the_push() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut mb = mailbox(Vec::new());
+    let mut p = FakeProvider::new(vec![remote("m1", "t1", 1_790_000_000)]);
+    cache.upsert_account(&account()).unwrap();
+    pull_all(&mut mb, &cache, &mut p, None);
+    let m1 = local_id(&cache, "m1");
+
+    mb.mark_read(m1);
+    // A pull lands before the push: the server still says unread, the local read wins.
+    pull_all(&mut mb, &cache, &mut p, Some("1".to_owned()));
+    assert!(mb.is_read(m1));
+
+    let results = run_reads(&mut p, pending_reads(&mb, &cache, ACCOUNT));
+    assert_eq!(apply_reads(&cache, &results), None);
+    assert_eq!(p.reads, [("m1".to_owned(), true)]);
+    assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty());
+}
+
+#[test]
+fn a_cache_from_before_read_sync_is_migrated_and_backfilled_from_the_server() {
+    // A cache file in the old schema (no remote_read column) holding one message.
+    let path = std::env::temp_dir().join(format!("mc-read-migration-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut old = local(1, ACCOUNT);
+    old.read = false;
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE messages(id INTEGER PRIMARY KEY, account TEXT NOT NULL,
+                remote_id TEXT NOT NULL, json TEXT NOT NULL, remote_state TEXT NOT NULL,
+                UNIQUE(account, remote_id));",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO messages VALUES(1, ?1, 'm1', ?2, '\"Inbox\"')",
+            (ACCOUNT, serde_json::to_string(&old).unwrap()),
+        )
+        .unwrap();
+    }
+    let cache = Cache::open(&path).unwrap();
+    cache.upsert_account(&account()).unwrap();
+    let (_, _, messages) = cache.load().unwrap();
+    let mut mb = mailbox(messages);
+    assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty(), "unknown rows are never pushed");
+
+    let refresh = cache.unknown_read(ACCOUNT, 25).unwrap();
+    assert_eq!(refresh, ["m1"]);
+    let mut read_in_gmail = remote("m1", "t1", 1_790_000_000);
+    read_in_gmail.unread = false;
+    let mut p = FakeProvider::new(vec![read_in_gmail]);
+    let pull = background_pull(&mut p, Some("1".to_owned()), &HashSet::new(), &refresh).unwrap();
+    apply_fetched(&mut mb, &cache, ACCOUNT, &pull).unwrap();
+
+    assert!(mb.is_read(1), "the server's read state replaces the unknown one");
+    assert!(cache.unknown_read(ACCOUNT, 25).unwrap().is_empty());
+    drop(cache);
+    let _ = std::fs::remove_file(&path);
 }
 
 // --------------------------------------------------------------------- pull
@@ -628,7 +730,7 @@ fn a_large_initial_import_lands_in_chunks_and_resumes() {
     let mut sizes = Vec::new();
     while cache.cursor(ACCOUNT).unwrap().is_none() {
         let known = cache.remote_ids(ACCOUNT).unwrap();
-        let pull = background_pull(&mut p, None, &known).expect("pull");
+        let pull = background_pull(&mut p, None, &known, &[]).expect("pull");
         sizes.push(pull.fetched.len());
         apply_fetched(&mut mb, &cache, ACCOUNT, &pull).expect("apply");
         assert!(sizes.len() <= 3, "import never finished: {sizes:?}");
@@ -646,7 +748,7 @@ fn an_expired_cursor_falls_back_to_a_recent_listing() {
     cache.upsert_account(&account()).unwrap();
     p.expire_cursor = true;
 
-    let pull = background_pull(&mut p, Some("stale".to_owned()), &HashSet::new()).expect("pull");
+    let pull = background_pull(&mut p, Some("stale".to_owned()), &HashSet::new(), &[]).expect("pull");
     assert_eq!(pull.fetched.len(), 1);
     assert!(pull.removed.is_empty());
     apply_fetched(&mut mb, &cache, ACCOUNT, &pull).expect("apply");

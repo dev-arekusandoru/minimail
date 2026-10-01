@@ -319,4 +319,14 @@ impl MailProvider for GmailProvider {
         )?;
         Ok(())
     }
+
+    fn set_read(&mut self, id: &RemoteId, read: bool) -> Result<(), ProviderError> {
+        let ops = if read {
+            json!({ "removeLabelIds": ["UNREAD"] })
+        } else {
+            json!({ "addLabelIds": ["UNREAD"] })
+        };
+        self.call("POST", &format!("{BASE}/messages/{id}/modify"), Some(ops))?;
+        Ok(())
+    }
 }

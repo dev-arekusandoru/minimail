@@ -27,6 +27,7 @@ fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
         bcc: String::new(),
         html: None,
         attachments: Vec::new(),
+        read: false,
     }
 }
 

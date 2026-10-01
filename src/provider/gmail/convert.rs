@@ -226,5 +226,6 @@ pub fn message(json: &Value, user_folders: &HashSet<String>) -> Option<RemoteMes
         attachments,
         state: state_from_labels(&labels, user_folders),
         outgoing: labels.iter().any(|l| l == LABEL_SENT),
+        unread: labels.iter().any(|l| l == "UNREAD"),
     })
 }

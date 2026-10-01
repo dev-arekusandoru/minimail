@@ -15,7 +15,7 @@ impl Render for MailApp {
         let hint = self.hint_context();
         let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
-            self.read.insert(id);
+            self.mailbox.mark_read(id);
         }
         // Rows size themselves from the real pane: the list pane side by side, the whole
         // region when the panes are stacked.

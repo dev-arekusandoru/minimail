@@ -84,6 +84,9 @@ pub struct Message {
     pub html: Option<String>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Opened (here, or on the server for synced mail). Persisted for synced accounts.
+    #[serde(default)]
+    pub read: bool,
 }
 
 impl Message {
@@ -449,6 +452,18 @@ impl Mailbox {
 
     pub fn state_of(&self, id: MessageId) -> Option<TriageState> {
         self.get(id).map(|m| m.state)
+    }
+
+    /// Opened in this app, or read on the server for synced mail.
+    pub fn is_read(&self, id: MessageId) -> bool {
+        self.get(id).is_some_and(|m| m.read)
+    }
+
+    /// Mark `id` read. Not an undo step: reading is not a triage action.
+    pub fn mark_read(&mut self, id: MessageId) {
+        if let Some(&i) = self.index.get(&id) {
+            self.messages[i].read = true;
+        }
     }
 }
 

@@ -78,6 +78,15 @@ impl Cache {
     fn connect(path: &Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
+        // Caches created before read sync lack the column; their rows start unknown (NULL).
+        let has_read: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='remote_read'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_read {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN remote_read INTEGER")?;
+        }
         Ok(Self { conn })
     }
 
@@ -263,15 +272,17 @@ impl Cache {
         message: &Message,
         remote_id: &str,
         state: &RemoteState,
+        remote_read: bool,
     ) -> rusqlite::Result<()> {
         let json = serde_json::to_string(message)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
-            "INSERT INTO messages(id, account, remote_id, json, remote_state)
-             VALUES(?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO messages(id, account, remote_id, json, remote_state, remote_read)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                 account=excluded.account, remote_id=excluded.remote_id,
-                json=excluded.json, remote_state=excluded.remote_state",
+                json=excluded.json, remote_state=excluded.remote_state,
+                remote_read=excluded.remote_read",
             params![
                 message.id as i64,
                 message.account,
@@ -279,6 +290,7 @@ impl Cache {
                 json,
                 serde_json::to_string(state)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?,
+                remote_read,
             ],
         )?;
         Ok(())
@@ -326,6 +338,32 @@ impl Cache {
             params![message.id as i64, json],
         )?;
         Ok(())
+    }
+
+    /// Read state the server last confirmed; `None` for rows cached before read sync existed.
+    pub fn remote_read(&self, id: MessageId) -> rusqlite::Result<Option<bool>> {
+        Ok(self
+            .conn
+            .query_row("SELECT remote_read FROM messages WHERE id=?1", [id as i64], |row| {
+                row.get::<_, Option<bool>>(0)
+            })
+            .optional()?
+            .flatten())
+    }
+
+    pub fn set_remote_read(&self, id: MessageId, read: bool) -> rusqlite::Result<()> {
+        self.conn
+            .execute("UPDATE messages SET remote_read=?2 WHERE id=?1", params![id as i64, read])?;
+        Ok(())
+    }
+
+    /// Up to `limit` cached messages of `account` whose server read state is unknown.
+    pub fn unknown_read(&self, account: &str, limit: usize) -> rusqlite::Result<Vec<RemoteId>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT remote_id FROM messages WHERE account=?1 AND remote_read IS NULL ORDER BY id LIMIT ?2",
+        )?;
+        let ids = stmt.query_map(params![account, limit as i64], |row| row.get(0))?;
+        ids.collect()
     }
 
     /// Every cached message, by local id.

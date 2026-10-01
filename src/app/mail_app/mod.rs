@@ -99,8 +99,6 @@ pub struct MailApp {
     pub summaries_enabled: bool,
     /// Preview snippet lines under each subject (`crate::preview::OPTIONS`); 0 is Off.
     pub preview_lines: u8,
-    /// Messages that have been shown in the reader (everything else is unread).
-    read: HashSet<MessageId>,
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
@@ -208,7 +206,6 @@ impl MailApp {
             toast: None,
             summaries_enabled: false,
             preview_lines: crate::preview::DEFAULT_LINES,
-            read: HashSet::new(),
             list_w: 0.,
             panes,
             _pane_subs: pane_subs,

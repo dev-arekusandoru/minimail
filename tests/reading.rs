@@ -22,6 +22,7 @@ fn msg(id: u32, thread_id: u32, received: &str) -> Message {
         bcc: String::new(),
         html: None,
         attachments: Vec::new(),
+        read: false,
     }
 }
 

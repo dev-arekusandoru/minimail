@@ -256,10 +256,10 @@ impl MailApp {
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
         let selected_count = ids.iter().filter(|id| self.triage.is_selected(**id)).count();
         let unread = ids.iter().any(|id| {
-            !self.read.contains(id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
+            !self.mailbox.is_read(*id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
         });
         let urgent = unread && ids.iter().any(|id| {
-            !self.read.contains(id)
+            !self.mailbox.is_read(*id)
                 && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
                 && self.mailbox.tags(*id).iter().any(|tag| matches!(tag, crate::model::Tag::Urgent(_)))
         });
