@@ -1,6 +1,7 @@
 use gpui_kit::component::ActiveTheme as _;
 use super::*;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::empty::{Empty, EmptyHeader, EmptyTitle};
 
 impl MailApp {
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -21,7 +22,7 @@ impl MailApp {
         };
         let filter_active = self.filter_count() > 0;
         let filter_label = self.filter_label();
-        let chips = self.render_chips(cx);
+        let chips = self.render_chips();
         let t = cx.theme();
         let header = div()
             .h(px(LIST_HEADER_H))
@@ -84,17 +85,12 @@ impl MailApp {
                     .child(self.anchor_probe(MenuKind::Filter)),
             );
         let body = if count == 0 {
-            let empty = match &self.mode {
-                ListMode::State => div().child(format!("No mail in {}", self.location_label())).into_any_element(),
-                ListMode::Search(_) => div().child("No matches").into_any_element(),
+            let title = match &self.mode {
+                ListMode::State => format!("No mail in {}", self.location_label()),
+                ListMode::Search(_) => "No matches".to_owned(),
             };
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(t.muted_foreground)
-                .child(empty)
+            Empty::new()
+                .header(EmptyHeader::new().title(EmptyTitle::new().child(title)))
                 .into_any_element()
         } else {
             list(
