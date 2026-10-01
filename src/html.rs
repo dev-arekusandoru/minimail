@@ -73,17 +73,21 @@ pub type RemoteImageFetcher = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send
 /// raster images are fetched only when `block_remote_images` is `false`, and only
 /// against public hosts. `width` is the CSS viewport width; overflow is preserved
 /// in the returned full-document raster when it fits safety limits.
+/// `color_scheme` supplies the CSS `prefers-color-scheme` preference; authored
+/// colors are preserved rather than inverted.
 pub fn render(
     html: &str,
     width: u32,
     scale: f32,
     block_remote_images: bool,
+    color_scheme: ColorScheme,
 ) -> Result<RenderedHtml, String> {
     render_with_fetcher(
         html,
         width,
         scale,
         block_remote_images,
+        color_scheme,
         resources::default_fetcher(),
     )
 }
@@ -97,6 +101,7 @@ pub fn render_with_fetcher(
     width: u32,
     scale: f32,
     block_remote_images: bool,
+    color_scheme: ColorScheme,
     fetch: RemoteImageFetcher,
 ) -> Result<RenderedHtml, String> {
     if html.len() > MAX_HTML_BYTES {
@@ -121,7 +126,7 @@ pub fn render_with_fetcher(
                 physical_width as u32,
                 physical_height as u32,
                 scale,
-                ColorScheme::Light,
+                color_scheme,
             )),
             base_url: Some("https://mail.invalid/".to_owned()),
             net_provider: Some(resources.clone()),
@@ -301,7 +306,7 @@ mod tests {
              <div style=\"width:1400px;height:4px;background:#00ff00\"></div>"
         );
 
-        let rendered = render(&html, 320, 1.0, false).unwrap();
+        let rendered = render(&html, 320, 1.0, false, ColorScheme::Light).unwrap();
         assert!(rendered.width >= 1400, "wide content was clipped");
         assert!(rendered.links.iter().any(|link| {
             link.href == "mailto:reader@example.test" && link.width > 0.0 && link.height > 0.0
@@ -316,7 +321,9 @@ mod tests {
         let html = "<p>tracked</p>\
                     <img width=\"16\" height=\"16\" src=\"https://cdn.example.test/hero.png\">";
 
-        let blocked = render_with_fetcher(html, 320, 1.0, true, Arc::clone(&fetch)).unwrap();
+        let blocked =
+            render_with_fetcher(html, 320, 1.0, true, ColorScheme::Light, Arc::clone(&fetch))
+                .unwrap();
         assert_eq!(blocked.blocked_remote_images, 1);
         assert!(!has_red(&blocked));
         assert!(
@@ -324,7 +331,8 @@ mod tests {
             "blocked mode must not consult the network transport"
         );
 
-        let allowed = render_with_fetcher(html, 320, 1.0, false, fetch).unwrap();
+        let allowed =
+            render_with_fetcher(html, 320, 1.0, false, ColorScheme::Light, fetch).unwrap();
         assert_eq!(allowed.blocked_remote_images, 0);
         assert_eq!(
             requests.lock().clone(),
@@ -342,7 +350,8 @@ mod tests {
         let html = "<p style=\"color:#0000ff\">still here</p>\
                     <img width=\"16\" height=\"16\" src=\"https://cdn.example.test/missing.png\">";
 
-        let rendered = render_with_fetcher(html, 320, 1.0, false, fetch).unwrap();
+        let rendered =
+            render_with_fetcher(html, 320, 1.0, false, ColorScheme::Light, fetch).unwrap();
         assert!(rendered.width >= 1 && rendered.height >= 1);
         assert!(!has_red(&rendered));
     }
@@ -354,7 +363,8 @@ mod tests {
                     <img src=\"data:text/css,body%7B%7D\">\
                     <img width=\"16\" height=\"16\" src=\"https://cdn.example.test/site.css\">";
 
-        let rendered = render_with_fetcher(html, 320, 1.0, false, fetch).unwrap();
+        let rendered =
+            render_with_fetcher(html, 320, 1.0, false, ColorScheme::Light, fetch).unwrap();
         assert!(
             requests.lock().is_empty(),
             "non-image resources must be denied without a fetch: {:?}",
@@ -362,5 +372,28 @@ mod tests {
         );
         assert_eq!(rendered.blocked_remote_images, 0);
         assert!(!has_red(&rendered));
+    }
+
+    #[test]
+    fn color_scheme_selects_email_css_without_inverting_authored_colors() {
+        let html = "<style>\
+            body { margin:0; background:#ffffff; }\
+            #adaptive { width:20px; height:20px; background:#ff0000; }\
+            @media (prefers-color-scheme:dark) { #adaptive { background:#0000ff; } }\
+            </style><div id='adaptive'></div>\
+            <div style='width:20px;height:20px;background:#00ff00'></div>";
+        for (scheme, adaptive) in [
+            (ColorScheme::Light, [255, 0, 0, 255]),
+            (ColorScheme::Dark, [0, 0, 255, 255]),
+        ] {
+            let rendered = render(html, 100, 1.0, true, scheme).unwrap();
+            let pixel = |x: usize, y: usize| {
+                let offset = (y * rendered.width as usize + x) * 4;
+                &rendered.pixels[offset..offset + 4]
+            };
+            assert_eq!(pixel(10, 10), adaptive);
+            assert_eq!(pixel(10, 30), [0, 255, 0, 255]);
+            assert_eq!(pixel(50, 10), [255, 255, 255, 255]);
+        }
     }
 }

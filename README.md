@@ -83,6 +83,7 @@ The reader shows the keys that apply to the current message in the footer (up to
 HTML mail is rendered by **Blitz**: browser-grade CSS resolution, real font shaping, and HTML/table layout, rasterized off the UI thread and displayed as a native GPUI image.
 
 - **Preserved:** inline styles and `<style>` blocks, colors, backgrounds, fonts, spacing, borders, tables, and responsive media queries. Wide documents scroll horizontally.
+- **Theme:** the app's light/dark preference is passed to CSS `prefers-color-scheme`; switching modes rerenders open HTML bodies. Explicit email colors, including white backgrounds, are not inverted.
 - **Safety:** email scripts never execute, sender-referenced local files are never read, and external CSS/font content is not loaded. Remote image requests are bounded and refuse private/internal addresses.
 - **Images:** PNG/JPEG/GIF/WebP images load by default, including bounded `data:` images. Enable **Settings → General → Block remote images** to prevent remote-image requests and show their blocked count. This is a session setting, retained when reopening Settings. Changing it updates open readers immediately.
 - **Links:** HTTP(S) and `mailto:` links open externally; other schemes are ignored.

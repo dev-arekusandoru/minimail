@@ -1,3 +1,4 @@
+use blitz_traits::shell::ColorScheme;
 use mail_classifier::html;
 
 #[test]
@@ -8,7 +9,7 @@ fn borderless_collapsed_layout_tables_stay_borderless() {
         <td style='width:80px;height:40px;padding:0'></td>\
         <td style='width:80px;height:40px;padding:0'></td>\
         </tr></table></td></tr></table></body>";
-    let rendered = html::render(source, 200, 1.0, true).unwrap();
+    let rendered = html::render(source, 200, 1.0, true, ColorScheme::Light).unwrap();
     assert!(
         rendered
             .pixels
@@ -27,7 +28,7 @@ fn collapsed_cell_borders_respect_each_edges_style_and_color() {
             <tr><td style='padding:0;width:80px;height:40px;border:none;border-{edge}:4px solid red'></td></tr>\
             </table></body>"
         );
-        let rendered = html::render(&source, 200, 1.0, true).unwrap();
+        let rendered = html::render(&source, 200, 1.0, true, ColorScheme::Light).unwrap();
         let mut bounds = (u32::MAX, u32::MAX, 0, 0);
         for (i, pixel) in rendered.pixels.chunks_exact(4).enumerate() {
             assert!(

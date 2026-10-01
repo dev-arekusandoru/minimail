@@ -1,4 +1,6 @@
 //! Native GPUI host for the asynchronous Blitz-rendered message document.
+use blitz_traits::shell::ColorScheme;
+use gpui_kit::component::ActiveTheme as _;
 use std::sync::Arc;
 
 use gpui_kit::*;
@@ -50,15 +52,26 @@ impl Element for HtmlView {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        let color_scheme = if cx.theme().is_dark() {
+            ColorScheme::Dark
+        } else {
+            ColorScheme::Light
+        };
         let (layout, child_state) = window.with_element_state::<HtmlElementState, _>(
             id.expect("HtmlView requires its stable element id"),
             |state, window| {
                 let state = state.unwrap_or_else(|| HtmlElementState {
-                    view: cx.new(|_| HtmlRasterView::new(self.html.clone(), self.block_remote_images)),
+                    view: cx.new(|_| {
+                        HtmlRasterView::new(
+                            self.html.clone(),
+                            self.block_remote_images,
+                            color_scheme,
+                        )
+                    }),
                 });
                 let view = state.view.clone();
                 view.update(cx, |view, cx| {
-                    view.set_document(&self.html, self.block_remote_images, cx)
+                    view.set_document(&self.html, self.block_remote_images, color_scheme, cx)
                 });
                 let mut child = view.clone().into_any_element();
                 let layout = child.request_layout(window, cx);
@@ -109,6 +122,7 @@ struct HtmlElementState {
 pub(crate) struct HtmlRasterView {
     html: String,
     block_remote_images: bool,
+    color_scheme: ColorScheme,
     width: u32,
     scale: f32,
     generation: u64,
@@ -126,10 +140,11 @@ struct RasterizedDocument {
 }
 
 impl HtmlRasterView {
-    fn new(html: String, block_remote_images: bool) -> Self {
+    fn new(html: String, block_remote_images: bool, color_scheme: ColorScheme) -> Self {
         Self {
             html,
             block_remote_images,
+            color_scheme,
             width: 0,
             scale: 1.,
             generation: 0,
@@ -140,10 +155,22 @@ impl HtmlRasterView {
         }
     }
 
-    fn set_document(&mut self, html: &str, block_remote_images: bool, _: &mut Context<Self>) {
-        if self.html != html || self.block_remote_images != block_remote_images {
-            self.html = html.to_owned();
+    fn set_document(
+        &mut self,
+        html: &str,
+        block_remote_images: bool,
+        color_scheme: ColorScheme,
+        _: &mut Context<Self>,
+    ) {
+        if self.html != html
+            || self.block_remote_images != block_remote_images
+            || self.color_scheme != color_scheme
+        {
+            if self.html != html {
+                self.html = html.to_owned();
+            }
             self.block_remote_images = block_remote_images;
+            self.color_scheme = color_scheme;
             self.generation = self.generation.wrapping_add(1);
             self.needs_render = true;
             self.rendered = None;
@@ -178,9 +205,10 @@ impl HtmlRasterView {
         let width = self.width;
         let scale = self.scale;
         let block_remote_images = self.block_remote_images;
+        let color_scheme = self.color_scheme;
         self.in_flight = true;
         let task = cx.background_spawn(async move {
-            crate::html::render(&html, width, scale, block_remote_images)
+            crate::html::render(&html, width, scale, block_remote_images, color_scheme)
                 .and_then(prepare_rendered_image)
         });
         cx.spawn(async move |this, cx| {
