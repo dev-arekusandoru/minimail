@@ -1,89 +1,222 @@
-//! Search query parsing and matching for the palette.
+//! Structured search query: the single source of truth for list filtering.
 //!
-//! Syntax (terms are ANDed, everything case-insensitive): `from:x`, `subject:x`,
-//! `is:inbox|snoozed|archived|filed|deleted|sent|new`,
-//! `tag:needs-reply|awaiting|follow-up|reminder|spam|urgent`, dates, quoted phrases,
-//! and free text over subject + body + sender. A leading `/` is ignored.
+//! A [`Query`] is a set of per-field [`Group`]s plus free text. Different fields are always
+//! ANDed; the values inside one field's group are combined with that group's [`Combinator`]
+//! (default AND). Free-text terms are ANDed and match subject, body and sender. All values are
+//! stored lowercase.
+//!
+//! # Syntax (case-insensitive, `parse` never fails)
+//!
+//! | field | value |
+//! |---|---|
+//! | `from:` `to:` `cc:` `bcc:` `subject:` `body:` | substring (`from` matches name or address) |
+//! | `before:` `after:` `on:` | `yyyy-mm-dd`, or relative `<n>d`/`w`/`m`/`y` (`after:7d`, `before:3m`) |
+//! | `is:` | `inbox snoozed archived filed deleted sent new` |
+//! | `in:` | `inbox sent snoozed archived deleted`, or a folder name |
+//! | `tag:` | `needs-reply awaiting follow-up reminder spam urgent` |
+//! | `kind:` | `person receipt newsletter notification other` |
+//! | `account:` | account id |
+//!
+//! `before:` is exclusive, `after:` inclusive; relative dates resolve to a UTC calendar day
+//! against the `now` passed to [`Query::matches`]. Values containing spaces or commas are quoted
+//! (`from:"ann lee"`). A leading `/` is ignored; a token with an unknown key or an invalid value
+//! (`foo:bar`, `is:bogus`, `before:soon`) stays free text.
+//!
+//! # Combinators
+//!
+//! * `field:a,b` — one token, values ORed. A trailing comma (`field:a,`) is a single-value OR
+//!   group, so the combinator survives removing values down to one.
+//! * `field:a field:b` — repeated tokens, values ANDed.
+//!
+//! A field has exactly one group, so if any of its tokens uses commas the whole group is OR.
+//! [`Display`](std::fmt::Display) emits this canonical form and `Query::parse(&q.to_string()) == q`.
 
-use crate::model::{Mailbox, Message, Tag, TriageState};
+mod dates;
+mod matching;
 
-const KEYS: [&str; 6] = ["from", "subject", "is", "tag", "before", "after"];
+use std::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Is {
-    State(TriageState),
-    Filed,
-    Sent,
-    New,
+use crate::judge::Kind;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Field {
+    From,
+    To,
+    Cc,
+    Bcc,
+    Subject,
+    Body,
+    Before,
+    After,
+    On,
+    Is,
+    In,
+    Tag,
+    Kind,
+    Account,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TagQuery {
-    NeedsReply,
-    Awaiting,
-    FollowUp,
-    Reminder,
-    Spam,
-    Urgent,
+
+impl Field {
+    pub const ALL: [Field; 14] = [
+        Field::From,
+        Field::To,
+        Field::Cc,
+        Field::Bcc,
+        Field::Subject,
+        Field::Body,
+        Field::Before,
+        Field::After,
+        Field::On,
+        Field::Is,
+        Field::In,
+        Field::Tag,
+        Field::Kind,
+        Field::Account,
+    ];
+
+    /// The operator as typed: `from`, `in`, ...
+    pub fn key(self) -> &'static str {
+        match self {
+            Field::From => "from",
+            Field::To => "to",
+            Field::Cc => "cc",
+            Field::Bcc => "bcc",
+            Field::Subject => "subject",
+            Field::Body => "body",
+            Field::Before => "before",
+            Field::After => "after",
+            Field::On => "on",
+            Field::Is => "is",
+            Field::In => "in",
+            Field::Tag => "tag",
+            Field::Kind => "kind",
+            Field::Account => "account",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Field> {
+        Field::ALL.into_iter().find(|f| f.key().eq_ignore_ascii_case(key))
+    }
+
+    /// Canonical lowercase form of `raw` for this field, or `None` if it is not a valid value.
+    pub fn normalize(self, raw: &str) -> Option<String> {
+        let v = raw.trim().to_lowercase();
+        if v.is_empty() {
+            return None;
+        }
+        let ok = match self {
+            Field::Is => IS_VALUES.contains(&v.as_str()),
+            Field::Tag => TAG_VALUES.contains(&v.as_str()),
+            Field::Kind => Kind::ALL.iter().any(|k| k.label() == v),
+            Field::Before | Field::After | Field::On => dates::is_valid(&v),
+            _ => true,
+        };
+        if !ok {
+            return None;
+        }
+        Some(match (self, v.as_str()) {
+            (Field::In, "archive") => "archived".into(),
+            (Field::In, "trash") => "deleted".into(),
+            _ => v,
+        })
+    }
+}
+
+pub(crate) const IS_VALUES: [&str; 7] =
+    ["inbox", "snoozed", "archived", "filed", "deleted", "sent", "new"];
+pub(crate) const TAG_VALUES: [&str; 6] =
+    ["needs-reply", "awaiting", "follow-up", "reminder", "spam", "urgent"];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Combinator {
+    #[default]
+    And,
+    Or,
+}
+
+impl Combinator {
+    pub fn toggled(self) -> Combinator {
+        match self {
+            Combinator::And => Combinator::Or,
+            Combinator::Or => Combinator::And,
+        }
+    }
+}
+
+/// All values of one field. Never empty inside a [`Query`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    pub field: Field,
+    pub values: Vec<String>,
+    pub combinator: Combinator,
+}
+
+/// One removable chip: a single field value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pill {
+    pub field: Field,
+    pub value: String,
+    /// How this pill joins the previous pill of the same field; `None` for the first.
+    pub combinator: Option<Combinator>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
-    from: Vec<String>,
-    subject: Vec<String>,
-    is: Vec<Is>,
-    tags: Vec<TagQuery>,
-    before: Vec<String>,
-    after: Vec<String>,
+    groups: Vec<Group>,
     text: Vec<String>,
 }
 
-fn tokenize(input: &str) -> Vec<String> {
+/// Splits on whitespace outside quotes, keeping the quotes.
+fn raw_tokens(input: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
-    let mut cur = String::new();
+    let mut start = None;
     let mut quoted = false;
-    let mut any = false;
-    for c in input.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                any = true;
+    for (i, c) in input.char_indices() {
+        if c == '"' {
+            quoted = !quoted;
+            start.get_or_insert(i);
+        } else if c.is_whitespace() && !quoted {
+            if let Some(s) = start.take() {
+                tokens.push(&input[s..i]);
             }
-            c if c.is_whitespace() && !quoted => {
-                if any {
-                    tokens.push(std::mem::take(&mut cur));
-                    any = false;
-                }
-            }
-            c => {
-                cur.push(c);
-                any = true;
-            }
+        } else {
+            start.get_or_insert(i);
         }
     }
-    if any {
-        tokens.push(cur);
+    if let Some(s) = start {
+        tokens.push(&input[s..]);
     }
     tokens
 }
 
-fn valid_date(s: &str) -> bool {
-    if s.len() != 10 || s.as_bytes()[4] != b'-' || s.as_bytes()[7] != b'-' {
-        return false;
+/// Splits on commas outside quotes.
+fn split_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut quoted = false;
+    let mut start = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            ',' if !quoted => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
     }
-    let (Ok(year), Ok(month), Ok(day)) = (
-        s[..4].parse::<u32>(),
-        s[5..7].parse::<u32>(),
-        s[8..10].parse::<u32>(),
-    ) else {
-        return false;
-    };
-    year > 0 && (1..=12).contains(&month) && (1..=31).contains(&day)
+    parts.push(&s[start..]);
+    parts
 }
 
-fn is_key(token: &str) -> Option<(&'static str, &str)> {
-    let (k, v) = token.split_once(':')?;
-    let k = KEYS.iter().find(|key| key.eq_ignore_ascii_case(k))?;
-    Some((k, v))
+fn unquote(s: &str) -> String {
+    s.chars().filter(|c| *c != '"').collect()
+}
+
+/// `(field, operand)` when `token` starts with a known `key:` and a non-empty operand.
+fn split_key(token: &str) -> Option<(Field, &str)> {
+    let (key, rest) = token.split_once(':')?;
+    let field = Field::from_key(key)?;
+    (!rest.is_empty()).then_some((field, rest))
 }
 
 impl Query {
@@ -91,114 +224,199 @@ impl Query {
         let input = input.trim_start();
         let input = input.strip_prefix('/').unwrap_or(input);
         let mut q = Query::default();
-        for token in tokenize(input) {
-            let lower = token.to_lowercase();
-            let Some((key, value)) = is_key(&lower).filter(|(_, v)| !v.is_empty()) else {
-                q.text.push(lower);
-                continue;
-            };
-            let value = value.to_string();
-            match key {
-                "from" => q.from.push(value),
-                "subject" => q.subject.push(value),
-                "is" => match value.as_str() {
-                    "inbox" => q.is.push(Is::State(TriageState::Inbox)),
-                    "snoozed" => q.is.push(Is::State(TriageState::Snoozed)),
-                    "archived" => q.is.push(Is::State(TriageState::Archived)),
-                    "filed" => q.is.push(Is::Filed),
-                    "deleted" => q.is.push(Is::State(TriageState::Deleted)),
-                    "sent" => q.is.push(Is::Sent),
-                    "new" => q.is.push(Is::New),
-                    _ => q.text.push(lower),
-                },
-                "tag" => match value.as_str() {
-                    "needs-reply" => q.tags.push(TagQuery::NeedsReply),
-                    "awaiting" => q.tags.push(TagQuery::Awaiting),
-                    "follow-up" => q.tags.push(TagQuery::FollowUp),
-                    "reminder" => q.tags.push(TagQuery::Reminder),
-                    "spam" => q.tags.push(TagQuery::Spam),
-                    "urgent" => q.tags.push(TagQuery::Urgent),
-                    _ => q.text.push(lower),
-                },
-                "before" if valid_date(&value) => q.before.push(value),
-                "after" if valid_date(&value) => q.after.push(value),
-                _ => q.text.push(lower),
+        for token in raw_tokens(input) {
+            if let Some((field, rest)) = split_key(token) {
+                let pieces = split_commas(rest);
+                let values: Option<Vec<String>> = pieces
+                    .iter()
+                    .map(|p| unquote(p))
+                    .filter(|p| !p.trim().is_empty())
+                    .map(|p| field.normalize(&p))
+                    .collect();
+                if let Some(values) = values.filter(|v| !v.is_empty()) {
+                    let or = pieces.len() > 1;
+                    for v in values {
+                        q.insert(field, v, or);
+                    }
+                    continue;
+                }
+            }
+            let term = unquote(token).trim().to_lowercase();
+            if !term.is_empty() {
+                q.text.push(term);
             }
         }
         q
     }
 
+    /// Whether `input` should be treated as a search rather than a palette command.
     pub fn is_search(input: &str) -> bool {
         let input = input.trim_start();
-        input.starts_with('/')
-            || tokenize(input)
-                .iter()
-                .any(|t| is_key(t).is_some_and(|(_, v)| !v.is_empty()))
+        input.starts_with('/') || raw_tokens(input).into_iter().any(|t| split_key(t).is_some())
     }
 
-    /// Match using mailbox state, tags, new-sender status, and outgoing status.
-    pub fn matches(&self, m: &Message, mailbox: &Mailbox) -> bool {
-        let Some(state) = mailbox.state_of(m.id) else {
+    fn insert(&mut self, field: Field, value: String, or: bool) -> bool {
+        let group = match self.groups.iter().position(|g| g.field == field) {
+            Some(i) => &mut self.groups[i],
+            None => {
+                self.groups.push(Group { field, values: Vec::new(), combinator: Combinator::And });
+                self.groups.last_mut().expect("just pushed")
+            }
+        };
+        if or {
+            group.combinator = Combinator::Or;
+        }
+        if group.values.contains(&value) {
+            return false;
+        }
+        group.values.push(value);
+        true
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty() && self.text.is_empty()
+    }
+
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+
+    /// Free-text terms (lowercase), ANDed over subject, body and sender.
+    pub fn text(&self) -> &[String] {
+        &self.text
+    }
+
+    pub fn values(&self, field: Field) -> &[String] {
+        self.groups
+            .iter()
+            .find(|g| g.field == field)
+            .map_or(&[], |g| &g.values)
+    }
+
+    /// The group's combinator; `None` if the field has no values.
+    pub fn combinator(&self, field: Field) -> Option<Combinator> {
+        self.groups.iter().find(|g| g.field == field).map(|g| g.combinator)
+    }
+
+    pub fn has(&self, field: Field, value: &str) -> bool {
+        field.normalize(value).is_some_and(|v| self.values(field).contains(&v))
+    }
+
+    /// Adds `value` to `field`'s group. `false` if invalid or already present.
+    pub fn add(&mut self, field: Field, value: &str) -> bool {
+        field.normalize(value).is_some_and(|v| self.insert(field, v, false))
+    }
+
+    /// Removes `value`, dropping the group when it empties. `false` if it was absent.
+    pub fn remove(&mut self, field: Field, value: &str) -> bool {
+        let Some(v) = field.normalize(value) else {
             return false;
         };
-        let new_sender = mailbox.is_new_sender(m.id);
-        let tags = mailbox.tags(m.id);
-        let name = m.from_name.to_lowercase();
-        let email = m.from_email.to_lowercase();
-        let subject = m.subject.to_lowercase();
-        let body = crate::reading::reader_text(m).to_lowercase();
-        let date = m.received.get(..10).unwrap_or(&m.received);
-        self.from
-            .iter()
-            .all(|f| name.contains(f) || email.contains(f))
-            && self.subject.iter().all(|s| subject.contains(s))
-            && self.is.iter().all(|i| match i {
-                Is::State(s) => *s == state,
-                Is::Filed => matches!(state, TriageState::Filed(_)),
-                Is::Sent => m.outgoing && state != TriageState::Deleted,
-                Is::New => new_sender,
-            })
-            && self.tags.iter().all(|t| match t {
-                TagQuery::NeedsReply => tags.contains(&Tag::NeedsReply),
-                TagQuery::Awaiting => tags.contains(&Tag::AwaitingReply),
-                TagQuery::FollowUp => tags.contains(&Tag::FollowUp),
-                TagQuery::Reminder => tags.contains(&Tag::Reminder),
-                TagQuery::Spam => tags.contains(&Tag::PossibleSpam),
-                TagQuery::Urgent => tags.iter().any(|x| matches!(x, Tag::Urgent(_))),
-            })
-            && self.before.iter().all(|d| date < d.as_str())
-            && self.after.iter().all(|d| date >= d.as_str())
-            && self.text.iter().all(|t| {
-                subject.contains(t) || body.contains(t) || name.contains(t) || email.contains(t)
-            })
+        let Some(i) = self.groups.iter().position(|g| g.field == field) else {
+            return false;
+        };
+        let Some(j) = self.groups[i].values.iter().position(|x| *x == v) else {
+            return false;
+        };
+        self.groups[i].values.remove(j);
+        if self.groups[i].values.is_empty() {
+            self.groups.remove(i);
+        }
+        true
     }
 
+    /// Adds the value if absent, removes it if present. Returns whether it is now present
+    /// (`false` also for an invalid value, which changes nothing).
+    pub fn toggle(&mut self, field: Field, value: &str) -> bool {
+        if self.remove(field, value) {
+            false
+        } else {
+            self.add(field, value)
+        }
+    }
+
+    /// Sets how `field`'s values combine. `false` if the field has no values.
+    pub fn set_combinator(&mut self, field: Field, combinator: Combinator) -> bool {
+        match self.groups.iter_mut().find(|g| g.field == field) {
+            Some(g) => {
+                g.combinator = combinator;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes every value of `field`. `false` if there were none.
+    pub fn clear_field(&mut self, field: Field) -> bool {
+        let before = self.groups.len();
+        self.groups.retain(|g| g.field != field);
+        self.groups.len() != before
+    }
+
+    /// Every field value in display order, grouped by field.
+    pub fn pills(&self) -> Vec<Pill> {
+        self.groups
+            .iter()
+            .flat_map(|g| {
+                g.values.iter().enumerate().map(|(i, v)| Pill {
+                    field: g.field,
+                    value: v.clone(),
+                    combinator: (i > 0).then_some(g.combinator),
+                })
+            })
+            .collect()
+    }
+
+    /// Canonical query string; `Query::parse` of it yields an equal query.
     pub fn describe(&self) -> String {
-        let mut parts = Vec::new();
-        parts.extend(self.from.iter().map(|v| format!("from:{v}")));
-        parts.extend(self.subject.iter().map(|v| format!("subject:{v}")));
-        parts.extend(self.is.iter().map(|i| match i {
-            Is::State(s) => format!("is:{}", s.label().to_lowercase()),
-            Is::Filed => "is:filed".into(),
-            Is::Sent => "is:sent".into(),
-            Is::New => "is:new".into(),
-        }));
-        parts.extend(self.tags.iter().map(|t| {
-            format!(
-                "tag:{}",
-                match t {
-                    TagQuery::NeedsReply => "needs-reply",
-                    TagQuery::Awaiting => "awaiting",
-                    TagQuery::FollowUp => "follow-up",
-                    TagQuery::Reminder => "reminder",
-                    TagQuery::Spam => "spam",
-                    TagQuery::Urgent => "urgent",
+        self.to_string()
+    }
+}
+
+fn write_value(f: &mut fmt::Formatter<'_>, v: &str) -> fmt::Result {
+    if v.chars().any(|c| c.is_whitespace() || c == ',' || c == '"') {
+        write!(f, "\"{}\"", v.replace('"', ""))
+    } else {
+        f.write_str(v)
+    }
+}
+
+impl fmt::Display for Query {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        let mut sep = |f: &mut fmt::Formatter<'_>| {
+            let s = if first { Ok(()) } else { f.write_str(" ") };
+            first = false;
+            s
+        };
+        for g in &self.groups {
+            match g.combinator {
+                Combinator::And => {
+                    for v in &g.values {
+                        sep(f)?;
+                        write!(f, "{}:", g.field.key())?;
+                        write_value(f, v)?;
+                    }
                 }
-            )
-        }));
-        parts.extend(self.after.iter().map(|v| format!("after:{v}")));
-        parts.extend(self.before.iter().map(|v| format!("before:{v}")));
-        parts.extend(self.text.iter().map(|v| format!("\"{v}\"")));
-        parts.join(" ")
+                Combinator::Or => {
+                    sep(f)?;
+                    write!(f, "{}:", g.field.key())?;
+                    for (i, v) in g.values.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(",")?;
+                        }
+                        write_value(f, v)?;
+                    }
+                    if g.values.len() == 1 {
+                        f.write_str(",")?;
+                    }
+                }
+            }
+        }
+        for t in &self.text {
+            sep(f)?;
+            write!(f, "\"{}\"", t.replace('"', ""))?;
+        }
+        Ok(())
     }
 }

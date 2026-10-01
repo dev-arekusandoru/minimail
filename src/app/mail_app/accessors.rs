@@ -175,7 +175,7 @@ impl MailApp {
             .messages()
             .iter()
             .filter(|m| !self.mailbox.is_hidden(m.id))
-            .filter(|m| query.matches(m, &self.mailbox))
+            .filter(|m| query.matches(m, &self.mailbox, self.now()))
             .collect();
         found.sort_by(|a, b| b.received.cmp(&a.received).then(b.id.cmp(&a.id)));
         found.into_iter().map(|m| m.id).collect()
