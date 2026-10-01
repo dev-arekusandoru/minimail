@@ -17,8 +17,6 @@ mod thread;
 
 use parts::{rail_row, Look, Role};
 
-/// Widest the reader column grows; longer lines stop being readable.
-const READER_MAX_W: f32 = 860.;
 /// Rail dot centers: inside a full surface (first line of its header) and in a collapsed line.
 const DOT_FULL: f32 = 27.;
 const DOT_COLLAPSED: f32 = thread::COLLAPSED_H / 2.;
@@ -147,7 +145,7 @@ impl MailApp {
             pane.scroll.clone()
         };
 
-        let column = |el: AnyElement| div().w_full().max_w(px(READER_MAX_W)).child(el);
+        let column = |el: AnyElement| div().w_full().child(el);
         pane.gap_3()
             .when_some(self.session.as_ref(), |d, s| {
                 d.child(SessionCard::new(s.index + 1, s.ids.len()))
