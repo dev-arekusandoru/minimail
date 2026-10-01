@@ -7,7 +7,7 @@ use super::super::*;
 use crate::app::ui::{mono_font, shortcut};
 use crate::theme::ThemeColor;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{avatar::Avatar, kbd::Kbd, tag::Tag, Sizable as _};
+use gpui_kit::component::{kbd::Kbd, tag::Tag, Sizable as _};
 
 /// Which surface of the reader a message is drawn as.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,22 +23,40 @@ pub(super) enum Role {
 pub(super) struct Look<'a> {
     pub t: &'a ThemeColor,
     pub mono: SharedString,
+    dark: bool,
 }
 
 impl<'a> Look<'a> {
     pub fn new(cx: &'a App) -> Self {
-        Self { t: &cx.theme().colors, mono: mono_font(cx) }
+        Self { t: &cx.theme().colors, mono: mono_font(cx), dark: cx.theme().is_dark() }
     }
 
-    /// The sender's avatar at `size` px: the one avatar the reader has, shared by the message
-    /// header and the tabs. The kit `Avatar` derives its text from the name it is given (the first
-    /// letter of each space-separated word, then a byte-counted one-letter fallback), so we hand
-    /// it `reading::initials` split into single-letter words — that reproduces the initials
-    /// verbatim, including two-letter non-ASCII pairs the byte-counted fallback would truncate.
-    pub fn monogram(&self, name: &str, email: &str, size: f32) -> Avatar {
+    /// The sender's monogram at `size` px: the one avatar the reader has, shared by the message
+    /// header and the tabs. Drawn here rather than with the kit `Avatar`, whose custom-size path
+    /// sizes the fallback text box to `size / 2` px instead of scaling the font, so two letters
+    /// wrap and clip below the circle. Letters come from [`crate::reading::initials`]; the font
+    /// scales with the circle and the text is one unbroken, centred line.
+    pub fn monogram(&self, name: &str, email: &str, size: f32) -> Div {
         let initials = crate::reading::initials(name, email);
-        let name_arg = initials.chars().map(|c| c.to_string()).collect::<Vec<_>>().join(" ");
-        Avatar::new().name(name_arg).with_size(px(size))
+        let font = size * if initials.chars().count() > 1 { 0.4 } else { 0.5 };
+        let (bg, fg, border) = identity_color(&initials, self.dark);
+        div()
+            .flex_shrink_0()
+            .w(px(size))
+            .h(px(size))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .overflow_hidden()
+            .border_1()
+            .border_color(border)
+            .bg(bg)
+            .text_color(fg)
+            .text_size(px(font))
+            .font_weight(FontWeight::SEMIBOLD)
+            .whitespace_nowrap()
+            .child(initials)
     }
 
     /// One line of mono metadata text.
@@ -112,6 +130,19 @@ impl<'a> Look<'a> {
             .gap_1()
             .when(!key.is_empty(), |b| b.child(self.keycap(key)))
             .on_click(run(action))
+    }
+}
+
+/// Avatar colours for a sender: the initials pick one of twelve evenly spaced hues, so the same
+/// person always gets the same background, ring and text, in both themes.
+fn identity_color(initials: &str, dark: bool) -> (Hsla, Hsla, Hsla) {
+    const HUES: u64 = 12;
+    let hash = initials.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    let hue = (hash % HUES) as f32 / HUES as f32;
+    if dark {
+        (hsla(hue, 0.35, 0.28, 1.), hsla(hue, 0.55, 0.80, 1.), hsla(hue, 0.40, 0.34, 1.))
+    } else {
+        (hsla(hue, 0.45, 0.94, 1.), hsla(hue, 0.55, 0.38, 1.), hsla(hue, 0.40, 0.86, 1.))
     }
 }
 

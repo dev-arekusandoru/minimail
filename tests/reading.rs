@@ -313,6 +313,9 @@ fn initials_use_name_then_email_and_are_unicode_safe() {
     assert_eq!(initials("łukasz żak", "x@y.z"), "ŁŻ");
     assert_eq!(initials("", ""), "?");
     assert_eq!(initials("Ünal", ""), "Ü");
+    assert_eq!(initials("Costco Wholesale", "x@y.z"), "CW");
+    assert_eq!(initials("  Costco   Wholesale  ", ""), "CW");
+    assert_eq!(initials("🎉 Costco", "x@y.z"), "C");
 }
 
 // ------------------------------------------------------------------- threads
