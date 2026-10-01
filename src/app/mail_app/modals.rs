@@ -248,13 +248,38 @@ impl MailApp {
             self.close_modals(window, cx);
             return;
         }
+        self.open_settings(false, window, cx);
+    }
+
+    /// Rows for the settings Accounts page.
+    pub(super) fn account_rows(&self) -> Vec<AccountRow> {
+        self.mailbox
+            .accounts()
+            .iter()
+            .map(|a| AccountRow {
+                id: a.id.clone(),
+                name: a.name.clone(),
+                email: a.email.clone(),
+                color: a.color.clone(),
+                gmail: a.provider == crate::model::ProviderKind::Gmail,
+            })
+            .collect()
+    }
+
+    /// Open settings, on the Accounts page when `accounts` (reopening if settings are already up).
+    pub(super) fn open_settings(&mut self, accounts: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings.is_some() {
+            self.close_modals(window, cx);
+        }
         if self.modal_open() {
             return;
         }
         let group = self.group_threads;
         let preview = self.preview_lines;
+        let rows = self.account_rows();
+        let gmail_configured = crate::provider::gmail::ClientConfig::from_env().is_some();
         let panel = cx.new(|cx| {
-            SettingsPanel::new(
+            let panel = SettingsPanel::new(
                 self.policy.clone(),
                 self.summaries_enabled,
                 group,
@@ -269,6 +294,8 @@ impl MailApp {
                 self.mailbox.unsubscribed().to_vec(),
                 self.mailbox.follow_up_timeout(),
             )
+            .accounts(rows, gmail_configured);
+            if accounts { panel.on_accounts_page() } else { panel }
         });
         self._modal_sub = Some(cx.subscribe_in(
             &panel,
@@ -304,6 +331,8 @@ impl MailApp {
                     this.mailbox.unblock_sender(email);
                     cx.notify();
                 }
+                SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
+                SettingsEvent::RemoveAccount(id) => this.remove_linked_account(id, window, cx),
                 SettingsEvent::Close => this.close_modals(window, cx),
             },
         ));

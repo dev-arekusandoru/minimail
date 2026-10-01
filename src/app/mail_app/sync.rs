@@ -117,6 +117,10 @@ impl MailApp {
         };
         let mut error: Option<String> = None;
         for outcome in outcomes {
+            // The account was removed while this batch was in flight.
+            if !self.providers.contains_key(&outcome.account) {
+                continue;
+            }
             if let Some(e) = sync::apply_moves(&self.mailbox, &cache, &outcome.results) {
                 error.get_or_insert(e);
             }
@@ -241,7 +245,45 @@ impl MailApp {
         self.register_provider(&id, Box::new(GmailProvider::new(client, refresh)));
         self.pull_now = true;
         self.show_toast(format!("Gmail connected: {label}"), window, cx);
+        self.refresh_account_rows(cx);
         self.classify_visible();
+        cx.notify();
+    }
+
+    /// Push the current account list into an open settings panel.
+    fn refresh_account_rows(&mut self, cx: &mut Context<Self>) {
+        if let Some(panel) = self.settings.clone() {
+            let rows = self.account_rows();
+            panel.update(cx, |panel, cx| panel.set_accounts(rows, cx));
+        }
+    }
+
+    /// Unlink an account: stop syncing it, forget its token, and drop its cached and shown mail.
+    /// Mail on the server is untouched.
+    pub(super) fn remove_linked_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(email) = self.mailbox.account(id).map(|a| a.email.clone()) else {
+            return;
+        };
+        self.providers.remove(id);
+        let mut problems = Vec::new();
+        if let Some(cache) = &self.cache
+            && let Err(e) = cache.delete_account(id)
+        {
+            problems.push(format!("cache: {e}"));
+        }
+        if let Err(e) = KeyringStore.delete(&email) {
+            problems.push(format!("keychain: {e}"));
+        }
+        self.mailbox.remove_account_data(id);
+        self.mailbox.remove_account(id);
+        self.reset_view_state();
+        let text = if problems.is_empty() {
+            format!("Removed {email}")
+        } else {
+            format!("Removed {email} ({})", problems.join("; "))
+        };
+        self.show_toast(text, window, cx);
+        self.refresh_account_rows(cx);
         cx.notify();
     }
 }

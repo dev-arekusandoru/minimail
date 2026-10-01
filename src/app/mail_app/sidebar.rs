@@ -147,9 +147,20 @@ impl MailApp {
                     .children(children),
             );
         }
+        let header = div()
+            .flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Mailboxes"))
+            .child(
+                icon_button("sidebar-add-account", IconName::Plus, "Add or manage accounts", "", cx)
+                    .on_click(run(ManageAccounts)),
+            );
         Sidebar::new("sidebar")
             .w_full()
             .collapsible(SidebarCollapsible::None)
+            .header(header)
             .children(items)
             .into_any_element()
     }

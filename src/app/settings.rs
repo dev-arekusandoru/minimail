@@ -10,7 +10,7 @@ use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
 use gpui_kit::{
     component::setting::{
-        NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+        NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
     },
     *,
 };
@@ -28,8 +28,26 @@ pub enum SettingsEvent {
     FollowUp(Timestamp),
     /// Unblock the sender (`mailbox.unblock_sender`); one undo step.
     Unblock(String),
+    /// Start the Gmail sign-in flow.
+    AddGmail,
+    /// Remove a linked account (confirmed in the panel).
+    RemoveAccount(String),
     Close,
 }
+
+/// One row of the Accounts page.
+#[derive(Clone, Debug)]
+pub struct AccountRow {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub color: String,
+    /// Linked Gmail account (removable); otherwise built-in demo data.
+    pub gmail: bool,
+}
+
+/// Index of the Accounts page in [`SettingsPanel::pages`].
+const ACCOUNTS_PAGE: usize = 1;
 
 const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("review", "Review")];
 const PANE_LAYOUTS: [(&str, &str); 2] = [("side", "Side by side"), ("stacked", "Stacked")];
@@ -52,6 +70,13 @@ pub struct SettingsPanel {
     unsubscribed: Vec<String>,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
+    accounts: Vec<AccountRow>,
+    /// Account whose Remove button has been clicked once (awaiting confirm).
+    confirm_remove: Option<String>,
+    /// Gmail OAuth client credentials are present in the environment.
+    gmail_configured: bool,
+    /// Page selected when the panel opens.
+    start_page: usize,
 }
 
 impl SettingsPanel {
@@ -74,6 +99,10 @@ impl SettingsPanel {
             orientation,
             blocked: Vec::new(),
             unsubscribed: Vec::new(),
+            accounts: Vec::new(),
+            confirm_remove: None,
+            gmail_configured: false,
+            start_page: 0,
             follow_up_days: (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
                 .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into()) as u8,
         }
@@ -82,6 +111,19 @@ impl SettingsPanel {
     /// Whether tabs show the sender's avatar (the row's initial value).
     pub fn tab_avatars(mut self, on: bool) -> Self {
         self.tab_avatars = on;
+        self
+    }
+
+    /// Seed the Accounts page: the account list and whether Gmail sign-in is configured.
+    pub fn accounts(mut self, accounts: Vec<AccountRow>, gmail_configured: bool) -> Self {
+        self.accounts = accounts;
+        self.gmail_configured = gmail_configured;
+        self
+    }
+
+    /// Open on the Accounts page instead of General.
+    pub fn on_accounts_page(mut self) -> Self {
+        self.start_page = ACCOUNTS_PAGE;
         self
     }
 
@@ -181,14 +223,126 @@ impl SettingsPanel {
         }
     }
 
+    /// Replace the account list (after a sign-in or removal) and drop any pending confirm.
+    pub fn set_accounts(&mut self, accounts: Vec<AccountRow>, cx: &mut Context<Self>) {
+        self.accounts = accounts;
+        self.confirm_remove = None;
+        cx.notify();
+    }
+
+    /// First click on Remove arms the confirm; the second emits the removal.
+    fn remove_account(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.confirm_remove.as_deref() == Some(id) {
+            self.confirm_remove = None;
+            cx.emit(SettingsEvent::RemoveAccount(id.to_owned()));
+        } else {
+            self.confirm_remove = Some(id.to_owned());
+        }
+        cx.notify();
+    }
+
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
         vec![
             self.general_page(weak),
+            self.accounts_page(weak),
             self.appearance_page(weak, cx),
             self.inbox_page(weak),
             self.blocked_page(weak),
             self.classifier_page(weak),
         ]
+    }
+
+    fn accounts_page(&self, weak: &Weak) -> SettingPage {
+        let keywords = ["accounts", "gmail", "add account", "remove account", "sign in", "email"];
+        let mut linked = SettingGroup::new();
+        if self.accounts.is_empty() {
+            linked = linked.item(note("accounts-empty", "No accounts.").keywords(keywords));
+        }
+        for (index, account) in self.accounts.iter().cloned().enumerate() {
+            let weak = weak.clone();
+            let label = account.email.clone();
+            let confirming = self.confirm_remove.as_deref() == Some(account.id.as_str());
+            linked = linked.item(
+                SettingItem::render(move |_, _, cx| {
+                    let t = cx.theme();
+                    let dot = crate::theme::parse_color(&account.color).unwrap_or(t.primary);
+                    let kind = if account.gmail { "Gmail" } else { "Demo data · replaced when you add Gmail" };
+                    let detail = if account.name == account.email {
+                        kind.to_owned()
+                    } else {
+                        format!("{} · {kind}", account.email)
+                    };
+                    let row = div()
+                        .id(("account-row", index))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .text_sm()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_1()
+                                .min_w_0()
+                                .items_center()
+                                .gap_2()
+                                .child(div().size_2().rounded_full().bg(dot))
+                                .child(div().flex().flex_col().child(account.name.clone()).child(
+                                    div().text_xs().text_color(t.muted_foreground).child(detail),
+                                )),
+                        );
+                    if !account.gmail {
+                        return row;
+                    }
+                    let (weak, id) = (weak.clone(), account.id.clone());
+                    let (text, tip) = if confirming {
+                        ("Confirm remove", "Removes the account and its cached mail from this app; Gmail is untouched")
+                    } else {
+                        ("Remove", "Remove this account from the app")
+                    };
+                    row.child(div().flex_none().child(button(("account-remove", index), text, tip, "", cx).on_click(
+                        move |_, _, cx| {
+                            weak.update(cx, |this, cx| this.remove_account(&id, cx)).ok();
+                        },
+                    )))
+                })
+                .keywords(keywords.into_iter().chain([label.as_str()])),
+            );
+        }
+        let configured = self.gmail_configured;
+        let weak = weak.clone();
+        let add = SettingItem::render(move |_, _, cx| {
+            let weak = weak.clone();
+            let hint = if configured {
+                "Sign in with your browser; the token is kept in the system keychain."
+            } else {
+                "Needs MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET set at launch."
+            };
+            div()
+                .id("account-add")
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .text_sm()
+                .child(
+                    div().flex().flex_col().flex_1().min_w_0().child("Add Gmail account").child(
+                        div().text_xs().text_color(cx.theme().muted_foreground).child(hint),
+                    ),
+                )
+                .child(
+                    div().flex_none().child(
+                        button("account-add-gmail", "Add Gmail…", "Sign in to a Gmail account", "", cx)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |_, cx| cx.emit(SettingsEvent::AddGmail)).ok();
+                            }),
+                    ),
+                )
+        })
+        .keywords(keywords);
+        SettingPage::new("Accounts")
+            .resettable(false)
+            .groups([linked, SettingGroup::new().title("Add account").item(add)])
     }
 
     fn general_page(&self, weak: &Weak) -> SettingPage {
@@ -475,7 +629,12 @@ impl Render for SettingsPanel {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(Settings::new("settings").sidebar_width(px(190.)).pages(pages)),
+                    .child(
+                        Settings::new("settings")
+                            .sidebar_width(px(190.))
+                            .default_selected_index(SelectIndex { page_ix: self.start_page, group_ix: None })
+                            .pages(pages),
+                    ),
             )
     }
 }

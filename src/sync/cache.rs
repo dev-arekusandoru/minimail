@@ -337,6 +337,16 @@ impl Cache {
         Ok(())
     }
 
+    /// Drops the account and everything cached for it (messages, folders, threads, cursor).
+    pub fn delete_account(&self, account: &str) -> rusqlite::Result<()> {
+        for table in ["messages", "folders", "threads"] {
+            self.conn
+                .execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
+        }
+        self.conn.execute("DELETE FROM accounts WHERE id=?1", [account])?;
+        Ok(())
+    }
+
     /// Max cached message id plus one; 1 when empty.
     pub fn next_message_id(&self) -> rusqlite::Result<MessageId> {
         self.next_id("SELECT MAX(id) FROM messages")

@@ -23,7 +23,7 @@ use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
-use crate::app::settings::{SettingsEvent, SettingsPanel};
+use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::judge::{JudgePolicy, Kind, Routed, StubJudge, classify};
