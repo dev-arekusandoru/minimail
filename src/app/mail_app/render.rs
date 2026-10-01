@@ -16,6 +16,12 @@ impl Render for MailApp {
         let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
+            // The opened message and the next couple of rows get their bodies.
+            let targets = self.body_targets();
+            self.fetch_bodies(targets, cx);
+        }
+        if let Some(text) = self.pending_toast.take() {
+            self.show_toast(text, window, cx);
         }
         // Rows size themselves from the real pane: the list pane side by side, the whole
         // region when the panes are stacked.

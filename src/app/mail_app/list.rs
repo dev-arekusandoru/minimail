@@ -8,6 +8,11 @@ impl MailApp {
         let count = self.visible_ids().len();
         let row_count = if self.grouped() { self.rows().len() } else { count };
         self.sync_list(row_count, cx);
+        // Near the end of the list, ask the server for the next page of older mail.
+        let cursor = self.cursor_ix();
+        let near_end = self.list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= row_count
+            || cursor + LOAD_MORE_MARGIN >= row_count;
+        self.maybe_load_older(near_end);
         let selected = self.triage.selected().len();
         let title = match &self.mode {
             ListMode::State if self.grouped() => format!(
@@ -78,13 +83,32 @@ impl MailApp {
                 .header(EmptyHeader::new().title(EmptyTitle::new().child(title)))
                 .into_any_element()
         } else {
-            list(
-                self.list_state.clone(),
-                cx.processor(|this, ix: usize, _window, cx| this.render_list_row(ix, cx)),
-            )
-            .w_full()
-            .flex_1()
-            .into_any_element()
+            div()
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(
+                    list(
+                        self.list_state.clone(),
+                        cx.processor(|this, ix: usize, _window, cx| this.render_list_row(ix, cx)),
+                    )
+                    .w_full()
+                    .flex_1(),
+                )
+                .when(self.loading_older(), |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .px_3()
+                            .py_1()
+                            .text_size(px(11.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Loading older mail…"),
+                    )
+                })
+                .into_any_element()
         };
         // The resizable panel owns the list's size; it just fills it.
         div()
@@ -103,6 +127,12 @@ impl MailApp {
     /// measured for an older preview setting, pane width, grouping or row count. Anything
     /// that changes those bumps the shape and is re-measured on the next render.
     fn sync_list(&mut self, count: usize, _cx: &mut Context<Self>) {
+        if self.list_shape.is_none() {
+            // Remember where the viewport ends, so a scroll near the last row can
+            // ask the server for the next page of older mail.
+            let end = self.list_visible_end.clone();
+            self.list_state.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
+        }
         let shape = ListShape {
             count,
             grouped: self.grouped(),

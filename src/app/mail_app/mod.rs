@@ -62,6 +62,8 @@ use reader::format_when;
 
 /// Height of the list header above the rows (title, selection count, Filter ▾).
 const LIST_HEADER_H: f32 = 28.;
+/// Rows after the end of the list that start a load-more request.
+const LOAD_MORE_MARGIN: usize = 20;
 /// Identity of the toast notification, so each new toast replaces the last.
 struct ToastId;
 
@@ -141,6 +143,8 @@ pub struct MailApp {
     list_state: ListState,
     /// What `list_state` was last measured against, so a stale row height is re-measured.
     list_shape: Option<list::ListShape>,
+    /// End of the list's visible range, from its scroll handler.
+    list_visible_end: std::cell::Cell<usize>,
     help_scroll: ScrollHandle,
     /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
     /// opened message can be scrolled into view.
@@ -158,17 +162,29 @@ pub struct MailApp {
     open_menu: Option<MenuKind>,
     /// Local mail cache; `None` for mock-only sessions.
     cache: Option<Rc<crate::sync::cache::Cache>>,
-    providers: HashMap<AccountId, sync::SharedProvider>,
+    providers: HashMap<AccountId, crate::sync::SharedProvider>,
     /// Last sync error shown, so each distinct error toasts once.
     sync_error: Option<String>,
     /// The mailbox came from fixtures (replaced on first Gmail sign-in).
     demo: bool,
-    /// Run a pull on the next sync iteration.
-    pull_now: bool,
-    /// Message count when a Fetch mail (or first import) was requested; toast the difference when it completes.
+    /// Run a server change check on the next round (Fetch mail, sign-in).
+    force_check: bool,
+    /// Time of the next scheduled check.
+    check_at: Timestamp,
+    /// Rounds pause until this time after a rate limit.
+    throttled_until: Option<Timestamp>,
+    /// Message count when a fetch was requested; toast the difference when it lands.
     fetch_baseline: Option<usize>,
-    /// Sync iterations left to skip after the provider rate-limited us.
-    sync_backoff: u32,
+    /// Scopes whose older mail the next round should extend.
+    older_queue: HashMap<AccountId, Vec<crate::provider::Scope>>,
+    /// Accounts with a load-more page in flight.
+    older_in_flight: HashSet<AccountId>,
+    /// Messages whose body is being downloaded.
+    bodies_in_flight: HashSet<MessageId>,
+    /// Wakes the sync loop when work is queued.
+    sync_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
+    /// Toast text queued from a background task, shown on the next frame.
+    pending_toast: Option<String>,
 }
 
 impl MailApp {
@@ -233,6 +249,7 @@ impl MailApp {
             focus_handle: cx.focus_handle(),
             list_state: ListState::new(0, ListAlignment::Top, px(200.)),
             list_shape: None,
+            list_visible_end: std::cell::Cell::new(0),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),
             finds: HashMap::new(),
@@ -245,9 +262,15 @@ impl MailApp {
             providers: HashMap::new(),
             sync_error: None,
             demo: true,
-            pull_now: false,
+            force_check: true,
+            check_at: 0,
+            throttled_until: None,
             fetch_baseline: None,
-            sync_backoff: 0,
+            older_queue: HashMap::new(),
+            older_in_flight: HashSet::new(),
+            bodies_in_flight: HashSet::new(),
+            sync_wake: None,
+            pending_toast: None,
         };
         app.classify_visible();
         app
