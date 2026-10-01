@@ -10,6 +10,7 @@ use crate::judge::QuestionKey;
 use crate::reading;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::text::TextView;
@@ -60,7 +61,7 @@ impl MailApp {
         let recipients_open = self.reader.recipients_open(m.thread_id, m.id);
 
         let head_id: ElementId =
-            if opened { ("reader-msg-head", id).into() } else { ("reader-thread-msg", id).into() };
+            if opened { ("reader-msg-head", id).into() } else { ("reader-thread-head", id).into() };
         let top = div()
             .id(head_id)
             .test_support()
@@ -488,23 +489,25 @@ impl MailApp {
             .child(main)
             .when_some(split.quoted, |d, quoted| {
                 d.child(
-                    look.link(
-                        ("reader-quoted", id),
-                        if quoted_open { "HIDE QUOTED TEXT" } else { "SHOW QUOTED TEXT" },
-                        None,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_quoted(mid, cx))),
+                    Collapsible::new()
+                        .open(quoted_open)
+                        .child(
+                            look.link(
+                                ("reader-quoted", id),
+                                if quoted_open { "HIDE QUOTED TEXT" } else { "SHOW QUOTED TEXT" },
+                                None,
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| this.toggle_quoted(mid, cx))),
+                        )
+                        .content(
+                            div()
+                                .pl_3()
+                                .border_l_2()
+                                .border_color(t.border)
+                                .text_color(t.muted_foreground)
+                                .child(self.find_text(m.thread_id, m.id, Segment::Quoted, quoted, cx)),
+                        ),
                 )
-                .when(quoted_open, |d| {
-                    d.child(
-                        div()
-                            .pl_3()
-                            .border_l_2()
-                            .border_color(t.border)
-                            .text_color(t.muted_foreground)
-                            .child(self.find_text(m.thread_id, m.id, Segment::Quoted, quoted, cx)),
-                    )
-                })
             })
             .into_any_element()
     }

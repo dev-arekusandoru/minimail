@@ -113,10 +113,10 @@ impl MailApp {
                     let color = theme::state_color(t, m.state);
                     let (dot, el) = if m.id == msg.id {
                         (DOT_FULL, self.message_surface(m, Role::Opened, &look, cx))
-                    } else if self.reader.is_expanded(m.thread_id, m.id) {
-                        (DOT_FULL, self.message_surface(m, Role::Thread, &look, cx))
                     } else {
-                        (DOT_COLLAPSED, self.collapsed_line(m, &newest, &look, cx))
+                        let expanded = self.reader.is_expanded(m.thread_id, m.id);
+                        let dot = if expanded { DOT_FULL } else { DOT_COLLAPSED };
+                        (dot, self.thread_message(m, expanded, &newest, &look, cx))
                     };
                     rail_row(t, Some((dot, color)), i == 0, i + 1 == count, el)
                         .into_any_element()

@@ -30,10 +30,14 @@ impl<'a> Look<'a> {
     }
 
     /// The sender's avatar at `size` px: the one avatar the reader has, shared by the message
-    /// header and the tabs. The kit `Avatar` derives its initials from the name it is given, so
-    /// we feed it the same `reading::initials` the app has always used.
+    /// header and the tabs. The kit `Avatar` derives its text from the name it is given (the first
+    /// letter of each space-separated word, then a byte-counted one-letter fallback), so we hand
+    /// it `reading::initials` split into single-letter words — that reproduces the initials
+    /// verbatim, including two-letter non-ASCII pairs the byte-counted fallback would truncate.
     pub fn monogram(&self, name: &str, email: &str, size: f32) -> Avatar {
-        Avatar::new().name(crate::reading::initials(name, email)).with_size(px(size))
+        let initials = crate::reading::initials(name, email);
+        let name_arg = initials.chars().map(|c| c.to_string()).collect::<Vec<_>>().join(" ");
+        Avatar::new().name(name_arg).with_size(px(size))
     }
 
     /// One line of mono metadata text.

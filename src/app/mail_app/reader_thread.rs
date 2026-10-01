@@ -2,8 +2,9 @@
 //! Expanded messages reuse `message_surface`.
 
 use super::super::*;
-use super::parts::Look;
+use super::parts::{Look, Role};
 use crate::reading;
+use gpui_kit::component::collapsible::Collapsible;
 
 /// Height of a collapsed thread line.
 pub(super) const COLLAPSED_H: f32 = 46.;
@@ -28,6 +29,24 @@ impl MailApp {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_thread_expansion(cx))),
             )
+            .into_any_element()
+    }
+
+    /// A non-opened thread message: its collapsed line, revealing the full surface when the
+    /// app-owned disclosure state says so. No animation, so find-driven expansion stays in step
+    /// with the scroll offsets.
+    pub(super) fn thread_message(
+        &self,
+        m: &Message,
+        expanded: bool,
+        newest: &str,
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        Collapsible::new()
+            .open(expanded)
+            .child(self.collapsed_line(m, newest, look, cx))
+            .content(self.message_surface(m, Role::Thread, look, cx))
             .into_any_element()
     }
 
