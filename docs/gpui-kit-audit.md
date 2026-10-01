@@ -96,3 +96,10 @@ Move snooze picker, rules panel, ChoiceDialog, help and settings into `host_in_d
 - `panels.rs`: A (RulesPanel shell) and D1 (RuleBanner/SessionCard): serialise.
 - `menu.rs` / `menus.rs` / `filter_menu.rs` / `mouse.rs`: C only.
 - Otherwise A, B-with-render-owner, C, D1, D2 are independent.
+
+## Adopted — known losses
+
+- D2: filter chips are the kit `Button` (`outline().xsmall().selected(on)`), not the old hand-rolled pill: kit outline/selected colours replace the `primary` border + `list_active` fill, padding is `px_1`, and the label is the kit xsmall `text_xs` (12px) rather than 11px. Ids (`("chip", i)`) and click behaviour are unchanged.
+- D2: the sidebar count pill is a kit `Tag` (chosen over `Badge`, whose count renders as an absolutely-positioned floating overlay, not an inline count). `Tag` fixes the text at `text_xs` (12px vs the old 10px), gains a 1px border tinted like the fill, and has a built-in `hover` dimming — so a count label now dims when the pointer is over it even though it is not interactive. Highlighted (active-row) vs muted fills are preserved via `Tag::custom`. The `account-count-*` id now sits on a wrapper div (Tag has no `id`).
+- D2: the "no mail / no matches" list empty state is the kit `Empty`, which paints a dashed rounded border, `p_6` around centred content, and a foreground-coloured title — the old state was bare muted text.
+- D2: the sidebar and reader gained overlay scrollbars. The reader keeps its `ScrollHandle` (find / jump-to still work) via `.vertical_scrollbar(&scroll)`; the sidebar uses the wrapper's own handle. The help body and rules list are deferred until WS-A has moved those modals onto `Dialog`, to avoid conflicting with that worktree.
