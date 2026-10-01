@@ -366,3 +366,95 @@ pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Cha
         }
     }
 }
+
+/// One embedded HTTP response from a Gmail batch reply.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BatchPart {
+    /// `Content-ID` of the part, without angle brackets, so a part can be
+    /// matched back to the request that asked for it.
+    pub id: String,
+    pub status: u16,
+    pub json: Value,
+    pub retry_after: Option<std::time::Duration>,
+}
+
+/// Request body for the Gmail batch endpoint: one `application/http` part per
+/// message, each holding a single embedded GET.
+pub fn batch_body(boundary: &str, parts: &[(String, String)]) -> String {
+    let mut out = String::new();
+    for (content_id, path) in parts {
+        out.push_str(&format!(
+            "--{boundary}\r\nContent-Type: application/http\r\nContent-ID: <{content_id}>\r\n\r\nGET {path} HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n"
+        ));
+    }
+    out.push_str(&format!("--{boundary}--\r\n"));
+    out
+}
+
+fn boundary_of(content_type: &str) -> Option<String> {
+    content_type.split(';').skip(1).find_map(|param| {
+        let (key, value) = param.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("boundary")
+            .then(|| value.trim().trim_matches('"').to_owned())
+    })
+}
+
+/// Splits a `multipart/mixed` batch reply into its embedded HTTP responses.
+/// Tolerates CRLF and bare LF line endings and returns parts in document
+/// order; use [`BatchPart::id`] to place them.
+pub fn parse_batch(content_type: &str, body: &str) -> Vec<BatchPart> {
+    let Some(boundary) = boundary_of(content_type) else {
+        return Vec::new();
+    };
+    let marker = format!("--{boundary}");
+    let mut parts = Vec::new();
+    for chunk in body.split(&marker) {
+        // Anything before the first marker is the (empty) preamble; the chunk
+        // after the closing marker starts with `--`.
+        let chunk = chunk.trim_start_matches(['\r', '\n']);
+        if chunk.starts_with("--") {
+            continue;
+        }
+        let normalized = chunk.replace("\r\n", "\n");
+        let mut lines = normalized.split('\n');
+        let mut id = String::new();
+        let mut headers_done = false;
+        for line in lines.by_ref() {
+            if line.trim().is_empty() {
+                headers_done = true;
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':')
+                && key.trim().eq_ignore_ascii_case("content-id")
+            {
+                id = value.trim().trim_matches(['<', '>']).to_owned();
+            }
+        }
+        if !headers_done {
+            continue;
+        }
+        let mut retry_after = None;
+        let Some(status) = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse().ok())
+        else {
+            continue;
+        };
+        for line in lines.by_ref() {
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':')
+                && key.trim().eq_ignore_ascii_case("retry-after")
+            {
+                retry_after = value.trim().parse::<u64>().ok().map(std::time::Duration::from_secs);
+            }
+        }
+        let text = lines.collect::<Vec<_>>().join("\n");
+        let json = serde_json::from_str(&text).unwrap_or(Value::Null);
+        parts.push(BatchPart { id, status, json, retry_after });
+    }
+    parts
+}
