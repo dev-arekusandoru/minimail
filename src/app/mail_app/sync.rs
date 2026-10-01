@@ -54,11 +54,12 @@ impl MailApp {
                 (Some(client), Some(token)) => {
                     self.register_provider(&account.id, Box::new(GmailProvider::new(client.clone(), token)));
                 }
-                _ => self.show_toast(
-                    format!("Gmail ({}): sign in again via “Add Gmail account”", account.email),
-                    window,
-                    cx,
-                ),
+                _ => {
+                    // Called while the window is being built: the kit's root (which hosts
+                    // notifications) doesn't exist yet, so toast after this frame's setup.
+                    let text = format!("Gmail ({}): sign in again via “Add Gmail account”", account.email);
+                    cx.defer_in(window, move |this, window, cx| this.show_toast(text, window, cx));
+                }
             }
         }
         let executor = cx.background_executor().clone();
