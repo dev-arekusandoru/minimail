@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use mail_classifier::provider::RemoteState;
-use mail_classifier::provider::gmail::convert::{label_ops, message, state_from_labels};
+use mail_classifier::provider::gmail::convert::{label_ops, list_ids, message, state_from_labels};
 use serde_json::{Value, json};
 
 fn strings(list: &[&str]) -> Vec<String> {
@@ -10,6 +10,16 @@ fn strings(list: &[&str]) -> Vec<String> {
 
 fn set(list: &[&str]) -> HashSet<String> {
     list.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[test]
+fn list_ids_reads_message_objects() {
+    let page = json!({
+        "messages": [{"id": "18a1", "threadId": "t1"}, {"id": "18a2", "threadId": "t1"}],
+        "resultSizeEstimate": 2
+    });
+    assert_eq!(list_ids(&page), strings(&["18a1", "18a2"]));
+    assert!(list_ids(&json!({"resultSizeEstimate": 0})).is_empty());
 }
 
 #[test]

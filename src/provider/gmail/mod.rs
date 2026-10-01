@@ -122,19 +122,6 @@ impl GmailProvider {
     }
 }
 
-fn str_list(value: &Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn push_unique(target: &mut Vec<RemoteId>, ids: &[RemoteId]) {
     for id in ids {
         if !target.contains(id) {
@@ -213,7 +200,7 @@ impl MailProvider for GmailProvider {
                 .map_err(|e| ProviderError::Network(e.to_string()))?
                 .to_string();
             let json = self.call("GET", &url, None)?;
-            ids.extend(str_list(&json, "messages"));
+            ids.extend(convert::list_ids(&json));
             match json.get("nextPageToken").and_then(Value::as_str) {
                 Some(next) if !next.is_empty() => page_token = next.to_owned(),
                 _ => break,

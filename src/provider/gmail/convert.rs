@@ -39,6 +39,16 @@ pub fn label_ops(from: &RemoteState, to: &RemoteState) -> (Vec<String>, Vec<Stri
     (add, remove)
 }
 
+/// Message ids from a `messages.list` page: `{"messages": [{"id": …, "threadId": …}, …]}`.
+pub fn list_ids(json: &Value) -> Vec<String> {
+    json.get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect()
+}
+
 /// Maps a message's label list to a triage state.
 pub fn state_from_labels(labels: &[String], user_folders: &HashSet<String>) -> RemoteState {
     if labels.iter().any(|l| l == LABEL_TRASH) {

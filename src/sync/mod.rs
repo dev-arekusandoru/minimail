@@ -248,6 +248,8 @@ pub fn background_pull(
 
 /// Merge a pull into the mailbox and the cache, and store the new cursor.
 ///
+/// Every remote folder gets a local folder, even when no fetched message is in it.
+///
 /// A message with an unconfirmed local change keeps its local state; otherwise
 /// the remote state wins, except that a snoozed message stays snoozed while it
 /// is archived remotely.
@@ -267,6 +269,10 @@ pub fn apply_fetched(
         .iter()
         .map(|f| (f.id.as_str(), f.path.as_str()))
         .collect();
+
+    for folder in &pull.folders {
+        ensure_folder(mb, cache, account, &by_path, &folder.path)?;
+    }
 
     for remote in &pull.fetched {
         let cached = cache

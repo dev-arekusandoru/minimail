@@ -585,6 +585,27 @@ fn a_folder_from_the_provider_becomes_a_local_folder() {
     );
 }
 
+#[test]
+fn empty_remote_folders_are_imported_and_survive_a_restart() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut mb = mailbox(Vec::new());
+    let mut p = FakeProvider::new(Vec::new()).with(vec![RemoteFolder {
+        id: "Label_3".to_owned(),
+        path: "Receipts".to_owned(),
+    }]);
+    cache.upsert_account(&account()).unwrap();
+
+    pull_all(&mut mb, &cache, &mut p, None);
+    pull_all(&mut mb, &cache, &mut p, Some("1".to_owned()));
+
+    let names = |folders: &[mail_classifier::model::Folder]| -> Vec<String> {
+        folders.iter().filter(|f| f.account == ACCOUNT).map(|f| f.name.clone()).collect()
+    };
+    assert_eq!(names(mb.all_folders()), ["Receipts"]);
+    let (_, cached, _) = cache.load().unwrap();
+    assert_eq!(names(&cached), ["Receipts"]);
+}
+
 // ------------------------------------------------------------------- cursors
 
 #[test]
