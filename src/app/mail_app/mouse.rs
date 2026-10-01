@@ -1,10 +1,9 @@
-//! Mouse entry points for row clicks, left-edge selection, suggestion badges and the
-//! popup menu layer.
+//! Mouse entry points for row clicks, left-edge selection and suggestion badges.
 use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::*;
 
-use super::{HEADER_H, ListMode, MENU_W, MailApp, PaneLayout};
+use super::{ListMode, MailApp, PaneLayout};
 
 impl MailApp {
     /// Move the cursor to visible row `ix` (either list mode), clamped.
@@ -107,48 +106,6 @@ impl MailApp {
             })
             .test_support()
             .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)))
-    }
-
-
-    /// The popup menu layer: a backdrop that dismisses on a click, plus the open panel
-    /// hanging under the trigger that opened it, right-aligned to it and kept inside the
-    /// window.
-    pub(super) fn render_menu(&self, window: &Window, cx: &Context<Self>) -> Option<AnyElement> {
-        const MARGIN: f32 = 8.;
-        let panel = self.menu_panel()?;
-        let open = self.menu.as_ref()?;
-        let viewport = window.viewport_size();
-        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
-        let (left, top) = match self.anchors.borrow().get(&open.kind) {
-            Some(b) => (
-                f32::from(b.right()) - MENU_W,
-                f32::from(b.bottom()) + 4.,
-            ),
-            None => (vw - MENU_W - 12., HEADER_H),
-        };
-        let left = left.clamp(MARGIN, (vw - MENU_W - MARGIN).max(MARGIN));
-        let top = top.min(vh - open.height - MARGIN).max(MARGIN);
-        Some(
-            div()
-                .id("menu-backdrop")
-                .test_support()
-                .absolute()
-                .inset_0()
-                .occlude()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| this.close_menu(window, cx)),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(top))
-                        .left(px(left))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(panel),
-                )
-                .into_any_element(),
-        )
     }
 
     /// Toolbar icon for the pane layout button: the current orientation.

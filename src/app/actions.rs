@@ -2,9 +2,6 @@
 
 use crate::app::chrome::HELP_CONTEXT;
 use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
-use crate::app::menu::{
-    MENU_CONTEXT, MenuBack, MenuCancel, MenuNext, MenuOpen, MenuPrev, MenuRun,
-};
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::judge::Kind;
@@ -203,16 +200,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", SelectPrev, Some(HELP_CONTEXT)),
         KeyBinding::new("pageup", HelpPageUp, Some(HELP_CONTEXT)),
         KeyBinding::new("pagedown", HelpPageDown, Some(HELP_CONTEXT)),
-        // Menus.
-        KeyBinding::new("j", MenuNext, Some(MENU_CONTEXT)),
-        KeyBinding::new("down", MenuNext, Some(MENU_CONTEXT)),
-        KeyBinding::new("k", MenuPrev, Some(MENU_CONTEXT)),
-        KeyBinding::new("up", MenuPrev, Some(MENU_CONTEXT)),
-        KeyBinding::new("enter", MenuRun, Some(MENU_CONTEXT)),
-        KeyBinding::new("left", MenuBack, Some(MENU_CONTEXT)),
-        KeyBinding::new("backspace", MenuBack, Some(MENU_CONTEXT)),
-        KeyBinding::new("right", MenuOpen, Some(MENU_CONTEXT)),
-        KeyBinding::new("escape", MenuCancel, Some(MENU_CONTEXT)),
+        // Popup menus: the kit owns arrows, enter and escape; `j`/`k` are the list's keys.
+        KeyBinding::new("j", gpui_kit::base::actions::SelectDown, Some("PopupMenu")),
+        KeyBinding::new("k", gpui_kit::base::actions::SelectUp, Some("PopupMenu")),
         // Rules panel.
         KeyBinding::new("j", RulesNext, Some(RULES_CONTEXT)),
         KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),

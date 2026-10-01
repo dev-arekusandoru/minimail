@@ -12,6 +12,9 @@ use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::contacts::{ContactStore, NewContact};
+
+#[path = "common/menu.rs"]
+mod menu;
 use mail_classifier::model::{
     Chip, Filter, Location, Mailbox, MessageId, OUTBOX_DELAY, Tag, TriageState,
 };
@@ -110,6 +113,14 @@ impl Harness<'_> {
         self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).expect("window alive");
         self.cx.run_until_parked();
     }
+    /// Click the row of the open popup menu labelled `label`.
+    fn click_row(&mut self, label: &str) {
+        menu::click_row(self.cx, self.window, label);
+    }
+    /// Whether the open popup menu has a row labelled `label`.
+    fn has_row(&mut self, label: &str) -> bool {
+        menu::has_row(self.cx, self.window, label)
+    }
     fn type_text(&mut self, text: &str) {
         let window = self.window;
         self.cx.update_window(window, |_, window, cx| window.input(text, cx)).unwrap();
@@ -169,7 +180,7 @@ fn sidebar_click_switches_location_and_resets_chip_and_filter(cx: &mut TestAppCo
     h.keys("2");
     assert_eq!(h.chip(), Chip::NeedsReply);
     h.click("btn-filter");
-    h.click("filter-tag-reminder");
+    h.click_row("Reminder");
     assert_eq!(h.filter().tags.len(), 1);
 
     h.click("2-3");
@@ -249,15 +260,15 @@ fn filter_menu_narrows_the_list_by_account_and_tag(cx: &mut TestAppContext) {
 
     h.click("btn-filter");
     assert!(h.read(|a| a.menu_open()));
-    h.click("filter-account");
-    h.click("filter-account-work");
+    h.click_row("Account");
+    h.click_row("Work");
     assert_eq!(h.filter().account.as_deref(), Some("work"));
     assert_eq!(h.visible(), vec![2]);
     assert!(h.read(|a| a.filter_label()).contains("(1)"), "the button shows the filter count");
 
     // Clear, then filter by tag: a snoozed message that woke up carries Reminder.
     h.click("btn-filter");
-    h.click("filter-clear");
+    h.click_row("Clear filters");
     assert_eq!(h.filter(), Filter::default());
     assert_eq!(h.visible(), vec![1, 2]);
 
@@ -267,23 +278,23 @@ fn filter_menu_narrows_the_list_by_account_and_tag(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.mailbox.tags(id).contains(&Tag::Reminder)));
 
     h.click("btn-filter");
-    h.click("filter-tag-reminder");
+    h.click_row("Reminder");
     assert_eq!(h.visible(), vec![id], "only the message tagged Reminder");
     assert!(h.read(|a| a.filter_label()).contains("(1)"));
 
     h.click("btn-filter");
-    h.click("filter-clear");
+    h.click_row("Clear filters");
     assert_eq!(h.filter(), Filter::default());
     assert_eq!(h.visible().len(), 2);
 
     // The account submenu belongs to All Inboxes only.
     h.click("btn-filter");
-    assert!(h.has("filter-account"), "All Inboxes can filter by account");
+    assert!(h.has_row("Account"), "All Inboxes can filter by account");
     h.keys("escape");
     assert!(!h.read(|a| a.menu_open()));
     h.click("1-0");
     h.click("btn-filter");
-    assert!(!h.has("filter-account"), "an account's Inbox need not filter by account");
+    assert!(!h.has_row("Account"), "an account's Inbox need not filter by account");
     h.keys("escape");
 }
 

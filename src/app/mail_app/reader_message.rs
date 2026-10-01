@@ -1,6 +1,5 @@
 //! One message surface of the reader: header, recipients, banners, suggestion strip, body and
 //! attachments. The opened message and every expanded thread message share it.
-use gpui_kit::component::ActiveTheme as _;
 
 use super::super::*;
 use super::parts::{stamp, Look, Role};
@@ -22,7 +21,6 @@ impl MailApp {
     fn message_buttons(&self, mid: MessageId, cx: &Context<Self>) -> Div {
         let id = mid as usize;
         let kind = MenuKind::Message(mid);
-        let selection = cx.theme().list_active;
         div()
             .flex()
             .flex_none()
@@ -33,17 +31,11 @@ impl MailApp {
                 icon_button(("btn-reply", id), IconName::Reply, "Reply to this message", "r", cx)
                     .on_click(cx.listener(move |this, _, window, cx| this.reply_to(mid, window, cx))),
             )
-            .child(
-                div()
-                    .relative()
-                    .flex_none()
-                    .child(
-                        icon_button(("btn-message-more", id), IconName::Ellipsis, "More actions for this message", "", cx)
-                            .when(self.menu_is(kind), |b| b.bg(selection))
-                            .on_click(cx.listener(move |this, _, window, cx| this.toggle_menu(kind, window, cx))),
-                    )
-                    .child(self.anchor_probe(kind)),
-            )
+            .child(div().flex_none().child(self.menu_trigger(
+                kind,
+                icon_button(("btn-message-more", id), IconName::Ellipsis, "More actions for this message", "", cx),
+                cx,
+            )))
     }
 
     pub(super) fn message_surface(

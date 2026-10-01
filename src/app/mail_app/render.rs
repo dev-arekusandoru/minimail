@@ -224,6 +224,5 @@ impl Render for MailApp {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
             .child(div().flex_none().child(HintBar::new(hint)))
-            .when_some(self.render_menu(window, cx), |d, menu| d.child(menu))
     }
 }

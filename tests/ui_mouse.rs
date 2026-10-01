@@ -9,6 +9,9 @@ use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::model::{Mailbox, MessageId, TriageState, TriageState::*};
 
+#[path = "common/menu.rs"]
+mod menu;
+
 struct Harness<'a> {
     cx: &'a mut TestAppContext,
     window: AnyWindowHandle,
@@ -59,6 +62,20 @@ impl Harness<'_> {
             .update_window(self.window, |_, window, cx| window.click(id, cx))
             .expect("window alive");
         self.settle(was_open);
+    }
+    /// Click the row of the open popup menu labelled `label`.
+    fn click_row(&mut self, label: &str) {
+        let was_open = self.read(|a| a.modal_open());
+        menu::click_row(self.cx, self.window, label);
+        self.settle(was_open);
+    }
+    /// Hover the row of the open popup menu labelled `label` (opens a submenu).
+    fn hover_row(&mut self, label: &str) {
+        menu::hover_row(self.cx, self.window, label);
+    }
+    /// Whether the open popup menu has a row labelled `label`.
+    fn has_row(&mut self, label: &str) -> bool {
+        menu::has_row(self.cx, self.window, label)
     }
     /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
     /// next click aims at them.
@@ -144,14 +161,14 @@ fn list_header_menu_shows_with_two_selected_and_acts_on_all_of_them(cx: &mut Tes
     assert!(h.has("btn-selection-more"), "two selected");
     h.click("btn-selection-more");
     assert!(h.read(|a| a.menu_open()));
-    assert!(!h.has("btn-summarize") && !h.has("btn-unsubscribe"), "single-message rows are left out");
-    h.click("btn-archive");
+    assert!(!h.has_row("Summarize thread") && !h.has_row("Mute thread"), "single-message rows are left out");
+    h.click_row("Archive");
     assert_eq!(h.state_of(ids[0]), Archived);
     assert_eq!(h.state_of(ids[1]), Archived);
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0 - 2, start.1 + 2));
     assert!(!h.has("btn-selection-more"), "the selection is spent");
     h.click("btn-more");
-    h.click("btn-undo");
+    h.click_row("Undo");
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1), "one undo step for both");
 }
 
@@ -181,11 +198,11 @@ fn delete_menu_row_moves_message_to_trash_and_undo_restores(cx: &mut TestAppCont
     let start = h.count(Deleted);
     h.click(("row", id as usize));
     h.click(("btn-message-more", id as usize));
-    h.click("btn-delete");
+    h.click_row("Delete");
     assert_eq!(h.state_of(id), Deleted);
     assert_eq!(h.count(Deleted), start + 1);
     h.click("btn-more");
-    h.click("btn-undo");
+    h.click_row("Undo");
     assert_eq!(h.state_of(id), Inbox);
     assert_eq!(h.count(Deleted), start);
 }
@@ -196,12 +213,12 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
     let mut h = harness(cx);
     let id = h.ids()[0];
     h.click(("row", id as usize));
-    let cases: [(ElementId, &'static str); 3] = [
-        (("btn-message-more", id as usize).into(), "btn-archive"),
-        ("btn-more".into(), "btn-palette"),
-        ("btn-filter".into(), "filter-tag-needs-reply"),
+    let cases: [ElementId; 3] = [
+        ("btn-message-more", id as usize).into(),
+        "btn-more".into(),
+        "btn-filter".into(),
     ];
-    for (trigger, first_row) in cases {
+    for trigger in cases {
         h.click(trigger.clone());
         let (button, row, viewport) = h
             .cx
@@ -209,7 +226,7 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
                 window.render_frame(cx);
                 (
                     window.find(trigger.clone()).bounds(),
-                    window.find(first_row).bounds(),
+                    window.within("popup-menu").find(0usize).bounds(),
                     window.viewport_size(),
                 )
             })
@@ -228,16 +245,14 @@ fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(cx: &
     for id in ["btn-session", "btn-layout", "tb-settings", "btn-more"] {
         assert!(h.has(id), "{id}");
     }
-    for id in ["btn-palette", "btn-undo", "btn-help"] {
-        assert!(!h.has(id), "{id} lives in the More menu only");
-    }
+    assert!(!h.read(|a| a.menu_open()), "the More menu's rows exist only while it is open");
     h.click("search-box");
     assert!(h.read(|a| a.palette_open()), "search opens the command/search palette");
     // The first escape clears the prefilled `/`, the second closes.
     h.keys("escape escape");
     assert!(!h.read(|a| a.palette_open()));
     h.click("btn-more");
-    h.click("btn-palette");
+    h.click_row("Commands…");
     assert!(h.read(|a| a.palette_open()));
     h.keys("s n o o z e d");
     h.keys("enter");
@@ -246,6 +261,25 @@ fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(cx: &
         h.read(|a| a.triage.view.location.clone()),
         mail_classifier::model::Location::Snoozed("personal".into())
     );
+}
+
+/// An open menu is driven by the keyboard: `j`/`k` and the arrows move, `enter` runs the row,
+/// and the list's bare keys do nothing meanwhile.
+#[gpui_kit::gpui::test]
+fn an_open_menu_is_navigated_with_j_and_enter(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let id = h.cursor().unwrap();
+    h.keys("e");
+    assert_eq!(h.state_of(id), Archived);
+    h.click("btn-more");
+    h.keys("e");
+    assert_eq!(h.state_of(id), Archived, "bare list keys are inert while a menu is open");
+    // Rows: Commands…, Undo, … — `j` twice lands on Undo.
+    h.keys("j");
+    h.keys("j");
+    h.keys("enter");
+    assert!(!h.read(|a| a.menu_open()), "running a row closes the menu");
+    assert_eq!(h.state_of(id), Inbox, "enter ran Undo");
 }
 
 /// Escape must dismiss without running anything — the menu takes focus, so this is the
@@ -276,14 +310,14 @@ fn a_menu_dismisses_when_the_backdrop_is_clicked(cx: &mut TestAppContext) {
     let id = h.ids()[0];
     h.click("btn-more");
     assert!(h.read(|a| a.menu_open()));
-    h.click("menu-backdrop");
+    h.click(("row", id as usize));
     assert!(!h.read(|a| a.menu_open()), "clicking away dismisses");
     assert_eq!(h.state_of(id), Inbox, "the click ran no menu row");
 
     h.click(("row", id as usize));
     h.click(("btn-message-more", id as usize));
     assert!(h.read(|a| a.menu_open()), "the other menu opens too");
-    h.click("menu-backdrop");
+    h.click(("row", id as usize));
     assert!(!h.read(|a| a.menu_open()));
 }
 
@@ -307,11 +341,11 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     h.click(("row", id as usize));
     h.click(("btn-message-more", id as usize));
     assert!(h.read(|a| a.menu_open()));
-    assert!(h.has("btn-sender-actions"));
-    assert!(!h.has("btn-sender-archive"), "the submenu's rows are a level down");
-    h.click("btn-sender-actions");
-    assert!(h.has("btn-sender-archive"), "clicking the submenu row opens its level");
-    h.click("btn-sender-archive");
+    assert!(h.has_row("Sender actions"));
+    assert!(!h.has_row("Archive from sender"), "the submenu's rows are a level down");
+    h.hover_row("Sender actions");
+    assert!(h.has_row("Archive from sender"), "hovering the submenu row opens its level");
+    h.click_row("Archive from sender");
     assert!(!h.read(|a| a.menu_open()), "the whole menu stack closes after a choice");
     assert!(h.read(|a| a.dialog_open()), "sender-wide actions confirm first");
     h.keys("1");
@@ -335,17 +369,17 @@ fn ai_rows_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext) {
         .expect("the fixture classifies at startup, so some message is pending");
     h.click(("row", pending as usize));
     h.click(("btn-message-more", pending as usize));
-    assert!(h.has("btn-accept"), "a pending suggestion offers Accept");
-    assert!(h.has("btn-reject"), "and Reject");
-    h.click("btn-reject");
+    assert!(h.has_row("Accept AI suggestions"), "a pending suggestion offers Accept");
+    assert!(h.has_row("Reject AI suggestions"), "and Reject");
+    h.click_row("Reject AI suggestions");
     assert!(
         h.read(|a| a.mailbox.pending(pending).is_empty()),
         "reject drops the badges"
     );
     h.click(("btn-message-more", pending as usize));
-    assert!(h.has("btn-archive"), "the menu still opens");
-    assert!(!h.has("btn-accept"), "nothing left pending: no Accept");
-    assert!(!h.has("btn-reject"), "nothing left pending: no Reject");
+    assert!(h.has_row("Archive"), "the menu still opens");
+    assert!(!h.has_row("Accept AI suggestions"), "nothing left pending: no Accept");
+    assert!(!h.has_row("Reject AI suggestions"), "nothing left pending: no Reject");
 }
 
 #[gpui_kit::gpui::test]
@@ -354,7 +388,7 @@ fn snooze_menu_row_opens_picker_and_preset_click_snoozes(cx: &mut TestAppContext
     let id = h.ids()[0];
     h.click(("row", id as usize));
     h.click(("btn-message-more", id as usize));
-    h.click("btn-snooze");
+    h.click_row("Snooze…");
     assert!(h.read(|a| a.snooze_open()));
     h.click(("snooze-preset", 0usize));
     assert!(!h.read(|a| a.snooze_open()));
@@ -383,7 +417,7 @@ fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContex
     h.click("settings-close");
     assert!(!h.read(|a| a.settings_open()));
     h.click("btn-more");
-    h.click("btn-help");
+    h.click_row("Shortcuts");
     assert!(h.read(|a| a.help_open()));
     h.keys("escape");
     assert!(!h.read(|a| a.help_open()));

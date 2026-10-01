@@ -21,7 +21,6 @@ use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
-use crate::app::menu::{MENU_W, MenuPanel};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
 use crate::app::settings::{SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
@@ -55,12 +54,10 @@ mod reader_tabs;
 mod sidebar;
 mod titlebar;
 mod rows;
-use menus::{MenuKind, OpenMenu};
+use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
 
-/// Height of the app-owned titlebar (where a menu lands when its trigger has no bounds yet).
-const HEADER_H: f32 = 36.;
 /// Height of the list header above the rows (title, selection count, Filter ▾).
 const LIST_HEADER_H: f32 = 28.;
 /// Identity of the toast notification, so each new toast replaces the last.
@@ -113,8 +110,6 @@ pub struct MailApp {
     /// Messages the next dispatched menu action applies to, instead of the cursor's. Set
     /// by a message menu for exactly one action dispatch (see `menus.rs`).
     menu_target: Option<Vec<MessageId>>,
-    /// Window bounds of each menu trigger from the last frame, so a menu hangs under its button.
-    anchors: Rc<RefCell<HashMap<MenuKind, Bounds<Pixels>>>>,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
@@ -159,9 +154,8 @@ pub struct MailApp {
     /// Frames until a reopened find bar selects its text (see `place_find_match`).
     find_select: std::cell::Cell<u8>,
     _modal_sub: Option<Subscription>,
-    /// The open popup menu, if any.
-    menu: Option<OpenMenu>,
-    _menu_sub: Option<Subscription>,
+    /// Which popup menu is open, if any (the kit owns the popup itself).
+    open_menu: Option<MenuKind>,
 }
 
 impl MailApp {
@@ -205,7 +199,6 @@ impl MailApp {
             _pane_subs: pane_subs,
             reader: ReaderView::default(),
             menu_target: None,
-            anchors: Rc::default(),
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,
@@ -235,8 +228,7 @@ impl MailApp {
             find_gen: std::cell::Cell::new(0),
             find_select: std::cell::Cell::new(0),
             _modal_sub: None,
-            menu: None,
-            _menu_sub: None,
+            open_menu: None,
         };
         app.classify_visible();
         app

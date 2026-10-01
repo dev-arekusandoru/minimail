@@ -83,17 +83,12 @@ impl MailApp {
 
     /// A popup menu is open.
     pub fn menu_open(&self) -> bool {
-        self.menu.is_some()
+        self.open_menu.is_some()
     }
 
     /// The open menu of `kind`, if that is the one showing.
     pub(super) fn menu_is(&self, kind: MenuKind) -> bool {
-        self.menu.as_ref().is_some_and(|m| m.kind == kind)
-    }
-
-    /// The open menu's panel, to draw it.
-    pub(super) fn menu_panel(&self) -> Option<Entity<MenuPanel>> {
-        self.menu.as_ref().map(|m| m.panel.clone())
+        self.open_menu == Some(kind)
     }
 
     /// The message shown in the reader: the session's current one during a session, nothing

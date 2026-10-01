@@ -69,7 +69,7 @@ fn the_menu_of_a_non_opened_thread_message_archives_that_message(cx: &mut TestAp
 
     h.click(("btn-message-more", other as usize));
     assert!(h.read(|a| a.menu_open()));
-    h.click("btn-archive");
+    h.click_row("Archive");
     assert!(!h.read(|a| a.menu_open()));
     assert_eq!(h.state_of(other), Archived, "the message whose menu it was");
     assert_eq!(h.state_of(opened), Inbox, "the opened message is untouched");
@@ -94,7 +94,7 @@ fn filing_from_a_non_opened_message_menu_files_that_message(cx: &mut TestAppCont
     h.keys("shift-o");
 
     h.click(("btn-message-more", other as usize));
-    h.click("btn-file");
+    h.click_row("File…");
     assert!(h.read(|a| a.folder_picker_open()));
     h.keys("enter");
     assert!(matches!(h.state_of(other), Filed(_)), "the menu's message was filed");

@@ -51,39 +51,24 @@ impl MailApp {
                 )
             })
             .when(selected >= 2, |d| {
-                d.child(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .child(
-                            icon_button(
-                                "btn-selection-more",
-                                IconName::Ellipsis,
-                                "Actions for the selected messages",
-                                "",
-                                cx,
-                            )
-                            .when(self.menu_is(MenuKind::Selection), |b| b.bg(t.list_active))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.toggle_menu(MenuKind::Selection, window, cx)
-                            })),
-                        )
-                        .child(self.anchor_probe(MenuKind::Selection)),
-                )
+                d.child(div().flex_none().child(self.menu_trigger(
+                    MenuKind::Selection,
+                    icon_button(
+                        "btn-selection-more",
+                        IconName::Ellipsis,
+                        "Actions for the selected messages",
+                        "",
+                        cx,
+                    ),
+                    cx,
+                )))
             })
-            .child(
-                div()
-                    .relative()
-                    .flex_none()
-                    .child(
-                        button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
-                            .when(filter_active, |b| b.bg(t.list_active).text_color(t.primary))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.toggle_menu(MenuKind::Filter, window, cx)
-                            })),
-                    )
-                    .child(self.anchor_probe(MenuKind::Filter)),
-            );
+            .child(div().flex_none().child(self.menu_trigger(
+                MenuKind::Filter,
+                button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
+                    .when(filter_active, |b| b.bg(t.list_active).text_color(t.primary)),
+                cx,
+            )));
         let body = if count == 0 {
             let title = match &self.mode {
                 ListMode::State => format!("No mail in {}", self.location_label()),

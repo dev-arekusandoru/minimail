@@ -326,9 +326,7 @@ impl MailApp {
     }
 
     pub(super) fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu_open() {
-            self.close_menu(window, cx);
-        } else if self.modal_open() {
+        if self.modal_open() {
             self.close_modals(window, cx);
         } else if matches!(self.mode, ListMode::Search(_)) {
             self.mode = ListMode::State;

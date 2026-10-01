@@ -10,6 +10,9 @@ use gpui_kit::{
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
+
+#[path = "common/menu.rs"]
+mod menu;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{FolderId, Mailbox, MessageId, Tag, TriageState};
@@ -91,6 +94,13 @@ impl Harness<'_> {
         if !keys.is_empty() {
             self.cx.simulate_keystrokes(self.window, keys);
         }
+        self.settle(was_open);
+    }
+
+    /// Click the row of the open popup menu labelled `label`.
+    fn click_row(&mut self, label: &str) {
+        let was_open = self.read(|a| a.modal_open());
+        menu::click_row(self.cx, self.window, label);
         self.settle(was_open);
     }
 
@@ -513,13 +523,13 @@ fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext)
 
     h.keys("enter");
     h.click(("btn-message-more", 1usize));
-    h.click("btn-archive");
+    h.click_row("Archive");
     assert_eq!(h.state_of(1), TriageState::Archived);
 
     h.keys("u");
     h.keys("enter");
     h.click(("btn-message-more", 1usize));
-    h.click("btn-file");
+    h.click_row("File…");
     assert!(h.read(|a| a.folder_picker_open()));
     h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Filed(1));

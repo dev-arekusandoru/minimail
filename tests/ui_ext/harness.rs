@@ -9,6 +9,9 @@ use mail_classifier::app::MailApp;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
 
+#[path = "../common/menu.rs"]
+mod menu;
+
 pub const NOON: Timestamp = 1_790_683_200;
 pub const MIDNIGHT: Timestamp = NOON - 12 * HOUR;
 
@@ -95,6 +98,12 @@ impl Harness<'_> {
         let id = id.into();
         let was_open = self.read(|a| a.modal_open());
         self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).unwrap();
+        self.settle(was_open);
+    }
+    /// Click the row of the open popup menu labelled `label`.
+    pub fn click_row(&mut self, label: &str) {
+        let was_open = self.read(|a| a.modal_open());
+        menu::click_row(self.cx, self.window, label);
         self.settle(was_open);
     }
     /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the

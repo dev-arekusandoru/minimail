@@ -6,7 +6,6 @@ use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{ListMode, MailApp, MenuKind};
@@ -106,15 +105,11 @@ impl MailApp {
                     .on_click(run(TogglePaneLayout)),
             ))
             .child(no_drag(icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
-            .child(
-                no_drag(
-                    icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx)
-                        .when(self.menu_is(MenuKind::Global), |b| b.bg(t.list_active))
-                        .on_click(cx.listener(|this, _, window, cx| this.toggle_menu(MenuKind::Global, window, cx))),
-                )
-                .relative()
-                .child(self.anchor_probe(MenuKind::Global)),
-            );
+            .child(no_drag(self.menu_trigger(
+                MenuKind::Global,
+                icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx),
+                cx,
+            )));
         let right = div()
             .flex()
             .flex_1()
