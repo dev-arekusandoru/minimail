@@ -124,6 +124,9 @@ pub struct Account {
     pub name: String,
     pub email: String,
     pub color: String,
+    /// Lucide icon key (see `account_style::ICONS`); `None` in configs from before icons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default)]
     pub provider: ProviderKind,
 }

@@ -14,7 +14,6 @@ use crate::provider::{Body, MailProvider, ProviderError, Scope};
 use crate::sync::cache::Cache;
 use crate::sync::{self, SharedProvider};
 
-const PALETTE: [&str; 6] = ["#61afef", "#c678dd", "#98c379", "#e5c07b", "#e06c75", "#56b6c2"];
 /// How long the loop waits before running a round that has nothing due.
 const TICK: Duration = Duration::from_secs(2);
 /// How often the server is checked for changes.
@@ -422,11 +421,13 @@ impl MailApp {
             }
             self.reset_view_state();
         }
+        let style = crate::account_style::style_for_index(self.mailbox.accounts().len());
         let account = Account {
             id: format!("gmail:{email}"),
             name: email.clone(),
             email,
-            color: PALETTE[self.mailbox.accounts().len() % PALETTE.len()].to_owned(),
+            color: style.color.to_owned(),
+            icon: Some(style.icon.to_owned()),
             provider: ProviderKind::Gmail,
         };
         if let Err(e) = cache.upsert_account(&account) {

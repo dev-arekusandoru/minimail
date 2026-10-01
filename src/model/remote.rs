@@ -114,4 +114,14 @@ impl Mailbox {
     pub fn remove_account(&mut self, id: &str) {
         self.accounts.retain(|a| a.id != id);
     }
+
+    /// Set an account's icon key and `#rrggbb` color. Returns whether the account exists.
+    pub fn set_account_style(&mut self, id: &str, icon: &str, color: &str) -> bool {
+        let Some(account) = self.accounts.iter_mut().find(|a| a.id == id) else {
+            return false;
+        };
+        account.icon = Some(icon.to_owned());
+        account.color = color.to_owned();
+        true
+    }
 }

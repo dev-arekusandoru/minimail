@@ -345,6 +345,7 @@ fn account() -> Account {
         name: "a@x.io".to_owned(),
         email: "a@x.io".to_owned(),
         color: "#61afef".to_owned(),
+        icon: None,
         provider: ProviderKind::Gmail,
     }
 }
@@ -496,6 +497,42 @@ fn reading_locally_is_pushed_once_and_survives_a_check_before_the_push() {
     flush(&mut mb, &cache, &provider);
     assert_eq!(reads(&state), [("m1".to_owned(), true)]);
     assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty());
+}
+
+#[test]
+fn account_icon_and_color_round_trip_through_the_cache() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut a = account();
+    a.icon = Some("briefcase".to_owned());
+    cache.upsert_account(&a).unwrap();
+    assert_eq!(cache.load().unwrap().0, vec![a.clone()]);
+
+    a.icon = Some("rocket".to_owned());
+    a.color = "#98c379".to_owned();
+    cache.upsert_account(&a).unwrap();
+    assert_eq!(cache.load().unwrap().0, vec![a]);
+}
+
+#[test]
+fn a_cache_from_before_account_icons_loads_with_no_icon_and_keeps_its_color() {
+    let path = std::env::temp_dir().join(format!("mc-icon-migration-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE accounts(id TEXT PRIMARY KEY, provider TEXT NOT NULL, name TEXT NOT NULL,
+                email TEXT NOT NULL, color TEXT NOT NULL, cursor TEXT);
+             INSERT INTO accounts VALUES('a', '\"Gmail\"', 'A', 'a@x.io', '#e06c75', 'c1');",
+        )
+        .unwrap();
+    }
+    let cache = Cache::open(&path).unwrap();
+    let accounts = cache.load().unwrap().0;
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].icon, None);
+    assert_eq!(accounts[0].color, "#e06c75");
+    assert_eq!(cache.cursor("a").unwrap().as_deref(), Some("c1"), "the cursor survives");
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

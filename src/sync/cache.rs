@@ -119,13 +119,22 @@ impl Cache {
         if !has_read {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN remote_read INTEGER")?;
         }
+        // Likewise for accounts: caches from before account icons store none (NULL).
+        let has_icon: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name='icon'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_icon {
+            conn.execute_batch("ALTER TABLE accounts ADD COLUMN icon TEXT")?;
+        }
         Ok(Self { conn })
     }
 
     /// Everything needed to rebuild a [`crate::model::Mailbox`].
     pub fn load(&self) -> rusqlite::Result<(Vec<Account>, Vec<Folder>, Vec<Message>)> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, provider, name, email, color FROM accounts ORDER BY rowid",
+            "SELECT id, provider, name, email, color, icon FROM accounts ORDER BY rowid",
         )?;
         let accounts = stmt
             .query_map([], |row| {
@@ -135,6 +144,7 @@ impl Cache {
                     name: row.get(2)?,
                     email: row.get(3)?,
                     color: row.get(4)?,
+                    icon: row.get(5)?,
                     provider: serde_json::from_str(&provider).unwrap_or(ProviderKind::Mock),
                 })
             })?
@@ -170,17 +180,18 @@ impl Cache {
 
     pub fn upsert_account(&self, account: &Account) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO accounts(id, provider, name, email, color, cursor)
-             VALUES(?1, ?2, ?3, ?4, ?5, NULL)
+            "INSERT INTO accounts(id, provider, name, email, color, icon, cursor)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, NULL)
              ON CONFLICT(id) DO UPDATE SET
                 provider=excluded.provider, name=excluded.name,
-                email=excluded.email, color=excluded.color",
+                email=excluded.email, color=excluded.color, icon=excluded.icon",
             params![
                 account.id,
                 serde_json::to_string(&account.provider).unwrap_or_else(|_| "\"Mock\"".into()),
                 account.name,
                 account.email,
                 account.color,
+                account.icon,
             ],
         )?;
         Ok(())
