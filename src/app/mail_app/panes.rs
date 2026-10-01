@@ -26,7 +26,7 @@ pub const STEP: f32 = 40.;
 pub const DIVIDER_HIT: f32 = 7.;
 
 /// The sidebar's default width.
-pub const SIDEBAR_W: f32 = 148.;
+pub const SIDEBAR_W: f32 = 190.;
 /// Sidebar drag limits.
 pub const MIN_SIDEBAR_W: f32 = 120.;
 pub const MAX_SIDEBAR_W: f32 = 320.;
