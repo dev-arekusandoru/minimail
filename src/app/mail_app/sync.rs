@@ -73,11 +73,20 @@ impl MailApp {
             loop {
                 // Sleep until the next round is due, or until something wakes us.
                 let _ = futures::future::select(Box::pin(executor.timer(wait)), Box::pin(rx.next())).await;
-                let Ok(Some(jobs)) = this.update(cx, |this, _| this.sync_prepare()) else {
-                    break;
+                // The loop stops only when the view is gone. An idle app (`Ok(None)`)
+                // means there is nothing due yet, not that the loop should end: it
+                // must stay alive to wake on the next `wake_sync` (Fetch mail, sign-in)
+                // or scheduled check.
+                let step = match wake_step(this.update(cx, |this, _| this.sync_prepare())) {
+                    Wake::Run(jobs) => jobs,
+                    Wake::Idle => {
+                        wait = TICK;
+                        continue;
+                    }
+                    Wake::Stop => break,
                 };
                 let results = executor
-                    .spawn(async move { jobs.into_iter().map(run_job).collect::<Vec<_>>() })
+                    .spawn(async move { step.into_iter().map(run_job).collect::<Vec<_>>() })
                     .await;
                 let Ok(step) = this.update_in(cx, |this, window, cx| this.sync_finish(results, window, cx)) else {
                     break;
@@ -458,4 +467,40 @@ impl MailApp {
 /// What the sync loop should do after a round.
 struct Step {
     wait: Duration,
+}
+
+/// The sync loop's next move after asking the app for work.
+enum Wake<T> {
+    Run(T),
+    /// Nothing is due; stay alive and check again later.
+    Idle,
+    /// The app entity is gone; end the loop.
+    Stop,
+}
+
+/// Decide the loop's next move. An idle app (`Ok(None)`) must keep the loop
+/// alive: ending it here would stop every future sync until the process
+/// restarts, which is why a signed-in account showed no mail until reload.
+fn wake_step<T, E>(prepared: Result<Option<T>, E>) -> Wake<T> {
+    match prepared {
+        Ok(Some(work)) => Wake::Run(work),
+        Ok(None) => Wake::Idle,
+        Err(_) => Wake::Stop,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Wake, wake_step};
+
+    #[test]
+    fn an_idle_app_keeps_the_sync_loop_alive() {
+        assert!(matches!(wake_step::<u8, ()>(Ok(None)), Wake::Idle));
+    }
+
+    #[test]
+    fn planned_work_runs_and_a_gone_view_stops() {
+        assert!(matches!(wake_step::<u8, ()>(Ok(Some(7))), Wake::Run(7)));
+        assert!(matches!(wake_step::<u8, ()>(Err(())), Wake::Stop));
+    }
 }
