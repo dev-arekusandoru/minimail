@@ -78,7 +78,7 @@ pub struct Answer {
     pub confidence: f32,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum QuestionKey {
     Spam,
     NeedsReply,

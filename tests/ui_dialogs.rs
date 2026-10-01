@@ -177,7 +177,7 @@ impl Harness<'_> {
     }
 
     fn blocked(&mut self) -> Vec<String> {
-        self.read(|a| a.mailbox.blocked())
+        self.read(|a| a.mailbox.blocked().into_iter().map(|(email, _)| email).collect())
     }
 
     fn has_tag(&mut self, id: MessageId, tag: Tag) -> bool {

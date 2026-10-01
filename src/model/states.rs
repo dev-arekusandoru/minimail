@@ -48,7 +48,7 @@ impl Mailbox {
             .collect()
     }
 
-    pub fn mark_spam(&mut self, ids: &[MessageId], block: bool) -> usize {
+    pub fn mark_spam(&mut self, ids: &[MessageId], block: bool, now: Timestamp) -> usize {
         let mut changes = Vec::new();
         let mut senders = HashSet::new();
         for id in ids {
@@ -71,8 +71,9 @@ impl Mailbox {
             }
         }
         for email in senders {
-            if self.blocked.insert(email.clone()) {
-                changes.push(Change::Blocked(email, false));
+            if let std::collections::hash_map::Entry::Vacant(v) = self.blocked.entry(email.clone()) {
+                v.insert(now);
+                changes.push(Change::Blocked(email, None));
             }
         }
         let changed = changes

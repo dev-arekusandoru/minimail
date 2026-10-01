@@ -328,7 +328,7 @@ impl MailApp {
             )
             .tab_avatars(self.tab_avatars)
             .mailbox_state(
-                self.mailbox.blocked(),
+                self.mailbox.blocked().into_iter().map(|(email, _)| email).collect(),
                 self.mailbox.unsubscribed().to_vec(),
                 self.mailbox.follow_up_timeout(),
             )
@@ -706,6 +706,7 @@ impl MailApp {
                 Pick::Create(name) => mb.create_folder(account, name, None),
             }
         }
+        let now = self.now();
         let n = match action {
             FileAction::Ids(ids) => match &pick {
                 Pick::File(id) => self.mailbox.set_state(ids, TriageState::Filed(*id)),
@@ -726,7 +727,7 @@ impl MailApp {
                 if *unsubscribe {
                     mb.unsubscribe(email, Some(state))
                 } else {
-                    mb.block_sender(email, Some(state))
+                    mb.block_sender(email, Some(state), now)
                 }
             }),
         };
@@ -859,7 +860,7 @@ impl MailApp {
             self.mailbox
                 .blocked()
                 .iter()
-                .any(|b| b.eq_ignore_ascii_case(email))
+                .any(|(b, _)| b.eq_ignore_ascii_case(email))
         };
         if already {
             self.show_toast(format!("Already {verb} {email}"), window, cx);
@@ -868,7 +869,7 @@ impl MailApp {
         let n = if unsubscribe {
             self.mailbox.unsubscribe(email, state)
         } else {
-            self.mailbox.block_sender(email, state)
+            self.mailbox.block_sender(email, state, self.now())
         };
         let tail = match state {
             Some(_) => format!(" · moved {n} · u to undo"),
@@ -915,7 +916,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let n = self.mailbox.mark_spam(ids, block);
+        let n = self.mailbox.mark_spam(ids, block, self.now());
         self.triage.clear_selection();
         let text = if block {
             format!("Marked {n} as spam and blocked the sender · u to undo")

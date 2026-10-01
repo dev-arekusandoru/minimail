@@ -207,7 +207,8 @@ enum Change {
     /// Sender allowed in the Screener: the email, whether it was known before,
     /// and whether the address book created a contact for it.
     Known(String, bool, bool),
-    Blocked(String, bool),
+    /// Sender's block before the action: when it was blocked, or `None` if it was not.
+    Blocked(String, Option<Timestamp>),
     /// Sender was appended to `unsubscribed`; undo removes it.
     Unsubscribed(String),
     /// Whole pending-suggestion list before the action.
@@ -265,7 +266,8 @@ pub struct Mailbox {
     meta: HashMap<MessageId, Meta>,
     known: HashSet<String>,
     contacts: Option<Rc<ContactStore>>,
-    blocked: HashSet<String>,
+    /// Blocked sender addresses (lowercase) and when each was blocked.
+    blocked: HashMap<String, Timestamp>,
     unsubscribed: Vec<String>,
     muted: HashSet<u32>,
     pending: Vec<Suggestion>,
@@ -356,7 +358,7 @@ impl Mailbox {
             next_seq: 0,
             meta,
             known,
-            blocked: HashSet::new(),
+            blocked: HashMap::new(),
             contacts: None,
             unsubscribed: Vec::new(),
             muted: HashSet::new(),

@@ -151,6 +151,41 @@ pub fn names(cx: &App) -> Vec<SharedString> {
     names
 }
 
+/// Which appearance the app follows: a fixed one, or the operating system's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+/// Names of the registered themes of one appearance, in [`names`] order.
+pub fn names_for(cx: &App, light: bool) -> Vec<SharedString> {
+    let registry = ThemeRegistry::global(cx);
+    names(cx)
+        .into_iter()
+        .filter(|n| registry.themes().get(n).is_some_and(|t| t.mode.is_dark() != light))
+        .collect()
+}
+
+/// The theme name to show: the light or dark pick, decided by `mode` (or, for
+/// [`ThemeMode::System`], by `system_is_dark`).
+pub fn active_theme_name<'a>(
+    mode: ThemeMode,
+    light_theme: &'a str,
+    dark_theme: &'a str,
+    system_is_dark: bool,
+) -> &'a str {
+    let dark = match mode {
+        ThemeMode::Light => false,
+        ThemeMode::Dark => true,
+        ThemeMode::System => system_is_dark,
+    };
+    if dark { dark_theme } else { light_theme }
+}
+
 /// Activate the named theme. Returns false, changing nothing, when no such theme is registered.
 pub fn apply(cx: &mut App, name: &str) -> bool {
     let Some(config) = ThemeRegistry::global(cx).themes().get(name).cloned() else {
@@ -233,3 +268,18 @@ pub fn urgent(c: &ThemeColor) -> Hsla {
 pub fn kind(c: &ThemeColor) -> Hsla {
     c.cyan
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_modes_ignore_the_system_and_system_follows_it() {
+        let pick = |mode, sys| active_theme_name(mode, "Day", "Night", sys);
+        assert_eq!(pick(ThemeMode::Light, true), "Day");
+        assert_eq!(pick(ThemeMode::Dark, false), "Night");
+        assert_eq!(pick(ThemeMode::System, false), "Day");
+        assert_eq!(pick(ThemeMode::System, true), "Night");
+    }
+}
+

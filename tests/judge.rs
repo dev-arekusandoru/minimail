@@ -1,6 +1,6 @@
 use mail_classifier::judge::{
-    Answer, AnswerValue, Judge, JudgeError, JudgePolicy, Kind, Mode, Question, QuestionKey, Routed,
-    StubJudge, classify, expects_reply, message_state, triage_questions,
+    Answer, AnswerValue, Confidence, Judge, JudgeError, JudgePolicy, Kind, Mode, Question,
+    QuestionKey, Routed, StubJudge, classify, expects_reply, message_state, triage_questions,
 };
 use mail_classifier::model::{Message, TriageState};
 use mail_classifier::summary::{StubSummarizer, Summarizer, SummaryError};
@@ -161,13 +161,25 @@ fn spam_route(spam_yes: f32, policy: &JudgePolicy) -> Vec<Routed> {
 }
 
 #[test]
-fn threshold_is_inclusive() {
+fn each_confidence_preset_gates_auto_against_review_inclusively() {
     let mut p = JudgePolicy::default();
-    p.set_mode(QuestionKey::Spam, Mode::Auto { threshold: 0.75 });
-    // Spam is the first question.
-    assert!(matches!(spam_route(0.75, &p)[0], Routed::Auto(_)));
-    assert!(matches!(spam_route(0.7499, &p)[0], Routed::Review(_)));
-    assert!(matches!(spam_route(0.9, &p)[0], Routed::Auto(_)));
+    for c in Confidence::ALL {
+        p.set_mode(QuestionKey::Spam, Mode::Auto(c));
+        // Spam is the first question.
+        assert!(matches!(spam_route(c.threshold(), &p)[0], Routed::Auto(_)), "{c:?} at threshold");
+        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Review(_)), "{c:?} below");
+    }
+    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::Low));
+    assert!(matches!(spam_route(0.65, &p)[0], Routed::Auto(_)));
+    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::High));
+    assert!(matches!(spam_route(0.65, &p)[0], Routed::Review(_)));
+}
+
+#[test]
+fn off_suggests_nothing_even_for_a_certain_answer() {
+    let mut p = JudgePolicy::default();
+    p.set_mode(QuestionKey::Spam, Mode::Off);
+    assert!(matches!(spam_route(1.0, &p)[0], Routed::Drop));
 }
 
 #[test]
@@ -253,28 +265,23 @@ fn spam_kind_urgency_examples() {
 }
 
 #[test]
-fn policy_defaults_setters_and_toggle() {
+fn nearest_preset_for_a_threshold() {
+    assert_eq!(Confidence::from_threshold(0.95), Confidence::High);
+    assert_eq!(Confidence::from_threshold(0.8), Confidence::Medium);
+    assert_eq!(Confidence::from_threshold(0.7), Confidence::Medium);
+    assert_eq!(Confidence::from_threshold(0.5), Confidence::Low);
+    for c in Confidence::ALL {
+        assert_eq!(Confidence::from_threshold(c.threshold()), c);
+    }
+}
+
+#[test]
+fn a_policy_survives_a_json_round_trip() {
     let mut p = JudgePolicy::default();
-    assert_eq!(p.mode(QuestionKey::Spam), Mode::Auto { threshold: 0.9 });
-    assert_eq!(p.mode(QuestionKey::ExpectsReply), Mode::Review);
-    assert_eq!(
-        p.mode(QuestionKey::NeedsReply),
-        Mode::Auto { threshold: 0.8 }
-    );
-    assert_eq!(p.mode(QuestionKey::Urgency), Mode::Auto { threshold: 0.7 });
-    assert_eq!(p.mode(QuestionKey::Kind), Mode::Auto { threshold: 0.6 });
-
-    p.set_threshold(QuestionKey::Kind, 1.7);
-    assert_eq!(p.mode(QuestionKey::Kind), Mode::Auto { threshold: 1.0 });
-    p.set_threshold(QuestionKey::Kind, 0.55);
-    p.toggle_mode(QuestionKey::Kind);
-    assert_eq!(p.mode(QuestionKey::Kind), Mode::Review);
-    p.toggle_mode(QuestionKey::Kind);
-    assert_eq!(p.mode(QuestionKey::Kind), Mode::Auto { threshold: 0.55 });
-
-    p.nudge_threshold(QuestionKey::Kind, -0.05);
-    p.nudge_threshold(QuestionKey::Kind, -0.05);
-    assert_eq!(p.threshold(QuestionKey::Kind), 0.45);
+    p.set_mode(QuestionKey::Spam, Mode::Off);
+    p.set_mode(QuestionKey::Kind, Mode::Auto(Confidence::High));
+    let back: JudgePolicy = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+    assert_eq!(back, p);
 }
 
 fn thread(bodies: &[&str]) -> Vec<Message> {

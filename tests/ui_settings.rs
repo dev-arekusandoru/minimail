@@ -4,7 +4,7 @@ use gpui_kit::{AppContext, TestAppContext};
 use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::clock::DAY;
-use mail_classifier::judge::{Mode, QuestionKey};
+use mail_classifier::judge::{Confidence, Mode, QuestionKey};
 use mail_classifier::model::{Tag, TriageState};
 
 #[path = "ui_ext/harness.rs"]
@@ -129,29 +129,27 @@ fn the_group_switch_and_preview_dropdown_reach_the_inbox(cx: &mut TestAppContext
 }
 
 #[gpui_kit::gpui::test]
-fn the_threshold_steps_in_auto_and_is_locked_in_review(cx: &mut TestAppContext) {
+fn the_handling_and_confidence_dropdowns_set_the_policy(cx: &mut TestAppContext) {
     let mut h = app(cx);
-    let spam = |h: &mut Harness<'_>| h.read(|a| a.policy.threshold(QuestionKey::Spam));
-    let before = spam(&mut h);
+    let spam = |h: &mut Harness<'_>| h.read(|a| a.policy.mode(QuestionKey::Spam));
     open_page(&mut h, CLASSIFIER);
-    click_in(&mut h, 0, 1, "decrement");
-    assert!((spam(&mut h) - (before - 0.05)).abs() < 0.001, "step is 5 points");
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High));
+    pick_option(&mut h, 0, 1, 2);
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::Low));
 
     pick_option(&mut h, 0, 0, 1);
-    assert!(matches!(h.read(|a| a.policy.mode(QuestionKey::Spam)), Mode::Review));
-    let locked = spam(&mut h);
-    click_in(&mut h, 0, 1, "decrement");
-    assert_eq!(spam(&mut h), locked, "the threshold input is disabled in Review");
-
+    assert_eq!(spam(&mut h), Mode::Review);
+    pick_option(&mut h, 0, 0, 2);
+    assert_eq!(spam(&mut h), Mode::Off);
     pick_option(&mut h, 0, 0, 0);
-    assert!(matches!(h.read(|a| a.policy.mode(QuestionKey::Spam)), Mode::Auto { .. }));
+    assert!(matches!(spam(&mut h), Mode::Auto(_)));
 }
 
 #[gpui_kit::gpui::test]
 fn unblocking_a_sender_from_settings_is_one_undoable_step(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "spam@example.com", "Deal", 1, "Inbox")]));
     h.app.update(h.cx, |a, _| {
-        a.mailbox.block_sender("spam@example.com", None);
+        a.mailbox.block_sender("spam@example.com", None, 0);
     });
     open_page(&mut h, BLOCKED);
     h.click(("blocked-unblock", 0usize));
@@ -160,7 +158,7 @@ fn unblocking_a_sender_from_settings_is_one_undoable_step(cx: &mut TestAppContex
     h.keys("escape");
     h.keys("u");
     assert!(
-        h.read(|a| a.mailbox.blocked().contains(&"spam@example.com".to_owned())),
+        h.read(|a| a.mailbox.blocked() == vec![("spam@example.com".to_owned(), 0)]),
         "undo restores the block"
     );
 }

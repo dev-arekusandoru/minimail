@@ -5,7 +5,7 @@ impl Mailbox {
         self.muted.contains(&m.thread_id)
             || self
                 .blocked
-                .iter()
+                .keys()
                 .any(|email| email.eq_ignore_ascii_case(&m.from_email))
             || self
                 .unsubscribed
@@ -75,12 +75,19 @@ impl Mailbox {
         self.push_undo(vec![Change::Known(e, false, created)]);
         true
     }
-    pub fn block_sender(&mut self, email: &str, move_to: Option<TriageState>) -> usize {
+    /// Block `email` as of `now`. Does nothing (returns 0) if it is already blocked, which keeps
+    /// the original time.
+    pub fn block_sender(
+        &mut self,
+        email: &str,
+        move_to: Option<TriageState>,
+        now: Timestamp,
+    ) -> usize {
         let e = lower(email);
-        if self.blocked.contains(&e) {
+        if self.blocked.contains_key(&e) {
             return 0;
         }
-        self.blocked.insert(e.clone());
+        self.blocked.insert(e.clone(), now);
         let ids: Vec<_> = self
             .messages
             .iter()
@@ -89,7 +96,7 @@ impl Mailbox {
             })
             .map(|m| m.id)
             .collect();
-        let mut changes = vec![Change::Blocked(e, false)];
+        let mut changes = vec![Change::Blocked(e, None)];
         for id in &ids {
             if let Some(s) = move_to {
                 changes.push(self.snapshot(*id));
@@ -107,16 +114,18 @@ impl Mailbox {
         self.push_undo(changes);
         ids.len()
     }
+    /// Unblock `email`; one undo step that restores the original block time.
     pub fn unblock_sender(&mut self, email: &str) -> bool {
         let e = lower(email);
-        if !self.blocked.remove(&e) {
+        let Some(at) = self.blocked.remove(&e) else {
             return false;
-        }
-        self.push_undo(vec![Change::Blocked(e, true)]);
+        };
+        self.push_undo(vec![Change::Blocked(e, Some(at))]);
         true
     }
-    pub fn blocked(&self) -> Vec<String> {
-        let mut v: Vec<_> = self.blocked.iter().cloned().collect();
+    /// Blocked senders with the time each was blocked, sorted by address.
+    pub fn blocked(&self) -> Vec<(String, Timestamp)> {
+        let mut v: Vec<_> = self.blocked.iter().map(|(e, at)| (e.clone(), *at)).collect();
         v.sort();
         v
     }
