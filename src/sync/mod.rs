@@ -7,6 +7,8 @@
 
 pub mod cache;
 
+use std::collections::HashSet;
+
 use crate::model::{
     Folder, FolderId, Mailbox, Message, MessageId, TriageState, format_rfc3339,
 };
@@ -18,6 +20,8 @@ use cache::Cache;
 
 /// Messages a pull may import on the very first sync.
 const INITIAL_LIMIT: usize = 500;
+/// Messages fetched per pull during the initial import (5 quota units each on Gmail).
+const IMPORT_CHUNK: usize = 50;
 
 /// The remote counterpart of a local state, or `None` when the target folder
 /// has no remote counterpart yet.
@@ -166,8 +170,9 @@ pub fn run_moves(
     results
 }
 
+/// Errors that make the rest of a batch pointless.
 fn is_fatal(e: &ProviderError) -> bool {
-    matches!(e, ProviderError::Auth(_) | ProviderError::Network(_))
+    matches!(e, ProviderError::Auth(_) | ProviderError::Network(_) | ProviderError::RateLimited)
 }
 
 /// Record the moves the provider confirmed. Returns the first error text.
@@ -211,31 +216,44 @@ pub struct Pull {
     pub folders: Vec<RemoteFolder>,
     pub fetched: Vec<RemoteMessage>,
     pub removed: Vec<RemoteId>,
-    pub cursor: String,
+    /// The change cursor to store, once the account is caught up. `None` while
+    /// an initial import still has messages left to fetch.
+    pub cursor: Option<String>,
 }
 
-/// Fetch what changed since `cursor`, falling back to a full recent listing
-/// when the provider no longer knows that cursor.
+impl Pull {
+    /// More of the initial import remains; pull again soon.
+    pub fn importing(&self) -> bool {
+        self.cursor.is_none()
+    }
+}
+
+/// Fetch what changed since `cursor`, or, without one (or when the provider no
+/// longer knows it), the next chunk of the initial import: the newest
+/// `INITIAL_LIMIT` messages minus those already in `known`, `IMPORT_CHUNK` at a
+/// time so each pull stays within provider rate limits and lands progressively.
 pub fn background_pull(
     p: &mut dyn MailProvider,
     cursor: Option<String>,
+    known: &HashSet<RemoteId>,
 ) -> Result<Pull, ProviderError> {
     let folders = p.folders()?;
-    let (fetched, removed, cursor) = match cursor.as_deref() {
+    let changes = match cursor.as_deref() {
         Some(cursor) => match p.changes(cursor) {
-            Ok(changes) => {
-                let messages = p.fetch(&changes.changed)?;
-                (messages, changes.removed, changes.cursor)
-            }
-            Err(ProviderError::CursorExpired) => {
-                let (ids, cursor) = p.recent(INITIAL_LIMIT)?;
-                (p.fetch(&ids)?, Vec::new(), cursor)
-            }
+            Ok(changes) => Some(changes),
+            Err(ProviderError::CursorExpired) => None,
             Err(e) => return Err(e),
         },
+        None => None,
+    };
+    let (fetched, removed, cursor) = match changes {
+        Some(changes) => (p.fetch(&changes.changed)?, changes.removed, Some(changes.cursor)),
         None => {
             let (ids, cursor) = p.recent(INITIAL_LIMIT)?;
-            (p.fetch(&ids)?, Vec::new(), cursor)
+            let missing: Vec<RemoteId> = ids.into_iter().filter(|id| !known.contains(id)).collect();
+            let chunk = &missing[..missing.len().min(IMPORT_CHUNK)];
+            let done = chunk.len() == missing.len();
+            (p.fetch(chunk)?, Vec::new(), done.then_some(cursor))
         }
     };
     Ok(Pull {
@@ -359,7 +377,10 @@ pub fn apply_fetched(
         cache.delete_message(id).map_err(err)?;
     }
 
-    cache.set_cursor(account, &pull.cursor).map_err(err)
+    match &pull.cursor {
+        Some(cursor) => cache.set_cursor(account, cursor).map_err(err),
+        None => Ok(()),
+    }
 }
 
 /// The local folder for a remote path, creating it (and any missing ancestor)

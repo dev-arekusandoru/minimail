@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use mail_classifier::provider::RemoteState;
-use mail_classifier::provider::gmail::convert::{label_ops, list_ids, message, state_from_labels};
+use mail_classifier::provider::gmail::convert::{
+    is_rate_limited, label_ops, list_ids, message, state_from_labels,
+};
 use serde_json::{Value, json};
 
 fn strings(list: &[&str]) -> Vec<String> {
@@ -20,6 +22,22 @@ fn list_ids_reads_message_objects() {
     });
     assert_eq!(list_ids(&page), strings(&["18a1", "18a2"]));
     assert!(list_ids(&json!({"resultSizeEstimate": 0})).is_empty());
+}
+
+#[test]
+fn quota_and_rate_errors_are_rate_limits_but_permission_errors_are_not() {
+    // The body Gmail returned when the import hammered the per-user quota.
+    let quota = json!({"error": {
+        "code": 403,
+        "message": "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' of service 'gmail.googleapis.com'.",
+        "status": "PERMISSION_DENIED"
+    }});
+    assert!(is_rate_limited(403, &quota));
+    assert!(is_rate_limited(429, &Value::Null));
+    let reason = json!({"error": {"errors": [{"reason": "userRateLimitExceeded"}]}});
+    assert!(is_rate_limited(403, &reason));
+    let denied = json!({"error": {"message": "Request had insufficient authentication scopes.", "status": "PERMISSION_DENIED"}});
+    assert!(!is_rate_limited(403, &denied));
 }
 
 #[test]

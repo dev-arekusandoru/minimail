@@ -167,6 +167,10 @@ pub struct MailApp {
     demo: bool,
     /// Run a pull on the next sync iteration.
     pull_now: bool,
+    /// Message count when a Fetch mail (or first import) was requested; toast the difference when it completes.
+    fetch_baseline: Option<usize>,
+    /// Sync iterations left to skip after the provider rate-limited us.
+    sync_backoff: u32,
 }
 
 impl MailApp {
@@ -245,6 +249,8 @@ impl MailApp {
             sync_error: None,
             demo: true,
             pull_now: false,
+            fetch_baseline: None,
+            sync_backoff: 0,
         };
         app.classify_visible();
         app

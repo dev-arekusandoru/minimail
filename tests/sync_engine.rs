@@ -1,5 +1,6 @@
 //! Sync engine against an in-memory cache and an in-file provider.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
@@ -131,6 +132,7 @@ fn clone_error(e: &ProviderError) -> ProviderError {
         ProviderError::Auth(m) => ProviderError::Auth(m.clone()),
         ProviderError::Network(m) => ProviderError::Network(m.clone()),
         ProviderError::CursorExpired => ProviderError::CursorExpired,
+        ProviderError::RateLimited => ProviderError::RateLimited,
         ProviderError::Api { status, message } => ProviderError::Api {
             status: *status,
             message: message.clone(),
@@ -207,9 +209,14 @@ fn inbox(mb: &Mailbox) -> Vec<MessageId> {
     })
 }
 
-/// Pull every remote message into the mailbox, the way the app does.
+/// Pull from the provider into the mailbox, the way the app does: without a
+/// cursor, cached messages are skipped (the initial import resumes).
 fn pull_all(mb: &mut Mailbox, cache: &Cache, p: &mut FakeProvider, cursor: Option<String>) {
-    let pull = background_pull(p, cursor).expect("pull");
+    let known = match cursor {
+        None => cache.remote_ids(ACCOUNT).unwrap(),
+        Some(_) => HashSet::new(),
+    };
+    let pull = background_pull(p, cursor, &known).expect("pull");
     apply_fetched(mb, cache, ACCOUNT, &pull).expect("apply");
 }
 
@@ -465,7 +472,7 @@ fn a_removed_id_disappears_locally() {
         folders: p.folders().unwrap(),
         fetched: Vec::new(),
         removed: vec![gone.clone()],
-        cursor: "2".to_owned(),
+        cursor: Some("2".to_owned()),
     };
     apply_fetched(&mut mb, &cache, ACCOUNT, &pull).expect("apply");
 
@@ -609,6 +616,29 @@ fn empty_remote_folders_are_imported_and_survive_a_restart() {
 // ------------------------------------------------------------------- cursors
 
 #[test]
+fn a_large_initial_import_lands_in_chunks_and_resumes() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut mb = mailbox(Vec::new());
+    let remotes = (0..120)
+        .map(|i| remote(&format!("m{i}"), &format!("t{i}"), 1_790_000_000 + i))
+        .collect();
+    let mut p = FakeProvider::new(remotes);
+    cache.upsert_account(&account()).unwrap();
+
+    let mut sizes = Vec::new();
+    while cache.cursor(ACCOUNT).unwrap().is_none() {
+        let known = cache.remote_ids(ACCOUNT).unwrap();
+        let pull = background_pull(&mut p, None, &known).expect("pull");
+        sizes.push(pull.fetched.len());
+        apply_fetched(&mut mb, &cache, ACCOUNT, &pull).expect("apply");
+        assert!(sizes.len() <= 3, "import never finished: {sizes:?}");
+    }
+    assert_eq!(sizes, [50, 50, 20], "each pull fetches only the next uncached chunk");
+    assert_eq!(inbox(&mb).len(), 120);
+    assert_eq!(cache.cursor(ACCOUNT).unwrap().as_deref(), Some("1"));
+}
+
+#[test]
 fn an_expired_cursor_falls_back_to_a_recent_listing() {
     let cache = Cache::open_in_memory().unwrap();
     let mut mb = mailbox(Vec::new());
@@ -616,7 +646,7 @@ fn an_expired_cursor_falls_back_to_a_recent_listing() {
     cache.upsert_account(&account()).unwrap();
     p.expire_cursor = true;
 
-    let pull = background_pull(&mut p, Some("stale".to_owned())).expect("pull");
+    let pull = background_pull(&mut p, Some("stale".to_owned()), &HashSet::new()).expect("pull");
     assert_eq!(pull.fetched.len(), 1);
     assert!(pull.removed.is_empty());
     apply_fetched(&mut mb, &cache, ACCOUNT, &pull).expect("apply");

@@ -103,6 +103,9 @@ impl GmailProvider {
         if status == 404 && url.contains("/history") {
             return Err(ProviderError::CursorExpired);
         }
+        if convert::is_rate_limited(status, &json) {
+            return Err(ProviderError::RateLimited);
+        }
         let message = json
             .get("error")
             .and_then(|e| e.get("message"))

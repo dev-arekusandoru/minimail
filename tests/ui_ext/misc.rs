@@ -18,6 +18,28 @@ pub fn spam_box() -> Mailbox {
     ])
 }
 
+// ---------------------------------------------------------------- Accounts
+
+#[gpui_kit::gpui::test]
+pub fn sidebar_plus_opens_settings_on_the_accounts_page(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let on_accounts_page = |h: &mut Harness<'_>| {
+        h.cx.update_window(h.window, |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find("account-add-gmail").is_some()
+        })
+        .unwrap()
+    };
+    assert!(!on_accounts_page(&mut h));
+    h.click("sidebar-add-account");
+    assert!(h.read(|a| a.modal_open()), "settings opened");
+    assert!(on_accounts_page(&mut h), "opened on Accounts, not General");
+    // Plain cmd-, still opens on General.
+    h.keys("escape");
+    h.keys("cmd-,");
+    assert!(!on_accounts_page(&mut h));
+}
+
 /// Undo startup auto-labels until message 1 is a plain Inbox message again.
 pub fn reset_spam(h: &mut Harness<'_>) {
     for _ in 0..20 {

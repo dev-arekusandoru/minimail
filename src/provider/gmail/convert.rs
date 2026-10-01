@@ -49,6 +49,24 @@ pub fn list_ids(json: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Gmail signals throttling as 429, or as 403 with a rate/quota reason
+/// (e.g. "Quota exceeded for quota metric … per minute per user").
+pub fn is_rate_limited(status: u16, error_body: &Value) -> bool {
+    if status == 429 {
+        return true;
+    }
+    let error = &error_body["error"];
+    status == 403
+        && (error["status"] == "RESOURCE_EXHAUSTED"
+            || error["message"].as_str().is_some_and(|m| m.starts_with("Quota exceeded"))
+            || error["errors"].as_array().into_iter().flatten().any(|e| {
+                matches!(
+                    e["reason"].as_str(),
+                    Some("rateLimitExceeded" | "userRateLimitExceeded" | "quotaExceeded")
+                )
+            }))
+}
+
 /// Maps a message's label list to a triage state.
 pub fn state_from_labels(labels: &[String], user_folders: &HashSet<String>) -> RemoteState {
     if labels.iter().any(|l| l == LABEL_TRASH) {

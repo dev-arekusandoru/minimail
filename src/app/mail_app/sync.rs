@@ -1,13 +1,14 @@
 //! Remote mail sync: a background loop that pushes pending triage moves and
 //! pulls changes, plus the "Add Gmail account" sign-in flow.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::model::{Account, ProviderKind};
 use crate::provider::gmail::{ClientConfig, GmailProvider, auth};
 use crate::provider::secrets::{KeyringStore, SecretStore};
-use crate::provider::{MailProvider, ProviderError};
+use crate::provider::{MailProvider, ProviderError, RemoteId};
 use crate::sync::cache::Cache;
 use crate::sync::{self, Move, Pull};
 
@@ -17,14 +18,22 @@ const PALETTE: [&str; 6] = ["#61afef", "#c678dd", "#98c379", "#e5c07b", "#e06c75
 /// Loop period; a pull happens every `PULL_EVERY` iterations (60 s).
 const TICK: Duration = Duration::from_secs(2);
 const PULL_EVERY: u32 = 30;
+/// Loop iterations to pause after a rate-limit response (~1 minute).
+const RATE_LIMIT_BACKOFF: u32 = 30;
 
 /// Work for one account, run on a background thread.
 struct AccountJob {
     account: AccountId,
     provider: SharedProvider,
     moves: Vec<Move>,
-    /// `Some(cursor)` when a pull is due (`None` inside = initial import).
-    pull: Option<Option<String>>,
+    pull: Option<PullJob>,
+}
+
+struct PullJob {
+    /// `None` = initial import (or its continuation).
+    cursor: Option<String>,
+    /// Remote ids already cached, skipped by the import.
+    known: HashSet<RemoteId>,
 }
 
 struct AccountOutcome {
@@ -36,7 +45,12 @@ struct AccountOutcome {
 fn run_job(job: AccountJob) -> AccountOutcome {
     let mut provider = job.provider.lock().unwrap_or_else(|e| e.into_inner());
     let results = sync::run_moves(provider.as_mut(), job.moves);
-    let pull = job.pull.map(|cursor| sync::background_pull(provider.as_mut(), cursor));
+    // Throttled while pushing: don't spend more quota on a pull.
+    let throttled = results.iter().any(|(_, r)| matches!(r, Err(ProviderError::RateLimited)));
+    let pull = job
+        .pull
+        .filter(|_| !throttled)
+        .map(|pull| sync::background_pull(provider.as_mut(), pull.cursor, &pull.known));
     AccountOutcome { account: job.account, results, pull }
 }
 
@@ -96,12 +110,25 @@ impl MailApp {
             return Vec::new();
         };
         sync::persist_local(&self.mailbox, &cache);
+        if self.sync_backoff > 0 {
+            // Rate limited: send nothing until the quota window has passed.
+            self.sync_backoff -= 1;
+            return Vec::new();
+        }
         let force = std::mem::take(&mut self.pull_now);
+        // A forced pull (Fetch mail, or the first import after sign-in) reports what it brought in.
+        if force && !self.providers.is_empty() && self.fetch_baseline.is_none() {
+            self.fetch_baseline = Some(self.mailbox.messages().len());
+        }
         let mut jobs = Vec::new();
         for (account, provider) in &self.providers {
             let moves = sync::pending_moves(&self.mailbox, &cache, account);
-            let pull = (pull_due || force)
-                .then(|| cache.cursor(account).ok().flatten());
+            let cursor = cache.cursor(account).ok().flatten();
+            // An unfinished initial import continues every tick, one chunk at a time.
+            let pull = (pull_due || force || cursor.is_none()).then(|| PullJob {
+                known: if cursor.is_none() { cache.remote_ids(account).unwrap_or_default() } else { HashSet::new() },
+                cursor,
+            });
             if moves.is_empty() && pull.is_none() {
                 continue;
             }
@@ -116,24 +143,46 @@ impl MailApp {
             return;
         };
         let mut error: Option<String> = None;
+        let mut importing = false;
+        let mut throttled = false;
         for outcome in outcomes {
             // The account was removed while this batch was in flight.
             if !self.providers.contains_key(&outcome.account) {
                 continue;
             }
+            throttled |= outcome.results.iter().any(|(_, r)| matches!(r, Err(ProviderError::RateLimited)));
             if let Some(e) = sync::apply_moves(&self.mailbox, &cache, &outcome.results) {
                 error.get_or_insert(e);
             }
             match outcome.pull {
                 Some(Ok(pull)) => {
+                    importing |= pull.importing();
                     if let Err(e) = sync::apply_fetched(&mut self.mailbox, &cache, &outcome.account, &pull) {
                         error.get_or_insert(e);
                     }
                 }
                 Some(Err(e)) => {
+                    throttled |= matches!(e, ProviderError::RateLimited);
                     error.get_or_insert(e.to_string());
                 }
                 None => {}
+            }
+        }
+        if throttled {
+            self.sync_backoff = RATE_LIMIT_BACKOFF;
+        }
+        // Report a requested fetch once it has finished (an initial import spans many pulls).
+        if let Some(baseline) = self.fetch_baseline
+            && (error.is_some() || !importing)
+        {
+            self.fetch_baseline = None;
+            if error.is_none() {
+                let text = match self.mailbox.messages().len().saturating_sub(baseline) {
+                    0 => "No new mail".to_owned(),
+                    1 => "1 new message".to_owned(),
+                    n => format!("{n} new messages"),
+                };
+                self.show_toast(text, window, cx);
             }
         }
         match error {
@@ -146,6 +195,20 @@ impl MailApp {
         }
         self.classify_visible();
         cx.notify();
+    }
+
+    pub(super) fn has_remote_accounts(&self) -> bool {
+        !self.providers.is_empty()
+    }
+
+    /// Pull every linked account on the next sync tick (within ~2 s), then report the result.
+    pub(super) fn fetch_mail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.providers.is_empty() {
+            self.show_toast("No Gmail account linked — add one with the sidebar +".into(), window, cx);
+            return;
+        }
+        self.pull_now = true;
+        self.show_toast("Fetching mail…".into(), window, cx);
     }
 
     /// Drop everything shown for demo data and reset view state.

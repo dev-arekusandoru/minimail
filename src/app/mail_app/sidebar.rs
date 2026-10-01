@@ -154,8 +154,19 @@ impl MailApp {
             .justify_between()
             .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Mailboxes"))
             .child(
-                icon_button("sidebar-add-account", IconName::Plus, "Add or manage accounts", "", cx)
-                    .on_click(run(ManageAccounts)),
+                div()
+                    .flex()
+                    .gap_1()
+                    .when(self.has_remote_accounts(), |row| {
+                        row.child(
+                            icon_button("sidebar-fetch-mail", IconName::RefreshCw, "Fetch mail", "cmd-shift-n", cx)
+                                .on_click(run(FetchMail)),
+                        )
+                    })
+                    .child(
+                        icon_button("sidebar-add-account", IconName::Plus, "Add or manage accounts", "", cx)
+                            .on_click(run(ManageAccounts)),
+                    ),
             );
         Sidebar::new("sidebar")
             .w_full()

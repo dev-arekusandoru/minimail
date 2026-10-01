@@ -251,6 +251,13 @@ impl Cache {
             .map(|id| id as MessageId))
     }
 
+    /// Remote ids of every cached message of `account`.
+    pub fn remote_ids(&self, account: &str) -> rusqlite::Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare("SELECT remote_id FROM messages WHERE account=?1")?;
+        let ids = stmt.query_map([account], |row| row.get(0))?;
+        ids.collect()
+    }
+
     pub fn upsert_message(
         &self,
         message: &Message,

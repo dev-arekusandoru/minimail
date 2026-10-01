@@ -56,6 +56,8 @@ pub enum ProviderError {
     Auth(String),
     CursorExpired,
     Network(String),
+    /// The server is throttling us; retry later.
+    RateLimited,
     Api { status: u16, message: String },
 }
 
@@ -65,6 +67,7 @@ impl std::fmt::Display for ProviderError {
             Self::Auth(m) => write!(f, "authentication failed: {m}"),
             Self::CursorExpired => write!(f, "sync cursor expired"),
             Self::Network(m) => write!(f, "network error: {m}"),
+            Self::RateLimited => write!(f, "rate limit reached; pausing for a minute"),
             Self::Api { status, message } => write!(f, "server error {status}: {message}"),
         }
     }
