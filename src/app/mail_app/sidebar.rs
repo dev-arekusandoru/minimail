@@ -15,7 +15,7 @@ use gpui_kit::component::ActiveTheme as _;
 use super::*;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{Icon, Sizable as _};
+use gpui_kit::component::{scroll::ScrollableElement as _, tag::Tag, Icon, Sizable as _};
 
 /// Width of one rail column. Icons sit in a slot of the same width, so a child's rail runs
 /// straight down from its parent's icon.
@@ -176,7 +176,7 @@ impl MailApp {
             .p_2()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .children(rows)
             .into_any_element()
     }
@@ -329,16 +329,13 @@ fn icon_slot(icon: IconName, color: Hsla, stem_down: Option<Hsla>) -> Div {
 }
 
 /// A pill badge with a message count.
-fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Div {
-    div()
-        .flex_none()
-        .ml_2()
-        .px(px(6.))
-        .rounded_full()
-        .text_size(px(10.))
-        .when(highlighted, |d| d.bg(t.primary).text_color(t.primary_foreground))
-        .when(!highlighted, |d| d.bg(t.secondary).text_color(t.muted_foreground))
-        .child(n.to_string())
+fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Tag {
+    let (bg, fg) = if highlighted {
+        (t.primary, t.primary_foreground)
+    } else {
+        (t.secondary, t.muted_foreground)
+    };
+    Tag::custom(bg, fg, bg).small().rounded_full().flex_none().ml_2().child(n.to_string())
 }
 
 /// An account's section label: the name, a fold chevron that appears on hover, and — while
@@ -381,9 +378,10 @@ fn account_header(
         )
         .when(folded && inbox_count > 0, |d| {
             d.child(
-                count_badge(t, inbox_count, false)
+                div()
                     .id(SharedString::from(format!("account-count-{id}")))
-                    .test_support(),
+                    .test_support()
+                    .child(count_badge(t, inbox_count, false)),
             )
         })
         .child(
