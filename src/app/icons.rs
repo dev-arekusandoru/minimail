@@ -23,7 +23,9 @@ gpui_kit::assets::icon_assets!(
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
         // Account icons.
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
-        Gamepad2, Music, Coffee, Rocket, Wallet, Leaf
+        Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
+        // Message toolbar and find bar icons (not in gpui-kit's default bundle).
+        ReplyAll, Forward, Regex, WholeWord
     ]
 );
 
@@ -204,6 +206,9 @@ impl Glyph {
 pub fn legend() -> Vec<(&'static str, Vec<Glyph>)> {
     let mut groups: Vec<(&'static str, Vec<Glyph>)> = Vec::new();
     for g in Glyph::ALL {
+        if g == Glyph::NewSender && !crate::known_senders::KNOWN_SENDERS_ENABLED {
+            continue;
+        }
         let group = g.spec().group;
         match groups.iter_mut().find(|(name, _)| *name == group) {
             Some((_, list)) => list.push(g),
