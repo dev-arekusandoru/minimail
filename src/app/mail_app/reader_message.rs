@@ -31,6 +31,14 @@ impl MailApp {
                 icon_button(("btn-reply", id), IconName::Reply, "Reply to this message", "r", cx)
                     .on_click(cx.listener(move |this, _, window, cx| this.reply_to(mid, window, cx))),
             )
+            .child(
+                icon_button(("btn-reply-all", id), IconName::ReplyAll, "Reply to everyone", "shift-a", cx)
+                    .on_click(cx.listener(move |this, _, window, cx| this.reply_all_to(mid, window, cx))),
+            )
+            .child(
+                icon_button(("btn-forward", id), IconName::Forward, "Forward this message", "w", cx)
+                    .on_click(cx.listener(move |this, _, window, cx| this.forward(mid, window, cx))),
+            )
             .child(div().flex_none().child(self.menu_trigger(
                 kind,
                 icon_button(("btn-message-more", id), IconName::Ellipsis, "More actions for this message", "", cx),

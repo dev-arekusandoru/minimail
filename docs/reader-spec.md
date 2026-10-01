@@ -80,11 +80,10 @@ Known limitations:
 ## Actions
 
 - **Per message** (every expanded surface, in the header's right cluster; they act on that message, not on the opened one):
-  - Reply `r`, an icon button.
+  - Reply `r`, Reply all `shift-a`, Forward `w`: icon buttons, in that order.
   - `⋯` menu: Archive `e`, Delete `d`, Snooze… `s`, Move to inbox `i` (each only when it changes something), Accept / Reject AI `y` / `n` while suggestions are pending, File… `f`, Mark spam… `!`, Toggle select `x`, Summarize `z`, Mute `m`, Unsubscribe `shift-u`, Sender actions ▸. It hangs under the button.
 - Banner and suggestion buttons sit in their banners; each shows its shortcut key.
 - Keyboard shortcuts also appear in the footer hint bar (`HintMode::Reader`, currently unreachable and must be wired): `r` reply, `e` archive, `f` file, `d` delete, `s` snooze, `]`/`[` thread, `v` reader mode, `shift-o` expand thread, `u` undo, `?` help; plus `y`/`n` while suggestions are pending. Keys act on the opened message or the list selection.
-- Reply all and Forward are omitted because no such actions exist; no dead buttons.
 - Keys come from `src/app/actions.rs`; never hard-code a second map.
 
 ## AI suggestion
