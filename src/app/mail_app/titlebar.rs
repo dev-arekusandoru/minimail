@@ -1,11 +1,10 @@
-//! App-owned, Zed-style window titlebar.
+//! The window titlebar: the kit `TitleBar` holding the sidebar toggle and view title, the
+//! search box and the global buttons.
 use gpui_kit::component::ActiveTheme as _;
-
-use std::cell::Cell;
-use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use super::{ListMode, MailApp, MenuKind};
@@ -14,7 +13,6 @@ use crate::app::ui::{icon_button, primary_button, run, shortcut};
 
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let moving = window.use_keyed_state("titlebar-moving", cx, |_, _| Rc::new(Cell::new(false))).read(cx).clone();
         let t = cx.theme();
         let searching = matches!(self.mode, ListMode::Search(_));
         let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
@@ -120,47 +118,16 @@ impl MailApp {
             .h_full()
             .child(right_buttons);
         // Left and right regions share the leftover width equally (flex-basis 0), so the fixed-size
-        // search box between them is always centered in the bar.
+        // search box between them is always centered in the bar. The kit `TitleBar` owns the bar
+        // itself (window move, double-click zoom, platform window controls, background); its own
+        // left inset is dropped (`pl_0`) so the `left` region keeps the traffic-light clearance.
         let titlebar = div()
             .id("mail-titlebar")
             .test_support()
-            .flex()
             .flex_none()
-            .items_center()
-            .h(px(36.))
-            .bg(t.sidebar)
-            .border_b_1()
-            .border_color(t.border)
-            .child(left)
-            .child(search)
-            .child(right);
-        drag_region(titlebar, &moving).into_any_element()
+            .child(TitleBar::new().pl_0().child(left).child(search).child(right));
+        titlebar.into_any_element()
     }
-}
-
-/// Makes the whole bar move the window on drag and zoom it on double-click, like gpui-component's
-/// `TitleBar`. Interactive children must call [`no_drag`] so pressing them never starts a move.
-/// `moving` must outlive a single render: a re-render between mouse-down and the first mouse-move
-/// (hover, tooltip, tick) would otherwise drop the pending-drag flag.
-fn drag_region<E: InteractiveElement>(bar: E, moving: &Rc<Cell<bool>>) -> E {
-    let (down, up, motion, out) = (moving.clone(), moving.clone(), moving.clone(), moving.clone());
-    bar.on_mouse_down_out(move |_, _, _| out.set(false))
-        .on_mouse_down(MouseButton::Left, move |event, window, _| {
-            if event.click_count == 2 {
-                #[cfg(target_os = "macos")]
-                window.titlebar_double_click();
-                #[cfg(not(target_os = "macos"))]
-                window.zoom_window();
-                return;
-            }
-            down.set(true);
-        })
-        .on_mouse_up(MouseButton::Left, move |_, _, _| up.set(false))
-        .on_mouse_move(move |_, window, _| {
-            if motion.replace(false) {
-                window.start_window_move();
-            }
-        })
 }
 
 /// Wraps an interactive titlebar child so presses on it are not treated as a bar drag.

@@ -10,15 +10,7 @@ fn main() {
         theme::watch_user_themes(cx);
         actions::bind_keys(cx);
         gpui_kit::open_window(
-            WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: None,
-                    appears_transparent: true,
-                    traffic_light_position: Some(point(px(9.), px(9.))),
-                }),
-                app_owns_titlebar_drag: true,
-                ..Default::default()
-            },
+            gpui_kit::component::TitleBar::window_options(),
             cx,
             |window, cx| {
                 let store = mail_classifier::contacts::open_default()
