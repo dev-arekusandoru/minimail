@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0.7. Mock data only (`fixtures/`); AI providers are deterministic stubs.
+Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0.7. Mock data by default (`fixtures/`); optional Gmail accounts sync through `src/provider/` + `src/sync/`. AI providers are deterministic stubs.
 
 - Verify with: `cargo build`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. All must pass before committing.
 - Commit as you go: one commit per completed, verified step (build, clippy, tests green), with a descriptive message. Don't batch a whole feature into one commit or leave finished work uncommitted. When parallel subagents edit disjoint files, commit only after they finish and the tree is green.
@@ -15,4 +15,4 @@ Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0
 - New actions go in `src/app/actions.rs` (`bind_keys` + `commands()`, with a palette `Category`), which makes them appear in the palette and help automatically. The palette and folder picker are the kit's `Command` in a `window.open_dialog`; our matching lives in `src/fuzzy.rs`.
 - UI tests are headless keystroke tests (`cx.simulate_keystrokes`) in `tests/ui*.rs`. Test behavior, not wiring.
 - Classifier (`src/judge.rs`) mirrors TypeSafe Jev's API (bool/choice/score questions → probabilities + confidence). Keep new providers behind the `Judge` trait.
-- No network calls or real providers unless explicitly asked.
+- Mail backends implement `MailProvider` (`src/provider/mod.rs`): blocking calls, run via `cx.background_spawn`; providers never see local ids. Tests use fake providers, never the network. No other network calls or real providers unless explicitly asked.

@@ -17,7 +17,7 @@ Built in Rust with [GPUI](https://www.gpui.rs/) and [gpui-kit](https://gpui-kit.
 Most mail apps hand you a pile and a mouse. **mail-classifier** gives every message exactly one state (**Inbox**, **Snoozed**, **Archived**, **Filed** or **Deleted**), lets you triage everything from the keyboard, and uses a fast "System 1" classifier to flag spam, replies you owe and urgent mail. Nothing is sorted away where you can't see it.
 
 > [!NOTE]
-> Early MVP. It runs on local mock data (`fixtures/`) and the AI providers are deterministic stubs. No real accounts are connected and no network calls are made.
+> Early MVP. By default it runs on local mock data (`fixtures/`), and the AI providers are deterministic stubs. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
 
 ## ✨ Features
 
@@ -151,8 +151,34 @@ its directory) on first launch, migrated forward through `PRAGMA user_version`,
 and seeded once from `fixtures/contacts_seed.json`; afterwards the file is
 yours, so deleting it just re-seeds on the next start. Allowing a new sender
 writes a contact there (undo takes it back out), and everything else
-the app tracks — messages, triage, rules, themes — still comes from the
-fixtures.
+the app tracks (rules, themes) still comes from the fixtures. Messages come from
+the fixtures until a Gmail account is linked (below).
+
+### Gmail accounts
+
+Gmail is optional; without it the app runs on the mock mailbox. To connect it,
+create a Google Cloud OAuth client of type **Desktop app**, enable the Gmail API,
+add yourself as a test user, then launch with:
+
+```sh
+MAIL_CLASSIFIER_GOOGLE_CLIENT_ID=… MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET=… cargo run
+```
+
+In the palette (`cmd-k`), run **Add Gmail account**. It signs you in with the
+browser over a loopback redirect (PKCE, `gmail.modify` scope) and saves the
+refresh token in the OS keychain (service `mail-classifier`). After the first
+account is linked, the demo mail is dropped. Fetched mail is cached in
+`$MAIL_CLASSIFIER_MAIL_DB`, otherwise in
+`~/Library/Application Support/mail-classifier/mail.db`, and later launches
+start from that cache.
+
+Sync runs every 2 s and pushes triage changes back to Gmail. Archive removes
+`INBOX`, delete moves the message to Trash, and filing applies a label (Gmail
+creates the label if it doesn't exist; nested folders become `Parent/Child`).
+Snooze archives the message in Gmail and wakes it locally. Remote changes are
+pulled every 60 s. The first import fetches the newest 500 non-spam, non-draft
+messages. Not supported yet: sending from Gmail, and read/unread state, which
+stays local.
 
 ### Project layout
 
@@ -163,6 +189,8 @@ src/
 ├── judge/        # System 1 classifier interface, stub provider, routing policy
 ├── summary.rs    # thread summarizer interface + stub
 ├── search.rs     # query parser
+├── provider/     # MailProvider trait, keychain secrets, Gmail adapter (OAuth, REST, label/MIME conversion)
+├── sync/         # SQLite mail cache and the sync engine (pending moves, pull merge); pure
 ├── rules.rs      # rule suggestions
 ├── clock.rs      # injectable clock
 ├── theme.rs      # gpui-kit theme setup (built-ins, user dir watcher, apply) and derived triage colors
@@ -197,4 +225,5 @@ Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": 
 - [ ] Bring-your-own provider for summaries
 - [ ] Review queue alongside the inline badges
 - [ ] Folders or streams driven by classifier labels
-- [ ] IMAP/SMTP accounts
+- [ ] IMAP/SMTP accounts (behind `MailProvider`, like Gmail)
+- [ ] Sending from Gmail; syncing Gmail read/unread
