@@ -54,43 +54,26 @@ impl MailApp {
 
         let head_id: ElementId =
             if opened { ("reader-msg-head", id).into() } else { ("reader-thread-head", id).into() };
-        let top = div()
-            .id(head_id)
-            .test_support()
+        let cluster = div()
             .h(px(22.))
             .flex()
+            .flex_none()
             .items_center()
-            .justify_between()
-            .gap_2()
-            .when(!opened, |d| {
-                d.cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
-            })
-            // The label stays an (empty) child for lone messages so `justify_between` keeps the
-            // right cluster at the far edge.
-            .child(look.mono(
-                if total > 1 { format!("MSG {pos:02} / {total:02}") } else { String::new() },
-                t.muted_foreground,
-            ))
-            .child(
+            .gap_3()
+            .when(total > 1, |d| d.child(look.mono(format!("MSG {pos:02} / {total:02}"), t.muted_foreground)))
+            .when(!opened, |d| d.child(look.mono("COLLAPSE", t.muted_foreground)))
+            .child({
+                let tip = m
+                    .received_at()
+                    .map_or_else(|| stamp(&m.received), |ts| humanize_time(ts, self.now()));
                 div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .when(!opened, |d| d.child(look.mono("COLLAPSE", t.muted_foreground)))
-                    .child({
-                        let absolute = stamp(&m.received);
-                        let label = m
-                            .received_at()
-                            .map_or_else(|| absolute.clone(), |ts| humanize_time(ts, self.now()));
-                        look.mono(label, t.muted_foreground)
-                            .id(("reader-msg-stamp", id))
-                            .tooltip(move |window, cx| {
-                                Tooltip::new(absolute.clone()).build(window, cx)
-                            })
-                    })
-                    .child(self.message_buttons(m.id, cx)),
-            );
+                    .id(("reader-msg-stamp", id))
+                    .text_size(px(13.))
+                    .text_color(t.muted_foreground)
+                    .child(reading::received_label(&m.received))
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            })
+            .child(self.message_buttons(m.id, cx));
 
         let subject = reading::display_subject(m);
         let subject = if opened {
@@ -105,63 +88,83 @@ impl MailApp {
             .text_color(t.foreground)
             .child(subject);
 
-        let sender = div()
+        let hover = t.foreground;
+        let recipient_toggle = div()
+            .id(("reader-recipients", id))
+            .test_support()
+            .self_start()
+            .max_w_full()
             .flex()
             .items_center()
-            .gap_2()
-            .child(look.monogram(&m.from_name, &m.from_email, 28.))
+            .h(px(18.))
+            .cursor_pointer()
+            .truncate()
+            .text_size(px(13.))
+            .text_color(t.muted_foreground)
+            .hover(move |s| s.text_color(hover))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_recipients(mid, cx)))
+            .child(format!(
+                "{} {}",
+                reading::recipient_line(m, me),
+                if recipients_open { "▴" } else { "▾" }
+            ));
+
+        let sender = div()
+            .id(head_id)
+            .test_support()
+            .flex()
+            .items_start()
+            .gap_3()
+            .when(!opened, |d| {
+                d.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
+            })
+            .child(look.monogram(&m.from_name, &m.from_email, 40.))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .items_baseline()
-                    .gap_2()
+                    .flex_col()
+                    .gap_0p5()
                     .child(
                         div()
-                            .flex_none()
-                            .max_w(px(260.))
-                            .truncate()
-                            .text_size(px(13.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(t.foreground)
-                            .child(m.from_name.clone()),
+                            .h(px(22.))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .max_w(px(260.))
+                                    .truncate()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(t.foreground)
+                                    .child(m.from_name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(13.))
+                                    .text_color(t.muted_foreground)
+                                    .child(m.from_email.clone()),
+                            ),
                     )
-                    .child(
-                        look.mono(m.from_email.clone(), t.muted_foreground).flex_1().min_w_0().truncate(),
-                    ),
-            );
-
-        let hover = t.foreground;
-        let recipient_toggle = div()
-            .id(("reader-recipients", id))
-            .test_support()
-            .ml(px(36.))
-            .flex()
-            .flex_none()
-            .items_center()
-            .h(px(18.))
-            .cursor_pointer()
-            .font_family(look.mono.clone())
-            .text_size(px(11.))
-            .text_color(t.muted_foreground)
-            .hover(move |s| s.text_color(hover))
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_recipients(mid, cx)))
-            .child(format!(
-                "{} {}",
-                reading::recipient_summary(m, me),
-                if recipients_open { "▴" } else { "▾" }
-            ));
+                    .child(recipient_toggle),
+            )
+            .child(cluster);
 
         let header = div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(top)
             .child(subject)
             .child(sender)
-            .child(recipient_toggle)
-            .child(self.labels_row(m, look).ml(px(36.)));
+            .child(self.labels_row(m, look).ml(px(52.)));
 
         let strip = if opened { self.suggestion_strip(m, look, cx) } else { None };
 

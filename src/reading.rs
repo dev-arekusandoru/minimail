@@ -70,27 +70,45 @@ fn parse_one_recipient(part: &str) -> Option<Recipient> {
     })
 }
 
-/// "to me", "to me, +3 others", "to Alice Chen, +1 other". Counts distinct
-/// addresses across to, cc and bcc; `me` is matched case-insensitively and is
-/// always named first. Empty when the message has no recipients.
-pub fn recipient_summary(msg: &Message, me: &str) -> String {
-    let mut seen = HashSet::new();
-    let all: Vec<Recipient> = [&msg.to, &msg.cc, &msg.bcc]
-        .into_iter()
-        .flat_map(|field| parse_recipients(field))
-        .filter(|r| seen.insert(r.email.to_ascii_lowercase()))
-        .collect();
-    let Some(first) = all.first() else {
-        return String::new();
-    };
+/// "to You, Ben Ito · cc Dev Rao": one segment per non-empty field (`to`, `cc`, `bcc`), names
+/// falling back to the address. `me` (case-insensitive) is shown as "You". Addresses repeated
+/// across fields appear only in the first. Empty when the message has no recipients.
+pub fn recipient_line(msg: &Message, me: &str) -> String {
     let me = me.trim();
-    let is_me = |r: &Recipient| !me.is_empty() && r.email.eq_ignore_ascii_case(me);
-    let head = if all.iter().any(is_me) { "me" } else { first.display() };
-    match all.len() - 1 {
-        0 => format!("to {head}"),
-        1 => format!("to {head}, +1 other"),
-        n => format!("to {head}, +{n} others"),
+    let mut seen = HashSet::new();
+    let mut segments = Vec::new();
+    for (label, field) in [("to", &msg.to), ("cc", &msg.cc), ("bcc", &msg.bcc)] {
+        let names: Vec<String> = parse_recipients(field)
+            .into_iter()
+            .filter(|r| seen.insert(r.email.to_ascii_lowercase()))
+            .map(|r| {
+                if !me.is_empty() && r.email.eq_ignore_ascii_case(me) {
+                    "You".to_owned()
+                } else {
+                    r.display().to_owned()
+                }
+            })
+            .collect();
+        if !names.is_empty() {
+            segments.push(format!("{label} {}", names.join(", ")));
+        }
     }
+    segments.join(" · ")
+}
+
+/// `Sep 30, 2026 · 20:46` from an RFC 3339 timestamp, as written (no clock, no zone math).
+/// Falls back to the raw string when it doesn't parse.
+pub fn received_label(received: &str) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let parsed = (|| {
+        let (y, m, d) = (received.get(..4)?, received.get(5..7)?, received.get(8..10)?);
+        let month = MONTHS.get(m.parse::<usize>().ok()?.checked_sub(1)?)?;
+        let day: u32 = d.parse().ok()?;
+        y.parse::<u32>().ok()?;
+        Some(format!("{month} {day}, {y} · {}", received.get(11..16)?))
+    })();
+    parsed.unwrap_or_else(|| received.to_owned())
 }
 
 // -------------------------------------------------------------------- quoted

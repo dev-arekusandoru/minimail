@@ -1,7 +1,7 @@
 use mail_classifier::model::{Attachment, Message, TriageState};
 use mail_classifier::reading::{
     Recipient, ReaderView, format_size, html_to_text, initials, parse_recipients, reader_text,
-    recipient_summary, safe_html, split_quoted, thread_others, thread_position,
+    received_label, recipient_line, safe_html, split_quoted, thread_others, thread_position,
 };
 
 fn msg(id: u32, thread_id: u32, received: &str) -> Message {
@@ -52,49 +52,40 @@ fn parse_recipients_is_tolerant() {
 }
 
 #[test]
-fn recipient_summary_names_me_and_counts_everyone() {
+fn recipient_line_groups_by_field_and_names_you() {
     let mut m = msg(1, 1, "2026-09-01T10:00:00Z");
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to me");
+    assert_eq!(recipient_line(&m, "me@example.com"), "to You");
     // `me` matches case-insensitively, whatever the display name says.
-    m.to = "Somebody <ME@Example.com>".into();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to me");
-
-    m.to = "me@example.com, a@x.io".into();
-    m.cc = "b@x.io, c@x.io".into();
-    m.bcc = "d@x.io".into();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to me, +4 others");
-
-    // Me is named first even when listed last, and one other is singular.
-    m.to = "Alice Chen <alice@x.io>, me@example.com".into();
+    m.to = "Somebody <ME@Example.com>, Ben Ito <ben@x.io>".into();
+    m.cc = "Dev Rao <dev@x.io>".into();
+    assert_eq!(recipient_line(&m, "me@example.com"), "to You, Ben Ito · cc Dev Rao");
     m.cc = String::new();
-    m.bcc = String::new();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to me, +1 other");
-}
-
-#[test]
-fn recipient_summary_without_me_names_first_recipient() {
-    let mut m = msg(1, 1, "2026-09-01T10:00:00Z");
-    m.to = "Alice Chen <alice@x.io>".into();
-    m.cc = "bob@x.io".into();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to Alice Chen, +1 other");
-    m.to = "bob@x.io".into();
-    m.cc = String::new();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to bob@x.io");
+    m.bcc = "hid@x.io".into();
+    assert_eq!(recipient_line(&m, "me@example.com"), "to You, Ben Ito · bcc hid@x.io");
     // An empty `me` never matches an empty address.
-    assert_eq!(recipient_summary(&m, ""), "to bob@x.io");
+    m.to = "bob@x.io".into();
+    m.bcc = String::new();
+    assert_eq!(recipient_line(&m, ""), "to bob@x.io");
 }
 
 #[test]
-fn recipient_summary_counts_an_address_once_and_handles_none() {
+fn recipient_line_counts_an_address_once_and_handles_none() {
     let mut m = msg(1, 1, "2026-09-01T10:00:00Z");
     m.to = "a@x.io".into();
     m.cc = "A@X.io".into();
     m.bcc = "a@x.io".into();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "to a@x.io");
+    assert_eq!(recipient_line(&m, "me@example.com"), "to a@x.io");
     m.to = String::new();
     m.cc = String::new();
     m.bcc = String::new();
-    assert_eq!(recipient_summary(&m, "me@example.com"), "");
+    assert_eq!(recipient_line(&m, "me@example.com"), "");
+}
+
+#[test]
+fn received_label_formats_as_written() {
+    assert_eq!(received_label("2026-09-30T20:46:00Z"), "Sep 30, 2026 · 20:46");
+    assert_eq!(received_label("2026-01-05T07:03:00+02:00"), "Jan 5, 2026 · 07:03");
+    assert_eq!(received_label("garbage"), "garbage");
 }
 
 // -------------------------------------------------------------------- quoted

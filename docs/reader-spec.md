@@ -13,14 +13,14 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 ## Header
 
 - Subject: largest text, wraps and never truncates.
-- Sender name and address on one line; initials mark on the left.
-- Timestamp and message index in mono, top row. Index is chronological within the thread (`MSG 04 / 04` = newest).
+- Sender block: 40px initials mark on the left; line 1 is name (semibold) and address (muted, UI font); line 2 is the recipient line.
+- Right of line 1, one cluster: message index (`MSG 04 / 04`, mono, threads only; chronological, 04 = newest), `COLLAPSE` (collapsed thread messages), absolute date (`Sep 30, 2026 · 20:46`, humanized time in its tooltip), Reply, `⋯`. No separate row above the subject.
 - Labels row, reusing the row badge language (`src/app/icons.rs`):
   - Triage state: `Inbox`, `Snoozed · <wake time>`, `Archived`, `Filed · <folder>`, `Deleted`, tinted by `Theme::state_color`.
   - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender.
   - Category: the `Kind` tag (for example Newsletter or Receipt).
 - New Sender and Possible Spam keep their banners (triage spec), with buttons: Allow `a` / Block `b`; Block & Delete / Delete `d`.
-- Recipient summary (`to me, +3 others`) expands to full-width rows **below** the header:
+- Recipient line (`to You, Ben Ito · cc Dev Rao ▾`, UI font, muted) sits under the sender name and expands to full-width rows **below** the header:
   - `To:` / `Cc:` / `Bcc:`, one row each, wrapping long lists.
   - Omit empty rows. Bcc appears only when known, which usually means sent mail.
   - Expanding must not move or resize any header element; only content below moves down.
