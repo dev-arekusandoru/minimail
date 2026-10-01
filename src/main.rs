@@ -41,16 +41,15 @@ fn main() {
                         None
                     }
                 });
-                let demo = cached.is_none();
                 let mailbox = match cached {
                     Some((accounts, folders, messages)) => {
                         Mailbox::from_parts(messages, accounts, folders, store)
                     }
-                    None => Mailbox::load_default_with(store),
+                    None => Mailbox::from_parts(Vec::new(), Vec::new(), Vec::new(), store),
                 };
                 let view = cx.new(|cx| MailApp::new(mailbox, window, cx));
                 if let Some(cache) = cache {
-                    view.update(cx, |app, cx| app.attach_sync(cache, demo, window, cx));
+                    view.update(cx, |app, cx| app.attach_sync(cache, window, cx));
                 }
                 let handle = view.read(cx).focus_handle().clone();
                 window.focus(&handle, cx);

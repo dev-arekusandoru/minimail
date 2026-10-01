@@ -93,3 +93,14 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
     assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()), None);
     assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
 }
+
+#[gpui_kit::gpui::test]
+fn an_app_without_accounts_shows_the_add_gmail_onboarding(cx: &mut TestAppContext) {
+    let store = std::rc::Rc::new(mail_classifier::contacts::ContactStore::open_in_memory().expect("store"));
+    let empty = mail_classifier::model::Mailbox::from_parts(Vec::new(), Vec::new(), Vec::new(), store);
+    let mut h = harness::harness_with(cx, empty);
+    assert!(h.has("onboarding-add-gmail"), "no accounts: the list area offers to add one");
+
+    let mut h = harness(h.cx);
+    assert!(!h.has("onboarding-add-gmail"), "with accounts the onboarding is gone");
+}

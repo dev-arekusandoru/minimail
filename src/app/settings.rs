@@ -49,6 +49,10 @@ pub enum SettingsEvent {
 }
 
 /// One row of the Accounts page.
+/// Shown beside "Add Gmail…" when the OAuth client is not configured.
+pub const GMAIL_ENV_HINT: &str =
+    "Needs MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET set at launch.";
+
 #[derive(Clone, Debug)]
 pub struct AccountRow {
     pub id: String,
@@ -59,7 +63,7 @@ pub struct AccountRow {
     pub icon: &'static str,
     /// Raw nickname text; blank means unset (see [`account_style::normalize_nickname`]).
     pub nickname: String,
-    /// Linked Gmail account (removable); otherwise built-in demo data.
+    /// Linked Gmail account (removable, has a sync status).
     pub gmail: bool,
     /// Sync status line (see [`crate::sync_status::describe`]) and whether it reports a problem.
     pub sync: String,
@@ -364,7 +368,7 @@ impl SettingsPanel {
             let hint = if configured {
                 "Sign in with your browser; the token is kept in the system keychain."
             } else {
-                "Needs MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET set at launch."
+                GMAIL_ENV_HINT
             };
             div()
                 .id("account-add")
@@ -651,7 +655,6 @@ fn account_card(
 ) -> Stateful<Div> {
     let t = cx.theme();
     let color = theme::parse_color(&account.color).unwrap_or(t.primary);
-    let kind = if account.gmail { "Gmail" } else { "Demo" };
     let tile = Button::new(("account-style", index))
         .custom(
             ButtonCustomVariant::new(cx)
@@ -718,7 +721,7 @@ fn account_card(
         .child(picker)
         .child(
             div().flex().flex_col().flex_1().min_w_0().gap_0p5().child(title).child(
-                div().px_3().text_xs().text_color(t.muted_foreground).child(format!("{} · {kind}", account.email)),
+                div().px_3().text_xs().text_color(t.muted_foreground).child(account.email.clone()),
             ),
         );
     let status_color = if account.sync_problem { t.danger } else { t.muted_foreground };

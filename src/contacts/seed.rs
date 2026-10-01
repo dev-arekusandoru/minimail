@@ -29,21 +29,18 @@ pub fn default_db_path() -> PathBuf {
     home.join("Library/Application Support/mail-classifier/contacts.db")
 }
 
-/// Open the database the app uses, creating the directory and seeding it the
-/// first time.
+/// Open the database the app uses, creating the directory. Starts empty: the
+/// shipped contacts are fixtures for tests only.
 pub fn open_default() -> Result<ContactStore> {
     let path = default_db_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| Error::Invalid(format!("cannot create {}: {e}", dir.display())))?;
     }
-    let store = ContactStore::open(&path)?;
-    seed_if_empty(&store)?;
-    Ok(store)
+    ContactStore::open(&path)
 }
 
-/// A seeded in-memory address book: the same fixture the app starts with,
-/// without touching the user's database file.
+/// A seeded in-memory address book from the shipped fixture, for tests.
 pub fn open_seeded_in_memory() -> Result<ContactStore> {
     let store = ContactStore::open_in_memory()?;
     seed_if_empty(&store)?;

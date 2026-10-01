@@ -37,9 +37,8 @@ fn run_job(job: AccountJob) -> (AccountId, sync::RoundResult) {
 
 impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
-    pub fn attach_sync(&mut self, cache: Rc<Cache>, demo: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
         self.cache = Some(cache);
-        self.demo = demo;
         let client = ClientConfig::from_env();
         let accounts: Vec<Account> = self
             .mailbox
@@ -361,7 +360,7 @@ impl MailApp {
         self.pending_toast = Some(format!("Gmail sync: {e}"));
     }
 
-    /// Drop everything shown for demo data and reset view state.
+    /// Reset the list, tabs and reader to a fresh state after accounts were removed.
     fn reset_view_state(&mut self) {
         self.folder = Location::AllInboxes;
         self.triage = Triage::new(self.mailbox.location_query(&Location::AllInboxes));
@@ -373,7 +372,6 @@ impl MailApp {
         self.session = None;
         self.menu_target = None;
         self.row_cursor = 0;
-        self.demo = false;
     }
 
     pub(super) fn add_gmail_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -425,20 +423,6 @@ impl MailApp {
         if let Err(e) = KeyringStore.set(&email, &refresh) {
             self.show_toast(format!("Gmail sign-in failed: keychain: {e}"), window, cx);
             return;
-        }
-        if self.demo {
-            let mocks: Vec<AccountId> = self
-                .mailbox
-                .accounts()
-                .iter()
-                .filter(|a| a.provider == ProviderKind::Mock)
-                .map(|a| a.id.clone())
-                .collect();
-            for id in mocks {
-                self.mailbox.remove_account_data(&id);
-                self.mailbox.remove_account(&id);
-            }
-            self.reset_view_state();
         }
         let style = crate::account_style::style_for_index(self.mailbox.accounts().len());
         let account = Account {

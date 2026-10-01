@@ -251,8 +251,7 @@ impl MailApp {
         self.open_settings(false, window, cx);
     }
 
-    /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache
-    /// (demo accounts live only in memory).
+    /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache.
     fn set_account_style(&mut self, id: &str, icon: &str, color: &str, window: &mut Window, cx: &mut Context<Self>) {
         if !self.mailbox.set_account_style(id, icon, color) {
             return;
@@ -261,8 +260,7 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Save a Gmail account's icon, color and nickname to the cache (demo accounts live only in
-    /// memory).
+    /// Save a Gmail account's icon, color and nickname to the cache.
     fn persist_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let (Some(cache), Some(account)) = (&self.cache, self.mailbox.account(id))
             && account.provider == crate::model::ProviderKind::Gmail
@@ -289,7 +287,7 @@ impl MailApp {
                     };
                     crate::sync_status::describe(&crate::sync_status::status(&facts), now)
                 } else {
-                    ("Demo data, replaced when you add Gmail".to_owned(), false)
+                    (String::new(), false)
                 };
                 AccountRow {
                     id: a.id.clone(),
