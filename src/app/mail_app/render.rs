@@ -71,14 +71,14 @@ impl Render for MailApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ExtendNext, _, cx| {
-                if this.mode == ListMode::State && !this.in_session() {
+                if !this.in_session() {
                     this.extend_by(1);
                 }
                 this.scroll_to_cursor();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ExtendPrev, _, cx| {
-                if this.mode == ListMode::State && !this.in_session() {
+                if !this.in_session() {
                     this.extend_by(-1);
                 }
                 this.scroll_to_cursor();
@@ -87,7 +87,7 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ToggleSelect, _, cx| {
                 if let Some(ids) = this.menu_target.clone() {
                     this.toggle_select_ids(&ids);
-                } else if this.mode == ListMode::State && !this.in_session() {
+                } else if !this.in_session() {
                     this.toggle_select_cursor();
                 }
                 cx.notify();
@@ -166,23 +166,21 @@ impl Render for MailApp {
                     this.close_modals(window, cx);
                 }
             }))
-            // Sidebar navigation: locations, chips and filters.
+            // Sidebar navigation and the list header's filter pills.
             .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))
             .on_action(cx.listener(|this, _: &GoArchive, _, cx| this.go_archive(cx)))
             .on_action(cx.listener(|this, _: &GoTrash, _, cx| this.go_trash(cx)))
-            .on_action(cx.listener(|this, _: &SelectChip1, _, cx| this.select_chip(Chip::ALL[0], cx)))
-            .on_action(cx.listener(|this, _: &SelectChip2, _, cx| this.select_chip(Chip::ALL[1], cx)))
-            .on_action(cx.listener(|this, _: &SelectChip3, _, cx| this.select_chip(Chip::ALL[2], cx)))
-            .on_action(cx.listener(|this, _: &SelectChip4, _, cx| this.select_chip(Chip::ALL[3], cx)))
-            .on_action(cx.listener(|this, _: &SelectChip5, _, cx| this.select_chip(Chip::ALL[4], cx)))
-            .on_action(cx.listener(|this, _: &SelectChip6, _, cx| this.select_chip(Chip::ALL[5], cx)))
-            .on_action(cx.listener(|this, ev: &ToggleTagFilter, _, cx| this.toggle_tag_filter(ev.tag, cx)))
-            .on_action(cx.listener(|this, ev: &SetFilterKind, _, cx| this.set_filter_kind(ev.kind, cx)))
-            .on_action(cx.listener(|this, ev: &SetFilterAccount, _, cx| this.set_filter_account(ev.account.clone(), cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter1, _, cx| this.quick_filter(0, cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter2, _, cx| this.quick_filter(1, cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter3, _, cx| this.quick_filter(2, cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter4, _, cx| this.quick_filter(3, cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter5, _, cx| this.quick_filter(4, cx)))
+            .on_action(cx.listener(|this, _: &QuickFilter6, _, cx| this.quick_filter(5, cx)))
             .on_action(cx.listener(|this, _: &ClearFilters, _, cx| this.clear_filters(cx)))
+            .on_action(cx.listener(|this, _: &AddFilter, window, cx| this.open_add_filter(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleHelp, w, cx| this.toggle_help(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSnoozePicker, w, cx| {
                 if !this.modal_open() {

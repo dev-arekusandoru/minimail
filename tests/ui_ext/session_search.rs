@@ -65,13 +65,23 @@ pub fn search_box() -> Mailbox {
     ])
 }
 
+/// Search for `q` from wherever the list is, then drop the pre-seeded folder pill, so the
+/// results are the query over all mail. Returns the ids; the search is cleared afterwards.
 pub fn search(h: &mut Harness<'_>, q: &str) -> Vec<MessageId> {
     h.keys("/");
     assert!(h.read(|a| a.palette_open()));
     h.type_text(q.trim_start_matches('/'));
     h.keys("enter");
+    assert!(
+        h.read(|a| a.search_header()).is_some_and(|s| s.starts_with("search:")),
+        "the query is applied on top of the folder being browsed"
+    );
+    if h.read(|a| a.location()).is_some() {
+        assert!(h.has("pill-remove-in-inbox"), "the folder is a removable pill now: q={} pills={:?} header={:?}", h.query(), h.pills(), h.header());
+        h.click("pill-remove-in-inbox");
+        assert_eq!(h.read(|a| a.location()), None, "removing the folder goes global");
+    }
     let ids = h.visible();
-    assert!(h.read(|a| a.search_header()).is_some_and(|s| s.starts_with("search:")));
     h.keys("escape");
     assert_eq!(h.read(|a| a.search_header()), None, "escape clears the search");
     ids

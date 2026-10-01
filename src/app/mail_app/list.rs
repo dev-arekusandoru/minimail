@@ -14,32 +14,17 @@ impl MailApp {
             || cursor + LOAD_MORE_MARGIN >= row_count;
         self.maybe_load_older(near_end);
         let selected = self.triage.selected().len();
-        let title = match &self.mode {
-            ListMode::State if self.grouped() => format!(
-                "{} · {count} · {} threads",
-                self.location_label(),
-                self.rows().iter().filter(|r| !matches!(r, Row::Child { .. })).count()
-            ),
-            ListMode::State => {
-                format!("{} · {count}", self.location_label())
-            }
-            ListMode::Search(q) => format!("search: {q} · {count}"),
-        };
-        let filter_active = self.filter_count() > 0;
-        let filter_label = self.filter_label();
-        let chips = self.render_chips();
+        let pills = self.render_pills(cx);
         let t = cx.theme();
         let header = div()
-            .h(px(LIST_HEADER_H))
             .flex_none()
-            .flex()
-            .items_center()
-            .justify_between()
+            .flex_col()
             .gap_2()
             .px_3()
+            .py_2()
             .text_size(px(11.))
             .text_color(t.muted_foreground)
-            .child(div().flex_1().min_w_0().truncate().child(title))
+            .child(pills)
             .when(selected > 0, |d| {
                 d.child(
                     div()
@@ -52,33 +37,24 @@ impl MailApp {
                         .child(
                             button("btn-clear-selection", "Clear", "Clear selection", "escape", cx)
                                 .on_click(run(ClearSelection)),
-                        ),
+                        )
+                        .when(selected >= 2, |d| {
+                            d.child(div().flex_none().child(self.menu_trigger(
+                                MenuKind::Selection,
+                                icon_button(
+                                    "btn-selection-more",
+                                    IconName::Ellipsis,
+                                    "Actions for the selected messages",
+                                    "",
+                                    cx,
+                                ),
+                                cx,
+                            )))
+                        }),
                 )
-            })
-            .when(selected >= 2, |d| {
-                d.child(div().flex_none().child(self.menu_trigger(
-                    MenuKind::Selection,
-                    icon_button(
-                        "btn-selection-more",
-                        IconName::Ellipsis,
-                        "Actions for the selected messages",
-                        "",
-                        cx,
-                    ),
-                    cx,
-                )))
-            })
-            .child(div().flex_none().child(self.menu_trigger(
-                MenuKind::Filter,
-                button("btn-filter", filter_label, "Filter mail by tag, kind or account", "", cx)
-                    .when(filter_active, |b| b.bg(t.list_active).text_color(t.primary)),
-                cx,
-            )));
+            });
         let body = if count == 0 {
-            let title = match &self.mode {
-                ListMode::State => format!("No mail in {}", self.location_label()),
-                ListMode::Search(_) => "No matches".to_owned(),
-            };
+            let title = format!("No mail in {}", self.location_label());
             Empty::new()
                 .header(EmptyHeader::new().title(EmptyTitle::new().child(title)))
                 .into_any_element()
@@ -118,7 +94,6 @@ impl MailApp {
             .flex()
             .flex_col()
             .child(header)
-            .when_some(chips, |d, chips| d.child(chips))
             .child(body)
             .into_any_element()
     }

@@ -1,37 +1,37 @@
 use super::*;
 
-/// Cursor + multi-selection over one view.
+/// Cursor + multi-selection over the list a [`Query`] selects.
 pub struct Triage {
-    pub view: View,
+    pub query: Query,
     cursor: usize,
     selected: Vec<MessageId>,
     anchor: Option<usize>,
 }
 
 impl Triage {
-    pub fn new(view: View) -> Self {
+    pub fn new(query: Query) -> Self {
         Self {
-            view,
+            query,
             cursor: 0,
             selected: Vec::new(),
             anchor: None,
         }
     }
-    fn ids(&self, mb: &Mailbox) -> Vec<MessageId> {
-        mb.ids_in_view(&self.view)
+    fn ids(&self, mb: &Mailbox, now: Timestamp) -> Vec<MessageId> {
+        mb.ids_matching(&self.query, now)
     }
     pub fn cursor_index(&self) -> usize {
         self.cursor
     }
-    pub fn cursor(&self, mb: &Mailbox) -> Option<MessageId> {
-        let ids = self.ids(mb);
+    pub fn cursor(&self, mb: &Mailbox, now: Timestamp) -> Option<MessageId> {
+        let ids = self.ids(mb, now);
         ids.get(clamp_index(self.cursor, ids.len())).copied()
     }
-    pub fn move_cursor(&mut self, mb: &Mailbox, delta: isize) {
-        self.cursor = shift(self.cursor, delta, self.ids(mb).len());
+    pub fn move_cursor(&mut self, mb: &Mailbox, now: Timestamp, delta: isize) {
+        self.cursor = shift(self.cursor, delta, self.ids(mb, now).len());
     }
-    pub fn extend(&mut self, mb: &Mailbox, delta: isize) {
-        let ids = self.ids(mb);
+    pub fn extend(&mut self, mb: &Mailbox, now: Timestamp, delta: isize) {
+        let ids = self.ids(mb, now);
         if ids.is_empty() {
             self.cursor = 0;
             self.clear_selection();
@@ -48,8 +48,8 @@ impl Triage {
         };
         self.selected = ids[lo..=hi].to_vec();
     }
-    pub fn toggle_select(&mut self, mb: &Mailbox) {
-        let ids = self.ids(mb);
+    pub fn toggle_select(&mut self, mb: &Mailbox, now: Timestamp) {
+        let ids = self.ids(mb, now);
         let Some(id) = ids.get(clamp_index(self.cursor, ids.len())).copied() else {
             return;
         };
@@ -61,8 +61,8 @@ impl Triage {
         self.selected
             .sort_by_key(|s| ids.iter().position(|c| c == s).unwrap_or(usize::MAX));
     }
-    pub fn set_cursor(&mut self, mb: &Mailbox, index: usize) {
-        self.cursor = clamp_index(index, self.ids(mb).len());
+    pub fn set_cursor(&mut self, mb: &Mailbox, now: Timestamp, index: usize) {
+        self.cursor = clamp_index(index, self.ids(mb, now).len());
     }
     pub fn set_selection(&mut self, ids: Vec<MessageId>) {
         self.selected = ids;
@@ -80,42 +80,43 @@ impl Triage {
     pub fn is_selected(&self, id: MessageId) -> bool {
         self.selected.contains(&id)
     }
-    pub fn targets(&self, mb: &Mailbox) -> Vec<MessageId> {
+    pub fn targets(&self, mb: &Mailbox, now: Timestamp) -> Vec<MessageId> {
         if !self.selected.is_empty() {
             return self.selected.clone();
         }
-        let ids = self.ids(mb);
+        let ids = self.ids(mb, now);
         ids.get(clamp_index(self.cursor, ids.len()))
             .map_or_else(Vec::new, |id| vec![*id])
     }
-    pub fn apply(&mut self, mb: &mut Mailbox, state: TriageState) -> usize {
-        let ids = self.targets(mb);
+    pub fn apply(&mut self, mb: &mut Mailbox, now: Timestamp, state: TriageState) -> usize {
+        let ids = self.targets(mb, now);
         let changed = mb.set_state(&ids, state);
         self.clear_selection();
-        self.clamp(mb);
+        self.clamp(mb, now);
         changed
     }
     /// Move every message from the cursor's sender that shares the cursor
     /// message's state to `state`, then re-clamp the cursor.
-    pub fn apply_to_sender(&mut self, mb: &mut Mailbox, state: TriageState) -> usize {
+    pub fn apply_to_sender(&mut self, mb: &mut Mailbox, now: Timestamp, state: TriageState) -> usize {
         let Some((sender, from)) = self
-            .cursor(mb)
+            .cursor(mb, now)
             .and_then(|id| mb.get(id))
             .map(|m| (m.from_email.clone(), m.state))
         else {
             return 0;
         };
         let changed = mb.set_state_for_sender(&sender, from, state);
-        self.clamp(mb);
+        self.clamp(mb, now);
         changed
     }
-    pub fn switch_view(&mut self, view: View) {
-        self.view = view;
+    /// Point the list at `query`: the cursor goes to the top and the selection clears.
+    pub fn set_query(&mut self, query: Query) {
+        self.query = query;
         self.cursor = 0;
         self.clear_selection();
     }
-    fn clamp(&mut self, mb: &Mailbox) {
-        self.cursor = clamp_index(self.cursor, self.ids(mb).len());
+    fn clamp(&mut self, mb: &Mailbox, now: Timestamp) {
+        self.cursor = clamp_index(self.cursor, self.ids(mb, now).len());
     }
 }
 fn clamp_index(index: usize, len: usize) -> usize {

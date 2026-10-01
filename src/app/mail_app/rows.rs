@@ -31,8 +31,8 @@ impl MailApp {
         let focused = self.opened().or_else(|| self.cursor_id());
         ctx.empty = focused.is_none();
         ctx.outside_inbox = !matches!(
-            self.triage.view.location,
-            Location::AllInboxes | Location::Inbox(_)
+            self.location(),
+            Some(Location::AllInboxes | Location::Inbox(_))
         );
         if let Some(id) = focused {
             ctx.new_sender = self.mailbox.is_new_sender(id);
@@ -93,7 +93,7 @@ impl MailApp {
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
-            selected: self.mode == ListMode::State && self.triage.is_selected(id),
+            selected: self.triage.is_selected(id),
             partial: false,
             unread,
             urgent,
@@ -106,7 +106,7 @@ impl MailApp {
             return (Vec::new(), Vec::new());
         };
         let pending = self.mailbox.pending(id);
-        let return_time_shown = matches!(&self.triage.view.location, Location::Snoozed(_)) && self.mode == ListMode::State;
+        let return_time_shown = matches!(self.location(), Some(Location::Snoozed(_)));
         let glyphs = icons::glyphs_for(&GlyphInputs {
             tags: self.mailbox.tags(id),
             pending: &pending,
@@ -131,7 +131,7 @@ impl MailApp {
         let mut visual = self.row_visual(msg.id);
         visual.cursor = ix == self.cursor_ix();
         let date = match self.mailbox.snoozed_until(msg.id) {
-            Some(until) if matches!(&self.triage.view.location, Location::Snoozed(_)) && self.mode == ListMode::State => {
+            Some(until) if matches!(self.location(), Some(Location::Snoozed(_))) => {
                 format!("↩ {}", format_when(until))
             }
             _ => Self::clock_label(&msg.received, newest),
@@ -144,7 +144,7 @@ impl MailApp {
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
         let sender = row::sender_label(msg);
-        let account_icon = if row::shows_account_icon(&self.triage.view.location) {
+        let account_icon = if row::shows_account_icon(&self.location().unwrap_or(Location::AllInboxes)) {
             self.mailbox.account(&msg.account).map(|account| {
                 icons::account_icon(crate::account_style::icon_key(account), &account.color, t, 13.)
             })

@@ -1,4 +1,5 @@
 use super::*;
+use crate::search::Field;
 
 impl MailApp {
     pub fn palette_open(&self) -> bool {
@@ -58,29 +59,14 @@ impl MailApp {
 
     pub fn new_senders_open(&self) -> bool {
         crate::known_senders::KNOWN_SENDERS_ENABLED
-            && self.mode == ListMode::State
-            && self.triage.view.chip == Chip::NewSenders
+            && self.triage.query.has(Field::Is, "new")
     }
 
     /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.
+    /// A query that is not anchored to one place (global search, several `in:` values)
+    /// reads as `"All mail"`.
     pub fn location_label(&self) -> String {
-        sidebar::view_label(&self.triage.view, &self.mailbox)
-    }
-
-    /// How many filter entries are set; shown on the Filter ▾ button.
-    pub fn filter_count(&self) -> usize {
-        let filter = &self.triage.view.filter;
-        filter.tags.len()
-            + usize::from(filter.kind.is_some())
-            + usize::from(filter.account.is_some())
-    }
-
-    /// The Filter ▾ button's label, e.g. `"Filter (2) ▾"`.
-    pub fn filter_label(&self) -> String {
-        match self.filter_count() {
-            0 => "Filter ▾".to_owned(),
-            n => format!("Filter ({n}) ▾"),
-        }
+        self.location().map_or_else(|| "All mail".to_owned(), |loc| sidebar::location_label(&loc, &self.mailbox))
     }
 
     /// A popup menu is open.
@@ -102,14 +88,6 @@ impl MailApp {
             None
         } else {
             self.tabs.opened()
-        }
-    }
-
-    /// `Some("search: …")` while a search is active.
-    pub fn search_header(&self) -> Option<String> {
-        match &self.mode {
-            ListMode::Search(q) => Some(format!("search: {q}")),
-            _ => None,
         }
     }
 
@@ -157,28 +135,11 @@ impl MailApp {
 
     /// Exactly the message ids the list shows, top to bottom.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        match &self.mode {
-            ListMode::State => self.mailbox.ids_in_view(&self.triage.view),
-            ListMode::Search(q) => self.search_ids(q),
-        }
+        self.mailbox.ids_matching(&self.triage.query, self.now())
     }
 
-
-    pub(super) fn now(&self) -> Timestamp {
+    pub fn now(&self) -> Timestamp {
         self.clock.now()
-    }
-
-    pub(super) fn search_ids(&self, q: &str) -> Vec<MessageId> {
-        let query = Query::parse(q);
-        let mut found: Vec<&Message> = self
-            .mailbox
-            .messages()
-            .iter()
-            .filter(|m| !self.mailbox.is_hidden(m.id))
-            .filter(|m| query.matches(m, &self.mailbox, self.now()))
-            .collect();
-        found.sort_by(|a, b| b.received.cmp(&a.received).then(b.id.cmp(&a.id)));
-        found.into_iter().map(|m| m.id).collect()
     }
 
     pub(super) fn in_session(&self) -> bool {
@@ -201,23 +162,14 @@ impl MailApp {
         if self.grouped() {
             return self.cursor_row().map(|r| r.primary());
         }
-        match self.mode {
-            ListMode::State => self.triage.cursor(&self.mailbox),
-            _ => {
-                let ids = self.visible_ids();
-                ids.get(self.alt_cursor.min(ids.len().saturating_sub(1))).copied()
-            }
-        }
+        self.triage.cursor(&self.mailbox, self.now())
     }
 
     pub(super) fn cursor_ix(&self) -> usize {
         if self.grouped() {
             return self.row_cursor();
         }
-        match self.mode {
-            ListMode::State => self.triage.cursor_index(),
-            _ => self.alt_cursor,
-        }
+        self.triage.cursor_index()
     }
 
     /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
@@ -228,10 +180,10 @@ impl MailApp {
         if self.grouped() && self.triage.selected().is_empty() {
             return self.cursor_row().map(|r| r.ids()).unwrap_or_default();
         }
-        if self.in_session() || self.mode != ListMode::State {
+        if self.in_session() {
             return self.cursor_id().into_iter().collect();
         }
-        self.triage.targets(&self.mailbox)
+        self.triage.targets(&self.mailbox, self.now())
     }
 
     pub(super) fn move_cursor(&mut self, delta: isize) {
@@ -239,12 +191,8 @@ impl MailApp {
             let len = self.rows().len();
             let max = len.saturating_sub(1) as isize;
             self.row_cursor = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
-        } else if self.mode == ListMode::State {
-            self.triage.move_cursor(&self.mailbox, delta);
         } else {
-            let len = self.visible_ids().len();
-            let max = len.saturating_sub(1) as isize;
-            self.alt_cursor = (self.alt_cursor as isize + delta).clamp(0, max) as usize;
+            self.triage.move_cursor(&self.mailbox, self.now(), delta);
         }
     }
 

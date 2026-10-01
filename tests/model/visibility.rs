@@ -1,5 +1,10 @@
 use crate::helpers::{State, sample};
-use mail_classifier::model::{Chip, Filter, Location, TagFilter, View};
+use mail_classifier::clock::Timestamp;
+use mail_classifier::model::Location;
+use mail_classifier::search::{Field, Query};
+
+/// Instant the sample mailbox is judged at (its newest message is 2026-09-29).
+const NOW: Timestamp = 1_790_000_000;
 #[test]
 fn block_move_is_one_undo_step_and_unblock_is_undoable() {
     let mut mb = sample();
@@ -41,17 +46,25 @@ fn unsubscribe_moves_inbox_and_undoes() {
     assert!(mb.unsubscribed().is_empty());
 }
 #[test]
-fn chips_are_ignored_outside_inbox_locations() {
+fn filters_narrow_every_location_and_muted_mail_never_matches() {
     let mb = sample();
-    let archive = View {
-        location: Location::Archive("personal".into()),
-        chip: Chip::PossibleSpam,
-        ..View::default()
-    };
-    assert_eq!(mb.ids_in_view(&archive).len(), 1);
+    let mut archive = Query::default();
+    archive.add(Field::In, "archived");
+    archive.add(Field::Account, "personal");
+    assert_eq!(mb.ids_matching(&archive, NOW), vec![3]);
+    // A sender pill is a filter like any other, and hides what it names.
+    archive.add(Field::From, "a@x.test");
+    assert_eq!(mb.ids_matching(&archive, NOW), vec![3], "message 3 is from a@x.test");
+    archive.add(Field::From, "c@x.test");
+    assert!(mb.ids_matching(&archive, NOW).is_empty(), "one of the two senders, not both");
+
+    let mut mb = mb;
+    assert!(mb.mute_thread(3));
+    assert!(mb.ids_matching(&archive, NOW).is_empty(), "a muted thread is out of the list");
+    assert_eq!(mb.ids_matching(&Query::default(), NOW).len(), 4, "hidden mail is not listed");
 }
 #[test]
-fn sent_folder_and_tag_filter_locations_select_expected_messages() {
+fn a_location_query_round_trips_through_its_tokens() {
     let mut mb = sample();
     mb.apply_auto(
         crate::helpers::sug(
@@ -61,35 +74,32 @@ fn sent_folder_and_tag_filter_locations_select_expected_messages() {
         ),
         0,
     );
-    let inbox = View {
-        location: Location::AllInboxes,
-        chip: Chip::NeedsReply,
-        filter: Filter {
-            tags: vec![TagFilter::NeedsReply],
-            kind: None,
-            account: Some("personal".into()),
-        },
-    };
-    assert_eq!(mb.ids_in_view(&inbox), vec![1]);
+    let mut inbox = Query::default();
+    inbox.add(Field::Tag, "needs-reply");
+    inbox.add(Field::Account, "personal");
+    inbox.add(Field::In, "inbox");
+    assert_eq!(mb.ids_matching(&inbox, NOW), vec![1]);
+    assert_eq!(
+        mb.query_location(&inbox),
+        Some(Location::Inbox("personal".into())),
+        "in:inbox plus account: is that account's inbox"
+    );
+    let all = mb.location_query(&Location::AllInboxes);
+    assert_eq!(mb.query_location(&all), Some(Location::AllInboxes), "a bare in:inbox is every inbox");
+
     mb.send_reply_at(1, "sent".into(), false, 0);
     mb.tick(10);
-    assert_eq!(
-        mb.ids_in_view(&View {
-            location: Location::Sent("personal".into()),
-            ..View::default()
-        })
-        .len(),
-        1
-    );
-    let folder = mb.create_folder("personal", "Receipts", None);
+    let sent = mb.location_query(&Location::Sent("personal".into()));
+    assert_eq!(mb.ids_matching(&sent, NOW).len(), 1);
+    assert_eq!(mb.query_location(&sent), Some(Location::Sent("personal".into())));
+
+    let folder = mb.create_folder("personal", "Zebras", None);
     mb.set_state(&[2], State::Filed(folder));
-    assert_eq!(
-        mb.ids_in_view(&View {
-            location: Location::Folder(folder),
-            ..View::default()
-        }),
-        vec![2]
-    );
+    let filed = mb.location_query(&Location::Folder(folder));
+    assert_eq!(mb.ids_matching(&filed, NOW), vec![2]);
+    assert_eq!(mb.query_location(&filed), Some(Location::Folder(folder)));
+    // The folder's own path is the `in:` value, so a nested folder still resolves.
+    assert_eq!(filed.values(Field::In), ["zebras"]);
 }
 
 #[test]

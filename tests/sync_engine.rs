@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use mail_classifier::clock::{Clock, DAY, FakeClock, Timestamp};
 use mail_classifier::contacts;
 use mail_classifier::model::{
-    Account, Folder, Location, Mailbox, Message, MessageId, ProviderKind, TriageState, View,
+    Account, Folder, Location, Mailbox, Message, MessageId, ProviderKind, TriageState,
 };
 use mail_classifier::provider::{
     Body, Changes, MailProvider, Page, ProviderError, RemoteFlags, RemoteFolder, RemoteId,
@@ -408,7 +408,7 @@ fn seeded() -> Cache {
 }
 
 fn inbox(mb: &Mailbox) -> Vec<MessageId> {
-    mb.ids_in_view(&View { location: inbox_location(), ..View::default() })
+    mb.ids_matching(&mb.location_query(&inbox_location()), NOW)
 }
 
 fn inbox_location() -> Location {

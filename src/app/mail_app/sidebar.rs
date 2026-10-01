@@ -18,12 +18,12 @@ use gpui_kit::component::{
     Icon, Sizable as _,
 };
 
-/// Titlebar and list-header label for the current location, e.g. `"All Inboxes"`,
-/// `"Work · Archive"` or `"Projects/Northwind"`.
-pub(super) fn view_label(view: &View, mailbox: &Mailbox) -> String {
-    match &view.location {
+/// Titlebar and list-header label for a location, e.g. `"All Inboxes"`, `"Work · Archive"`
+/// or `"Projects/Northwind"`.
+pub(super) fn location_label(loc: &Location, mailbox: &Mailbox) -> String {
+    match loc {
         Location::AllInboxes => "All Inboxes".to_owned(),
-        Location::Folder(id) => folder_path(mailbox, *id),
+        Location::Folder(id) => mailbox.folder_path(*id),
         loc => format!(
             "{} · {}",
             account_name(mailbox, &location_account(loc)),
@@ -63,26 +63,6 @@ fn account_name(mailbox: &Mailbox, id: &str) -> String {
         .map_or_else(|| id.to_owned(), |a| crate::account_style::display_name(a).to_owned())
 }
 
-/// A folder's name including its parents, e.g. `"Projects/Northwind"`.
-fn folder_path(mailbox: &Mailbox, id: FolderId) -> String {
-    let mut names = Vec::new();
-    let mut cursor = Some(id);
-    while let Some(next) = cursor {
-        let Some(folder) = mailbox.folder(next) else {
-            break;
-        };
-        names.push(folder.name.clone());
-        cursor = folder.parent;
-    }
-    names.reverse();
-    names.join("/")
-}
-
-/// Whether a location shows Inbox mail — the only locations with a chip row.
-pub(super) fn is_inbox_location(loc: &Location) -> bool {
-    matches!(loc, Location::AllInboxes | Location::Inbox(_))
-}
-
 /// Icon and tint of a location.
 fn location_icon(loc: &Location, t: &ThemeColor, open: bool) -> (IconName, Hsla) {
     match loc {
@@ -110,18 +90,20 @@ fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Tag {
 impl MailApp {
     /// Account the `g`-prefix jumps land in: the current location's, else the first.
     pub(super) fn nav_account(&self) -> Option<AccountId> {
-        match &self.triage.view.location {
-            Location::Folder(id) => self.mailbox.folder(*id).map(|f| f.account.clone()),
-            Location::AllInboxes => self.mailbox.accounts().first().map(|a| a.id.clone()),
-            loc => Some(location_account(loc)).filter(|a| !a.is_empty()),
+        match self.location() {
+            Some(Location::Folder(id)) => self.mailbox.folder(id).map(|f| f.account.clone()),
+            None | Some(Location::AllInboxes) => {
+                self.mailbox.accounts().first().map(|a| a.id.clone())
+            }
+            Some(loc) => Some(location_account(&loc)).filter(|a| !a.is_empty()),
         }
     }
 
     /// The sidebar: All Inboxes, then per account a submenu of its locations and folder tree.
     pub(super) fn render_sidebar(&self, cx: &Context<Self>) -> AnyElement {
-        let active = &self.triage.view.location;
+        let active = self.location();
         let mut items: Vec<SidebarMenuItem> =
-            vec![self.location_item(Location::AllInboxes, active, cx)];
+            vec![self.location_item(Location::AllInboxes, &active, cx)];
         for account in self.mailbox.accounts() {
             let mut children: Vec<SidebarMenuItem> = [
                 Location::Inbox(account.id.clone()),
@@ -131,11 +113,11 @@ impl MailApp {
                 Location::Trash(account.id.clone()),
             ]
             .into_iter()
-            .map(|loc| self.location_item(loc, active, cx))
+            .map(|loc| self.location_item(loc, &active, cx))
             .collect();
             for folder in self.mailbox.folders(&account.id) {
                 if folder.parent.is_none() {
-                    children.push(self.folder_item(folder, &account.id, active, cx));
+                    children.push(self.folder_item(folder, &account.id, &active, cx));
                 }
             }
             items.push(
@@ -186,14 +168,14 @@ impl MailApp {
     fn location_item(
         &self,
         loc: Location,
-        active: &Location,
+        active: &Option<Location>,
         cx: &Context<Self>,
     ) -> SidebarMenuItem {
         let (icon, color) = location_icon(&loc, cx.theme(), false);
-        let is_active = active == &loc;
+        let is_active = *active == Some(loc.clone());
         let counted =
             matches!(loc, Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_));
-        let count = self.mailbox.count_at(&loc);
+        let count = self.mailbox.count_at(&loc, self.now());
         let mut item = SidebarMenuItem::new(location_name(&loc).to_owned())
             .icon(Icon::new(icon).text_color(color))
             .active(is_active)
@@ -209,7 +191,7 @@ impl MailApp {
         &self,
         folder: &Folder,
         account: &AccountId,
-        active: &Location,
+        active: &Option<Location>,
         cx: &Context<Self>,
     ) -> SidebarMenuItem {
         let loc = Location::Folder(folder.id);
@@ -222,7 +204,7 @@ impl MailApp {
         let (icon, color) = location_icon(&loc, cx.theme(), !subfolders.is_empty());
         let mut item = SidebarMenuItem::new(folder.name.clone())
             .icon(Icon::new(icon).text_color(color))
-            .active(active == &loc)
+            .active(*active == Some(loc.clone()))
             .on_click(run(ShowLocation { location: loc }));
         if !subfolders.is_empty() {
             item = item.default_open(true).children(

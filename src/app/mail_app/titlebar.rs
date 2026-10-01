@@ -6,7 +6,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
-use super::{ListMode, MailApp, MenuKind};
+use super::{MailApp, MenuKind};
 use crate::app::actions::*;
 use crate::app::ui::{button, icon_button, primary_button, run, shortcut};
 
@@ -17,13 +17,10 @@ const SEARCH_SIDE: f32 = 190.;
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
-        let searching = matches!(self.mode, ListMode::Search(_));
+        let searching = self.is_filtered();
         let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
-        let view: SharedString = match &self.mode {
-            ListMode::State => self.location_label().into(),
-            ListMode::Search(_) => "Search".into(),
-        };
+        let view: SharedString = self.location_label().into();
         // The box is a kit outline `Button` (icon + placeholder/query label) that opens the
         // palette; the clear button, or the `/` keycap while idle, sits over its right edge.
         let search = div()

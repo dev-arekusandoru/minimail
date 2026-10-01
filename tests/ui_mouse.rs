@@ -110,7 +110,7 @@ impl Harness<'_> {
         self.read(|a| a.triage.cursor_index())
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox))
+        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
     }
     fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -213,11 +213,7 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
     let mut h = harness(cx);
     let id = h.ids()[0];
     h.click(("row", id as usize));
-    let cases: [ElementId; 3] = [
-        ("btn-message-more", id as usize).into(),
-        "btn-more".into(),
-        "btn-filter".into(),
-    ];
+    let cases: [ElementId; 2] = [("btn-message-more", id as usize).into(), "btn-more".into()];
     for trigger in cases {
         h.click(trigger.clone());
         let (button, row, viewport) = h
@@ -258,8 +254,8 @@ fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(cx: &
     h.keys("enter");
     assert!(!h.read(|a| a.palette_open()));
     assert_eq!(
-        h.read(|a| a.triage.view.location.clone()),
-        mail_classifier::model::Location::Snoozed("personal".into())
+        h.read(|a| a.location()),
+        Some(mail_classifier::model::Location::Snoozed("personal".into()))
     );
 }
 

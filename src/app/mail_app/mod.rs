@@ -27,7 +27,7 @@ use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::judge::{JudgePolicy, Kind, Routed, StubJudge, classify};
-use crate::model::{AccountId, Chip, Filter, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, TagFilter, Triage, TriageState, View};
+use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
@@ -38,8 +38,7 @@ use crate::threads::Row;
 
 mod accessors;
 mod actions;
-mod chips;
-mod filter_menu;
+mod filters;
 mod grouping;
 mod help;
 mod list;
@@ -60,8 +59,6 @@ use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
 
-/// Height of the list header above the rows (title, selection count, Filter ▾).
-const LIST_HEADER_H: f32 = 28.;
 /// Rows after the end of the list that start a load-more request.
 const LOAD_MORE_MARGIN: usize = 20;
 /// Identity of the toast notification, so each new toast replaces the last.
@@ -69,15 +66,6 @@ struct ToastId;
 /// Identity of the persistent “Fetching mail…” notification, kept apart from `ToastId` so the
 /// result toast doesn't replace it before it is dismissed.
 struct FetchToastId;
-
-/// What the message list currently shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum ListMode {
-    /// One of the four triage states (`Triage::view`).
-    State,
-    /// Search results for the (already stripped) query text.
-    Search(String),
-}
 
 /// A triage session: one inbox message at a time.
 struct Session {
@@ -90,6 +78,9 @@ struct Session {
 pub struct MailApp {
     pub mailbox: Mailbox,
     pub triage: Triage,
+    /// The folder the sidebar last showed. Its `in:` (and `account:`) values are the query's
+    /// implicit part: hidden as pills until something else is applied.
+    folder: Location,
     /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
     /// (see [`MailApp::opened`]).
     pub tabs: Tabs,
@@ -118,9 +109,6 @@ pub struct MailApp {
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
-    mode: ListMode,
-    /// Cursor for the non-`State` list modes.
-    alt_cursor: usize,
     /// One row per thread instead of per message (State panels).
     pub group_threads: bool,
     /// Threads whose messages are listed under their header.
@@ -163,6 +151,8 @@ pub struct MailApp {
     _modal_sub: Option<Subscription>,
     /// Which popup menu is open, if any (the kit owns the popup itself).
     open_menu: Option<MenuKind>,
+    /// The `+ Filter` picker or a pill's value editor, when one is open.
+    filter_popover: Option<filters::FilterPopoverState>,
     /// Local mail cache; `None` for mock-only sessions.
     cache: Option<Rc<crate::sync::cache::Cache>>,
     providers: HashMap<AccountId, crate::sync::SharedProvider>,
@@ -220,7 +210,8 @@ impl MailApp {
         let pane_subs = panes.states().into_iter().map(|state| cx.observe(state, |_, _, cx| cx.notify())).collect();
         let mut app = Self {
             mailbox,
-            triage: Triage::new(View::default()),
+            triage: Triage::new(Query::parse("in:inbox")),
+            folder: Location::AllInboxes,
             tabs: Tabs::default(),
             tab_avatars: true,
             palette: None,
@@ -237,8 +228,6 @@ impl MailApp {
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             clock,
-            mode: ListMode::State,
-            alt_cursor: 0,
             group_threads: false,
             expanded: HashSet::new(),
             row_cursor: 0,
@@ -265,6 +254,7 @@ impl MailApp {
             find_select: std::cell::Cell::new(0),
             _modal_sub: None,
             open_menu: None,
+            filter_popover: None,
             cache: None,
             providers: HashMap::new(),
             sync_error: None,

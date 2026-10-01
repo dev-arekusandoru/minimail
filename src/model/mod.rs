@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::clock::{DAY, HOUR, MINUTE, Timestamp};
 use crate::contacts::{ContactSource, ContactStore};
 use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
+use crate::search::{Field, Query};
 
 mod replies;
 mod states;
@@ -151,58 +152,6 @@ pub enum Location {
     Archive(AccountId),
     Trash(AccountId),
     Folder(FolderId),
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Chip {
-    #[default]
-    All,
-    NeedsReply,
-    FollowUp,
-    Urgent,
-    NewSenders,
-    PossibleSpam,
-}
-impl Chip {
-    pub const ALL: [Chip; 6] = [
-        Self::All,
-        Self::NeedsReply,
-        Self::FollowUp,
-        Self::Urgent,
-        Self::NewSenders,
-        Self::PossibleSpam,
-    ];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::NeedsReply => "Needs Reply",
-            Self::FollowUp => "Follow Up",
-            Self::Urgent => "Urgent",
-            Self::NewSenders => "New Senders",
-            Self::PossibleSpam => "Possible Spam",
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TagFilter {
-    NeedsReply,
-    AwaitingReply,
-    FollowUp,
-    Reminder,
-    NewSender,
-    PossibleSpam,
-    Urgent,
-}
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct Filter {
-    pub tags: Vec<TagFilter>,
-    pub kind: Option<Kind>,
-    pub account: Option<AccountId>,
-}
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct View {
-    pub location: Location,
-    pub chip: Chip,
-    pub filter: Filter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

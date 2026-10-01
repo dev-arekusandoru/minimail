@@ -61,13 +61,13 @@ impl Harness<'_> {
         TriageState::ALL.map(|s| self.count(s))
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox))
+        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
     }
     fn index(&mut self) -> usize {
         self.read(|a| a.triage.cursor_index())
     }
-    fn view(&mut self) -> Location {
-        self.read(|a| a.triage.view.location.clone())
+    fn view(&mut self) -> Option<Location> {
+        self.read(|a| a.location())
     }
     fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -132,7 +132,7 @@ fn state_keys_move_messages_and_undo(cx: &mut TestAppContext) {
 
     // Move back to inbox from the Archive location.
     h.keys("g a");
-    assert_eq!(h.view(), Location::Archive("personal".into()));
+    assert_eq!(h.view(), Some(Location::Archive("personal".into())));
     let d = h.cursor().unwrap();
     h.keys("i");
     assert_eq!(h.state_of(d), Inbox);
@@ -159,19 +159,19 @@ fn cmd_z_undoes(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn g_prefix_switches_locations(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert_eq!(h.view(), Location::AllInboxes);
+    assert_eq!(h.view(), Some(Location::AllInboxes));
     h.keys("g s");
-    assert_eq!(h.view(), Location::Snoozed("personal".into()));
+    assert_eq!(h.view(), Some(Location::Snoozed("personal".into())));
     h.keys("g t");
-    assert_eq!(h.view(), Location::Sent("personal".into()));
+    assert_eq!(h.view(), Some(Location::Sent("personal".into())));
     h.keys("g a");
-    assert_eq!(h.view(), Location::Archive("personal".into()));
+    assert_eq!(h.view(), Some(Location::Archive("personal".into())));
     h.keys("g d");
-    assert_eq!(h.view(), Location::Trash("personal".into()));
+    assert_eq!(h.view(), Some(Location::Trash("personal".into())));
     h.keys("g i");
-    assert_eq!(h.view(), Location::Inbox("personal".into()), "`g i` keeps the account");
+    assert_eq!(h.view(), Some(Location::Inbox("personal".into())), "`g i` keeps the account");
     h.keys("g i");
-    assert_eq!(h.view(), Location::Inbox("personal".into()));
+    assert_eq!(h.view(), Some(Location::Inbox("personal".into())));
     h.keys("j j g a");
     assert_eq!(h.index(), 0, "switching location resets the cursor");
 }
@@ -210,7 +210,7 @@ fn palette_runs_view_switch(cx: &mut TestAppContext) {
     h.keys("cmd-k");
     h.keys("g o space t o space s n o o z e d");
     h.keys("enter");
-    assert_eq!(h.view(), Location::Snoozed("personal".into()));
+    assert_eq!(h.view(), Some(Location::Snoozed("personal".into())));
 }
 
 impl Harness<'_> {
@@ -234,7 +234,7 @@ fn palette_matches_by_subsequence_and_by_key_string(cx: &mut TestAppContext) {
     h.keys("g space a");
     assert_eq!(h.palette_rows().first().map(String::as_str), Some("Go to archive"));
     h.keys("enter");
-    assert_eq!(h.view(), Location::Archive("personal".into()));
+    assert_eq!(h.view(), Some(Location::Archive("personal".into())));
 }
 
 #[gpui_kit::gpui::test]
@@ -388,7 +388,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     // Move the cursor (via keys) to a message whose sender has several messages.
     let multi = |h: &mut Harness| {
         h.read(|a| {
-            let id = a.triage.cursor(&a.mailbox).unwrap();
+            let id = a.triage.cursor(&a.mailbox, a.now()).unwrap();
             let email = a.mailbox.get(id).unwrap().from_email.clone();
             let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
             (email, n)

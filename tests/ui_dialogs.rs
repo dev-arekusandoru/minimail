@@ -162,7 +162,7 @@ impl Harness<'_> {
     }
 
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox))
+        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
     }
 
     /// Move the cursor with `j` until it reaches `id`.

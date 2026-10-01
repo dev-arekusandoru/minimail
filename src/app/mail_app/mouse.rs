@@ -3,7 +3,7 @@ use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::*;
 
-use super::{ListMode, MailApp, PaneLayout};
+use super::{MailApp, PaneLayout};
 
 impl MailApp {
     /// Move the cursor to visible row `ix` (either list mode), clamped.
@@ -22,7 +22,7 @@ impl MailApp {
         cx: &mut Context<Self>,
     ) {
         let mods = event.modifiers();
-        let selectable = self.mode == ListMode::State && !self.in_session();
+        let selectable = !self.in_session();
         if selectable && mods.shift {
             let delta = ix as isize - self.cursor_ix() as isize;
             self.extend_by(delta);
@@ -44,7 +44,7 @@ impl MailApp {
     /// Click on the row's left edge: like moving there and pressing `x`.
     pub(super) fn toggle_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.cursor_to(ix);
-        if self.mode == ListMode::State && !self.in_session() {
+        if !self.in_session() {
             self.toggle_select_cursor();
         }
         window.focus(&self.focus_handle, cx);

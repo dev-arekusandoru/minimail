@@ -62,12 +62,12 @@ impl MailApp {
         cx.notify();
     }
 
+    /// Run a palette query: parsed into the list's one query, on top of the folder being
+    /// browsed (so searching from inside a folder keeps it, until the pill is removed).
     pub(super) fn start_search(&mut self, raw: &str, cx: &mut Context<Self>) {
-        let q = raw.trim().trim_start_matches('/').trim().to_string();
-        self.end_session();
-        self.mode = ListMode::Search(q);
-        self.alt_cursor = 0;
-        cx.notify();
+        let mut query = self.implicit_query();
+        query.overlay(&Query::parse(raw));
+        self.apply_query(query, cx);
     }
 
     pub(super) fn open_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -458,8 +458,10 @@ impl MailApp {
     pub(super) fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.modal_open() {
             self.close_modals(window, cx);
-        } else if matches!(self.mode, ListMode::Search(_)) {
-            self.mode = ListMode::State;
+        } else if self.filter_popover.is_some() {
+            self.close_filter_popover();
+        } else if self.is_filtered() {
+            self.clear_filters(cx);
         } else if let Some(s) = self.session.take() {
             if s.handled > 0 {
                 self.session_end = Some((s.handled, self.now() - s.started));

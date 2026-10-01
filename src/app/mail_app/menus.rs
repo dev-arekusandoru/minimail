@@ -22,8 +22,6 @@ pub(super) enum MenuKind {
     Message(MessageId),
     /// Actions for the list's selection.
     Selection,
-    /// The list header's Filter ▾ menu.
-    Filter,
 }
 
 impl MailApp {
@@ -85,7 +83,6 @@ impl MailApp {
     pub(super) fn menu_items(&self, kind: MenuKind) -> (Vec<MenuItem>, Option<Vec<MessageId>>) {
         match kind {
             MenuKind::Global => (global_items(), None),
-            MenuKind::Filter => (self.filter_items(), None),
             MenuKind::Message(id) => (self.message_items(id), Some(vec![id])),
             MenuKind::Selection => (self.selection_items(), None),
         }
@@ -149,7 +146,7 @@ impl MailApp {
 
     /// Whether `x` can toggle `id` in the selection: it is a row of the state list.
     fn can_toggle_select(&self, id: MessageId) -> bool {
-        self.mode == ListMode::State && !self.in_session() && self.visible_ids().contains(&id)
+        !self.in_session() && self.visible_ids().contains(&id)
     }
 
     /// Toggle `ids` in the selection: all selected already → deselect them, else select them.

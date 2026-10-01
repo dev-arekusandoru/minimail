@@ -11,15 +11,15 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{ListMode, MailApp};
+use super::MailApp;
 use crate::app::row;
 use crate::model::MessageId;
 use crate::threads::{self, Row};
 
 impl MailApp {
-    /// Grouped rows are in effect: setting on, a state panel, not in a triage session.
+    /// Grouped rows are in effect: setting on and not in a triage session.
     pub(super) fn grouped(&self) -> bool {
-        self.group_threads && self.mode == ListMode::State && !self.in_session()
+        self.group_threads && !self.in_session()
     }
 
     /// The list rows when grouped (empty otherwise): threads collapsed or expanded.
@@ -27,7 +27,7 @@ impl MailApp {
         if !self.grouped() {
             return Vec::new();
         }
-        let ids = self.mailbox.ids_in_view(&self.triage.view);
+        let ids = self.visible_ids();
         let groups = threads::group(&ids, |id| self.mailbox.get(id));
         threads::rows(&groups, &self.expanded)
     }
@@ -57,7 +57,7 @@ impl MailApp {
     /// Shift-selection over rows, like `shift-j`/`shift-k`.
     pub(super) fn extend_by(&mut self, delta: isize) {
         if !self.grouped() {
-            self.triage.extend(&self.mailbox, delta);
+            self.triage.extend(&self.mailbox, self.now(), delta);
             return;
         }
         let rows = self.rows();
@@ -86,7 +86,7 @@ impl MailApp {
     /// `x`: toggle the cursor row (every message of a thread row) in the selection.
     pub(super) fn toggle_select_cursor(&mut self) {
         if !self.grouped() {
-            self.triage.toggle_select(&self.mailbox);
+            self.triage.toggle_select(&self.mailbox, self.now());
             return;
         }
         let Some(row) = self.cursor_row() else { return };
@@ -154,7 +154,7 @@ impl MailApp {
         }
         if self.grouped() {
             let thread = self.mailbox.get(id).map(|m| m.thread_id);
-            let in_panel = self.mailbox.ids_in_view(&self.triage.view).contains(&id);
+            let in_panel = self.visible_ids().contains(&id);
             if reveal && in_panel && let Some(t) = thread {
                 self.expanded.insert(t);
             }
@@ -171,13 +171,10 @@ impl MailApp {
             }
             return;
         }
+        let now = self.now();
         let ids = self.visible_ids();
         if let Some(at) = ids.iter().position(|x| *x == id) {
-            if self.mode == ListMode::State {
-                self.triage.set_cursor(&self.mailbox, at);
-            } else {
-                self.alt_cursor = at;
-            }
+            self.triage.set_cursor(&self.mailbox, now, at);
         }
     }
 

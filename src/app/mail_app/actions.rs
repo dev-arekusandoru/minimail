@@ -125,7 +125,7 @@ impl MailApp {
         self.rules.accept(rule.clone());
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_in_view(&View::default())
+            .ids_matching(&self.mailbox.location_query(&Location::AllInboxes), self.now())
             .into_iter()
             .filter(|id| {
                 self.mailbox
@@ -154,93 +154,10 @@ impl MailApp {
         }
     }
 
-    pub(super) fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
-        self.end_session();
-        self.mode = ListMode::State;
-        self.triage.switch_view(view);
-        self.row_cursor = 0;
-        self.row_anchor = None;
-        self.scroll_to_cursor();
-        cx.notify();
-    }
-
-    /// Show a location the way the sidebar does: chip and filters reset.
-    pub(super) fn show_location(&mut self, location: Location, cx: &mut Context<Self>) {
-        self.show_view(
-            View {
-                location,
-                ..View::default()
-            },
-            cx,
-        );
-    }
-
-    /// Re-point the current view without leaving the reader (chips and filters).
-    fn filter_view(&mut self, view: View, cx: &mut Context<Self>) {
-        self.end_session();
-        self.mode = ListMode::State;
-        self.triage.switch_view(view);
-        self.row_cursor = 0;
-        self.row_anchor = None;
-        self.scroll_to_cursor();
-        cx.notify();
-    }
-
-    /// Pick a chip. Chips live on Inbox views only, so elsewhere this is a no-op.
-    pub(super) fn select_chip(&mut self, chip: Chip, cx: &mut Context<Self>) {
-        if !sidebar::is_inbox_location(&self.triage.view.location) {
-            return;
-        }
-        if chip == Chip::NewSenders && !crate::known_senders::KNOWN_SENDERS_ENABLED {
-            return;
-        }
-        let view = View {
-            chip,
-            ..self.triage.view.clone()
-        };
-        self.filter_view(view, cx);
-    }
-
-    /// Add or remove one tag from the Filter ▾ menu.
-    pub(super) fn toggle_tag_filter(&mut self, tag: TagFilter, cx: &mut Context<Self>) {
-        let mut view = self.triage.view.clone();
-        if let Some(ix) = view.filter.tags.iter().position(|t| *t == tag) {
-            view.filter.tags.remove(ix);
-        } else {
-            view.filter.tags.push(tag);
-        }
-        self.filter_view(view, cx);
-    }
-
-    /// Pick the Filter ▾ menu's Kind (`None` = any kind).
-    pub(super) fn set_filter_kind(&mut self, kind: Option<Kind>, cx: &mut Context<Self>) {
-        let mut view = self.triage.view.clone();
-        view.filter.kind = kind;
-        self.filter_view(view, cx);
-    }
-
-    /// Pick the Filter ▾ menu's account (`None` = every account).
-    pub(super) fn set_filter_account(
-        &mut self,
-        account: Option<AccountId>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut view = self.triage.view.clone();
-        view.filter.account = account;
-        self.filter_view(view, cx);
-    }
-
-    /// Drop every Filter ▾ entry (the chip stays as it is).
-    pub(super) fn clear_filters(&mut self, cx: &mut Context<Self>) {
-        let mut view = self.triage.view.clone();
-        view.filter = Filter::default();
-        self.filter_view(view, cx);
-    }
-
     /// `g i`: the current account's Inbox, or All Inboxes when already there.
     pub(super) fn go_inbox(&mut self, cx: &mut Context<Self>) {
-        let location = match self.triage.view.location.clone() {
-            Location::AllInboxes => Location::AllInboxes,
+        let location = match self.location() {
+            Some(Location::AllInboxes) | None => Location::AllInboxes,
             _ => match self.nav_account() {
                 Some(account) => Location::Inbox(account),
                 None => return,
@@ -282,12 +199,13 @@ impl MailApp {
     }
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
-        let ids = self.mailbox.ids_in_view(&View::default());
+        let query = self.mailbox.location_query(&Location::AllInboxes);
+        let ids = self.mailbox.ids_matching(&query, self.now());
         if ids.is_empty() {
             return;
         }
-        self.mode = ListMode::State;
-        self.triage.switch_view(View::default());
+        self.folder = Location::AllInboxes;
+        self.triage.set_query(query);
         self.session_end = None;
         self.session = Some(Session {
             ids,
@@ -300,9 +218,10 @@ impl MailApp {
 
     /// Run the stub judge over the visible inbox. Returns `(auto-applied, queued for review)`.
     pub(super) fn classify_visible(&mut self) -> (usize, usize) {
+        let inbox = self.mailbox.location_query(&Location::AllInboxes);
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_in_view(&View::default())
+            .ids_matching(&inbox, self.now())
             .into_iter()
             .filter(|id| self.mailbox.pending(*id).is_empty())
             .collect();

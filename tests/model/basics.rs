@@ -1,5 +1,6 @@
 use crate::helpers::{State, assert_invariant, mailbox, sample};
-use mail_classifier::model::{Location, Mailbox, View};
+use mail_classifier::model::{Location, Mailbox};
+use mail_classifier::search::Query;
 
 #[test]
 fn set_state_and_sender_scope_are_undoable() {
@@ -37,7 +38,8 @@ fn folders_are_seeded_nested_and_create_undoes() {
     assert!(mb.folder(id).is_none());
 }
 #[test]
-fn location_chip_filter_and_account_selection() {
+fn a_location_query_and_its_count_select_the_same_mail() {
+    const NOW: mail_classifier::clock::Timestamp = 1_790_000_000;
     let mut mb = sample();
     mb.apply_auto(
         crate::helpers::sug(
@@ -47,13 +49,11 @@ fn location_chip_filter_and_account_selection() {
         ),
         0,
     );
-    let v = View {
-        location: Location::Inbox("personal".into()),
-        ..View::default()
-    };
-    assert!(mb.ids_in_view(&v).contains(&1));
-    assert_eq!(mb.count_at(&Location::Archive("personal".into())), 1);
-    assert_eq!(mb.count_at(&Location::Folder(1)), 0);
+    let inbox = mb.location_query(&Location::Inbox("personal".into()));
+    assert!(mb.ids_matching(&inbox, NOW).contains(&1));
+    assert_eq!(mb.count_at(&Location::Archive("personal".into()), NOW), 1);
+    assert_eq!(mb.count_at(&Location::Folder(1), NOW), 0);
+    assert_eq!(mb.query_location(&inbox), Some(Location::Inbox("personal".into())));
 }
 #[test]
 fn fixture_invariant_and_accounts() {
@@ -94,5 +94,5 @@ fn fixture_covers_every_triage_state_with_real_folders_and_wake_times() {
 #[test]
 fn empty_mailbox_views_are_empty() {
     let mb = mailbox(&[]);
-    assert!(mb.ids_in_view(&View::default()).is_empty());
+    assert!(mb.ids_matching(&Query::default(), 0).is_empty());
 }

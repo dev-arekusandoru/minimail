@@ -131,7 +131,7 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.count(s))
     }
     pub fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox))
+        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
     }
     pub fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -185,5 +185,28 @@ impl Harness<'_> {
 impl Harness<'_> {
     pub fn palette_rows(&mut self) -> Vec<String> {
         self.app.read_with(self.cx, |a, cx| a.palette_rows(cx))
+    }
+    /// Rows of the open filter picker, top to bottom.
+    pub fn picker_rows(&mut self) -> Vec<String> {
+        self.app.read_with(self.cx, |a, cx| a.filter_popover_rows(cx))
+    }
+    /// The pills the list header shows.
+    pub fn pills(&mut self) -> Vec<String> {
+        self.read(|a| a.pill_texts())
+    }
+    /// The list header's first line, e.g. `"Inbox · 12"`.
+    pub fn header(&mut self) -> String {
+        self.read(|a| a.header_title(a.visible_ids().len()))
+    }
+    /// The query the list is showing, as text.
+    pub fn query(&mut self) -> String {
+        self.read(|a| a.query().describe())
+    }
+    /// Whether an element is in the tree of the last completed frame.
+    pub fn has(&mut self, id: impl Into<gpui_kit::ElementId>) -> bool {
+        let id = id.into();
+        self.cx
+            .update_window(self.window, |_, window, _| window.try_find(id).is_some())
+            .unwrap_or(false)
     }
 }

@@ -4,8 +4,8 @@ use crate::app::chrome::HELP_CONTEXT;
 use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
-use crate::judge::Kind;
-use crate::model::{AccountId, Location, TagFilter};
+use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
+use crate::model::Location;
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -132,18 +132,20 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("r", Reply, m),
         KeyBinding::new("shift-a", ReplyAll, m),
         KeyBinding::new("w", Forward, m),
-        // Sidebar navigation: chips (Inbox views only) and `g`-prefix jumps.
-        KeyBinding::new("1", SelectChip1, m),
-        KeyBinding::new("2", SelectChip2, m),
-        KeyBinding::new("3", SelectChip3, m),
-        KeyBinding::new("4", SelectChip4, m),
-        KeyBinding::new("5", SelectChip5, m),
-        KeyBinding::new("6", SelectChip6, m),
+        // Sidebar navigation: `g`-prefix jumps.
         KeyBinding::new("g i", GoInbox, m),
         KeyBinding::new("g s", GoSnoozed, m),
         KeyBinding::new("g t", GoSent, m),
         KeyBinding::new("g a", GoArchive, m),
         KeyBinding::new("g d", GoTrash, m),
+        // The list header's filter pills: number keys toggle the quick ones.
+        KeyBinding::new("1", QuickFilter1, m),
+        KeyBinding::new("2", QuickFilter2, m),
+        KeyBinding::new("3", QuickFilter3, m),
+        KeyBinding::new("4", QuickFilter4, m),
+        KeyBinding::new("5", QuickFilter5, m),
+        KeyBinding::new("6", QuickFilter6, m),
+        KeyBinding::new("l", AddFilter, m),
         KeyBinding::new("?", ToggleHelp, m),
         KeyBinding::new("y", AcceptSuggestions, m),
         KeyBinding::new("n", RejectSuggestions, m),
@@ -223,6 +225,10 @@ pub fn bind_keys(cx: &mut App) {
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),
+        // Filter picker: `enter` and `space` belong to its list and inputs, not to the kit
+        // popover around it (which would close on them).
+        KeyBinding::new("enter", NoAction, Some(FILTER_PICKER_CONTEXT)),
+        KeyBinding::new("space", NoAction, Some(FILTER_PICKER_CONTEXT)),
         // Palette dialog: the kit's Command owns navigation, enter and escape.
         KeyBinding::new("cmd-k", ToggleCommandPalette, p),
     ]);
@@ -361,16 +367,27 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Navigate, "Go to sent", "g t", GoSent),
         cmd!(Navigate, "Go to archive", "g a", GoArchive),
         cmd!(Navigate, "Go to trash", "g d", GoTrash),
-        cmd!(Navigate, "Chip: all", "1", SelectChip1),
-        cmd!(Navigate, "Chip: needs reply", "2", SelectChip2),
-        cmd!(Navigate, "Chip: follow up", "3", SelectChip3),
-        cmd!(Navigate, "Chip: urgent", "4", SelectChip4),
-        cmd!(Navigate, "Chip: new senders", "5", SelectChip5),
-        cmd!(Navigate, "Chip: possible spam", "6", SelectChip6),
-        cmd!(Navigate, "Clear filters", "", ClearFilters),
+        cmd!(Navigate, "Add filter…", "l", AddFilter),
+        cmd!(Navigate, "Clear filters", "escape", ClearFilters),
     ];
+    // The number keys toggle the quick filter pills (all, needs reply, follow up, urgent,
+    // new senders, possible spam), in that order.
+    const QUICK: [fn() -> Box<dyn Action>; 6] =
+        [|| Box::new(QuickFilter1), || Box::new(QuickFilter2), || Box::new(QuickFilter3), || Box::new(QuickFilter4), || Box::new(QuickFilter5), || Box::new(QuickFilter6)];
+    const KEYS: [&str; 6] = ["1", "2", "3", "4", "5", "6"];
+    for (i, action) in QUICK.into_iter().enumerate() {
+        if crate::filters::quick_filter(i).is_none() {
+            continue;
+        }
+        cmds.push(CommandSpec {
+            category: Category::Navigate,
+            name: crate::filters::QUICK_FILTER_NAMES[i],
+            key: KEYS[i],
+            action,
+        });
+    }
     if !crate::known_senders::KNOWN_SENDERS_ENABLED {
-        cmds.retain(|c| c.name != "Allow sender" && c.name != "Chip: new senders");
+        cmds.retain(|c| c.name != "Allow sender");
     }
     cmds
 }
@@ -385,12 +402,13 @@ gpui_kit::actions!(
         GoSent,
         GoArchive,
         GoTrash,
-        SelectChip1,
-        SelectChip2,
-        SelectChip3,
-        SelectChip4,
-        SelectChip5,
-        SelectChip6,
+        QuickFilter1,
+        QuickFilter2,
+        QuickFilter3,
+        QuickFilter4,
+        QuickFilter5,
+        QuickFilter6,
+        AddFilter,
         ClearFilters
     ]
 );
@@ -402,23 +420,3 @@ pub struct ShowLocation {
     pub location: Location,
 }
 
-/// Add or remove one tag from the Filter ▾ menu's tag list.
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct ToggleTagFilter {
-    pub tag: TagFilter,
-}
-
-/// Pick the Filter ▾ menu's Kind (`None` = any kind).
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct SetFilterKind {
-    pub kind: Option<Kind>,
-}
-
-/// Pick the Filter ▾ menu's account (`None` = every account).
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct SetFilterAccount {
-    pub account: Option<AccountId>,
-}

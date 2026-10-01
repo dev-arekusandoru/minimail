@@ -261,7 +261,7 @@ impl MailApp {
         let Some(cache) = self.cache.clone() else {
             return;
         };
-        let location = self.triage.view.location.clone();
+        let Some(location) = self.location() else { return };
         let scopes: Vec<(AccountId, Scope)> = sync::scopes_for(&self.mailbox, &cache, &location)
             .into_iter()
             .filter(|(account, scope)| sync::has_older(&cache, account, scope))
@@ -363,7 +363,8 @@ impl MailApp {
 
     /// Drop everything shown for demo data and reset view state.
     fn reset_view_state(&mut self) {
-        self.triage = Triage::new(View::default());
+        self.folder = Location::AllInboxes;
+        self.triage = Triage::new(self.mailbox.location_query(&Location::AllInboxes));
         self.tabs = Tabs::default();
         self.expanded.clear();
         self.reader_panes.borrow_mut().clear();
@@ -372,7 +373,6 @@ impl MailApp {
         self.session = None;
         self.menu_target = None;
         self.row_cursor = 0;
-        self.alt_cursor = 0;
         self.demo = false;
     }
 

@@ -211,68 +211,21 @@ impl Mailbox {
             (id, mb.set_state(ids, TriageState::Filed(id)))
         })
     }
-    pub fn ids_in_view(&self, view: &View) -> Vec<MessageId> {
+    /// Ids of every visible message `query` matches, newest first. Muted, blocked and
+    /// unsubscribed mail never matches. Relative dates resolve against `now`.
+    pub fn ids_matching(&self, query: &Query, now: Timestamp) -> Vec<MessageId> {
         self.newest_first
             .iter()
             .copied()
             .filter(|id| {
-                let Some(m) = self.get(*id) else {
-                    return false;
-                };
-                if self.is_hidden_msg(m) {
-                    return false;
-                }
-                let location_ok = match &view.location {
-                    Location::AllInboxes => !m.outgoing && m.state == TriageState::Inbox,
-                    Location::Inbox(a) => {
-                        !m.outgoing && m.account == *a && m.state == TriageState::Inbox
-                    }
-                    Location::Snoozed(a) => m.account == *a && m.state == TriageState::Snoozed,
-                    Location::Sent(a) => {
-                        m.account == *a && m.outgoing && m.state != TriageState::Deleted
-                    }
-                    Location::Archive(a) => m.account == *a && m.state == TriageState::Archived,
-                    Location::Trash(a) => m.account == *a && m.state == TriageState::Deleted,
-                    Location::Folder(f) => m.state == TriageState::Filed(*f),
-                };
-                location_ok && view.filter.account.as_ref().is_none_or(|a| &m.account == a)
-            })
-            .filter(|id| {
-                let tags = self.tags(*id);
-                let matches = |t: TagFilter| match t {
-                    TagFilter::NewSender => self.is_new_sender(*id),
-                    TagFilter::NeedsReply => tags.contains(&Tag::NeedsReply),
-                    TagFilter::AwaitingReply => tags.contains(&Tag::AwaitingReply),
-                    TagFilter::FollowUp => tags.contains(&Tag::FollowUp),
-                    TagFilter::Reminder => tags.contains(&Tag::Reminder),
-                    TagFilter::PossibleSpam => tags.contains(&Tag::PossibleSpam),
-                    TagFilter::Urgent => tags.iter().any(|x| matches!(x, Tag::Urgent(_))),
-                };
-                view.filter.tags.iter().all(|t| matches(*t))
-                    && view
-                        .filter
-                        .kind
-                        .is_none_or(|k| tags.contains(&Tag::Kind(k)))
-            })
-            .filter(|id| {
-                !matches!(&view.location, Location::AllInboxes | Location::Inbox(_))
-                    || match view.chip {
-                        Chip::All => true,
-                        Chip::NeedsReply => self.tags(*id).contains(&Tag::NeedsReply),
-                        Chip::FollowUp => self.tags(*id).contains(&Tag::FollowUp),
-                        Chip::Urgent => self.tags(*id).iter().any(|x| matches!(x, Tag::Urgent(_))),
-                        Chip::NewSenders => self.is_new_sender(*id),
-                        Chip::PossibleSpam => self.tags(*id).contains(&Tag::PossibleSpam),
-                    }
+                self.get(*id)
+                    .is_some_and(|m| !self.is_hidden_msg(m) && query.matches(m, self, now))
             })
             .collect()
     }
-    pub fn count_at(&self, location: &Location) -> usize {
-        self.ids_in_view(&View {
-            location: location.clone(),
-            ..View::default()
-        })
-        .len()
+    /// How many visible messages `location` holds.
+    pub fn count_at(&self, location: &Location, now: Timestamp) -> usize {
+        self.ids_matching(&self.location_query(location), now).len()
     }
     /// A folder's name including its parents, e.g. `"Projects/Northwind"`.
     pub fn folder_path(&self, id: FolderId) -> String {
@@ -287,6 +240,69 @@ impl Mailbox {
         }
         names.reverse();
         names.join("/")
+    }
+    /// The query that lists exactly `location`: an `in:` value, plus `account:` for every
+    /// location that belongs to one account.
+    pub fn location_query(&self, location: &Location) -> Query {
+        let (place, account) = match location {
+            Location::AllInboxes => ("inbox".to_owned(), None),
+            Location::Inbox(a) => ("inbox".to_owned(), Some(a.as_str())),
+            Location::Snoozed(a) => ("snoozed".to_owned(), Some(a.as_str())),
+            Location::Sent(a) => ("sent".to_owned(), Some(a.as_str())),
+            Location::Archive(a) => ("archived".to_owned(), Some(a.as_str())),
+            Location::Trash(a) => ("deleted".to_owned(), Some(a.as_str())),
+            Location::Folder(id) => (
+                self.folder_path(*id),
+                self.folder(*id).map(|f| f.account.as_str()),
+            ),
+        };
+        let mut q = Query::default();
+        q.add(Field::In, &place);
+        if let Some(account) = account {
+            q.add(Field::Account, account);
+        }
+        q
+    }
+    /// The location `query` names through its `in:` (and `account:`) values: exactly one of
+    /// each at most, the account required for everything but All Inboxes. `None` for a
+    /// query that is not anchored to one place (global search, several `in:` values).
+    pub fn query_location(&self, query: &Query) -> Option<Location> {
+        let [place] = query.values(Field::In) else {
+            return None;
+        };
+        let account = match query.values(Field::Account) {
+            [] => None,
+            [a] => Some(a),
+            _ => return None,
+        };
+        let account_id = |a: &String| {
+            self.accounts
+                .iter()
+                .find(|x| x.id.to_lowercase() == *a)
+                .map(|x| x.id.clone())
+        };
+        let account = match account {
+            Some(a) => Some(account_id(a)?),
+            None => None,
+        };
+        match (place.as_str(), account) {
+            ("inbox", None) => Some(Location::AllInboxes),
+            ("inbox", Some(a)) => Some(Location::Inbox(a)),
+            ("snoozed", Some(a)) => Some(Location::Snoozed(a)),
+            ("sent", Some(a)) => Some(Location::Sent(a)),
+            ("archived", Some(a)) => Some(Location::Archive(a)),
+            ("deleted", Some(a)) => Some(Location::Trash(a)),
+            (_, None) => None,
+            (folder, Some(a)) => {
+                // A full path wins over a bare leaf name, so `in:projects/recruiting` picks
+                // the nested folder when two folders share a name.
+                let in_account = || self.folders.iter().filter(|f| f.account == a);
+                in_account()
+                    .find(|f| self.folder_path(f.id).to_lowercase() == folder)
+                    .or_else(|| in_account().find(|f| f.name.to_lowercase() == folder))
+                    .map(|f| Location::Folder(f.id))
+            }
+        }
     }
     pub fn follow_up_timeout(&self) -> Timestamp {
         self.follow_up_timeout
