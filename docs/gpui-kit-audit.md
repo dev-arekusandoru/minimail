@@ -1,0 +1,98 @@
+# gpui-kit 0.7 adoption audit
+
+Scope: `gpui-component-0.7.0/src` (re-exported as `gpui_kit::component`) plus `gpui-kit-0.7.0`. The gpui-kit.com index was not consulted; everything below is verified against the crate source and this repo's `src/`/`tests/`. Audit only: no source was changed.
+
+Kit modules that exist: accordion, alert, attachment, avatar (+group), badge, breadcrumb, bubble, button, carousel, chart, checkbox, clipboard, collapsible, color_picker, combobox, command, description_list, dialog, dock, empty, form, group_box, highlighter, history, hover_card, icon, input (+number/otp/textarea/search), kbd, label, link, list, marker, menu (popup_menu, context_menu, dropdown_menu, app_menu_bar, native_menu), message, message_scroller, notification, pagination, plot, popover, progress, questionnaire, radio, rating, resizable, root, scroll (scrollbars), searchable_list, select, separator, setting, sheet, shimmer, sidebar, skeleton, slider, spinner, status_bar, stepper, switch, tab, table, tag, text (TextView), time, title_bar, toolbar, toggle, tooltip, tree, virtual_list, window_border.
+
+Key: **Used** = adopted consistently. **Inconsistent** = kit used at some sites, hand-rolled at others. **Hand-rolled** = app builds its own equivalent. **N/A** = no fit.
+Effort: S < 1h, M a few hours, L a day+.
+
+## Component table
+
+| Component | Status | Sites | Proposed action | Expected loss / risk | Effort |
+|---|---|---|---|---|---|
+| Button | Inconsistent | Kit: `app/ui.rs:68,110,131`, `reader_parts.rs:68`, `reader_tabbar.rs:32`, `reader_findbar.rs:37`, `chrome.rs:220`. Hand-rolled click divs: sidebar chevron/fold header (`sidebar.rs:346`), `chips.rs:44` (chip), `titlebar.rs:29` (search box), list thread header `grouping.rs:353`, `reader_thread.rs:48` collapsed lines, dialog option rows (`dialog.rs:106`), rules rows (`panels.rs:128`), snooze rows (`snooze.rs:114`) | Chips/search box → `Button` (see Tag/Toggle); rest are list rows, not buttons: leave | Low; row-like divs would lose layout control | S |
+| Kbd | Used | `ui.rs:36-40` `shortcut()`, `reader_parts.rs:57`, `menu.rs` (via `shortcut`), palette (Command) | None | – | – |
+| Tooltip | Used | `icons.rs:299`, `ui.rs:87`, `titlebar.rs:47`, `reader_message.rs:92`, `mouse.rs:110` all build the kit `Tooltip` | None (no hand-rolled hover popups found) | – | – |
+| Tab / TabBar | Used | `reader_tabbar.rs:44` | None | – | – |
+| Command | Used | `palette.rs`, `folder_picker.rs` (in `open_dialog`) | None | – | – |
+| StatusBar | Used | `chrome.rs` `HintBar` (~l.111-140) | None | – | – |
+| Resizable | Used | `panes.rs:13` | None | – | – |
+| Root / Theme / Settings / Switch / Dropdown / NumberInput | Used | `settings.rs`, `ui.rs:27` | None | – | – |
+| Input / InputState | Used | `snooze.rs:53,179`, `reader_findbar.rs:73`, `reader_find.rs:81`. Hand-rolled "input" look: titlebar search box is a div showing text (`titlebar.rs:29`) that opens the palette | Keep: it is a button that opens the palette, not an input. Optionally render with `Button::outline()` | None | S |
+| Separator | Inconsistent | Kit: `compose.rs:113`, `panels.rs:110`, `chrome.rs:227,239`. Hand-rolled: `div().h(px(1.)).bg(border)` at `menu.rs:296`, `reader_message.rs:~248` (recipient_rows) | Replace both with `Separator::horizontal()` | None | S |
+| Label | Inconsistent | Kit: `compose.rs:95`, `chrome.rs:195`. All other text is raw `div().text_*` | Leave; Label adds nothing without form context. Only `compose.rs` form rows could use `DescriptionList` | None | – |
+| Dialog (`window.open_dialog`) | **Inconsistent** | Kit: palette, folder picker (`modals.rs:15` `host_in_dialog`), confirm dialogs via `open_dialog` (`modals.rs:463,630,688,772,880`). Hand-rolled modals with `overlay()` backdrop (`overlay.rs`, `render.rs:276-312`): snooze picker (`snooze.rs`), settings (`settings.rs:467`), rules panel (`panels.rs:93-110`), ChoiceDialog (`dialog.rs:130-186`), help (`render.rs:~262` + `chrome.rs:200-240`) | Host snooze, rules, ChoiceDialog, help and settings through `host_in_dialog`, then delete `overlay.rs` (`overlay()`, `FitViewport`) and the `snooze/settings/rules_panel/dialog/help` render branches | Key contexts (`MailSnooze`, rules/dialog contexts) must still be tracked inside dialog content; the kit `Dialog` has its own Escape handling so `DialogCancel` etc. can double-fire. Focus restore on close comes free. Tests that assert overlay state (`a.help`, `a.snooze`) need to follow the new fields | M-L |
+| Sheet | N/A | – | Possible home for Settings (right-side sheet, `window.open_sheet`), but settings is already a self-contained panel; Dialog is the lower-risk target | – | – |
+| Notification (toast) | Hand-rolled | `render.rs:246-275`, `actions.rs:4 show_toast` (+ ~20 callers), `mod.rs:99 toast`, test `tests/ui_ext/harness.rs:129` reads `a.toast` | `window.push_notification(Notification::success(msg).id1(..).autohide(true).action(...), cx)` with an "Undo" action when the text contains "undo" | Tests read `MailApp.toast`; keep a `last_toast` string for tests or read from `NotificationList`. Toast currently pinned bottom-centre above the hint bar; kit places top-right by default (`.placement(Anchor)` can move it). The Undo button uses `key_tooltip`; the kit `action` closure is a plain button, so we lose the `u` keycap hint (can be put in the message text) | M |
+| Alert | Hand-rolled | `reader_message.rs:~265-330 banners()` (new-sender, possible-spam), `panels.rs RuleBanner` (~l.260-290), `render.rs:~244` | `Alert::warning(id, text).banner()` for the banner chrome; buttons stay `Button`s inside | Alert has no action slot in the builder shown (`new/info/success/warning/error/title/icon/banner/visible/on_close`): action buttons would need to be siblings, or keep div. Partial adoption risk: medium | M |
+| Tag / Badge (chips, pills, state badges) | **Hand-rolled** | State/tag/kind badges `reader_parts.rs:85 badge()`; filter chips `chips.rs:44-60`; count pill `sidebar.rs:331 count_badge`; account dot in rows `rows.rs:174`; `reader_findbar.rs:63-70` | Detail badges → `Tag::custom(color, fg, border).rounded_full()` (API: `Tag::new/primary/secondary/danger/success/warning/info/custom(color, fg, border)/color(impl Into<ColorName>)/with_variant/outline/rounded/rounded_full`); count pill → `Badge::new().count(n).max(99).color(c)`; chips → `Button::new().outline()/.selected(on)` or `Tag` with click wrapper | Tag has no icon slot (Glyph icon in `badge()` would be placed as a sibling child; layout differs) and no `on_click`; chips are clickable so keep them `Button`-based (`.selected(on)`). Badge is an overlay decoration (dot/count on a child), not a stand-alone inline pill, so it may not fit sidebar's inline count: keep `count_badge` if it doesn't | M |
+| Avatar | Hand-rolled | Monogram `reader_parts.rs:32-50 monogram()` (initials in bordered rounded square, used by `reader_tabbar.rs:49`, `reader_message.rs:116`) | `Avatar::new().name(name)` (API: `new/src/name/placeholder`, circular, derives initials from `name`) | Our monogram uses `reading::initials(name, email)` (fallback to email) and a deterministic square tinted look; Avatar's initials algorithm and circle shape differ, and the app tests may pin initials. Pure-logic `initials()` stays | S-M |
+| Checkbox | N/A (today) | No bulk-select checkboxes in rows; selection is shown by bar + `RowVisual.selected` (`row.rs:frame`) | None. Adding row checkboxes would change layout and is not a keyboard concern; skip | – | – |
+| Sidebar | Hand-rolled | `sidebar.rs:100-549`: `render_sidebar`, `nav_row`, `account_header`, `fold_rows`, tree-rail glyphs (stem/branch), `count_badge` | Candidate: `Sidebar::new(id)` + `SidebarGroup::new(label).child(..)` + `SidebarMenu::new().child(SidebarMenuItem::new(label).icon(..).active(bool).on_click(..).suffix(..).children(..).default_open(..))` | Our bespoke rails/colour-bar per account, account-colour active marker, fold chevron-on-hover, `test_support()` ids used by tests (`nav-*`), keyboard `g`-jumps and folding keys all depend on the custom rows. Kit Sidebar is built for its own look (collapsible rail) and has no tree rails. **Loses**: rail/branch drawing, per-account active-bar colour, element ids used in `tests/ui_*`. Recommend: do NOT migrate; at most use `Badge`/`Separator` pieces | L (not recommended) |
+| TitleBar | Hand-rolled | `titlebar.rs:1-174` (own drag region via `on_mouse_down`, traffic-light inset 80px, search box, right buttons) | Use `TitleBar::new()` + `TitleBar::title_bar_options()` for window options and drag/double-click zoom; keep children | Our `no_drag` plumbing exists because we build the drag region ourselves; kit TitleBar handles hit-testing so `no_drag` may become unnecessary. Risk: macOS traffic-light inset and fullscreen offset logic; double-click-to-zoom behaviour changes | M |
+| PopupMenu / ContextMenu / DropdownMenu | **Hand-rolled** | `app/menu.rs` `MenuPanel` (320 lines: items, submenus, keyboard nav `MenuNext/Prev/Back/Run/Open/Cancel`, `MENU_CONTEXT`), `mail_app/menus.rs`, `filter_menu.rs`, `mouse.rs`; right-click on rows `rows.rs:237` | `PopupMenu::build(window, cx, \|menu, w, cx\| menu.menu(label, Box<dyn Action>).separator().submenu(label, \|..\|))` (`PopupMenuItem::new(label).action(Box<dyn Action>)`), `ContextMenuExt::context_menu(\|menu, w, cx\| ..)`, `DropdownMenu::dropdown_menu(..)` for the titlebar overflow and Filter ▾ | Kit menu already supports keyboard (up/down/enter/escape/left-right submenu) and shows action `Kbd`s from key bindings automatically (our `key:` strings become redundant). **Loss**: our fixed `MENU_W` anchoring, custom row heights math (`menus.rs:254`), our exact `MenuRun` semantics ("choosing runs exactly what its shortcut runs" also works with Box<dyn Action>), and tests driving `MailMenu` actions. Position of a context menu opened from a *keyboard* shortcut (menu at cursor row) is not supported by `ContextMenuExt` (mouse-anchored); needs a `PopupMenu` entity in a `Popover`/anchored element | L |
+| List / VirtualList | N/A (keep) | Message list uses `gpui::list` + `ListState` with measured variable row heights (`list.rs:120-185`) | Keep. Kit `VirtualList` (`v_virtual_list`) needs known item sizes; `List` wraps `ListDelegate` with its own selection/keyboard that would collide with our cursor model | Would break cursor/selection invariants and measured previews | – |
+| Scrollbar (`ScrollableElement`) | Hand-rolled | Bare `overflow_y_scroll()` with no visible scrollbar: `sidebar.rs:179`, `reader.rs:165` (`track_scroll`), `menu.rs:265`, `chrome.rs:236`, `dialog.rs:162`, `panels.rs:98`, `snooze.rs:158`; message list (`gpui::list`) | `.scrollable(Axis::Vertical)` / `ScrollableElement` (`scroll/scrollable.rs`) adds a styled overlay scrollbar; apply to sidebar, reader scroll, help, rules | Reader keeps its `ScrollHandle` for `find`/jump-to; scrollbar wrapper must accept `track_scroll`. Minimal functionality risk, visual change | S-M |
+| Collapsible / Accordion | Hand-rolled | Collapsed thread messages `reader_thread.rs:36-70 collapsed_line` and expand toggle (`shift-o`, `toggle_reader_expanded`), sidebar folds, quoted-text fold in `reader_message.rs` | `Collapsible::new().open(bool).content(el)` for the message body expand; Accordion not needed | Open/closed state is owned by `MailApp` (`reader_state.rs`) for keyboard/undo and find (`reader_find.rs` expands matches), so `Collapsible` must be driven by `.open(state)` only. Animation can desync virtualised find scroll offsets. Low gain | S-M |
+| DescriptionList | Hand-rolled | `reader_message.rs:~232 recipient_rows` (To/Cc/Bcc label+value), `compose.rs:95` header rows | `DescriptionList::horizontal().label_width(px(32.)).item(label, value, span)` | Values here are plain text; minor. Keep mono label style via `DescriptionText` | S |
+| TextView | Used | `reader_message.rs:463` HTML body only; plain-text bodies and summary card are divs | Check plain text bodies/quoted blocks: `TextView::markdown`/`html` supports text selection; plain body could use it for consistent selection/copy | `reader_find.rs` highlights matches itself; TextView content cannot be decorated with find highlights. Plain bodies must stay div-rendered for find. | – (keep) |
+| Spinner / Skeleton / Shimmer / Progress | Hand-rolled / none | Summary "generating" state in `summary.rs`/`SummaryCard` (text only); `SessionCard` uses text `"{pos}/{total}"` (`panels.rs:168`) | `Progress::new().value(pct)` in `SessionCard`; `Spinner::new()` while a summary generates | None (data is deterministic stubs, so spinner never visible: skip Spinner/Skeleton) | S |
+| Empty | Hand-rolled | `chrome.rs` empty state (view tabs/empty state section) | `Empty::new().header(EmptyHeader::new().media(..).title(..).description(..))` | None | S |
+| Toolbar / Toggle / Radio / Select / Slider | N/A | – | None; `ChoiceDialog` options are numbered rows (`1`-`5` keys) and not radios | – | – |
+| Link | N/A | Reader HTML links are handled inside `TextView` | None | – | – |
+| Hover card / Popover | N/A (candidate) | Filter menu / overflow anchored by hand (`filter_menu.rs`, `mouse.rs`) | Needed only if menus move to `PopupMenu` (anchor via `Popover`/`dropdown_menu_with_anchor`) | – | (folded into menu row) |
+| Breadcrumb, Pagination, Rating, ColorPicker, Slider, Stepper, Tree, Table, Dock, Chart, Carousel, Questionnaire, Attachment, Bubble, Message | N/A | Folder tree is custom with rails; `Tree` is a flat-list API with its own selection | None | – | – |
+
+## Findings worth calling out
+
+1. **Dialog split.** Two modal systems coexist: kit `Dialog` (palette, folder picker, confirms) and the legacy `overlay()` stack (snooze, settings, rules, ChoiceDialog, help). Finishing the move is the single biggest consistency win and lets us delete `overlay.rs`.
+2. **Toast.** Custom absolute-positioned div; `Root` already mounts the notification layer, so `push_notification` is available.
+3. **Menus.** `MenuPanel` duplicates `PopupMenu` including keyboard nav and Kbd rendering.
+4. **Pills.** Four independent hand-rolled pills: reader badges, list chips, sidebar count, row account dot.
+5. Tooltips, Kbd, Tab, Command, StatusBar, Resizable are already consistent: every tooltip site builds the kit `Tooltip`.
+
+## Migration plan (independent workstreams)
+
+Ordered by value/risk. Files are listed so workstreams A-D can run in parallel without touching the same file; E-F are optional and riskier.
+
+### WS-A: Modals onto kit Dialog (M-L)
+Move snooze picker, rules panel, ChoiceDialog, help and settings into `host_in_dialog`; delete `overlay()`/`FitViewport` and the five `render.rs` overlay branches.
+- Files: `src/app/overlay.rs` (delete), `src/app/snooze.rs`, `src/app/panels.rs` (RulesPanel only), `src/app/dialog.rs`, `src/app/settings.rs` (outer shell only), `src/app/chrome.rs` (HelpOverlay), `src/app/mail_app/modals.rs`, `src/app/mail_app/render.rs` (overlay branches, l.~262-312), `src/app/mail_app/mod.rs` (field removals), `src/app/mail_app/help.rs`, tests `tests/ui_dialogs.rs`, `tests/ui_settings.rs`, `tests/ui_ext/snooze.rs` as needed.
+- API: `window.open_dialog(cx, |dialog, _, _| dialog.close_button(false).p_0().w(px(w)).on_close(..).content(|c, _, _| c.child(view)))` (already in `modals.rs:15`).
+- Loss: Escape is double-handled (kit Dialog + our `*Cancel` actions); modal-specific key contexts must remain on the inner view. Keyboard-first invariants (`enter` default choice, `1`-`5`) preserved because those listeners live in the content view.
+
+### WS-B: Toast → kit Notification (M)
+- Files: `src/app/mail_app/actions.rs` (`show_toast`), `src/app/mail_app/render.rs` (l.246-275 only; coordinate with WS-A which edits other lines of the same file: do WS-B after A or have one worker own `render.rs`), `src/app/mail_app/mod.rs` (`toast`, `toast_gen`), `tests/ui_ext/harness.rs`, tests asserting `toast()`.
+- API: `window.push_notification(Notification::success(msg).autohide(true).placement(Anchor::BottomCenter).action(|n, w, cx| ..), cx)`.
+- Loss: tests read `MailApp.toast`; keep a `last_toast: SharedString` for tests. Undo button loses its `u` keycap tooltip. Toast no longer replaced in place (kit stacks notifications; use `.id1(..)` to dedupe).
+
+### WS-C: Menus onto kit PopupMenu (L; keyboard-risky)
+- Files: `src/app/menu.rs` (delete after), `src/app/mail_app/menus.rs`, `filter_menu.rs`, `mouse.rs`, `rows.rs` (right-click at l.237), `render.rs` (`render_menu` call only), `src/app/actions.rs` (drop `MenuNext..MenuCancel`), `tests/ui_*` that drive menus (`ui_mouse.rs`, `ui_panes.rs`).
+- API: `PopupMenu::build(window, cx, |menu, w, cx| menu.menu(label, Box::new(Action)).separator().submenu(label, w, cx, |sub, ..| ..))`; `Button::dropdown_menu(..)` for the overflow/filter triggers; `ContextMenuExt::context_menu` for mouse right-click.
+- Loss: keyboard-opened menus at a computed anchor (`MENU_W`, `menus.rs:254` height math) need `dropdown_menu_with_anchor`; per-item shortcut strings become automatic Kbd lookups from bindings (items with no binding show none). Test coverage for `MenuNext/MenuRun` must be rewritten.
+
+### WS-D: Small pieces (S each; parallel with A-C because they touch disjoint files)
+1. Separators: `menu.rs:296` (skip if WS-C lands), `reader_message.rs` recipient_rows → `Separator::horizontal()`.
+2. Pills: `reader_parts.rs:85 badge()` → `Tag::custom(..).rounded_full()`; `sidebar.rs:331 count_badge` → keep or `Badge::count`; chips (`chips.rs`) → `Button::new(..).outline().selected(on).xsmall()`. Files: `reader_parts.rs`, `chips.rs`, `sidebar.rs` (count_badge only).
+3. Avatar: `reader_parts.rs:32 monogram()` → `Avatar::new().name(..)` (check `reading::initials` tests first). Files: `reader_parts.rs`, `reader_tabbar.rs`, `reader_message.rs:116`.
+4. DescriptionList for To/Cc/Bcc: `reader_message.rs` (same file as 1-3: assign one worker).
+5. Alert banners: `reader_message.rs banners()`, `panels.rs RuleBanner`.
+6. Scrollbars: `.scrollable(Axis::Vertical)` on `sidebar.rs:179`, `reader.rs:165`, `chrome.rs:236`, `panels.rs:98`.
+7. Progress in `SessionCard` (`panels.rs:168`), `Empty` in `chrome.rs`.
+- Split for two workers: **D1** = `reader_parts.rs`, `reader_message.rs`, `reader_tabbar.rs`, `panels.rs` (items 1b,3,4,5,7a); **D2** = `chips.rs`, `sidebar.rs`, `reader.rs`, `chrome.rs` (items 2,6,7b).
+
+### WS-E (optional): TitleBar (M)
+- Files: `src/app/mail_app/titlebar.rs`, `render.rs` (titlebar call), `src/main.rs`/window options. Loss: custom `no_drag` hit-testing and the macOS 80px traffic-light inset logic need re-verification; double-click zoom changes.
+
+### WS-F (not recommended): Sidebar, List, Collapsible
+- Sidebar (`sidebar.rs`, L): loses rails, per-account bar colour, `nav-*` test ids and fold-on-hover chevron.
+- List/VirtualList (`list.rs`, `rows.rs`): breaks measured row heights, cursor model and bulk-selection bars.
+- Collapsible (`reader_thread.rs`): state is app-owned and find-driven; adopt only if animation is wanted.
+
+### Conflict map
+- `render.rs`: A (overlay branches), B (toast branch), C (menu call), E (titlebar call): serialise or give one worker the file.
+- `reader_message.rs`: D1 only (items 1-5 together).
+- `panels.rs`: A (RulesPanel shell) and D1 (RuleBanner/SessionCard): serialise.
+- `menu.rs` / `menus.rs` / `filter_menu.rs` / `mouse.rs`: C only.
+- Otherwise A, B-with-render-owner, C, D1, D2 are independent.
