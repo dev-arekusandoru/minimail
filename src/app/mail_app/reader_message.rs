@@ -16,8 +16,9 @@ use gpui_kit::component::text::TextView;
 use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
-    /// Reply and the `⋯` menu of one expanded message. Both act on that message, whichever one
-    /// the reader is opened on. Pressing them never counts as a click on the header.
+    /// Reply, Reply all, Forward and the `⋯` menu of one expanded message. All act on that
+    /// message, whichever one the reader is opened on. Pressing them never counts as a click on
+    /// the header.
     fn message_buttons(&self, mid: MessageId, cx: &Context<Self>) -> Div {
         let id = mid as usize;
         let kind = MenuKind::Message(mid);
