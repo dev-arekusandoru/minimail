@@ -47,7 +47,7 @@ pub struct AccountRow {
 }
 
 /// Index of the Accounts page in [`SettingsPanel::pages`].
-const ACCOUNTS_PAGE: usize = 1;
+const ACCOUNTS_PAGE: usize = 5;
 
 const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("review", "Review")];
 const PANE_LAYOUTS: [(&str, &str); 2] = [("side", "Side by side"), ("stacked", "Stacked")];
@@ -244,11 +244,11 @@ impl SettingsPanel {
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
         vec![
             self.general_page(weak),
-            self.accounts_page(weak),
             self.appearance_page(weak, cx),
             self.inbox_page(weak),
             self.blocked_page(weak),
             self.classifier_page(weak),
+            self.accounts_page(weak),
         ]
     }
 
