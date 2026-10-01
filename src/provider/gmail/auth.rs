@@ -30,9 +30,9 @@ impl ClientConfig {
     /// Reads the OAuth desktop-client credentials from the environment.
     /// `None` when either is missing or blank.
     pub fn from_env() -> Option<Self> {
-        let client_id = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID").ok()?;
-        let client_secret = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET").ok()?;
-        if client_id.trim().is_empty() || client_secret.trim().is_empty() {
+        let client_id = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID").ok()?.trim().to_owned();
+        let client_secret = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET").ok()?.trim().to_owned();
+        if client_id.is_empty() || client_secret.is_empty() {
             return None;
         }
         Some(Self {
