@@ -45,10 +45,10 @@ impl MailApp {
                 .aria_label(title)
                 .when(self.tab_avatars, |tab| {
                     tab.prefix(match latest {
-                        Some(m) => look
-                            .monogram(&m.from_name, &m.from_email, AVATAR)
+                        Some(m) => div()
                             .id(("reader-tab-avatar", thread))
                             .test_support()
+                            .child(look.monogram(&m.from_name, &m.from_email, AVATAR))
                             .into_any_element(),
                         None => div().into_any_element(),
                     })

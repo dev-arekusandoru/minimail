@@ -9,6 +9,9 @@ use crate::find::Segment;
 use crate::judge::QuestionKey;
 use crate::reading;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::alert::Alert;
+use gpui_kit::component::description_list::DescriptionList;
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::tooltip::Tooltip;
 
@@ -180,7 +183,7 @@ impl MailApp {
             .border_color(t.border)
             .bg(t.secondary)
             .child(header)
-            .when(recipients_open, |d| d.child(self.recipient_rows(m, look)))
+            .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
             .child(self.message_body(m, role, look, cx))
@@ -233,122 +236,89 @@ impl MailApp {
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.
-    fn recipient_rows(&self, m: &Message, look: &Look<'_>) -> Div {
-        let t = &look.t;
+    fn recipient_rows(&self, m: &Message) -> Div {
         let fields = [("To:", &m.to), ("Cc:", &m.cc), ("Bcc:", &m.bcc)];
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(div().h(px(1.)).bg(t.border))
-            .children(fields.into_iter().filter_map(|(label, field)| {
-                let list = reading::parse_recipients(field);
-                if list.is_empty() {
-                    return None;
-                }
-                let text = list
-                    .iter()
-                    .map(|r| match &r.name {
-                        Some(name) => format!("{name} <{}>", r.email),
-                        None => r.email.clone(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Some(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap_2()
-                        .child(look.mono(label, t.muted_foreground).w(px(32.)).flex_none())
-                        .child(div().flex_1().min_w_0().text_size(px(12.)).child(text)),
-                )
-            }))
+        let mut list = DescriptionList::horizontal().columns(1).label_width(px(32.)).bordered(false);
+        for (label, field) in fields {
+            let recipients = reading::parse_recipients(field);
+            if recipients.is_empty() {
+                continue;
+            }
+            let text = recipients
+                .iter()
+                .map(|r| match &r.name {
+                    Some(name) => format!("{name} <{}>", r.email),
+                    None => r.email.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            list = list.item(label, text, 1);
+        }
+        div().flex().flex_col().gap_1().child(Separator::horizontal()).child(list)
     }
 
     /// New-sender and possible-spam banners, with their action buttons.
     fn banners(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Vec<AnyElement> {
-        let t = &look.t;
-        let banner = |id: &'static str, color: Hsla| {
+        // The kit `Alert` has no action slot, so its buttons sit beside it.
+        let row = |alert: Alert, actions: Div| {
             div()
-                .id(id)
-                .test_support()
                 .flex_none()
                 .flex()
                 .items_center()
                 .gap_3()
-                .px_3()
-                .py_2()
-                .rounded_sm()
-                .bg(color.opacity(0.12))
-                .border_1()
-                .border_color(color.opacity(0.5))
+                .child(div().flex_1().min_w_0().child(alert))
+                .child(actions)
+                .into_any_element()
         };
+        let actions = || div().flex().flex_none().items_center().gap_2();
         let mut out = Vec::new();
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
-            out.push(
-                banner("banner-new-sender", theme::new_sender(t))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(px(12.))
-                            .child(format!("New sender · {} <{}>", m.from_name, m.from_email)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap_2()
-                            .child(look.action_button(
-                                "btn-banner-allow",
-                                "Allow",
-                                "Allow this sender",
-                                "a",
-                                AllowSender,
-                                cx,
-                            ))
-                            .child(look.action_button(
-                                "btn-banner-block",
-                                "Block",
-                                "Block this sender",
-                                "b",
-                                BlockSender,
-                                cx,
-                            )),
-                    )
-                    .into_any_element(),
-            );
+            out.push(row(
+                Alert::warning(
+                    "banner-new-sender",
+                    format!("New sender · {} <{}>", m.from_name, m.from_email),
+                )
+                .banner(),
+                actions()
+                    .child(look.action_button(
+                        "btn-banner-allow",
+                        "Allow",
+                        "Allow this sender",
+                        "a",
+                        AllowSender,
+                        cx,
+                    ))
+                    .child(look.action_button(
+                        "btn-banner-block",
+                        "Block",
+                        "Block this sender",
+                        "b",
+                        BlockSender,
+                        cx,
+                    )),
+            ));
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
-            out.push(
-                banner("banner-possible-spam", theme::spam(t))
-                    .child(div().flex_1().min_w_0().text_size(px(12.)).child("Possible spam"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap_2()
-                            .child(look.action_button(
-                                "btn-banner-spam-block",
-                                "Block & Delete",
-                                "Block the sender and delete this message",
-                                "",
-                                SpamBlock,
-                                cx,
-                            ))
-                            .child(look.action_button(
-                                "btn-banner-spam-delete",
-                                "Delete",
-                                "Delete this message",
-                                "d",
-                                Delete,
-                                cx,
-                            )),
-                    )
-                    .into_any_element(),
-            );
+            out.push(row(
+                Alert::error("banner-possible-spam", "Possible spam").banner(),
+                actions()
+                    .child(look.action_button(
+                        "btn-banner-spam-block",
+                        "Block & Delete",
+                        "Block the sender and delete this message",
+                        "",
+                        SpamBlock,
+                        cx,
+                    ))
+                    .child(look.action_button(
+                        "btn-banner-spam-delete",
+                        "Delete",
+                        "Delete this message",
+                        "d",
+                        Delete,
+                        cx,
+                    )),
+            ));
         }
         out
     }

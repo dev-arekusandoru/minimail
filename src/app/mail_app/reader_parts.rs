@@ -6,7 +6,7 @@ use super::super::*;
 use crate::app::ui::{mono_font, shortcut};
 use crate::theme::ThemeColor;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{kbd::Kbd, Sizable as _};
+use gpui_kit::component::{avatar::Avatar, kbd::Kbd, tag::Tag, Sizable as _};
 
 /// Which surface of the reader a message is drawn as.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,23 +29,11 @@ impl<'a> Look<'a> {
         Self { t: &cx.theme().colors, mono: mono_font(cx) }
     }
 
-    /// The sender's monogram (initials in a bordered rounded square) at `size` px: the one
-    /// avatar the reader has, shared by the message header and the tabs.
-    pub fn monogram(&self, name: &str, email: &str, size: f32) -> Div {
-        div()
-            .w(px(size))
-            .h(px(size))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_md()
-            .border_1()
-            .border_color(self.t.border)
-            .font_family(self.mono.clone())
-            .text_size(px((size * 0.4).round()))
-            .text_color(self.t.muted_foreground)
-            .child(crate::reading::initials(name, email))
+    /// The sender's avatar at `size` px: the one avatar the reader has, shared by the message
+    /// header and the tabs. The kit `Avatar` derives its initials from the name it is given, so
+    /// we feed it the same `reading::initials` the app has always used.
+    pub fn monogram(&self, name: &str, email: &str, size: f32) -> Avatar {
+        Avatar::new().name(crate::reading::initials(name, email)).with_size(px(size))
     }
 
     /// One line of mono metadata text.
@@ -82,19 +70,13 @@ impl<'a> Look<'a> {
     }
 
     /// Row-badge look (see `icons.rs`): tinted border and fill, mono label, optional glyph.
-    pub fn badge(&self, label: impl Into<SharedString>, color: Hsla, glyph: Option<Glyph>) -> Div {
-        div()
-            .flex()
+    pub fn badge(&self, label: impl Into<SharedString>, color: Hsla, glyph: Option<Glyph>) -> Tag {
+        Tag::custom(color.opacity(0.1), color, color.opacity(0.5))
+            .rounded(px(4.))
             .flex_none()
-            .items_center()
             .gap_1()
             .h(px(18.))
             .px(px(6.))
-            .rounded_sm()
-            .border_1()
-            .border_color(color.opacity(0.5))
-            .bg(color.opacity(0.1))
-            .text_color(color)
             .font_family(self.mono.clone())
             .text_size(px(10.5))
             .when_some(glyph, |d, g| d.child(icons::icon(g, self.t, 11.)))
