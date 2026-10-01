@@ -3,6 +3,7 @@
 Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0.7. Mock data only (`fixtures/`); AI providers are deterministic stubs.
 
 - Verify with: `cargo build`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. All must pass before committing.
+- Commit as you go: one commit per completed, verified step (build, clippy, tests green), with a descriptive message. Don't batch a whole feature into one commit or leave finished work uncommitted. When parallel subagents edit disjoint files, commit only after they finish and the tree is green.
 - Pure logic lives in `src/*.rs` (no GPUI); views live in `src/app/`. Keep business logic out of views.
 - Invariant: every message has exactly one `TriageState`; `Snoozed` iff it has a wake time; muted threads are excluded from visible state counts.
 - Every user action is one undo step. `tick(now)` never pushes undo.
