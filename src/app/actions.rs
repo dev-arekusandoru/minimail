@@ -82,7 +82,11 @@ gpui_kit::actions!(
 pub const MAIL_CONTEXT: &str = "MailApp";
 /// Binding predicate for the list keymap: `MailApp` but not while a text input has focus
 /// (a focused kit `Input` sets context `Input`; bare-letter bindings would otherwise steal typing).
-const MAIL_BINDING: &str = "MailApp && !Input";
+const MAIL_BINDING: &str = "MailApp && !Input && !PopupMenu";
+/// Same, for bindings that may fire while an input has focus. `!PopupMenu`: the app keeps its
+/// `MailApp` context while a menu is open (the menu's keycaps are resolved through it), so
+/// the menu itself is what keeps list keys inert.
+const MAIL_SCOPE: &str = "MailApp && !PopupMenu";
 /// Key context of the command palette.
 pub const PALETTE_CONTEXT: &str = "CommandPalette";
 /// Key context of the reader's find bar.
@@ -157,16 +161,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("v", ToggleReaderMode, m),
         KeyBinding::new("shift-o", ToggleThreadExpansion, m),
         // Reader tabs. Modifier chords, so they work from any focus inside the app.
-        KeyBinding::new("cmd-w", CloseTab, Some(MAIL_CONTEXT)),
-        KeyBinding::new("ctrl-tab", NextTab, Some(MAIL_CONTEXT)),
-        KeyBinding::new("cmd-shift-]", NextTab, Some(MAIL_CONTEXT)),
-        KeyBinding::new("ctrl-shift-tab", PrevTab, Some(MAIL_CONTEXT)),
-        KeyBinding::new("cmd-shift-[", PrevTab, Some(MAIL_CONTEXT)),
+        KeyBinding::new("cmd-w", CloseTab, Some(MAIL_SCOPE)),
+        KeyBinding::new("ctrl-tab", NextTab, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-shift-]", NextTab, Some(MAIL_SCOPE)),
+        KeyBinding::new("ctrl-shift-tab", PrevTab, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-shift-[", PrevTab, Some(MAIL_SCOPE)),
         // Global search (the titlebar's search, like `/`) and find in the active reader tab.
-        KeyBinding::new("cmd-shift-f", OpenSearch, Some(MAIL_CONTEXT)),
-        KeyBinding::new("cmd-f", OpenFind, Some(MAIL_CONTEXT)),
-        KeyBinding::new("cmd-g", FindNext, Some(MAIL_CONTEXT)),
-        KeyBinding::new("cmd-shift-g", FindPrev, Some(MAIL_CONTEXT)),
+        KeyBinding::new("cmd-shift-f", OpenSearch, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-f", OpenFind, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-g", FindNext, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-shift-g", FindPrev, Some(MAIL_SCOPE)),
         // Find bar (its input has focus, so these are not under `m`).
         KeyBinding::new("enter", FindNext, Some(FIND_CONTEXT)),
         KeyBinding::new("shift-enter", FindPrev, Some(FIND_CONTEXT)),

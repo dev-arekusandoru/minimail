@@ -34,7 +34,7 @@ impl Render for MailApp {
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
-            .when(!self.modal_open() && !self.menu_open(), |d| {
+            .when(!self.modal_open(), |d| {
                 d.key_context(MAIL_CONTEXT)
             })
             .on_mouse_down(

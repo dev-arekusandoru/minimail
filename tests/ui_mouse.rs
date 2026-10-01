@@ -477,3 +477,18 @@ fn titlebar_search_box_stays_centered_in_fullscreen(cx: &mut TestAppContext) {
     let center = f32::from(b.origin.x + b.size.width / 2.);
     assert!((center - width / 2.).abs() < 0.5, "fullscreen: center {center} of {width}");
 }
+
+/// Row keycaps must stay painted for as long as a menu is open, not just on its first frame
+/// (the app's key context used to be dropped once the menu opened, losing every binding).
+#[gpui_kit::gpui::test]
+fn menu_keycaps_stay_visible_while_the_menu_is_open(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("btn-more");
+    for frame in 0..4 {
+        h.cx.run_until_parked();
+        let mut vcx = gpui_kit::VisualTestContext::from_window(h.window, h.cx);
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(vcx.debug_bounds("kbd:cmd-z").is_some(), "Undo keycap missing on frame {frame}");
+        assert!(vcx.debug_bounds("kbd:cmd-,").is_some(), "Settings keycap missing on frame {frame}");
+    }
+}
