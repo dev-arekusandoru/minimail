@@ -8,6 +8,8 @@ pub mod hints;
 pub mod contacts;
 pub mod judge;
 pub mod model;
+pub mod provider;
+pub mod sync;
 pub mod rules;
 pub mod search;
 pub mod theme;

@@ -54,6 +54,7 @@ mod reader_state;
 mod reader_tabs;
 mod sidebar;
 mod titlebar;
+mod sync;
 mod rows;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
@@ -157,6 +158,15 @@ pub struct MailApp {
     _modal_sub: Option<Subscription>,
     /// Which popup menu is open, if any (the kit owns the popup itself).
     open_menu: Option<MenuKind>,
+    /// Local mail cache; `None` for mock-only sessions.
+    cache: Option<Rc<crate::sync::cache::Cache>>,
+    providers: HashMap<AccountId, sync::SharedProvider>,
+    /// Last sync error shown, so each distinct error toasts once.
+    sync_error: Option<String>,
+    /// The mailbox came from fixtures (replaced on first Gmail sign-in).
+    demo: bool,
+    /// Run a pull on the next sync iteration.
+    pull_now: bool,
 }
 
 impl MailApp {
@@ -230,6 +240,11 @@ impl MailApp {
             find_select: std::cell::Cell::new(0),
             _modal_sub: None,
             open_menu: None,
+            cache: None,
+            providers: HashMap::new(),
+            sync_error: None,
+            demo: true,
+            pull_now: false,
         };
         app.classify_visible();
         app

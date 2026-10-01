@@ -136,6 +136,10 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.mailbox.account(&msg.account).is_some_and(|a| a.provider == crate::model::ProviderKind::Gmail) {
+            self.show_toast("Sending from Gmail isn't supported yet".into(), window, cx);
+            return;
+        }
         self.pin_message(msg.id);
         let own = self.mailbox.account(&msg.account).map(|a| a.email.clone()).unwrap_or_default();
         let compose = cx.new(|cx| {
