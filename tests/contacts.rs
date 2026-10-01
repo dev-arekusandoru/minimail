@@ -7,7 +7,6 @@ use mail_classifier::contacts::{
     ContactQuery, ContactSource, ContactStore, ContactUrl, EmailAddress, Error, Label,
     NewContact, PhoneNumber, PostalAddress, seed_if_empty,
 };
-use mail_classifier::model::Mailbox;
 
 const T0: i64 = 1_790_812_800;
 
@@ -360,36 +359,4 @@ fn seeding_is_idempotent() {
     let reopened = ContactStore::open(db.path()).expect("reopen");
     assert_eq!(seed_if_empty(&reopened).expect("seed after reopen"), 0);
     assert_eq!(reopened.known_addresses().expect("addresses").len(), seeded.len());
-}
-
-#[test]
-fn allowing_a_new_sender_is_persisted_and_undo_removes_it() {
-    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory"));
-    let messages = serde_json::json!([
-        {"id": 1, "thread_id": 1, "from_name": "Known Sender", "from_email": "known@a.test",
-         "to": "you@example.com", "subject": "s1", "body": "b", "received": "2026-09-01T00:00:00Z"},
-        {"id": 2, "thread_id": 2, "from_name": "New Sender", "from_email": "New@a.test",
-         "to": "you@example.com", "subject": "s2", "body": "b", "received": "2026-09-02T00:00:00Z"},
-    ]);
-    store.create(NewContact::from_email("known@a.test", "Known Sender")).expect("seed one contact");
-
-    let json = serde_json::to_string(&messages).unwrap();
-    let mut mb = Mailbox::from_json_with_contacts(&json, store.clone()).expect("mailbox");
-    assert!(mb.is_new_sender(2));
-
-    assert!(mb.allow_sender("new@a.test"));
-    assert!(!mb.allow_sender("new@a.test"), "already known");
-    assert!(!mb.is_new_sender(2));
-    assert!(store.is_known("new@a.test").expect("known"), "the decision is in the address book");
-    let contact = store.get_by_email("new@a.test").unwrap().expect("contact");
-    assert_eq!(contact.display_name, "New Sender", "the sender name carries over");
-
-    let restarted = Mailbox::from_json_with_contacts(&json, store.clone()).expect("mailbox");
-    assert!(!restarted.is_new_sender(2));
-    assert_eq!(restarted.ids_in(mail_classifier::model::TriageState::Inbox), vec![2, 1]);
-
-    assert!(mb.undo());
-    assert!(mb.is_new_sender(2), "undo restores the new sender classification");
-    assert!(!store.is_known("new@a.test").expect("known"), "undo also rewinds the address book");
-    assert_eq!(store.search(&ContactQuery::new()).expect("all").len(), 1);
 }

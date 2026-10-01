@@ -191,6 +191,9 @@ impl MailApp {
         if !sidebar::is_inbox_location(&self.triage.view.location) {
             return;
         }
+        if chip == Chip::NewSenders && !crate::known_senders::KNOWN_SENDERS_ENABLED {
+            return;
+        }
         let view = View {
             chip,
             ..self.triage.view.clone()

@@ -37,7 +37,9 @@ impl MailApp {
                 .gap_1()
                 .px_3()
                 .pb_2()
-                .children(Chip::ALL.into_iter().enumerate().map(|(i, chip)| {
+                .children(Chip::ALL.into_iter().enumerate().filter(|(_, chip)| {
+                    crate::known_senders::KNOWN_SENDERS_ENABLED || *chip != Chip::NewSenders
+                }).map(|(i, chip)| {
                     let on = chip == active;
                     Button::new(("chip", i))
                         .outline()

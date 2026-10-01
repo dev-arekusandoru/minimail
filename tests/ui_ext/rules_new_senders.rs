@@ -1,8 +1,7 @@
 use gpui_kit::TestAppContext;
-use mail_classifier::model::{Chip, Location, Mailbox};
+use mail_classifier::model::Mailbox;
 use mail_classifier::model::TriageState::*;
-use crate::harness::{Harness, harness_with, json, mailbox, msg};
-use mail_classifier::contacts::{ContactStore, NewContact};
+use crate::harness::{Harness, harness_with, mailbox, msg};
 
 // ---------------------------------------------------------------- Rule suggestions
 
@@ -84,50 +83,4 @@ pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), None);
     h.keys("escape");
     assert!(!h.read(|a| a.rules_open()));
-}
-
-// ---------------------------------------------------------------- New-sender chip
-
-pub fn new_sender_box() -> Mailbox {
-    let msgs = json(&[
-        msg(1, 1, "known@a.io", "k1", 25, "Inbox"),
-        msg(2, 2, "new1@a.io", "n1a", 24, "Inbox"),
-        msg(3, 3, "new1@a.io", "n1b", 23, "Inbox"),
-        msg(4, 4, "new2@a.io", "n2", 22, "Inbox"),
-    ]);
-    let store = ContactStore::open_in_memory().unwrap();
-    store.create(NewContact::from_email("known@a.io", "Known")).unwrap();
-    Mailbox::from_json_with_contacts(&msgs, std::rc::Rc::new(store)).unwrap()
-}
-
-#[gpui_kit::gpui::test]
-pub fn new_senders_chip_filters_all_inboxes_and_allows_or_blocks_senders(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, new_sender_box());
-    assert_eq!(h.visible(), vec![1, 2, 3, 4]);
-
-    h.keys("5");
-    assert_eq!(h.read(|a| a.triage.view.location.clone()), Location::AllInboxes);
-    assert_eq!(h.read(|a| a.triage.view.chip), Chip::NewSenders);
-    assert_eq!(h.visible(), vec![2, 3, 4]);
-
-    h.keys("a");
-    assert_eq!(h.visible(), vec![4]);
-    assert_eq!(h.state_of(2), Inbox);
-    assert_eq!(h.state_of(3), Inbox);
-    assert!(!h.read(|a| a.mailbox.is_new_sender(2)));
-    assert_eq!(h.count(Inbox), 4);
-    h.assert_invariant("allow sender");
-
-    h.keys("b");
-    assert!(h.read(|a| a.dialog_open()), "block asks what to do with the sender's mail");
-    h.keys("4");
-    assert!(h.visible().is_empty());
-    assert_eq!(h.total(), 4, "blocking hides, but does not delete, mail");
-    assert_eq!(h.count(Inbox), 3);
-    assert_eq!(h.read(|a| a.mailbox.hidden_count()), 1);
-    h.assert_invariant("block sender");
-
-    h.keys("u");
-    assert_eq!(h.visible(), vec![4], "undo restores the blocked new sender");
-    h.assert_invariant("undo block");
 }

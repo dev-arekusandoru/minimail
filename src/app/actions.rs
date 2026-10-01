@@ -290,7 +290,7 @@ macro_rules! cmd {
 
 /// Every action except palette/compose-internal ones.
 pub fn commands() -> Vec<CommandSpec> {
-    vec![
+    let mut cmds = vec![
         cmd!(Navigate, "Next message", "j", SelectNext),
         cmd!(Navigate, "Previous message", "k", SelectPrev),
         cmd!(Navigate, "Extend selection down", "shift-j", ExtendNext),
@@ -368,7 +368,11 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Navigate, "Chip: new senders", "5", SelectChip5),
         cmd!(Navigate, "Chip: possible spam", "6", SelectChip6),
         cmd!(Navigate, "Clear filters", "", ClearFilters),
-    ]
+    ];
+    if !crate::known_senders::KNOWN_SENDERS_ENABLED {
+        cmds.retain(|c| c.name != "Allow sender" && c.name != "Chip: new senders");
+    }
+    cmds
 }
 
 // ---------------------------------------------------------------- Sidebar navigation

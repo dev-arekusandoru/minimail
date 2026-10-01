@@ -57,7 +57,9 @@ impl MailApp {
     }
 
     pub fn new_senders_open(&self) -> bool {
-        self.mode == ListMode::State && self.triage.view.chip == Chip::NewSenders
+        crate::known_senders::KNOWN_SENDERS_ENABLED
+            && self.mode == ListMode::State
+            && self.triage.view.chip == Chip::NewSenders
     }
 
     /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.

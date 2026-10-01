@@ -421,6 +421,9 @@ impl MailApp {
 
     /// `a` allows the sender outright; `b` asks what to do with their Inbox mail first.
     pub(super) fn screen_sender(&mut self, allow: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if allow && !crate::known_senders::KNOWN_SENDERS_ENABLED {
+            return;
+        }
         let Some((name, email)) = self.cursor_sender() else {
             return;
         };

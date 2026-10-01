@@ -144,11 +144,18 @@ fn suggestion_is_first_and_low_signal_never_takes_a_slot() {
 #[test]
 fn every_glyph_is_documented_once_in_the_legend() {
     let listed: Vec<Glyph> = legend().into_iter().flat_map(|(_, g)| g).collect();
-    assert_eq!(listed.len(), Glyph::ALL.len());
+    // The New Sender glyph drops out of the legend while the feature is off.
+    let documented =
+        |g: Glyph| g != Glyph::NewSender || mail_classifier::known_senders::KNOWN_SENDERS_ENABLED;
+    assert_eq!(listed.len(), Glyph::ALL.iter().filter(|g| documented(**g)).count());
     for g in Glyph::ALL {
         let s = g.spec();
         assert!(!s.label.is_empty() && !s.description.is_empty(), "{g:?}");
-        assert_eq!(listed.iter().filter(|x| **x == g).count(), 1, "{g:?}");
+        assert_eq!(
+            listed.iter().filter(|x| **x == g).count(),
+            documented(g) as usize,
+            "{g:?}"
+        );
     }
 }
 

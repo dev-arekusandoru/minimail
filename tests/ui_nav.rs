@@ -11,7 +11,6 @@ use gpui_kit::{
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
-use mail_classifier::contacts::{ContactStore, NewContact};
 
 #[path = "common/menu.rs"]
 mod menu;
@@ -83,21 +82,6 @@ fn nav_box() -> Mailbox {
         msg(3, "personal", "ann@x.io", "Personal archive", 2, "Archived"),
         msg(4, "work", "bob@acme.co", "Work archive", 1, "Archived"),
     ]))
-    .expect("valid mailbox json")
-}
-
-/// The same shape, but everyone from `known@a.io` is in the address book.
-fn new_sender_box() -> Mailbox {
-    let store = ContactStore::open_in_memory().unwrap();
-    store.create(NewContact::from_email("known@a.io", "Known")).unwrap();
-    Mailbox::from_json_with_contacts(
-        &json(&[
-            msg(1, "personal", "known@a.io", "Known one", 4, "Inbox"),
-            msg(2, "personal", "known@a.io", "Known two", 3, "Inbox"),
-            msg(3, "personal", "stranger@b.io", "From a stranger", 2, "Inbox"),
-        ]),
-        Rc::new(store),
-    )
     .expect("valid mailbox json")
 }
 
@@ -232,25 +216,34 @@ fn chips_exist_on_inbox_views_only(cx: &mut TestAppContext) {
 
 #[gpui_kit::gpui::test]
 fn chip_keys_select_each_chip_and_filter_the_list(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, new_sender_box());
+    let mut h = harness(cx);
     let all = h.visible();
-    assert_eq!(all.len(), 3);
+    assert_eq!(all.len(), 2, "both inbox messages");
 
-    for (i, expected) in Chip::ALL.into_iter().enumerate() {
-        h.keys(&(i + 1).to_string());
-        assert_eq!(h.chip(), expected, "key {} selects {}", i + 1, expected.label());
+    // v1 disables the New Senders chip: its key (`5`) does nothing.
+    let enabled = [
+        Chip::All,
+        Chip::NeedsReply,
+        Chip::FollowUp,
+        Chip::Urgent,
+        Chip::PossibleSpam,
+    ];
+    for (i, expected) in enabled.into_iter().enumerate() {
+        let key = if i == 4 { 6 } else { i + 1 };
+        h.keys(&key.to_string());
+        assert_eq!(h.chip(), expected, "key {key} selects {}", expected.label());
     }
 
     h.keys("5");
-    assert_eq!(h.visible(), vec![3], "the New Senders chip keeps the stranger's mail");
+    assert_eq!(h.chip(), Chip::PossibleSpam, "the New Senders key is inert");
+
     h.keys("1");
     assert_eq!(h.chip(), Chip::All);
     assert_eq!(h.visible(), all, "the All chip drops the filter");
 
     // Clicking a chip does exactly what its key does.
-    h.click(("chip", 4usize));
-    assert_eq!(h.chip(), Chip::NewSenders);
-    assert_eq!(h.visible(), vec![3]);
+    h.click(("chip", 5usize));
+    assert_eq!(h.chip(), Chip::PossibleSpam);
 }
 
 #[gpui_kit::gpui::test]

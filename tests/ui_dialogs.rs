@@ -180,10 +180,6 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.blocked())
     }
 
-    fn is_new_sender(&mut self, id: MessageId) -> bool {
-        self.read(|a| a.mailbox.is_new_sender(id))
-    }
-
     fn has_tag(&mut self, id: MessageId, tag: Tag) -> bool {
         self.read(|a| a.mailbox.tags(id).contains(&tag))
     }
@@ -536,24 +532,6 @@ fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::gpui::test]
-fn new_sender_banner_allows_and_blocks(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "stranger@example.com", "Hello", 1)]));
-    h.keys("enter");
-    assert!(h.is_new_sender(1), "the fixture sender is unknown");
-
-    h.click("btn-banner-allow");
-    assert!(!h.is_new_sender(1), "Allow removes New Sender");
-    assert_eq!(h.state_of(1), TriageState::Inbox);
-
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "stranger@example.com", "Hello", 1)]));
-    h.keys("enter");
-    h.click("btn-banner-block");
-    assert!(h.dialog_open(), "Block opens the block dialog");
-    h.keys("4");
-    assert_eq!(h.blocked(), vec!["stranger@example.com"]);
-}
-
-#[gpui_kit::gpui::test]
 fn spam_banner_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     let mut mb = mailbox(&[msg(1, 1, "spam@example.com", "Offer", 1)]);
     tag_possible_spam(&mut mb, 1);
@@ -623,12 +601,4 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     assert!(h.blocked().is_empty(), "the block reverts too");
     assert!(h.folder(folder).is_none());
     assert_eq!(h.folder_count(), before);
-}
-
-#[gpui_kit::gpui::test]
-fn allow_key_works_outside_the_new_senders_view(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "stranger@example.com", "Hello", 1)]));
-    assert_eq!(h.cursor(), Some(1));
-    h.keys("a");
-    assert!(!h.is_new_sender(1));
 }

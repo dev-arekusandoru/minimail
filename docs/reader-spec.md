@@ -17,9 +17,9 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 - Right of line 1, one cluster: message index (`MSG 04 / 04`, mono, threads only; chronological, 04 = newest), `COLLAPSE` (collapsed thread messages), absolute date (`Sep 30, 2026 · 20:46`, humanized time in its tooltip), Reply, `⋯`. No separate row above the subject.
 - Labels row, reusing the row badge language (`src/app/icons.rs`):
   - Triage state: `Inbox`, `Snoozed · <wake time>`, `Archived`, `Filed · <folder>`, `Deleted`, tinted by `Theme::state_color`.
-  - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender.
+  - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender (off in v1 — see `src/known_senders.rs`).
   - Category: the `Kind` tag (for example Newsletter or Receipt).
-- New Sender and Possible Spam keep their banners (triage spec), with buttons: Allow `a` / Block `b`; Block & Delete / Delete `d`.
+- Possible Spam keeps its banner (triage spec), with buttons: Block & Delete / Delete `d`. The New Sender banner (Allow `a` / Block `b`) is off in v1.
 - Recipient line (`to You, Ben Ito · cc Dev Rao ▾`, UI font, muted) sits under the sender name and expands to full-width rows **below** the header:
   - `To:` / `Cc:` / `Bcc:`, one row each, wrapping long lists.
   - Omit empty rows. Bcc appears only when known, which usually means sent mail.
@@ -100,4 +100,4 @@ Audit existing coverage first, then fill gaps:
 - Multi-person thread (To/Cc); sent mail with Bcc; repeated quoted history.
 - HTML only; text only; text + HTML alternatives; branded newsletter; receipt with tables; inline and blocked remote images; broken markup; wide layouts.
 - Attachments, including on earlier messages; links; lists.
-- Read and unread; every triage state (Inbox, Snoozed with a wake time, Archived, Filed, Deleted); every tag, including New Sender and Possible Spam.
+- Read and unread; every triage state (Inbox, Snoozed with a wake time, Archived, Filed, Deleted); every tag, including Possible Spam (New Sender is off in v1).

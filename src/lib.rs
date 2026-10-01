@@ -6,6 +6,7 @@ pub mod clock;
 pub mod draft;
 pub mod find;
 pub mod hints;
+pub mod known_senders;
 pub mod contacts;
 pub mod judge;
 pub mod model;

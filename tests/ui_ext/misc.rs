@@ -127,10 +127,10 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------- Palette / help
 
 /// Keys introduced by the v2 features.
-pub const NEW_KEYS: [&str; 33] = [
+pub const NEW_KEYS: [&str; 32] = [
     "e", "d", "i", "shift-e", "shift-d", "shift-i", "s", "z", "ctrl-g", "y", "n",
     "shift-y", "shift-n", "shift-r", "m", "shift-u", "cmd-,", "t", "/", "c",
-    "1", "2", "3", "4", "5", "6", "g i", "g s", "g t", "g a", "g d",
+    "1", "2", "3", "4", "6", "g i", "g s", "g t", "g a", "g d",
     "v", "shift-o",
 ];
 
