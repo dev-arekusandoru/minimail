@@ -224,3 +224,27 @@ fn the_avatar_setting_controls_the_tab_icon(cx: &mut TestAppContext) {
     assert!(!h.exists(("reader-tab-avatar", 2usize)));
     assert!(h.exists(("reader-tab", 2usize)), "the tab itself stays");
 }
+
+#[gpui_kit::gpui::test]
+fn tab_avatar_title_and_close_are_evenly_spaced(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.row(3);
+    let (avatar, title, close) = h
+        .cx
+        .update_window(h.window, |_, window, cx| {
+            window.render_frame(cx);
+            (
+                window.find(("reader-tab-avatar", 2usize)).bounds(),
+                window.find(("reader-tab", 2usize)).bounds(),
+                window.find(("reader-tab-close", 2usize)).bounds(),
+            )
+        })
+        .unwrap();
+    let before = f32::from(title.left() - avatar.right());
+    let after = f32::from(close.left() - title.right());
+    assert!((before - after).abs() <= 1., "gaps {before} vs {after}");
+    assert!(before <= 8., "gap {before} too wide");
+    assert!(f32::from(avatar.size.height) >= 16., "avatar clipped: {avatar:?}");
+    let (a, c) = (avatar.center().y, close.center().y);
+    assert!((f32::from(a - c)).abs() <= 1., "not vertically aligned");
+}

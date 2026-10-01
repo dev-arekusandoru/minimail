@@ -41,20 +41,28 @@ impl MailApp {
                     cx.stop_propagation();
                     this.close_tab(ix, window, cx);
                 }));
-            Tab::new()
-                .aria_label(title)
-                .when(self.tab_avatars, |tab| {
-                    tab.prefix(match latest {
+            // Avatar, title and close share one row inside the tab's padded label box, so
+            // both edge insets match and the gaps between the three are equal.
+            let row = div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .when(self.tab_avatars, |row| {
+                    row.child(match latest {
                         Some(m) => div()
                             .id(("reader-tab-avatar", thread))
                             .test_support()
+                            .flex_shrink_0()
                             .child(look.monogram(&m.from_name, &m.from_email, AVATAR))
                             .into_any_element(),
                         None => div().into_any_element(),
                     })
                 })
                 .child(label)
-                .suffix(close)
+                .child(close);
+            Tab::new()
+                .aria_label(title)
+                .child(row)
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     this.click_tab(ix, event.click_count(), window, cx);
                 }))
