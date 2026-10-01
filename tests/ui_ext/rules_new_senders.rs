@@ -21,7 +21,7 @@ pub fn rules_box() -> Mailbox {
 /// The sender-wide keys confirm first, so `1` answers the dialog.
 pub fn repeat_sender_archive(h: &mut Harness<'_>) {
     h.keys("shift-e 1 g a i");
-    h.click("nav-all-inboxes");
+    h.click(0usize);
 }
 
 #[gpui_kit::gpui::test]

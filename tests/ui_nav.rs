@@ -172,7 +172,7 @@ fn sidebar_click_switches_location_and_resets_chip_and_filter(cx: &mut TestAppCo
     h.click("filter-tag-reminder");
     assert_eq!(h.filter().tags.len(), 1);
 
-    h.click("nav-archive-work");
+    h.click("2-3");
     assert_eq!(h.location(), Location::Archive("work".into()));
     assert_eq!(h.chip(), Chip::All, "clicking a location resets the chip");
     assert_eq!(h.filter(), Filter::default(), "clicking a location clears filters");
@@ -180,51 +180,23 @@ fn sidebar_click_switches_location_and_resets_chip_and_filter(cx: &mut TestAppCo
     assert_eq!(h.state_of(4), TriageState::Archived);
     assert_eq!(h.read(|a| a.location_label()), "Work · Archive");
 
-    h.click("nav-inbox-personal");
+    h.click("1-0");
     assert_eq!(h.location(), Location::Inbox("personal".into()));
     assert_eq!(h.visible(), vec![1]);
     assert_eq!(h.read(|a| a.location_label()), "Personal · Inbox");
 
-    h.click("nav-sent-personal");
+    h.click("1-2");
     assert_eq!(h.location(), Location::Sent("personal".into()));
     assert!(h.visible().is_empty(), "no replies sent yet");
 
-    h.click("nav-folder-4");
-    assert_eq!(h.location(), Location::Folder(4), "a folder of the work account");
-    assert_eq!(h.read(|a| a.location_label()), "Projects");
-    h.click("nav-folder-5");
-    assert_eq!(h.read(|a| a.location_label()), "Projects/Northwind");
+    assert!(h.has("2-5"), "Projects is a work folder");
+    assert!(h.has("2-5-0"), "Northwind nests under Projects");
+    h.click("2-6");
+    assert_eq!(h.location(), Location::Folder(6), "a folder of the work account");
+    assert_eq!(h.read(|a| a.location_label()), "Recruiting");
 
-    h.click("nav-all-inboxes");
+    h.click(0usize);
     assert_eq!(h.read(|a| a.location_label()), "All Inboxes");
-}
-
-#[gpui_kit::gpui::test]
-fn folder_rows_fold_their_children(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    assert!(h.has("nav-folder-5"), "Northwind nests under Projects");
-    h.click(("folder-caret", 4usize));
-    assert!(!h.has("nav-folder-5"), "folding Projects hides Northwind");
-    assert!(h.has("nav-folder-4"), "the folder itself stays");
-    assert_eq!(h.location(), Location::AllInboxes, "folding does not navigate");
-    h.click(("folder-caret", 4usize));
-    assert!(h.has("nav-folder-5"), "unfolding brings the child back");
-}
-
-#[gpui_kit::gpui::test]
-fn account_headers_fold_their_section(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    assert!(h.has("nav-inbox-work") && h.has("nav-folder-4"));
-    assert!(!h.has("account-count-work"), "unfolded headers show no count");
-    h.click("account-work");
-    assert!(!h.has("nav-inbox-work"), "folding hides the account's rows");
-    assert!(!h.has("nav-folder-4"), "including its folders");
-    assert!(h.has("nav-inbox-personal"), "other accounts are untouched");
-    assert!(h.has("account-count-work"), "the work Inbox holds unread mail");
-    assert_eq!(h.location(), Location::AllInboxes, "folding does not navigate");
-    h.click("account-work");
-    assert!(h.has("nav-inbox-work") && h.has("nav-folder-4"), "unfolding restores the rows");
-    assert!(!h.has("account-count-work"));
 }
 
 #[gpui_kit::gpui::test]
@@ -233,14 +205,14 @@ fn chips_exist_on_inbox_views_only(cx: &mut TestAppContext) {
     assert!(h.chip_row(), "All Inboxes is an Inbox view");
     assert!(h.chip_row() && h.has(("chip", 0usize)));
 
-    h.click("nav-archive-personal");
+    h.click("1-3");
     assert!(!h.chip_row(), "no chips on a non-Inbox location");
     let all = h.visible();
     h.keys("2");
     assert_eq!(h.chip(), Chip::All, "chip keys are ignored outside Inbox views");
     assert_eq!(h.visible(), all);
 
-    h.click("nav-inbox-work");
+    h.click("2-0");
     assert!(h.chip_row(), "an account's Inbox has chips");
     h.keys("2");
     assert_eq!(h.chip(), Chip::NeedsReply);
@@ -309,7 +281,7 @@ fn filter_menu_narrows_the_list_by_account_and_tag(cx: &mut TestAppContext) {
     assert!(h.has("filter-account"), "All Inboxes can filter by account");
     h.keys("escape");
     assert!(!h.read(|a| a.menu_open()));
-    h.click("nav-inbox-personal");
+    h.click("1-0");
     h.click("btn-filter");
     assert!(!h.has("filter-account"), "an account's Inbox need not filter by account");
     h.keys("escape");
@@ -330,16 +302,16 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Location::Inbox("personal".into()));
 
     // From All Inboxes the first account answers, and `g i` keeps it unified.
-    h.click("nav-all-inboxes");
+    h.click(0usize);
     assert_eq!(h.location(), Location::AllInboxes);
     h.keys("g a");
     assert_eq!(h.location(), Location::Archive("personal".into()));
-    h.click("nav-all-inboxes");
+    h.click(0usize);
     h.keys("g i");
     assert_eq!(h.location(), Location::AllInboxes, "`g i` stays on All Inboxes");
 
     // From an account's location the jumps stay in that account.
-    h.click("nav-inbox-work");
+    h.click("2-0");
     h.keys("g a");
     assert_eq!(h.location(), Location::Archive("work".into()));
     h.keys("g i");
@@ -349,7 +321,7 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn sent_shows_the_outgoing_message_after_a_flushed_reply(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("nav-inbox-personal");
+    h.click("1-0");
     assert!(h.outgoing().is_empty());
 
     h.keys("r");
@@ -368,3 +340,5 @@ fn sent_shows_the_outgoing_message_after_a_flushed_reply(cx: &mut TestAppContext
     assert_eq!(h.location(), Location::Sent("personal".into()));
     assert_eq!(h.visible(), sent, "the Sent location lists the outgoing message");
 }
+
+

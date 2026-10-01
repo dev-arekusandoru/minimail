@@ -66,7 +66,7 @@ pub fn pending_total(h: &mut Harness<'_>) -> usize {
 
 /// Move the cursor down the current view until a message with pending suggestions is found.
 pub fn goto_pending(h: &mut Harness<'_>) -> MessageId {
-    h.click("nav-all-inboxes");
+    h.click(0usize);
     for _ in 0..80 {
         let id = h.cursor().unwrap();
         if h.read(|a| !a.mailbox.pending(id).is_empty()) {
