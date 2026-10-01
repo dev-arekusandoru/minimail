@@ -1,2 +1,6 @@
 /target
 .hippo/
+
+.agents/
+.claude
+skills-lock.json
