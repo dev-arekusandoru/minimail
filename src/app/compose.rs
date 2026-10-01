@@ -8,13 +8,11 @@ use crate::app::ui::button;
 use crate::model::{Message, MessageId};
 use gpui_kit::{
     component::{
+        description_list::DescriptionList,
         input::{InputEvent, Textarea, TextareaState},
-        label::Label,
     },
     *,
 };
-
-use crate::theme::ThemeColor;
 
 pub enum ComposeEvent {
     Send { in_reply_to: MessageId, body: String },
@@ -86,13 +84,14 @@ impl Focusable for ComposeReply {
 
 impl EventEmitter<ComposeEvent> for ComposeReply {}
 
-fn header(t: &ThemeColor, name: &'static str, value: String) -> impl IntoElement {
-    div()
-        .flex()
-        .gap_2()
-        .text_sm()
-        .child(div().w(px(56.)).text_color(t.muted_foreground).child(name))
-        .child(div().text_color(t.foreground).child(Label::new(value)))
+/// The read-only To/Subject header, as a `DescriptionList` row pair, like `recipient_rows`.
+fn header(to: String, subject: String) -> DescriptionList {
+    DescriptionList::horizontal()
+        .columns(1)
+        .label_width(px(56.))
+        .bordered(false)
+        .item("To", to, 1)
+        .item("Subject", subject, 1)
 }
 
 impl Render for ComposeReply {
@@ -108,8 +107,7 @@ impl Render for ComposeReply {
             .gap_2()
             .p_4()
             .bg(t.background)
-            .child(header(t, "To", self.to.clone()))
-            .child(header(t, "Subject", self.subject.clone()))
+            .child(header(self.to.clone(), self.subject.clone()))
             .child(gpui_kit::component::separator::Separator::horizontal())
             .child(div().flex_1().child(Textarea::new(&self.body).h_full()))
             .child(
