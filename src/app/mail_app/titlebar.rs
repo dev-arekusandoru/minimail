@@ -3,13 +3,12 @@
 use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
 use super::{ListMode, MailApp, MenuKind};
 use crate::app::actions::*;
-use crate::app::ui::{icon_button, primary_button, run, shortcut};
+use crate::app::ui::{button, icon_button, primary_button, run, shortcut};
 
 /// Width kept clear on each side of the search box for the sidebar toggle and title (left, past
 /// the traffic lights) and the global buttons (right).
@@ -25,45 +24,39 @@ impl MailApp {
             ListMode::State => self.location_label().into(),
             ListMode::Search(_) => "Search".into(),
         };
-        let search_tip: SharedString = "Search mail".into();
+        // The box is a kit outline `Button` (icon + placeholder/query label) that opens the
+        // palette; the clear button, or the `/` keycap while idle, sits over its right edge.
         let search = div()
             .id("search-box")
             .test_support()
+            .relative()
             .flex()
             .flex_none()
             .w(px(260.))
             .max_w_full()
             .min_w(px(80.))
-            .items_center()
-            .justify_between()
-            .h(px(22.))
-            .px_2()
-            .rounded_sm()
-            .border_1()
-            .border_color(t.border)
-            .bg(t.secondary)
-            .text_size(px(11.))
-            .text_color(if searching { t.foreground } else { t.muted_foreground })
-            .cursor_pointer()
-            .tooltip(move |window, cx| {
-                Tooltip::new(search_tip.clone())
-                    .key_binding(Some(shortcut("/")))
-                    .build(window, cx)
-            })
-            .child(search_text)
-            .child(if searching {
-                icon_button("search-clear", IconName::Close, "Clear search", "escape", cx)
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(|event, window, cx| {
-                        run(ClearSelection)(event, window, cx);
-                        cx.stop_propagation();
-                    })
-                    .into_any_element()
-            } else {
-                div().flex_none().text_color(t.muted_foreground).child("/").into_any_element()
-            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(run(OpenSearch));
+            .child(
+                button("search-open", search_text, "Search mail", "/", cx)
+                    .outline()
+                    .icon(IconName::Search)
+                    .w_full()
+                    .justify_start()
+                    .text_color(if searching { t.foreground } else { t.muted_foreground })
+                    .on_click(run(OpenSearch)),
+            )
+            .child(
+                div().absolute().right_1().top_0().bottom_0().flex().items_center().child(if searching {
+                    icon_button("search-clear", IconName::Close, "Clear search", "escape", cx)
+                        .on_click(|event, window, cx| {
+                            run(ClearSelection)(event, window, cx);
+                            cx.stop_propagation();
+                        })
+                        .into_any_element()
+                } else {
+                    shortcut("/").into_any_element()
+                }),
+            );
 
         let width = f32::from(window.viewport_size().width);
         let sidebar_icon = if self.sidebar_visible() { IconName::PanelLeftClose } else { IconName::PanelLeftOpen };
