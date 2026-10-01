@@ -1,23 +1,42 @@
 //! Evaluating a [`Query`] against a message.
 
+use std::cell::OnceCell;
+
 use super::{Combinator, Field, Group, Query, dates};
 use crate::clock::Timestamp;
 use crate::judge::Kind;
 use crate::model::{Mailbox, Message, Tag, TriageState};
 
-/// Lowercased haystacks for one message, computed once per `matches` call.
+/// Lowercased haystacks for one message, each computed on first use: counting a location
+/// for every sidebar row would otherwise lowercase every message's text on every frame.
 struct Haystack<'a> {
     m: &'a Message,
     mailbox: &'a Mailbox,
     state: TriageState,
     now: Timestamp,
-    name: String,
-    email: String,
-    subject: String,
-    body: Option<String>,
+    name: OnceCell<String>,
+    email: OnceCell<String>,
+    subject: OnceCell<String>,
+    body: OnceCell<String>,
 }
 
 impl Haystack<'_> {
+    fn name(&self) -> &str {
+        self.name.get_or_init(|| self.m.from_name.to_lowercase())
+    }
+
+    fn email(&self) -> &str {
+        self.email.get_or_init(|| self.m.from_email.to_lowercase())
+    }
+
+    fn subject(&self) -> &str {
+        self.subject.get_or_init(|| self.m.subject.to_lowercase())
+    }
+
+    fn body(&self) -> &str {
+        self.body.get_or_init(|| crate::reading::reader_text(self.m).to_lowercase())
+    }
+
     fn date(&self) -> &str {
         self.m.received.get(..10).unwrap_or(&self.m.received)
     }
@@ -26,12 +45,12 @@ impl Haystack<'_> {
         let tags = self.mailbox.tags(self.m.id);
         let m = self.m;
         match field {
-            Field::From => self.name.contains(v) || self.email.contains(v),
+            Field::From => self.name().contains(v) || self.email().contains(v),
             Field::To => m.to.to_lowercase().contains(v),
             Field::Cc => m.cc.to_lowercase().contains(v),
             Field::Bcc => m.bcc.to_lowercase().contains(v),
-            Field::Subject => self.subject.contains(v),
-            Field::Body => self.body.as_deref().unwrap_or_default().contains(v),
+            Field::Subject => self.subject().contains(v),
+            Field::Body => self.body().contains(v),
             Field::Before => dates::resolve(v, self.now).is_some_and(|d| self.date() < d.as_str()),
             Field::After => dates::resolve(v, self.now).is_some_and(|d| self.date() >= d.as_str()),
             Field::On => dates::resolve(v, self.now).is_some_and(|d| self.date() == d),
@@ -51,9 +70,13 @@ impl Haystack<'_> {
                 "sent" => m.outgoing && self.state != TriageState::Deleted,
                 "archived" => self.state == TriageState::Archived,
                 "deleted" => self.state == TriageState::Deleted,
-                folder => self.mailbox.folders(&m.account).iter().any(|f| {
-                    self.state == TriageState::Filed(f.id) && f.name.to_lowercase() == folder
-                }),
+                folder => match self.state {
+                    TriageState::Filed(id) => self
+                        .mailbox
+                        .folder(id)
+                        .is_some_and(|f| f.name.to_lowercase() == folder || self.mailbox.folder_path(id).to_lowercase() == folder),
+                    _ => false,
+                },
             },
             Field::Tag => match v {
                 "needs-reply" => tags.contains(&Tag::NeedsReply),
@@ -88,23 +111,19 @@ impl Query {
         let Some(state) = mailbox.state_of(m.id) else {
             return false;
         };
-        let needs_body = !self.text.is_empty() || self.groups.iter().any(|g| g.field == Field::Body);
         let h = Haystack {
             m,
             mailbox,
             state,
             now,
-            name: m.from_name.to_lowercase(),
-            email: m.from_email.to_lowercase(),
-            subject: m.subject.to_lowercase(),
-            body: needs_body.then(|| crate::reading::reader_text(m).to_lowercase()),
+            name: OnceCell::new(),
+            email: OnceCell::new(),
+            subject: OnceCell::new(),
+            body: OnceCell::new(),
         };
         self.groups.iter().all(|g| h.group(g))
             && self.text.iter().all(|t| {
-                h.subject.contains(t)
-                    || h.body.as_deref().unwrap_or_default().contains(t)
-                    || h.name.contains(t)
-                    || h.email.contains(t)
+                h.subject().contains(t) || h.name().contains(t) || h.email().contains(t) || h.body().contains(t)
             })
     }
 }

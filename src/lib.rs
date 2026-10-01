@@ -1,5 +1,6 @@
 pub mod account_style;
 pub mod app;
+pub mod filters;
 pub mod fuzzy;
 pub mod preview;
 pub mod sync_status;

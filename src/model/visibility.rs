@@ -274,6 +274,20 @@ impl Mailbox {
         })
         .len()
     }
+    /// A folder's name including its parents, e.g. `"Projects/Northwind"`.
+    pub fn folder_path(&self, id: FolderId) -> String {
+        let mut names = Vec::new();
+        let mut cursor = Some(id);
+        while let Some(next) = cursor {
+            let Some(folder) = self.folder(next) else {
+                break;
+            };
+            names.push(folder.name.clone());
+            cursor = folder.parent;
+        }
+        names.reverse();
+        names.join("/")
+    }
     pub fn follow_up_timeout(&self) -> Timestamp {
         self.follow_up_timeout
     }

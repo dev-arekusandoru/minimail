@@ -568,3 +568,19 @@ fn overlay_replaces_the_fields_it_names_and_appends_text() {
     assert_eq!(q.to_string(), "account:work tag:urgent in:archived from:ann,bob \"lunch\"");
     assert_eq!(q.combinator(Field::From), Some(Combinator::Or), "the overlaid group keeps its combinator");
 }
+
+#[test]
+fn quick_filters_keep_the_old_chip_order() {
+    use mail_classifier::filters::{QuickFilter, quick_filter};
+    assert_eq!(quick_filter(0), Some(QuickFilter::Clear), "key 1 was the All chip");
+    assert_eq!(quick_filter(1), Some(QuickFilter::Toggle(Field::Tag, "needs-reply")));
+    assert_eq!(quick_filter(2), Some(QuickFilter::Toggle(Field::Tag, "follow-up")));
+    assert_eq!(quick_filter(3), Some(QuickFilter::Toggle(Field::Tag, "urgent")));
+    assert_eq!(
+        quick_filter(4).is_some(),
+        mail_classifier::known_senders::KNOWN_SENDERS_ENABLED,
+        "key 5 (new senders) only while known senders are on"
+    );
+    assert_eq!(quick_filter(5), Some(QuickFilter::Toggle(Field::Tag, "spam")));
+    assert_eq!(quick_filter(6), None);
+}
