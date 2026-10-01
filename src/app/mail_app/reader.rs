@@ -1,6 +1,6 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
 //! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::{scroll::ScrollableElement as _, ActiveTheme as _};
 
 use super::*;
 
@@ -167,7 +167,8 @@ impl MailApp {
                     .flex_col()
                     .when_some(summary, |d, s| d.child(column(SummaryCard::new(&s).into_any_element()).pb_3()))
                     .when_some(title, |d, el| d.child(column(el).pb_3()))
-                    .children(rows.into_iter().map(column)),
+                    .children(rows.into_iter().map(column))
+                    .vertical_scrollbar(&scroll),
             )
             .into_any_element()
     }
