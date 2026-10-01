@@ -51,6 +51,9 @@ impl Mailbox {
             .count()
     }
     pub fn allow_sender(&mut self, email: &str) -> bool {
+        if !crate::known_senders::KNOWN_SENDERS_ENABLED {
+            return false;
+        }
         let e = lower(email);
         if !self.known.insert(e.clone()) {
             return false;
@@ -152,8 +155,12 @@ impl Mailbox {
     pub fn unsubscribed(&self) -> &[String] {
         &self.unsubscribed
     }
-    /// Mail you sent is never from a new sender.
+    /// Mail you sent is never from a new sender. Always `false` while the
+    /// known/unknown sender distinction is off (see [`crate::known_senders`]).
     pub fn is_new_sender(&self, id: MessageId) -> bool {
+        if !crate::known_senders::KNOWN_SENDERS_ENABLED {
+            return false;
+        }
         self.get(id)
             .is_some_and(|m| !m.outgoing && !self.known.contains(&lower(&m.from_email)))
     }

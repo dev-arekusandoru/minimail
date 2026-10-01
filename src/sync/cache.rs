@@ -128,13 +128,21 @@ impl Cache {
         if !has_icon {
             conn.execute_batch("ALTER TABLE accounts ADD COLUMN icon TEXT")?;
         }
+        let has_nickname: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('accounts') WHERE name='nickname'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_nickname {
+            conn.execute_batch("ALTER TABLE accounts ADD COLUMN nickname TEXT")?;
+        }
         Ok(Self { conn })
     }
 
     /// Everything needed to rebuild a [`crate::model::Mailbox`].
     pub fn load(&self) -> rusqlite::Result<(Vec<Account>, Vec<Folder>, Vec<Message>)> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, provider, name, email, color, icon FROM accounts ORDER BY rowid",
+            "SELECT id, provider, name, email, color, icon, nickname FROM accounts ORDER BY rowid",
         )?;
         let accounts = stmt
             .query_map([], |row| {
@@ -145,6 +153,7 @@ impl Cache {
                     email: row.get(3)?,
                     color: row.get(4)?,
                     icon: row.get(5)?,
+                    nickname: row.get(6)?,
                     provider: serde_json::from_str(&provider).unwrap_or(ProviderKind::Mock),
                 })
             })?
@@ -180,11 +189,12 @@ impl Cache {
 
     pub fn upsert_account(&self, account: &Account) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO accounts(id, provider, name, email, color, icon, cursor)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, NULL)
+            "INSERT INTO accounts(id, provider, name, email, color, icon, nickname, cursor)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
              ON CONFLICT(id) DO UPDATE SET
                 provider=excluded.provider, name=excluded.name,
-                email=excluded.email, color=excluded.color, icon=excluded.icon",
+                email=excluded.email, color=excluded.color, icon=excluded.icon,
+                nickname=excluded.nickname",
             params![
                 account.id,
                 serde_json::to_string(&account.provider).unwrap_or_else(|_| "\"Mock\"".into()),
@@ -192,6 +202,7 @@ impl Cache {
                 account.email,
                 account.color,
                 account.icon,
+                account.nickname,
             ],
         )?;
         Ok(())

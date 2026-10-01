@@ -346,6 +346,7 @@ fn account() -> Account {
         email: "a@x.io".to_owned(),
         color: "#61afef".to_owned(),
         icon: None,
+        nickname: None,
         provider: ProviderKind::Gmail,
     }
 }
@@ -500,15 +501,17 @@ fn reading_locally_is_pushed_once_and_survives_a_check_before_the_push() {
 }
 
 #[test]
-fn account_icon_and_color_round_trip_through_the_cache() {
+fn account_style_and_nickname_round_trip_through_the_cache() {
     let cache = Cache::open_in_memory().unwrap();
     let mut a = account();
     a.icon = Some("briefcase".to_owned());
+    a.nickname = Some("Side gig".to_owned());
     cache.upsert_account(&a).unwrap();
     assert_eq!(cache.load().unwrap().0, vec![a.clone()]);
 
     a.icon = Some("rocket".to_owned());
     a.color = "#98c379".to_owned();
+    a.nickname = None;
     cache.upsert_account(&a).unwrap();
     assert_eq!(cache.load().unwrap().0, vec![a]);
 }
@@ -533,6 +536,7 @@ fn a_cache_from_before_account_icons_loads_with_no_icon_and_keeps_its_color() {
     assert_eq!(accounts[0].color, "#e06c75");
     assert_eq!(cache.cursor("a").unwrap().as_deref(), Some("c1"), "the cursor survives");
     let _ = std::fs::remove_file(&path);
+    assert_eq!(accounts[0].nickname, None);
 }
 
 #[test]

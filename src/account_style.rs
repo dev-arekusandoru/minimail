@@ -66,6 +66,27 @@ pub fn icon_label(key: &str) -> Option<&'static str> {
     ICONS.iter().find(|(k, _)| *k == key).map(|(_, label)| *label)
 }
 
+/// A nickname as stored: trimmed, and `None` when empty or whitespace-only.
+pub fn normalize_nickname(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn set_nickname(account: &Account) -> Option<&str> {
+    account.nickname.as_deref().map(str::trim).filter(|n| !n.is_empty())
+}
+
+/// How the UI names `account`: its nickname when set, else its `name`.
+pub fn display_name(account: &Account) -> &str {
+    set_nickname(account).unwrap_or(&account.name)
+}
+
+/// Like [`display_name`], but falls back to `fallback` (e.g. the email) instead of the name,
+/// for places that label an account by address.
+pub fn nickname_or<'a>(account: &'a Account, fallback: &'a str) -> &'a str {
+    set_nickname(account).unwrap_or(fallback)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,7 +99,7 @@ mod tests {
         assert_eq!(old.icon, None);
         let json = serde_json::to_string(&old).unwrap();
         assert!(!json.contains("icon"), "unset icons are not written: {json}");
-        let styled = Account { icon: Some("star".into()), ..old };
+        let styled = Account { icon: Some("star".into()), nickname: Some("Mine".into()), ..old };
         let back: Account = serde_json::from_str(&serde_json::to_string(&styled).unwrap()).unwrap();
         assert_eq!(back, styled);
     }
@@ -90,8 +111,30 @@ mod tests {
             email: format!("{id}@x.io"),
             color: "#61afef".into(),
             icon: icon.map(str::to_owned),
+            nickname: None,
             provider: ProviderKind::Gmail,
         }
+    }
+
+    #[test]
+    fn nicknames_are_trimmed_and_blank_means_unset() {
+        assert_eq!(normalize_nickname("  Work mail "), Some("Work mail".into()));
+        assert_eq!(normalize_nickname(""), None);
+        assert_eq!(normalize_nickname(" \t "), None);
+    }
+
+    #[test]
+    fn display_name_prefers_a_nickname_and_falls_back() {
+        let mut a = account("a", None);
+        a.name = "Alice".into();
+        assert_eq!(display_name(&a), "Alice");
+        assert_eq!(nickname_or(&a, "a@x.io"), "a@x.io");
+        a.nickname = Some("  ".into());
+        assert_eq!(display_name(&a), "Alice", "a blank stored nickname is unset");
+        assert_eq!(nickname_or(&a, "a@x.io"), "a@x.io");
+        a.nickname = Some("Home".into());
+        assert_eq!(display_name(&a), "Home");
+        assert_eq!(nickname_or(&a, "a@x.io"), "Home");
     }
 
     #[test]

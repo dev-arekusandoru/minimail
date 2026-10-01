@@ -127,6 +127,9 @@ pub struct Account {
     /// Lucide icon key (see `account_style::ICONS`); `None` in configs from before icons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Optional user-chosen display name; blank means unset (see `account_style::display_name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
     #[serde(default)]
     pub provider: ProviderKind,
 }

@@ -57,7 +57,8 @@ impl MailApp {
                 _ => {
                     // Called while the window is being built: the kit's root (which hosts
                     // notifications) doesn't exist yet, so toast after this frame's setup.
-                    let text = format!("Gmail ({}): sign in again via “Add Gmail account”", account.email);
+                    let shown = crate::account_style::nickname_or(&account, &account.email);
+                    let text = format!("Gmail ({shown}): sign in again via “Add Gmail account”");
                     cx.defer_in(window, move |this, window, cx| this.show_toast(text, window, cx));
                 }
             }
@@ -428,6 +429,7 @@ impl MailApp {
             email,
             color: style.color.to_owned(),
             icon: Some(style.icon.to_owned()),
+            nickname: None,
             provider: ProviderKind::Gmail,
         };
         if let Err(e) = cache.upsert_account(&account) {
@@ -458,7 +460,9 @@ impl MailApp {
     /// Unlink an account: stop syncing it, forget its token, and drop its cached and shown mail.
     /// Mail on the server is untouched.
     pub(super) fn remove_linked_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(email) = self.mailbox.account(id).map(|a| a.email.clone()) else {
+        let Some((email, label)) = self.mailbox.account(id).map(|a| {
+            (a.email.clone(), crate::account_style::nickname_or(a, &a.email).to_owned())
+        }) else {
             return;
         };
         self.providers.remove(id);
@@ -480,9 +484,9 @@ impl MailApp {
         self.mailbox.remove_account(id);
         self.reset_view_state();
         let text = if problems.is_empty() {
-            format!("Removed {email}")
+            format!("Removed {label}")
         } else {
-            format!("Removed {email} ({})", problems.join("; "))
+            format!("Removed {label} ({})", problems.join("; "))
         };
         self.show_toast(text, window, cx);
         self.refresh_account_rows(cx);

@@ -34,6 +34,9 @@ impl MailApp {
         let filter = &self.triage.view.filter;
         let mut items: Vec<MenuItem> = TAGS
             .into_iter()
+            .filter(|t| {
+                crate::known_senders::KNOWN_SENDERS_ENABLED || *t != TagFilter::NewSender
+            })
             .map(|tag| {
                 MenuItem::action_fn(tag_label(tag), move || Box::new(ToggleTagFilter { tag }))
                     .checked(filter.tags.contains(&tag))
@@ -54,7 +57,11 @@ impl MailApp {
         if matches!(self.triage.view.location, Location::AllInboxes) {
             let mut accounts = vec![account_item("Any account", None, filter)];
             for account in self.mailbox.accounts() {
-                accounts.push(account_item(account.name.clone(), Some(account.id.clone()), filter));
+                accounts.push(account_item(
+                    crate::account_style::display_name(account).to_owned(),
+                    Some(account.id.clone()),
+                    filter,
+                ));
             }
             items.push(MenuItem::submenu(
                 match filter.account.as_deref() {
@@ -73,7 +80,7 @@ impl MailApp {
 fn mailbox_name(mailbox: &Mailbox, id: &str) -> String {
     mailbox
         .account(id)
-        .map_or_else(|| id.to_owned(), |a| a.name.clone())
+        .map_or_else(|| id.to_owned(), |a| crate::account_style::display_name(a).to_owned())
 }
 
 fn kind_item(label: &str, kind: Option<Kind>, current: Option<Kind>) -> MenuItem {

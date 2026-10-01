@@ -124,4 +124,13 @@ impl Mailbox {
         account.color = color.to_owned();
         true
     }
+
+    /// Set or clear (blank) an account's nickname. Returns whether the account exists.
+    pub fn set_account_nickname(&mut self, id: &str, nickname: &str) -> bool {
+        let Some(account) = self.accounts.iter_mut().find(|a| a.id == id) else {
+            return false;
+        };
+        account.nickname = crate::account_style::normalize_nickname(nickname);
+        true
+    }
 }

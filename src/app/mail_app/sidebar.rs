@@ -60,7 +60,7 @@ fn location_account(loc: &Location) -> AccountId {
 fn account_name(mailbox: &Mailbox, id: &str) -> String {
     mailbox
         .account(id)
-        .map_or_else(|| id.to_owned(), |a| a.name.clone())
+        .map_or_else(|| id.to_owned(), |a| crate::account_style::display_name(a).to_owned())
 }
 
 /// A folder's name including its parents, e.g. `"Projects/Northwind"`.
@@ -139,9 +139,12 @@ impl MailApp {
                 }
             }
             items.push(
-                SidebarMenuItem::new(account.name.clone())
-                    .icon(Icon::new(IconName::User).text_color(
-                        theme::parse_color(&account.color).unwrap_or(cx.theme().primary),
+                SidebarMenuItem::new(crate::account_style::display_name(account).to_owned())
+                    .icon(icons::account_icon(
+                        crate::account_style::icon_key(account),
+                        &account.color,
+                        cx.theme(),
+                        16.,
                     ))
                     .default_open(true)
                     .children(children),
