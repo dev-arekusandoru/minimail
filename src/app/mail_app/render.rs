@@ -23,6 +23,7 @@ impl Render for MailApp {
         if let Some(text) = self.pending_toast.take() {
             self.show_toast(text, window, cx);
         }
+        self.settle_fetch_toast(window, cx);
         // Rows size themselves from the real pane: the list pane side by side, the whole
         // region when the panes are stacked.
         self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);

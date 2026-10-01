@@ -110,6 +110,7 @@ impl MailApp {
         if let Some(until) = self.throttled_until
             && now < until
         {
+            self.fetch_baseline = None;
             return None;
         }
         let check = self.force_check || now >= self.check_at;
@@ -209,8 +210,29 @@ impl MailApp {
         }
         self.force_check = true;
         self.fetch_baseline = Some(self.mailbox.messages().len());
-        self.show_toast("Fetching mail…".into(), window, cx);
+        self.fetch_toast = true;
+        window.push_notification(
+            Notification::info("Fetching mail…")
+                .id::<FetchToastId>()
+                .placement(Anchor::BottomCenter)
+                .autohide(false),
+            cx,
+        );
         self.wake_sync();
+    }
+
+    /// Whether a requested fetch (or a fresh sign-in's first sync) is still running.
+    pub(super) fn is_fetching(&self) -> bool {
+        self.fetch_baseline.is_some()
+    }
+
+    /// Dismiss the persistent fetch toast once the fetch has landed or failed; runs every frame
+    /// so no exit path (error, throttle, removed account) can leave it stuck.
+    pub(super) fn settle_fetch_toast(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.fetch_toast && !self.is_fetching() {
+            self.fetch_toast = false;
+            window.remove_notification::<FetchToastId>(cx);
+        }
     }
 
     /// The list is near its end: queue a page of older mail and wake the loop.
@@ -439,6 +461,9 @@ impl MailApp {
             return;
         };
         self.providers.remove(id);
+        if self.providers.is_empty() {
+            self.fetch_baseline = None;
+        }
         self.older_queue.remove(id);
         self.older_in_flight.remove(id);
         let mut problems = Vec::new();

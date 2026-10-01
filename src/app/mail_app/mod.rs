@@ -66,6 +66,9 @@ const LIST_HEADER_H: f32 = 28.;
 const LOAD_MORE_MARGIN: usize = 20;
 /// Identity of the toast notification, so each new toast replaces the last.
 struct ToastId;
+/// Identity of the persistent “Fetching mail…” notification, kept apart from `ToastId` so the
+/// result toast doesn't replace it before it is dismissed.
+struct FetchToastId;
 
 /// What the message list currently shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,6 +178,8 @@ pub struct MailApp {
     throttled_until: Option<Timestamp>,
     /// Message count when a fetch was requested; toast the difference when it lands.
     fetch_baseline: Option<usize>,
+    /// The persistent “Fetching mail…” notification is showing.
+    fetch_toast: bool,
     /// Scopes whose older mail the next round should extend.
     older_queue: HashMap<AccountId, Vec<crate::provider::Scope>>,
     /// Accounts with a load-more page in flight.
@@ -266,6 +271,7 @@ impl MailApp {
             check_at: 0,
             throttled_until: None,
             fetch_baseline: None,
+            fetch_toast: false,
             older_queue: HashMap::new(),
             older_in_flight: HashSet::new(),
             bodies_in_flight: HashSet::new(),

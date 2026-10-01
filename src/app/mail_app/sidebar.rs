@@ -160,6 +160,8 @@ impl MailApp {
                     .when(self.has_remote_accounts(), |row| {
                         row.child(
                             icon_button("sidebar-fetch-mail", IconName::RefreshCw, "Fetch mail", "cmd-shift-n", cx)
+                                .loading(self.is_fetching())
+                                .loading_icon(IconName::RefreshCw)
                                 .on_click(run(FetchMail)),
                         )
                     })
