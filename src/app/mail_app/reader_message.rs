@@ -13,8 +13,9 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::text::{Text, TextView};
+use gpui_kit::component::text::Text;
 use gpui_kit::component::tooltip::Tooltip;
+use crate::app::html_view::HtmlView;
 
 impl MailApp {
     /// Reply, Reply all, Forward and the `⋯` menu of one expanded message. All act on that
@@ -471,11 +472,7 @@ impl MailApp {
             Some(h) if !plain => {
                 let safe = reading::safe_html(h);
                 blocked = safe.blocked_images;
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .child(TextView::html(("reader-html", id), safe.html).selectable(true))
-                    .into_any_element()
+                HtmlView::new(("reader-html", id), safe.html).into_any_element()
             }
             _ => self.text_content(m, look, cx),
         };

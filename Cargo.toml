@@ -17,6 +17,20 @@ rand = "0.8"
 url = "2"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false }
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts", "complex-scripts"] }
+blitz-html = { version = "=0.3.0-beta.2", default-features = false }
+blitz-paint = { version = "=0.3.0-beta.2", default-features = false }
+blitz-traits = "=0.3.0-beta.2"
+anyrender = "=0.13.0"
+anyrender_vello_cpu = "=0.17.0"
+data-url = "0.3.1"
+peniko = "0.6.1"
+image = { version = "0.25.6", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+
+[patch.crates-io]
+# Stylo's ToCss derive leaves a nested Result error type unconstrained.
+# GPUI's serde_fmt dependency adds a second From impl for fmt::Error.
+stylo_derive = { path = "vendor/stylo_derive" }
 
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }

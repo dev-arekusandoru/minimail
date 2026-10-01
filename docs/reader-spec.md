@@ -29,8 +29,8 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 
 - Plain text and HTML are both first-class. Emails may be text only, HTML only, or both.
 - Branded HTML, such as newsletters, renders as HTML by default. Per-message **Reader mode** (`v`) swaps it for the text part (or text extracted from the HTML) in reader typography.
-  - Constraint: GPUI's HTML renderer (`gpui_kit::component::text::TextView`) renders structure only: headings, emphasis, links, lists, tables, and images. CSS colors, backgrounds, fonts, spacing, and table widths are dropped, so the "original" view is structural, not a pixel-faithful brand render. Exceptions: image `width`/`height` and the `<mark>` highlight color. A faithful render would need a web engine, which is out of scope. User-facing details: README → *HTML mail*.
-- Safety: scripts and styles are dropped by the renderer. Remote (`http(s)`) images are blocked and replaced by their alt text, with a "N remote images blocked" note. `data:` images render inline.
+  - Original HTML uses Blitz CSS resolution, font shaping, and layout, with CPU rasterization on a background task and a native GPUI image. Each retained view caches its current document/width/scale result; resize requests are single-flight and stale results are discarded. Wide content scrolls horizontally. The rasterized body is not selectable; Reader mode remains selectable.
+- Safety: scripts never execute. Sender-referenced network and local-file resources are denied, including CSS imports, fonts, and backgrounds. Non-`data:` images are replaced by alt text with a blocked-image note. Only bounded PNG/JPEG/GIF/WebP data images are allowed. Rendering errors are visible; document/image limits are listed in README → *HTML mail*. Only HTTP(S)/`mailto:` links open externally.
 - Quoted history inside a body is collapsed ("Show quoted text").
 - Attachments appear as chips with the filename and size.
 
@@ -74,7 +74,7 @@ Pure matching and per-tab query state live in `src/find.rs` (`find_in_thread`, `
 
 Known limitations:
 
-- HTML bodies cannot be highlighted: they render through `TextView`, which takes no highlight ranges. While a message has matches it is shown in its text (Reader mode) form instead; its own Reader mode setting is untouched, and the HTML view returns when the bar is hidden or the matches go.
+- HTML bodies cannot be highlighted because they are rasterized by Blitz. While a message has matches it is shown in its text (Reader mode) form instead; its own Reader mode setting is untouched, and the HTML view returns when the bar is hidden or the matches go.
 - Only the opened message's subject line is searched and highlighted; the other messages' subject lines repeat the thread subject.
 
 ## Actions
