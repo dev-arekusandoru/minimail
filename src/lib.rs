@@ -2,6 +2,7 @@ pub mod app;
 pub mod fuzzy;
 pub mod preview;
 pub mod clock;
+pub mod draft;
 pub mod find;
 pub mod hints;
 pub mod contacts;

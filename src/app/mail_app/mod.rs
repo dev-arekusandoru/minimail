@@ -18,6 +18,7 @@ use crate::hints::{HintContext, HintMode};
 use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::row::{self, RowVisual};
 use crate::app::compose::{ComposeEvent, ComposeReply};
+use crate::draft::DraftKind;
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};

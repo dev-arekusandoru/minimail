@@ -87,6 +87,37 @@ impl MailApp {
         }
     }
 
+    /// Reply all to message `id`: sender + To + Cc, minus our own address.
+    pub(super) fn reply_all_to(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
+        self.compose_kind_for(DraftKind::ReplyAll, id, window, cx);
+    }
+
+    /// Forward message `id` with the forwarded-message block prefilled and To empty.
+    pub(super) fn forward(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
+        self.compose_kind_for(DraftKind::Forward, id, window, cx);
+    }
+
+    /// The keyboard/palette path: the same, on the cursor message.
+    pub(super) fn open_compose_kind(&mut self, kind: DraftKind, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.cursor_id() else {
+            return;
+        };
+        match kind {
+            DraftKind::Reply => self.reply_to(id, window, cx),
+            DraftKind::ReplyAll => self.reply_all_to(id, window, cx),
+            DraftKind::Forward => self.forward(id, window, cx),
+        }
+    }
+
+    fn compose_kind_for(&mut self, kind: DraftKind, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.modal_open() {
+            return;
+        }
+        if let Some(msg) = self.mailbox.get(id).cloned() {
+            self.open_compose_kind_for(kind, &msg, None, window, cx);
+        }
+    }
+
     pub(super) fn open_compose_for(
         &mut self,
         msg: &Message,
@@ -94,9 +125,21 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_compose_kind_for(DraftKind::Reply, msg, body, window, cx);
+    }
+
+    fn open_compose_kind_for(
+        &mut self,
+        kind: DraftKind,
+        msg: &Message,
+        body: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.pin_message(msg.id);
+        let own = self.mailbox.account(&msg.account).map(|a| a.email.clone()).unwrap_or_default();
         let compose = cx.new(|cx| {
-            let mut c = ComposeReply::new(msg, window, cx);
+            let mut c = ComposeReply::new(kind, msg, &own, window, cx);
             if let Some(body) = body {
                 c.set_body(&body, window, cx);
             }
@@ -107,7 +150,12 @@ impl MailApp {
             window,
             |this, _, event: &ComposeEvent, window, cx| {
                 match event {
-                    ComposeEvent::Send { in_reply_to, body } => {
+                    ComposeEvent::Send { kind: DraftKind::Forward, .. } => {
+                        // Mock data: a forward leaves the message's triage and tags untouched.
+                        this.close_modals(window, cx);
+                        this.show_toast("Forward sent".into(), window, cx);
+                    }
+                    ComposeEvent::Send { in_reply_to, body, .. } => {
                         let now = this.now();
                         let expects_reply = crate::judge::expects_reply(&StubJudge, body);
                         this.mailbox.send_reply_at(*in_reply_to, body.clone(), expects_reply, now);

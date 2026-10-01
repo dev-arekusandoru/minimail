@@ -1,42 +1,61 @@
-//! Reply composer: read-only To/Subject header plus a multiline body.
+//! Composer for Reply, Reply all and Forward: editable To/Cc, read-only Subject, multiline body.
 use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::actions::{CancelCompose, COMPOSE_CONTEXT, SendReply};
 use crate::app::chrome::HintBar;
 use crate::hints::{HintContext, HintMode};
 use crate::app::ui::button;
+use crate::draft::{DraftKind, draft};
 use crate::model::{Message, MessageId};
 use gpui_kit::{
     component::{
-        description_list::DescriptionList,
-        input::{InputEvent, Textarea, TextareaState},
+        input::{Input, InputEvent, InputState, Textarea, TextareaState},
     },
     *,
 };
 
 pub enum ComposeEvent {
-    Send { in_reply_to: MessageId, body: String },
+    Send { in_reply_to: MessageId, kind: DraftKind, body: String },
     Cancel,
 }
 
 pub struct ComposeReply {
     in_reply_to: MessageId,
-    to: String,
+    kind: DraftKind,
+    to: Entity<InputState>,
+    cc: Entity<InputState>,
     subject: String,
     body: Entity<TextareaState>,
 }
 
 impl ComposeReply {
-    pub fn new(msg: &Message, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let body = cx.new(|cx| TextareaState::new(window, cx).placeholder("Write your reply…"));
-        let subject = if msg.subject.to_lowercase().starts_with("re:") {
-            msg.subject.clone()
-        } else {
-            format!("Re: {}", msg.subject)
-        };
+    /// `own_email` is the receiving account's address (excluded from Reply all).
+    pub fn new(
+        kind: DraftKind,
+        msg: &Message,
+        own_email: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let d = draft(kind, msg, own_email);
+        let placeholder = if kind == DraftKind::Forward { "Add a note…" } else { "Write your reply…" };
+        let body = cx.new(|cx| TextareaState::new(window, cx).placeholder(placeholder));
+        if !d.body.is_empty() {
+            body.update(cx, |b, cx| b.set_value(d.body.as_str(), window, cx));
+        }
+        let to = cx.new(|cx| {
+            let mut i = InputState::new(window, cx).placeholder("Recipients");
+            i.set_value(d.to.as_str(), window, cx);
+            i
+        });
+        let cc = cx.new(|cx| {
+            let mut i = InputState::new(window, cx).placeholder("Cc");
+            i.set_value(d.cc.as_str(), window, cx);
+            i
+        });
         // The kit Textarea binds cmd-enter ("secondary-enter") itself, inserting a
         // newline and emitting PressEnter; treat that as "send" and drop the newline.
-        cx.subscribe(&body, |this, body, event: &InputEvent, cx| {
+        cx.subscribe(&body, move |this, body, event: &InputEvent, cx| {
             if matches!(event, InputEvent::PressEnter { secondary: true, .. }) {
                 let mut text = body.read(cx).value().to_string();
                 if text.ends_with('\n') {
@@ -44,6 +63,7 @@ impl ComposeReply {
                 }
                 cx.emit(ComposeEvent::Send {
                     in_reply_to: this.in_reply_to,
+                    kind: this.kind,
                     body: text,
                 });
             }
@@ -51,8 +71,10 @@ impl ComposeReply {
         .detach();
         Self {
             in_reply_to: msg.id,
-            to: format!("{} <{}>", msg.from_name, msg.from_email),
-            subject,
+            kind,
+            to,
+            cc,
+            subject: d.subject,
             body,
         }
     }
@@ -60,6 +82,22 @@ impl ComposeReply {
     pub fn set_body(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.body
             .update(cx, |body, cx| body.set_value(text, window, cx));
+    }
+
+    pub fn kind(&self) -> DraftKind {
+        self.kind
+    }
+
+    pub fn to(&self, cx: &App) -> String {
+        self.to.read(cx).value().to_string()
+    }
+
+    pub fn cc(&self, cx: &App) -> String {
+        self.cc.read(cx).value().to_string()
+    }
+
+    pub fn subject(&self) -> &str {
+        &self.subject
     }
 
     pub fn body(&self, cx: &App) -> String {
@@ -71,6 +109,7 @@ impl ComposeReply {
         let body = self.body.read(cx).value().to_string();
         cx.emit(ComposeEvent::Send {
             in_reply_to: self.in_reply_to,
+            kind: self.kind,
             body,
         });
     }
@@ -78,20 +117,25 @@ impl ComposeReply {
 
 impl Focusable for ComposeReply {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.body.focus_handle(cx)
+        // A forward starts with no recipient: type it first.
+        if self.kind == DraftKind::Forward {
+            self.to.focus_handle(cx)
+        } else {
+            self.body.focus_handle(cx)
+        }
     }
 }
 
 impl EventEmitter<ComposeEvent> for ComposeReply {}
 
-/// The read-only To/Subject header, as a `DescriptionList` row pair, like `recipient_rows`.
-fn header(to: String, subject: String) -> DescriptionList {
-    DescriptionList::horizontal()
-        .columns(1)
-        .label_width(px(56.))
-        .bordered(false)
-        .item("To", to, 1)
-        .item("Subject", subject, 1)
+/// One header row: fixed-width label, then the editable field or plain text.
+fn row(label: &'static str, field: impl IntoElement, cx: &App) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(div().w(px(56.)).text_sm().text_color(cx.theme().muted_foreground).child(label))
+        .child(div().flex_1().min_w_0().child(field))
 }
 
 impl Render for ComposeReply {
@@ -107,7 +151,9 @@ impl Render for ComposeReply {
             .gap_2()
             .p_4()
             .bg(t.background)
-            .child(header(self.to.clone(), self.subject.clone()))
+            .child(row("To", Input::new(&self.to), cx))
+            .child(row("Cc", Input::new(&self.cc), cx))
+            .child(row("Subject", self.subject.clone(), cx))
             .child(gpui_kit::component::separator::Separator::horizontal())
             .child(div().flex_1().child(Textarea::new(&self.body).h_full()))
             .child(

@@ -132,6 +132,12 @@ impl Render for MailApp {
                     this.open_compose(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &ReplyAll, window, cx| {
+                this.open_compose_kind(crate::draft::DraftKind::ReplyAll, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &Forward, window, cx| {
+                this.open_compose_kind(crate::draft::DraftKind::Forward, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
             .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))

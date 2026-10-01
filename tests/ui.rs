@@ -461,3 +461,39 @@ fn help_overlay_fits_window_and_scrolls_at_any_size(cx: &mut TestAppContext) {
     h.keys("escape");
     assert!(!h.read(|a| a.help_open()));
 }
+
+#[gpui_kit::gpui::test]
+fn reply_all_and_forward_keys_open_prefilled_composer(cx: &mut TestAppContext) {
+    use mail_classifier::draft::DraftKind;
+    let mut h = harness(cx);
+    let id = h.cursor().unwrap();
+    let (from, subject) = h.read(|a| {
+        let m = a.mailbox.get(id).unwrap();
+        (m.from_email.clone(), m.subject.clone())
+    });
+    let fields = |h: &mut Harness| {
+        let app = h.app.clone();
+        h.cx.read_entity(&app, |a, cx| {
+            let c = a.compose.as_ref().expect("composer open").read(cx);
+            (c.kind(), c.to(cx), c.subject().to_owned(), c.body(cx))
+        })
+    };
+
+    h.keys("shift-a");
+    let (kind, to, subj, _) = fields(&mut h);
+    assert_eq!(kind, DraftKind::ReplyAll);
+    assert!(to.contains(&from));
+    assert!(!to.contains("you@example.com"));
+    assert!(subj.starts_with("Re: ") && subj.ends_with(&subject.trim_start_matches("Re: ").to_owned()));
+    h.keys("escape");
+    assert!(!h.read(|a| a.compose_open()));
+
+    h.keys("w");
+    let (kind, to, subj, body) = fields(&mut h);
+    assert_eq!(kind, DraftKind::Forward);
+    assert!(to.is_empty());
+    assert!(subj.starts_with("Fwd: ") || subj.to_lowercase().starts_with("fw"));
+    assert!(body.contains("Forwarded message") && body.contains(&from));
+    h.keys("escape");
+    assert!(!h.read(|a| a.compose_open()));
+}
