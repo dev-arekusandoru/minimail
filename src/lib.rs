@@ -3,6 +3,7 @@ pub mod app;
 pub mod filters;
 pub mod fuzzy;
 pub mod preview;
+pub mod prefs;
 pub mod sync_status;
 pub mod clock;
 pub mod draft;
