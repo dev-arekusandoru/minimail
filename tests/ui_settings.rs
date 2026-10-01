@@ -67,8 +67,10 @@ fn the_tab_avatar_switch_turns_the_setting_off_and_back_on(cx: &mut TestAppConte
     open_page(&mut h, APPEARANCE);
     click_in(&mut h, 0, 2, "check");
     assert!(!h.read(|a| a.tab_avatars));
-    // The panel reopens showing the current value, so the next click turns it back on.
-    h.keys("escape cmd-,");
+    // The panel reopens showing the current value, so the next click turns it back on. Two
+    // calls, so the harness sees the panel close and waits out the reopened one's slide-in.
+    h.keys("escape");
+    h.keys("cmd-,");
     h.click(format!("0-{APPEARANCE}"));
     click_in(&mut h, 0, 2, "check");
     assert!(h.read(|a| a.tab_avatars));
