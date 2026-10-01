@@ -31,7 +31,6 @@ impl Render for MailApp {
         let banner = self.pending_rule.clone();
         let t = cx.theme();
         let (bg, fg) = (t.background, t.foreground);
-        let (success, on_primary) = (t.success, t.primary_foreground);
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -227,37 +226,6 @@ impl Render for MailApp {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
             .child(div().flex_none().child(HintBar::new(hint)))
-            .when_some(self.toast.clone(), |d, text| {
-                d.child(
-                    div()
-                        .absolute()
-                        .bottom(px(40.))
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .px_3()
-                                .py_1()
-                                .rounded_md()
-                                .bg(success)
-                                .text_color(on_primary)
-                                .text_size(px(12.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(text.clone())
-                                .when(text.contains("undo"), |d| {
-                                    d.child(
-                                        button("toast-undo", "Undo", "Undo", "u", cx)
-                                            .on_click(run(Undo)),
-                                    )
-                                }),
-                        ),
-                )
-            })
             .when_some(self.render_menu(window, cx), |d, menu| d.child(menu))
     }
 }

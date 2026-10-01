@@ -10,7 +10,7 @@
 
 pub use gpui_kit::component::theme::ThemeColor;
 use gpui_kit::component::theme::{Theme as KitTheme, ThemeRegistry};
-use gpui_kit::{App, Hsla, SharedString, rgba};
+use gpui_kit::{App, Hsla, SharedString, px, rgba};
 use std::path::PathBuf;
 
 /// Name of the theme applied at startup.
@@ -100,7 +100,11 @@ pub fn apply(cx: &mut App, name: &str) -> bool {
     let Some(config) = ThemeRegistry::global(cx).themes().get(name).cloned() else {
         return false;
     };
-    KitTheme::update(cx, |theme| theme.apply_config(&config));
+    KitTheme::update(cx, |theme| {
+        theme.apply_config(&config);
+        // Bottom toasts clear the hint bar.
+        theme.notification.margins.bottom = px(40.);
+    });
     true
 }
 

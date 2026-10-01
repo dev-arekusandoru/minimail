@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::theme;
-use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -63,7 +63,8 @@ use reader::format_when;
 const HEADER_H: f32 = 36.;
 /// Height of the list header above the rows (title, selection count, Filter ▾).
 const LIST_HEADER_H: f32 = 28.;
-const TOAST_MS: u64 = 4000;
+/// Identity of the toast notification, so each new toast replaces the last.
+struct ToastId;
 
 /// What the message list currently shows.
 #[derive(Clone, Debug, PartialEq, Eq)]

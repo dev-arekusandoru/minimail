@@ -155,6 +155,25 @@ fn list_header_menu_shows_with_two_selected_and_acts_on_all_of_them(cx: &mut Tes
     assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1), "one undo step for both");
 }
 
+/// The toast after an action carries an Undo button that is the same step as `u`.
+#[gpui_kit::gpui::test]
+fn the_toast_undo_button_undoes_the_last_action(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let id = h.cursor().unwrap();
+    h.keys("d");
+    assert_eq!(h.state_of(id), Deleted);
+    assert!(h.read(|a| a.toast.is_some()), "an action raises a toast");
+    // The notification fades in on the executor's timers and over real frame time; run both
+    // out before aiming at it.
+    h.cx.executor().advance_clock(std::time::Duration::from_millis(600));
+    std::thread::sleep(std::time::Duration::from_millis(450));
+    h.cx.run_until_parked();
+    h.cx.update_window(h.window, |_, window, cx| window.draw(cx).clear(cx)).unwrap();
+    h.cx.update_window(h.window, |_, window, cx| window.draw(cx).clear(cx)).unwrap();
+    h.click("toast-undo");
+    assert_eq!(h.state_of(id), Inbox);
+}
+
 #[gpui_kit::gpui::test]
 fn delete_menu_row_moves_message_to_trash_and_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness(cx);

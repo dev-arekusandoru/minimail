@@ -1,23 +1,38 @@
 use super::*;
 
 impl MailApp {
+    /// Show `text` as a kit notification at the bottom of the window. A new toast replaces the
+    /// previous one; one that mentions undo carries an Undo button. `self.toast` mirrors the
+    /// visible text because the kit keeps its notification text private.
     pub(super) fn show_toast(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.toast_gen += 1;
         let generation = self.toast_gen;
-        self.toast = Some(text.into());
-        cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(TOAST_MS))
-                .await;
-            this.update(cx, |this, cx| {
-                if this.toast_gen == generation {
-                    this.toast = None;
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-        .detach();
+        let text: SharedString = text.into();
+        self.toast = Some(text.clone());
+        let app = cx.weak_entity();
+        let mut note = Notification::success(text.clone())
+            .id::<ToastId>()
+            .placement(Anchor::BottomCenter)
+            .on_close(move |_, cx| {
+                app.update(cx, |this, cx| {
+                    if this.toast_gen == generation {
+                        this.toast = None;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
+        if text.contains("undo") {
+            note = note.content(|_, _, cx| {
+                button("toast-undo", "Undo", "Undo", "u", cx)
+                    .on_click(cx.listener(|note, _, window, cx| {
+                        window.dispatch_action(Box::new(Undo), cx);
+                        note.dismiss(window, cx);
+                    }))
+                    .into_any_element()
+            });
+        }
+        window.push_notification(note, cx);
         cx.notify();
     }
 
