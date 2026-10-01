@@ -95,9 +95,9 @@ pub fn sender_label(msg: &crate::model::Message) -> String {
     }
 }
 
-/// Rows carry the account color dot only in the unified `All Inboxes` view, where the
-/// account is otherwise ambiguous.
-pub fn shows_account_dot(location: &crate::model::Location) -> bool {
+/// Rows carry the sender's account icon (in the account color) only in the unified `All Inboxes`
+/// view, where the account is otherwise ambiguous.
+pub fn shows_account_icon(location: &crate::model::Location) -> bool {
     matches!(location, crate::model::Location::AllInboxes)
 }
 

@@ -32,6 +32,13 @@ pub fn parse_color(value: &str) -> Option<Hsla> {
     Some(rgba(if digits.len() == 6 { (v << 8) | 0xff } else { v }).into())
 }
 
+/// The `#rrggbb` form of `color` (alpha dropped); the inverse of [`parse_color`].
+pub fn to_hex(color: Hsla) -> String {
+    let c = gpui_kit::Rgba::from(color);
+    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b))
+}
+
 /// Directory user theme files are read from: `$MAIL_CLASSIFIER_THEMES`, else
 /// `~/.config/mail-classifier/themes`.
 pub fn user_themes_dir() -> Option<PathBuf> {

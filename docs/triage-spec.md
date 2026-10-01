@@ -97,7 +97,7 @@ Every user action is one undo step.
   Inbox). Single-select, fixed set, no counts:
   All · Needs Reply · Follow Up · Urgent · New Senders · Possible Spam
 - **Filter ▾ menu**: every location; filter by tag, Kind, account.
-- **Rows**: tag badges; account color dot in All Inboxes.
+- **Rows**: tag badges; account icon (per-account icon + color) before the sender in All Inboxes.
 - **Viewer**: Archive / File / Delete / Snooze in each message's `⋯` menu; banner for New Sender
   (Allow / Block) and Possible Spam (Block & Delete / Delete).
 

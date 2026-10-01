@@ -251,6 +251,21 @@ impl MailApp {
         self.open_settings(false, window, cx);
     }
 
+    /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache
+    /// (demo accounts live only in memory).
+    fn set_account_style(&mut self, id: &str, icon: &str, color: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.mailbox.set_account_style(id, icon, color) {
+            return;
+        }
+        if let (Some(cache), Some(account)) = (&self.cache, self.mailbox.account(id))
+            && account.provider == crate::model::ProviderKind::Gmail
+            && let Err(e) = cache.upsert_account(account)
+        {
+            self.show_toast(format!("Could not save the account style: {e}"), window, cx);
+        }
+        cx.notify();
+    }
+
     /// Rows for the settings Accounts page.
     pub(super) fn account_rows(&self) -> Vec<AccountRow> {
         self.mailbox
@@ -261,6 +276,7 @@ impl MailApp {
                 name: a.name.clone(),
                 email: a.email.clone(),
                 color: a.color.clone(),
+                icon: crate::account_style::icon_key(a),
                 gmail: a.provider == crate::model::ProviderKind::Gmail,
             })
             .collect()
@@ -333,6 +349,7 @@ impl MailApp {
                 }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
                 SettingsEvent::RemoveAccount(id) => this.remove_linked_account(id, window, cx),
+                SettingsEvent::AccountStyle { id, icon, color } => this.set_account_style(id, icon, color, window, cx),
                 SettingsEvent::Close => this.close_modals(window, cx),
             },
         ));

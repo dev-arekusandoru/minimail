@@ -20,7 +20,10 @@ gpui_kit::assets::icon_assets!(
         ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
-        Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders
+        Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
+        // Account icons.
+        Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
+        Gamepad2, Music, Coffee, Rocket, Wallet, Leaf
     ]
 );
 
@@ -293,6 +296,36 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
 pub fn icon(glyph: Glyph, t: &ThemeColor, size: f32) -> Icon {
     let spec = glyph.spec();
     Icon::new(spec.icon).with_size(px(size)).text_color(spec.token.color(t))
+}
+
+/// The Lucide icon for an [`crate::account_style::ICONS`] key; `None` for an unknown key.
+pub fn account_icon_name(key: &str) -> Option<IconName> {
+    Some(match key {
+        "mail" => IconName::Mail,
+        "briefcase" => IconName::Briefcase,
+        "house" => IconName::House,
+        "star" => IconName::Star,
+        "heart" => IconName::Heart,
+        "building-2" => IconName::Building2,
+        "graduation-cap" => IconName::GraduationCap,
+        "shopping-bag" => IconName::ShoppingBag,
+        "users" => IconName::Users,
+        "globe" => IconName::Globe,
+        "gamepad-2" => IconName::Gamepad2,
+        "music" => IconName::Music,
+        "coffee" => IconName::Coffee,
+        "rocket" => IconName::Rocket,
+        "wallet" => IconName::Wallet,
+        "leaf" => IconName::Leaf,
+        _ => return None,
+    })
+}
+
+/// `key`'s icon at `size` pixels tinted with the `#rrggbb` `color` (the theme accent when it does
+/// not parse). Pass [`crate::account_style::icon_key`] for an account.
+pub fn account_icon(key: &str, color: &str, t: &ThemeColor, size: f32) -> Icon {
+    let name = account_icon_name(key).unwrap_or(IconName::Mail);
+    Icon::new(name).with_size(px(size)).text_color(theme::parse_color(color).unwrap_or(t.primary))
 }
 
 fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {

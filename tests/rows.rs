@@ -10,7 +10,7 @@ use mail_classifier::app::icons::{
 };
 use mail_classifier::app::row::{
     BarState, LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, sender_label,
-    shows_account_dot, thread_preview_lines, thread_row_height,
+    shows_account_icon, thread_preview_lines, thread_row_height,
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::judge::Kind;
@@ -265,23 +265,31 @@ fn new_sender_badge_is_derived_from_the_mailbox() {
 }
 
 #[test]
-fn account_dot_shows_only_in_the_unified_inbox() {
-    assert!(shows_account_dot(&Location::AllInboxes));
-    assert!(!shows_account_dot(&Location::Inbox("personal".into())));
-    assert!(!shows_account_dot(&Location::Snoozed("personal".into())));
-    assert!(!shows_account_dot(&Location::Sent("personal".into())));
-    assert!(!shows_account_dot(&Location::Archive("personal".into())));
-    assert!(!shows_account_dot(&Location::Trash("personal".into())));
-    assert!(!shows_account_dot(&Location::Folder(1)));
+fn account_icon_shows_only_in_the_unified_inbox() {
+    assert!(shows_account_icon(&Location::AllInboxes));
+    assert!(!shows_account_icon(&Location::Inbox("personal".into())));
+    assert!(!shows_account_icon(&Location::Snoozed("personal".into())));
+    assert!(!shows_account_icon(&Location::Sent("personal".into())));
+    assert!(!shows_account_icon(&Location::Archive("personal".into())));
+    assert!(!shows_account_icon(&Location::Trash("personal".into())));
+    assert!(!shows_account_icon(&Location::Folder(1)));
 
     let mailbox = Mailbox::load_default();
     for account in mailbox.accounts() {
         assert!(
             mail_classifier::theme::parse_color(&account.color).is_some(),
-            "account {} has a parseable color dot",
+            "account {} has a parseable color",
             account.id
         );
     }
+}
+
+#[test]
+fn every_selectable_account_icon_has_a_lucide_glyph() {
+    for (key, _) in mail_classifier::account_style::ICONS {
+        assert!(mail_classifier::app::icons::account_icon_name(key).is_some(), "{key}");
+    }
+    assert!(mail_classifier::app::icons::account_icon_name("nope").is_none());
 }
 
 #[test]

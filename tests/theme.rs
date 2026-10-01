@@ -92,3 +92,12 @@ fn parse_color_accepts_hex_only() {
     assert!(theme::parse_color("#12345").is_none());
     assert!(theme::parse_color("red").is_none());
 }
+
+#[test]
+fn hex_colors_round_trip_and_the_account_palette_survives() {
+    for color in mail_classifier::account_style::COLORS {
+        let parsed = theme::parse_color(color).expect("palette color parses");
+        assert_eq!(theme::to_hex(parsed), color);
+    }
+    assert_eq!(theme::to_hex(theme::parse_color("#12345678").unwrap()), "#123456", "alpha is dropped");
+}

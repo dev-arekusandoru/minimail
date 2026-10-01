@@ -144,10 +144,10 @@ impl MailApp {
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
         let sender = row::sender_label(msg);
-        let account_dot = if row::shows_account_dot(&self.triage.view.location) {
-            self.mailbox
-                .account(&msg.account)
-                .and_then(|account| theme::parse_color(&account.color))
+        let account_icon = if row::shows_account_icon(&self.triage.view.location) {
+            self.mailbox.account(&msg.account).map(|account| {
+                icons::account_icon(crate::account_style::icon_key(account), &account.color, t, 13.)
+            })
         } else {
             None
         };
@@ -170,8 +170,16 @@ impl MailApp {
                             .flex()
                             .items_center()
                             .gap_1()
-                            .when_some(account_dot, |d, color| {
-                                d.child(div().w(px(6.)).h(px(6.)).flex_none().rounded_full().bg(color))
+                            .when_some(account_icon, |d, icon| {
+                                d.child(
+                                    div()
+                                        .id(("row-account-icon", ix_id))
+                                        .test_support()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .child(icon),
+                                )
                             })
                             .child(
                                 div()

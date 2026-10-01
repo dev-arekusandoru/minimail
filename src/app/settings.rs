@@ -1,10 +1,18 @@
 //! Settings panel: gpui-kit's `Settings` component (sidebar pages with search, grouped setting
 //! items) hosted in a modal. The panel entity owns the settings state and emits
 //! [`SettingsEvent`]s; the component's field getters/setters reach it through a `WeakEntity`.
+use gpui_kit::prelude::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Selectable as _;
+use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
+use gpui_kit::component::{Icon, Sizable as _};
+use std::collections::HashMap;
 
+use crate::account_style;
+use crate::app::icons;
 use crate::app::mail_app::panes::Orientation;
-use crate::app::ui::button;
+use crate::app::ui::{button, icon_button};
 use crate::clock::{DAY, Timestamp};
 use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
@@ -32,6 +40,8 @@ pub enum SettingsEvent {
     AddGmail,
     /// Remove a linked account (confirmed in the panel).
     RemoveAccount(String),
+    /// An account's icon key and `#rrggbb` color changed (`mailbox.set_account_style`).
+    AccountStyle { id: String, icon: &'static str, color: String },
     Close,
 }
 
@@ -42,6 +52,8 @@ pub struct AccountRow {
     pub name: String,
     pub email: String,
     pub color: String,
+    /// Resolved icon key (see [`account_style::ICONS`]).
+    pub icon: &'static str,
     /// Linked Gmail account (removable); otherwise built-in demo data.
     pub gmail: bool,
 }
@@ -71,6 +83,8 @@ pub struct SettingsPanel {
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
     accounts: Vec<AccountRow>,
+    /// One color picker per account, with the subscription that reports its changes.
+    pickers: HashMap<String, (Entity<ColorPickerState>, Subscription)>,
     /// Account whose Remove button has been clicked once (awaiting confirm).
     confirm_remove: Option<String>,
     /// Gmail OAuth client credentials are present in the environment.
@@ -100,6 +114,7 @@ impl SettingsPanel {
             blocked: Vec::new(),
             unsubscribed: Vec::new(),
             accounts: Vec::new(),
+            pickers: HashMap::new(),
             confirm_remove: None,
             gmail_configured: false,
             start_page: 0,
@@ -230,6 +245,44 @@ impl SettingsPanel {
         cx.notify();
     }
 
+    /// Apply a picked icon and/or color to the account row and tell the app.
+    fn set_account_style(&mut self, id: &str, icon: Option<&'static str>, color: Option<String>, cx: &mut Context<Self>) {
+        let Some(row) = self.accounts.iter_mut().find(|a| a.id == id) else {
+            return;
+        };
+        let new_icon = icon.unwrap_or(row.icon);
+        let new_color = color.unwrap_or_else(|| row.color.clone());
+        if new_icon == row.icon && new_color.eq_ignore_ascii_case(&row.color) {
+            return;
+        }
+        row.icon = new_icon;
+        row.color = new_color.clone();
+        cx.emit(SettingsEvent::AccountStyle { id: id.to_owned(), icon: new_icon, color: new_color });
+        cx.notify();
+    }
+
+    /// Give every account a color picker and drop the pickers of removed accounts.
+    fn sync_pickers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pickers.retain(|id, _| self.accounts.iter().any(|a| &a.id == id));
+        let missing: Vec<(String, Hsla)> = self
+            .accounts
+            .iter()
+            .filter(|a| !self.pickers.contains_key(&a.id))
+            .map(|a| (a.id.clone(), theme::parse_color(&a.color).unwrap_or_else(|| cx.theme().primary)))
+            .collect();
+        for (id, color) in missing {
+            let state = cx.new(|cx| ColorPickerState::new(window, cx).default_value(color));
+            let account = id.clone();
+            let sub = cx.subscribe(&state, move |this, _, event: &ColorPickerEvent, cx| {
+                let ColorPickerEvent::Change(Some(color)) = event else {
+                    return;
+                };
+                this.set_account_style(&account, None, Some(theme::to_hex(*color)), cx);
+            });
+            self.pickers.insert(id, (state, sub));
+        }
+    }
+
     /// First click on Remove arms the confirm; the second emits the removal.
     fn remove_account(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.confirm_remove.as_deref() == Some(id) {
@@ -259,13 +312,17 @@ impl SettingsPanel {
             linked = linked.item(note("accounts-empty", "No accounts.").keywords(keywords));
         }
         for (index, account) in self.accounts.iter().cloned().enumerate() {
+            let picker = self.pickers.get(&account.id).map(|(state, _)| state.clone());
+            let (style_icon, style_id) = (account.icon, account.id.clone());
+            let style_weak = weak.clone();
             let weak = weak.clone();
             let label = account.email.clone();
+            let label2 = account.email.clone();
             let confirming = self.confirm_remove.as_deref() == Some(account.id.as_str());
             linked = linked.item(
                 SettingItem::render(move |_, _, cx| {
                     let t = cx.theme();
-                    let dot = crate::theme::parse_color(&account.color).unwrap_or(t.primary);
+                    let color = theme::parse_color(&account.color).unwrap_or(t.primary);
                     let kind = if account.gmail { "Gmail" } else { "Demo data · replaced when you add Gmail" };
                     let detail = if account.name == account.email {
                         kind.to_owned()
@@ -286,7 +343,11 @@ impl SettingsPanel {
                                 .min_w_0()
                                 .items_center()
                                 .gap_2()
-                                .child(div().size_2().rounded_full().bg(dot))
+                                .child(
+                                    Icon::new(icons::account_icon_name(account.icon).unwrap_or(IconName::Mail))
+                                        .with_size(px(16.))
+                                        .text_color(color),
+                                )
                                 .child(div().flex().flex_col().child(account.name.clone()).child(
                                     div().text_xs().text_color(t.muted_foreground).child(detail),
                                 )),
@@ -307,6 +368,45 @@ impl SettingsPanel {
                     )))
                 })
                 .keywords(keywords.into_iter().chain([label.as_str()])),
+            );
+            linked = linked.item(
+                SettingItem::render(move |_, _, cx| {
+                    let t = cx.theme();
+                    let pick = |index: usize, key: &'static str, label: &'static str| {
+                        let weak = style_weak.clone();
+                        let id = style_id.clone();
+                        let name = icons::account_icon_name(key).unwrap_or(IconName::Mail);
+                        icon_button(("account-icon", index), name, label, "", cx)
+                            .selected(key == style_icon)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.set_account_style(&id, Some(key), None, cx)).ok();
+                            })
+                    };
+                    let palette: Vec<Hsla> = account_style::COLORS.iter().filter_map(|c| theme::parse_color(c)).collect();
+                    div()
+                        .id(("account-style", index))
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .text_sm()
+                        .child(div().text_xs().text_color(t.muted_foreground).child("Icon and color in the All Inboxes list"))
+                        .child(div().flex().flex_wrap().gap_1().children(
+                            account_style::ICONS
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (key, label))| pick(index * account_style::ICONS.len() + i, key, label)),
+                        ))
+                        .when_some(picker.clone(), |d, state| {
+                            d.child(
+                                div().flex().items_center().gap_2().child("Color").child(
+                                    ColorPicker::new(&state)
+                                        .featured_colors(palette)
+                                        .accessibility_label("Account color"),
+                                ),
+                            )
+                        })
+                })
+                .keywords(keywords.into_iter().chain([label2.as_str()])),
             );
         }
         let configured = self.gmail_configured;
@@ -601,6 +701,7 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_pickers(window, cx);
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
