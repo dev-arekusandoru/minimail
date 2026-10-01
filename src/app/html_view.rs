@@ -7,13 +7,19 @@ use gpui_kit::*;
 pub(crate) struct HtmlView {
     id: ElementId,
     html: String,
+    block_remote_images: bool,
 }
 
 impl HtmlView {
-    pub(crate) fn new(id: impl Into<ElementId>, html: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        id: impl Into<ElementId>,
+        html: impl Into<String>,
+        block_remote_images: bool,
+    ) -> Self {
         Self {
             id: id.into(),
             html: html.into(),
+            block_remote_images,
         }
     }
 }
@@ -48,10 +54,12 @@ impl Element for HtmlView {
             id.expect("HtmlView requires its stable element id"),
             |state, window| {
                 let state = state.unwrap_or_else(|| HtmlElementState {
-                    view: cx.new(|_| HtmlRasterView::new(self.html.clone())),
+                    view: cx.new(|_| HtmlRasterView::new(self.html.clone(), self.block_remote_images)),
                 });
                 let view = state.view.clone();
-                view.update(cx, |view, cx| view.set_document(&self.html, cx));
+                view.update(cx, |view, cx| {
+                    view.set_document(&self.html, self.block_remote_images, cx)
+                });
                 let mut child = view.clone().into_any_element();
                 let layout = child.request_layout(window, cx);
                 ((layout, (view, child)), state)
@@ -100,6 +108,7 @@ struct HtmlElementState {
 
 pub(crate) struct HtmlRasterView {
     html: String,
+    block_remote_images: bool,
     width: u32,
     scale: f32,
     generation: u64,
@@ -117,9 +126,10 @@ struct RasterizedDocument {
 }
 
 impl HtmlRasterView {
-    fn new(html: String) -> Self {
+    fn new(html: String, block_remote_images: bool) -> Self {
         Self {
             html,
+            block_remote_images,
             width: 0,
             scale: 1.,
             generation: 0,
@@ -130,9 +140,10 @@ impl HtmlRasterView {
         }
     }
 
-    fn set_document(&mut self, html: &str, _: &mut Context<Self>) {
-        if self.html != html {
+    fn set_document(&mut self, html: &str, block_remote_images: bool, _: &mut Context<Self>) {
+        if self.html != html || self.block_remote_images != block_remote_images {
             self.html = html.to_owned();
+            self.block_remote_images = block_remote_images;
             self.generation = self.generation.wrapping_add(1);
             self.needs_render = true;
             self.rendered = None;
@@ -166,9 +177,11 @@ impl HtmlRasterView {
         let html = self.html.clone();
         let width = self.width;
         let scale = self.scale;
+        let block_remote_images = self.block_remote_images;
         self.in_flight = true;
         let task = cx.background_spawn(async move {
-            crate::html::render(&html, width, scale).and_then(prepare_rendered_image)
+            crate::html::render(&html, width, scale, block_remote_images)
+                .and_then(prepare_rendered_image)
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;

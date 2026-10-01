@@ -440,8 +440,9 @@ impl MailApp {
         )
     }
 
-    /// The body: HTML (remote images blocked) unless Reader mode is on, else text with the quoted
-    /// history folded. Messages with an HTML part carry the per-message Reader mode toggle.
+    /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text
+    /// with the quoted history folded. Messages with an HTML part carry the per-message Reader mode
+    /// toggle.
     fn message_body(
         &self,
         m: &Message,
@@ -470,9 +471,15 @@ impl MailApp {
         let mut blocked = 0;
         let content = match html {
             Some(h) if !plain => {
-                let safe = reading::safe_html(h);
-                blocked = safe.blocked_images;
-                HtmlView::new(("reader-html", id), safe.html).into_any_element()
+                let block = self.block_remote_images;
+                let document = if block {
+                    let safe = reading::safe_html(h);
+                    blocked = safe.blocked_images;
+                    safe.html
+                } else {
+                    h.to_owned()
+                };
+                HtmlView::new(("reader-html", id), document, block).into_any_element()
             }
             _ => self.text_content(m, look, cx),
         };
@@ -492,8 +499,11 @@ impl MailApp {
                             ),
                             t.muted_foreground,
                         )
+                        .id("reader-images-blocked")
+                        .test_support()
+                        .into_any_element()
                     } else {
-                        div()
+                        div().into_any_element()
                     })
                     .child(
                         look.link(

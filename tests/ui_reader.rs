@@ -188,6 +188,39 @@ fn v_toggles_reader_mode_only_for_an_html_message(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.reader_plain(1)), "v switches back");
 }
 
+/// The `Block remote images` setting changes what the reader renders: turning it on strips the
+/// remote image and reports the count, turning it off leaves the document alone.
+#[gpui_kit::gpui::test]
+fn the_remote_image_setting_switches_the_reader_policy(cx: &mut TestAppContext) {
+    // A loopback pixel: with blocking off the engine's SSRF policy refuses it without a network
+    // fetch, so the test stays offline.
+    let html = with_fields(
+        msg(1, 1, "news@example.com", "Weekly digest", 1, "Inbox"),
+        serde_json::json!({
+            "html": "<p>Hello</p><img src=\"http://127.0.0.1:9/pixel.png\" alt=\"Pixel\">",
+        }),
+    );
+    let mut h = harness_with(cx, mailbox_of(&[html]));
+
+    // Block remote images is the last row of the Inbox page (sidebar index 2).
+    let set_blocking = |h: &mut Harness<'_>, on: bool| {
+        h.settings_open_page(2);
+        h.settings_click_in(0, 3, "check");
+        assert_eq!(h.read(|a| a.block_remote_images), on, "the switch sets the policy");
+        h.settings_keys("escape");
+        assert!(!h.read(|a| a.settings_open()));
+    };
+
+    h.keys("enter");
+    assert!(!h.exists("reader-images-blocked"), "images load by default, nothing is blocked");
+
+    set_blocking(&mut h, true);
+    assert!(h.exists("reader-images-blocked"), "blocking strips the image and reports the count");
+
+    set_blocking(&mut h, false);
+    assert!(!h.exists("reader-images-blocked"), "unblocking stops reporting blocked images");
+}
+
 #[gpui_kit::gpui::test]
 fn reader_hints_follow_the_open_message_and_pending_suggestions(cx: &mut TestAppContext) {
     let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);

@@ -45,6 +45,18 @@ impl SettingsPanel {
                         SettingsPanel::reset_follow_up,
                     ),
                     follow_up,
+                ))
+                .item(row(
+                    "Block remote images",
+                    "Remote images can tell the sender you opened the message. Block them to stop \
+                     tracking; images load by default.",
+                    &["images", "remote images", "tracking", "privacy", "pixel", "block"],
+                    Undo::of_panel(
+                        weak,
+                        |this| this.block_remote_images,
+                        SettingsPanel::reset_block_remote_images,
+                    ),
+                    switch(weak, |this| this.block_remote_images, SettingsPanel::set_block_remote_images),
                 )),
         )
     }

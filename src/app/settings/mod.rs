@@ -51,6 +51,8 @@ pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
     Grouping(bool),
     TabAvatars(bool),
+    /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
+    BlockRemoteImages(bool),
     PreviewLines(u8),
     Theme { mode: theme::ThemeMode, light: String, dark: String },
     PaneLayout(Orientation),
@@ -202,6 +204,8 @@ pub struct SettingsPanel {
     summaries: bool,
     group: bool,
     tab_avatars: bool,
+    /// Block remote images in the reader (opt in; images load by default).
+    block_remote_images: bool,
     preview_lines: u8,
     orientation: Orientation,
     theme_mode: theme::ThemeMode,
@@ -278,6 +282,7 @@ impl SettingsPanel {
             summaries,
             group,
             tab_avatars: true,
+            block_remote_images: false,
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
             orientation,
             theme_mode: theme::ThemeMode::System,
@@ -300,6 +305,12 @@ impl SettingsPanel {
     /// Whether tabs show the sender's avatar (the row's initial value).
     pub fn tab_avatars(mut self, on: bool) -> Self {
         self.tab_avatars = on;
+        self
+    }
+
+    /// Whether the reader blocks remote images (the switch's initial value).
+    pub fn block_remote_images(mut self, on: bool) -> Self {
+        self.block_remote_images = on;
         self
     }
     pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
@@ -469,6 +480,7 @@ impl SettingsPanel {
         self.summaries = false;
         self.group = false;
         self.tab_avatars = true;
+        self.block_remote_images = false;
         self.preview_lines = preview::DEFAULT_LINES;
         self.orientation = Orientation::SideBySide;
         self.theme_mode = theme::ThemeMode::System;
@@ -541,6 +553,19 @@ impl SettingsPanel {
             cx.emit(SettingsEvent::TabAvatars(on));
             cx.notify();
         }
+    }
+
+    fn set_block_remote_images(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.block_remote_images {
+            self.block_remote_images = on;
+            cx.emit(SettingsEvent::BlockRemoteImages(on));
+            cx.notify();
+        }
+    }
+
+    /// Restore loading remote images.
+    fn reset_block_remote_images(&mut self, cx: &mut Context<Self>) {
+        self.set_block_remote_images(false, cx);
     }
 
     fn set_summaries(&mut self, on: bool, cx: &mut Context<Self>) {

@@ -58,6 +58,24 @@ fn the_tab_avatar_switch_turns_the_setting_off_and_back_on(cx: &mut TestAppConte
 }
 
 #[gpui_kit::gpui::test]
+fn the_remote_image_switch_is_opt_in_and_survives_reopening_settings(cx: &mut TestAppContext) {
+    let mut h = app(cx);
+    assert!(!h.read(|a| a.block_remote_images), "remote images load by default");
+
+    h.settings_open_page(INBOX);
+    h.settings_click_in(0, 3, "check");
+    assert!(h.read(|a| a.block_remote_images), "the switch opts into blocking");
+    h.settings_keys("escape");
+    assert!(!h.read(|a| a.settings_open()));
+
+    // The window reopens showing the current value, so this click turns blocking back off
+    // rather than on again.
+    h.settings_open_page(INBOX);
+    h.settings_click_in(0, 3, "check");
+    assert!(!h.read(|a| a.block_remote_images), "the choice persisted across the reopen");
+}
+
+#[gpui_kit::gpui::test]
 fn opening_settings_again_focuses_the_same_window(cx: &mut TestAppContext) {
     let mut h = app(cx);
     let first = h.open_settings();

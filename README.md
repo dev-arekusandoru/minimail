@@ -83,13 +83,13 @@ The reader shows the keys that apply to the current message in the footer (up to
 HTML mail is rendered by **Blitz**: browser-grade CSS resolution, real font shaping, and HTML/table layout, rasterized off the UI thread and displayed as a native GPUI image.
 
 - **Preserved:** inline styles and `<style>` blocks, colors, backgrounds, fonts, spacing, borders, tables, and responsive media queries. Wide documents scroll horizontally.
-- **Safety:** email scripts never execute. Network resources and sender-referenced local files are never fetched, including CSS imports, fonts, and background images.
-- **Images:** bounded PNG/JPEG/GIF/WebP `data:` images render inline. Other image sources are replaced by alt text, with the existing blocked-image count. There is no remote-image loading option yet.
+- **Safety:** email scripts never execute, sender-referenced local files are never read, and external CSS/font content is not loaded. Remote image requests are bounded and refuse private/internal addresses.
+- **Images:** PNG/JPEG/GIF/WebP images load by default, including bounded `data:` images. Enable **Settings → General → Block remote images** to prevent remote-image requests and show their blocked count. This is a session setting, retained when reopening Settings. Changing it updates open readers immediately.
 - **Links:** HTTP(S) and `mailto:` links open externally; other schemes are ignored.
 - **Reader mode (`v`)** shows the text part, or text extracted from HTML-only mail. Use it to select/copy body text; the original HTML view is a bitmap. Find automatically uses the text path for messages with matches.
-- **Limits:** HTML is capped at 8 MiB, embedded images at 16 megapixels total, and document rasters at 32 megapixels with a 16,000-pixel maximum side. Invalid or oversized embedded images/documents show a rendering error.
+- **Limits:** HTML is capped at 8 MiB, decoded images at 16 megapixels total, and document rasters at 32 megapixels with a 16,000-pixel maximum side. Remote images have byte, request, redirect, and timeout limits; unavailable remote images do not fail the whole message. Invalid or oversized embedded images/documents show a rendering error.
 
-Blitz is still beta; unusual markup can differ from a browser. The pinned Stylo derive dependency carries a local, explicitly typed `Result` fix under `vendor/stylo_derive` to compile alongside GPUI's formatting dependencies. See `docs/reader-spec.md`.
+Blitz is still beta; unusual markup can differ from a browser. Blitz is pinned to an upstream table-layout fix, with a local painter correction under `vendor/blitz-paint` so collapsed borders respect each edge's style and color. The pinned Stylo derive dependency carries a local, explicitly typed `Result` fix under `vendor/stylo_derive` to compile alongside GPUI's formatting dependencies. See `docs/reader-spec.md`.
 
 ### Where the controls live
 

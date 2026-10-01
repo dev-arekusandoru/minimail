@@ -96,6 +96,8 @@ pub struct MailApp {
     pub toast: Option<SharedString>,
     /// Opt-in thread summaries (settings panel).
     pub summaries_enabled: bool,
+    /// Block remote images in the reader (settings panel; opt in, images load by default).
+    pub block_remote_images: bool,
     /// Preview snippet lines under each subject (`crate::preview::OPTIONS`); 0 is Off.
     pub preview_lines: u8,
     /// Width of the message list panel in pixels (drives how many row icons fit):
@@ -230,6 +232,7 @@ impl MailApp {
             help: None,
             toast: None,
             summaries_enabled: false,
+            block_remote_images: false,
             preview_lines: crate::preview::DEFAULT_LINES,
             list_w: 0.,
             panes,
@@ -298,6 +301,7 @@ impl MailApp {
         use crate::prefs::Scope;
         let scope = Scope::Global;
         self.tab_avatars = crate::app_settings::TAB_AVATARS.get(store.as_ref(), &scope);
+        self.block_remote_images = crate::app_settings::BLOCK_REMOTE_IMAGES.get(store.as_ref(), &scope);
         self.group_threads = crate::app_settings::GROUP_THREADS.get(store.as_ref(), &scope);
         self.preview_lines = crate::app_settings::PREVIEW_LINES.get(store.as_ref(), &scope).min(5);
         self.summaries_enabled = crate::app_settings::SUMMARIES.get(store.as_ref(), &scope);

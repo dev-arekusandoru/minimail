@@ -339,6 +339,7 @@ impl MailApp {
         let light_theme = self.light_theme.clone();
         let dark_theme = self.dark_theme.clone();
         let tab_avatars = self.tab_avatars;
+        let block_remote_images = self.block_remote_images;
         let blocked = self.mailbox.blocked();
         let now = self.now();
         let follow_up = self.mailbox.follow_up_timeout();
@@ -365,6 +366,7 @@ impl MailApp {
             let panel = cx.new(|cx| {
                 let panel = SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
+                    .block_remote_images(block_remote_images)
                     .mailbox_state(blocked, now, follow_up)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured);
@@ -389,6 +391,7 @@ impl MailApp {
                         crate::app_settings::DARK_THEME.reset(store.as_ref(), &scope);
                         crate::app_settings::PANE_LAYOUT.reset(store.as_ref(), &scope);
                         crate::app_settings::TAB_AVATARS.reset(store.as_ref(), &scope);
+                        crate::app_settings::BLOCK_REMOTE_IMAGES.reset(store.as_ref(), &scope);
                         crate::app_settings::GROUP_THREADS.reset(store.as_ref(), &scope);
                         crate::app_settings::PREVIEW_LINES.reset(store.as_ref(), &scope);
                         crate::app_settings::FOLLOW_UP_DAYS.reset(store.as_ref(), &scope);
@@ -410,6 +413,7 @@ impl MailApp {
                     this.summaries_enabled = false;
                     this.group_threads = false;
                     this.tab_avatars = true;
+                    this.block_remote_images = false;
                     this.preview_lines = crate::preview::DEFAULT_LINES;
                     this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
                     this.panes.set_orientation(PaneLayout::SideBySide);
@@ -461,6 +465,11 @@ impl MailApp {
                 SettingsEvent::TabAvatars(on) => {
                     this.tab_avatars = *on;
                     this.save_setting(&crate::app_settings::TAB_AVATARS, *on);
+                    cx.notify();
+                }
+                SettingsEvent::BlockRemoteImages(on) => {
+                    this.block_remote_images = *on;
+                    this.save_setting(&crate::app_settings::BLOCK_REMOTE_IMAGES, *on);
                     cx.notify();
                 }
                 SettingsEvent::Grouping(on) => {

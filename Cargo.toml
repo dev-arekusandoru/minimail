@@ -17,10 +17,10 @@ rand = "0.8"
 url = "2"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false }
-blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["system-fonts", "complex-scripts"] }
-blitz-html = { version = "=0.3.0-beta.2", default-features = false }
-blitz-paint = { version = "=0.3.0-beta.2", default-features = false }
-blitz-traits = "=0.3.0-beta.2"
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false, features = ["system-fonts", "complex-scripts"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7" }
 anyrender = "=0.13.0"
 anyrender_vello_cpu = "=0.17.0"
 data-url = "0.3.1"
@@ -31,6 +31,10 @@ image = { version = "0.25.6", default-features = false, features = ["png", "jpeg
 # Stylo's ToCss derive leaves a nested Result error type unconstrained.
 # GPUI's serde_fmt dependency adds a second From impl for fmt::Error.
 stylo_derive = { path = "vendor/stylo_derive" }
+
+[patch."https://github.com/DioxusLabs/blitz"]
+# Collapsed-table painting must honor none/hidden and each edge's style.
+blitz-paint = { path = "vendor/blitz-paint" }
 
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }

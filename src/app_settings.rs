@@ -10,6 +10,7 @@ pub const PANE_LAYOUT: Setting<String> =
     Setting::with_default_fn("pane_layout", String::new(), default_pane_layout);
 pub const TAB_AVATARS: Setting<bool> = Setting::new("tab_avatars", true);
 pub const GROUP_THREADS: Setting<bool> = Setting::new("group_threads", false);
+pub const BLOCK_REMOTE_IMAGES: Setting<bool> = Setting::new("block_remote_images", false);
 pub const PREVIEW_LINES: Setting<u8> = Setting::new("preview_lines", crate::preview::DEFAULT_LINES);
 pub const FOLLOW_UP_DAYS: Setting<u8> = Setting::new("follow_up_days", 3);
 pub const SUMMARIES: Setting<bool> = Setting::new("summaries", false);
