@@ -1,45 +1,68 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Mode {
-    /// Apply automatically when `confidence >= threshold`; otherwise queue for review.
-    Auto { threshold: f32 },
-    /// Always queue for review.
-    Review,
+/// How sure the judge must be before a suggestion is applied without review.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    High,
+    Medium,
+    Low,
 }
 
-/// Per-question routing mode. Remembers each question's last threshold so
-/// toggling Auto -> Review -> Auto restores it.
-#[derive(Clone, Debug, PartialEq)]
+impl Confidence {
+    pub const ALL: [Confidence; 3] = [Confidence::High, Confidence::Medium, Confidence::Low];
+
+    /// Minimum answer confidence for automatic handling (inclusive).
+    pub fn threshold(self) -> f32 {
+        match self {
+            Confidence::High => 0.9,
+            Confidence::Medium => 0.75,
+            Confidence::Low => 0.6,
+        }
+    }
+
+    /// The preset whose threshold is nearest to `threshold`; ties go to the stricter preset.
+    pub fn from_threshold(threshold: f32) -> Confidence {
+        Self::ALL
+            .into_iter()
+            .min_by(|a, b| {
+                let (da, db) = ((a.threshold() - threshold).abs(), (b.threshold() - threshold).abs());
+                da.total_cmp(&db)
+            })
+            .unwrap_or(Confidence::Medium)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Apply automatically when the answer's confidence reaches the preset; otherwise queue for review.
+    Auto(Confidence),
+    /// Always queue for review.
+    Review,
+    /// The check is disabled: nothing is suggested, applied or queued.
+    Off,
+}
+
+/// Per-question routing mode.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JudgePolicy {
     modes: HashMap<QuestionKey, Mode>,
-    thresholds: HashMap<QuestionKey, f32>,
 }
 
 impl Default for JudgePolicy {
     fn default() -> Self {
-        let defaults = [
-            (QuestionKey::Spam, Mode::Auto { threshold: 0.9 }),
-            (QuestionKey::NeedsReply, Mode::Auto { threshold: 0.8 }),
-            (QuestionKey::ExpectsReply, Mode::Review),
-            (QuestionKey::Urgency, Mode::Auto { threshold: 0.7 }),
-            (QuestionKey::Kind, Mode::Auto { threshold: 0.6 }),
-        ];
-        let thresholds = defaults
-            .iter()
-            .map(|(k, m)| {
-                let t = match m {
-                    Mode::Auto { threshold } => *threshold,
-                    Mode::Review => 0.8,
-                };
-                (*k, t)
-            })
-            .collect();
         JudgePolicy {
-            modes: defaults.into_iter().collect(),
-            thresholds,
+            modes: HashMap::from([
+                (QuestionKey::Spam, Mode::Auto(Confidence::High)),
+                (QuestionKey::NeedsReply, Mode::Auto(Confidence::Medium)),
+                (QuestionKey::ExpectsReply, Mode::Review),
+                (QuestionKey::Urgency, Mode::Auto(Confidence::Medium)),
+                (QuestionKey::Kind, Mode::Auto(Confidence::Low)),
+            ]),
         }
     }
 }
@@ -50,48 +73,7 @@ impl JudgePolicy {
     }
 
     pub fn set_mode(&mut self, key: QuestionKey, mode: Mode) {
-        if let Mode::Auto { threshold } = mode {
-            self.thresholds.insert(key, threshold.clamp(0.0, 1.0));
-        }
-        let mode = match mode {
-            Mode::Auto { threshold } => Mode::Auto {
-                threshold: threshold.clamp(0.0, 1.0),
-            },
-            Mode::Review => Mode::Review,
-        };
         self.modes.insert(key, mode);
-    }
-
-    /// Threshold last used (or currently used) for `key`.
-    pub fn threshold(&self, key: QuestionKey) -> f32 {
-        self.thresholds.get(&key).copied().unwrap_or(0.8)
-    }
-
-    /// Sets the threshold, clamped to `0.0..=1.0`. Under Review it is stored and
-    /// takes effect when the question is switched back to Auto.
-    pub fn set_threshold(&mut self, key: QuestionKey, threshold: f32) {
-        let t = threshold.clamp(0.0, 1.0);
-        self.thresholds.insert(key, t);
-        if let Some(Mode::Auto { .. }) = self.modes.get(&key) {
-            self.modes.insert(key, Mode::Auto { threshold: t });
-        }
-    }
-
-    /// Adjusts the threshold by `delta`, rounded to 0.01 to avoid float drift.
-    pub fn nudge_threshold(&mut self, key: QuestionKey, delta: f32) {
-        let t = ((self.threshold(key) + delta) * 100.0).round() / 100.0;
-        self.set_threshold(key, t);
-    }
-
-    /// Auto <-> Review, keeping the remembered threshold.
-    pub fn toggle_mode(&mut self, key: QuestionKey) {
-        let next = match self.mode(key) {
-            Mode::Auto { .. } => Mode::Review,
-            Mode::Review => Mode::Auto {
-                threshold: self.threshold(key),
-            },
-        };
-        self.modes.insert(key, next);
     }
 }
 
@@ -161,13 +143,11 @@ pub fn classify(judge: &dyn Judge, policy: &JudgePolicy, msgs: &[&Message]) -> V
                 key,
                 answer,
             };
-            out.push(if is_noop(m, &s) {
-                Routed::Drop
-            } else {
-                match policy.mode(key) {
-                    Mode::Auto { threshold } if s.answer.confidence >= threshold => Routed::Auto(s),
-                    _ => Routed::Review(s),
-                }
+            out.push(match policy.mode(key) {
+                _ if is_noop(m, &s) => Routed::Drop,
+                Mode::Off => Routed::Drop,
+                Mode::Auto(c) if s.answer.confidence >= c.threshold() => Routed::Auto(s),
+                Mode::Auto(_) | Mode::Review => Routed::Review(s),
             });
         }
     }

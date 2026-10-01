@@ -8,29 +8,44 @@ const NOW: Timestamp = 1_790_000_000;
 #[test]
 fn block_move_is_one_undo_step_and_unblock_is_undoable() {
     let mut mb = sample();
-    assert_eq!(mb.block_sender("a@x.test", Some(State::Archived)), 1);
+    assert_eq!(mb.block_sender("a@x.test", Some(State::Archived), NOW), 1);
     assert_eq!(mb.state_of(1), Some(State::Archived));
     assert_eq!(mb.state_of(3), Some(State::Archived));
-    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+    assert_eq!(mb.blocked(), vec![("a@x.test".to_owned(), NOW)]);
     assert!(mb.undo());
     assert_eq!(mb.state_of(1), Some(State::Inbox));
     assert!(mb.blocked().is_empty());
-    assert_eq!(mb.block_sender("a@x.test", None), 0);
+    assert_eq!(mb.block_sender("a@x.test", None, NOW), 0);
     assert!(mb.unblock_sender("a@x.test"));
     assert!(mb.blocked().is_empty());
     assert!(mb.undo());
-    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+    assert_eq!(mb.blocked(), vec![("a@x.test".to_owned(), NOW)]);
+}
+#[test]
+fn the_block_time_survives_unblock_and_undo_and_is_not_reset_by_blocking_again() {
+    let mut mb = sample();
+    mb.block_sender("b@x.test", None, NOW);
+    mb.block_sender("A@x.test", None, NOW + 100);
+    assert_eq!(
+        mb.blocked(),
+        vec![("a@x.test".to_owned(), NOW + 100), ("b@x.test".to_owned(), NOW)],
+        "sorted by address, each with its own time"
+    );
+    assert_eq!(mb.block_sender("a@x.test", None, NOW + 999), 0, "already blocked");
+    assert!(mb.unblock_sender("a@x.test"));
+    assert!(mb.undo());
+    assert_eq!(mb.blocked()[0], ("a@x.test".to_owned(), NOW + 100));
 }
 #[test]
 fn mark_spam_deletes_and_optionally_blocks_in_one_step() {
     let mut mb = sample();
-    assert_eq!(mb.mark_spam(&[1], false), 1);
+    assert_eq!(mb.mark_spam(&[1], false, NOW), 1);
     assert_eq!(mb.state_of(1), Some(State::Deleted));
     assert!(mb.blocked().is_empty());
     assert!(mb.undo());
     assert_eq!(mb.state_of(1), Some(State::Inbox));
-    assert_eq!(mb.mark_spam(&[1], true), 1);
-    assert_eq!(mb.blocked(), vec!["a@x.test"]);
+    assert_eq!(mb.mark_spam(&[1], true, NOW), 1);
+    assert_eq!(mb.blocked(), vec![("a@x.test".to_owned(), NOW)]);
     assert!(mb.undo());
     assert!(mb.blocked().is_empty());
     assert_eq!(mb.state_of(1), Some(State::Inbox));

@@ -11,12 +11,32 @@ const AUTH_ERROR_PREFIX: &str = "authentication failed";
 pub enum SyncStatus {
     /// A round is running.
     Syncing,
-    /// The sign-in is missing or rejected; the user must add the account again.
+    /// The sign-in is missing or rejected; the user must re-authenticate the same account.
     SignInAgain,
     /// The last round failed with this message.
     Failed(String),
     /// The last completed server check, if any ever finished.
     Synced(Option<Timestamp>),
+}
+
+/// The one action the UI offers next to a status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyncAction {
+    /// Re-run sign-in for the same account.
+    SignInAgain,
+    /// Try the failed round again.
+    Retry,
+}
+
+impl SyncStatus {
+    /// What the user can do about this status; `None` when nothing is wrong or a round is running.
+    pub fn action(&self) -> Option<SyncAction> {
+        match self {
+            SyncStatus::SignInAgain => Some(SyncAction::SignInAgain),
+            SyncStatus::Failed(_) => Some(SyncAction::Retry),
+            SyncStatus::Syncing | SyncStatus::Synced(_) => None,
+        }
+    }
 }
 
 /// What the app knows about one account's sync.
@@ -53,7 +73,7 @@ pub fn status(facts: &SyncFacts) -> SyncStatus {
 pub fn describe(status: &SyncStatus, now: Timestamp) -> (String, bool) {
     match status {
         SyncStatus::Syncing => ("Syncing…".to_owned(), false),
-        SyncStatus::SignInAgain => ("Sign in again to resume syncing".to_owned(), true),
+        SyncStatus::SignInAgain => ("Sign-in expired".to_owned(), true),
         SyncStatus::Failed(message) => (format!("Sync failed: {message}"), true),
         SyncStatus::Synced(Some(at)) => (format!("Synced {}", ago(now - at)), false),
         SyncStatus::Synced(None) => ("Not synced yet".to_owned(), false),
@@ -103,7 +123,7 @@ mod tests {
         let running = SyncFacts { syncing: true, ..facts(Some(NOW - 5 * DAY)) };
         assert_eq!(text(&running), ("Syncing…".into(), false));
         let signed_out = SyncFacts { signed_in: false, ..running };
-        assert_eq!(text(&signed_out), ("Sign in again to resume syncing".into(), true));
+        assert_eq!(text(&signed_out), ("Sign-in expired".into(), true));
     }
 
     #[test]
@@ -114,5 +134,14 @@ mod tests {
         let net = ProviderError::Network("offline".into()).to_string();
         let failing = SyncFacts { error: Some(&net), ..facts(Some(NOW)) };
         assert_eq!(text(&failing), (format!("Sync failed: {net}"), true));
+    }
+
+    #[test]
+    fn only_broken_statuses_offer_an_action() {
+        assert_eq!(SyncStatus::SignInAgain.action(), Some(SyncAction::SignInAgain));
+        assert_eq!(SyncStatus::Failed("x".into()).action(), Some(SyncAction::Retry));
+        assert_eq!(SyncStatus::Syncing.action(), None);
+        assert_eq!(SyncStatus::Synced(Some(5)).action(), None);
+        assert_eq!(SyncStatus::Synced(None).action(), None);
     }
 }

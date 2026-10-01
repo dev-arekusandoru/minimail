@@ -15,7 +15,7 @@ use crate::app::icons;
 use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::{button, icon_button};
 use crate::clock::{DAY, Timestamp};
-use crate::judge::{JudgePolicy, Mode, QuestionKey};
+use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
 use gpui_kit::{
     component::setting::{
@@ -69,7 +69,8 @@ pub struct AccountRow {
 /// Index of the Accounts page in [`SettingsPanel::pages`].
 const ACCOUNTS_PAGE: usize = 5;
 
-const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("review", "Review")];
+const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
+const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
 const PANE_LAYOUTS: [(&str, &str); 2] = [("side", "Side by side"), ("stacked", "Stacked")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
@@ -187,17 +188,22 @@ impl SettingsPanel {
         }
     }
 
-    fn set_threshold(&mut self, question: QuestionKey, percent: f64, cx: &mut Context<Self>) {
-        let threshold = (percent.clamp(0., 100.) / 100.) as f32;
-        if (self.policy.threshold(question) - threshold).abs() > f32::EPSILON {
-            self.policy.set_threshold(question, threshold);
+    fn set_confidence(&mut self, question: QuestionKey, confidence: Confidence, cx: &mut Context<Self>) {
+        if matches!(self.policy.mode(question), Mode::Auto(c) if c != confidence) {
+            self.policy.set_mode(question, Mode::Auto(confidence));
             self.changed(cx);
         }
     }
 
-    fn set_classifier_mode(&mut self, question: QuestionKey, review: bool, cx: &mut Context<Self>) {
-        if matches!(self.policy.mode(question), Mode::Review) != review {
-            self.policy.toggle_mode(question);
+    fn set_classifier_mode(&mut self, question: QuestionKey, value: &str, cx: &mut Context<Self>) {
+        let mode = match (value, self.policy.mode(question)) {
+            ("auto", mode @ Mode::Auto(_)) => mode,
+            ("auto", _) => Mode::Auto(Confidence::Medium),
+            ("off", _) => Mode::Off,
+            _ => Mode::Review,
+        };
+        if self.policy.mode(question) != mode {
+            self.policy.set_mode(question, mode);
             self.changed(cx);
         }
     }
@@ -571,38 +577,53 @@ impl SettingsPanel {
                 SettingField::dropdown(
                     options(&CLASSIFIER_MODES),
                     move |cx| {
-                        let review = get
-                            .read_with(cx, |this, _| matches!(this.policy.mode(question), Mode::Review))
+                        let index = get
+                            .read_with(cx, |this, _| match this.policy.mode(question) {
+                                Mode::Auto(_) => 0,
+                                Mode::Review => 1,
+                                Mode::Off => 2,
+                            })
                             .unwrap_or_default();
-                        pick(&CLASSIFIER_MODES, usize::from(review))
+                        pick(&CLASSIFIER_MODES, index)
                     },
                     move |value: SharedString, cx| {
-                        set.update(cx, |this, cx| this.set_classifier_mode(question, value == "review", cx)).ok();
+                        set.update(cx, |this, cx| this.set_classifier_mode(question, &value, cx)).ok();
                     },
                 )
             };
-            let threshold_field = {
+            let confidence_field = {
                 let (get, set) = (weak.clone(), weak.clone());
-                SettingField::number_input(
-                    NumberFieldOptions { min: 0., max: 100., step: 5. },
+                SettingField::dropdown(
+                    options(&CONFIDENCES),
                     move |cx| {
-                        get.read_with(cx, |this, _| f64::from((this.policy.threshold(question) * 100.).round()))
-                            .unwrap_or_default()
+                        let index = get
+                            .read_with(cx, |this, _| match this.policy.mode(question) {
+                                Mode::Auto(Confidence::High) => 0,
+                                Mode::Auto(Confidence::Low) => 2,
+                                _ => 1,
+                            })
+                            .unwrap_or_default();
+                        pick(&CONFIDENCES, index)
                     },
-                    move |percent, cx| {
-                        set.update(cx, |this, cx| this.set_threshold(question, percent, cx)).ok();
+                    move |value: SharedString, cx| {
+                        let confidence = match &*value {
+                            "high" => Confidence::High,
+                            "low" => Confidence::Low,
+                            _ => Confidence::Medium,
+                        };
+                        set.update(cx, |this, cx| this.set_confidence(question, confidence, cx)).ok();
                     },
                 )
             };
-            let review = matches!(self.policy.mode(question), Mode::Review);
+            let auto = matches!(self.policy.mode(question), Mode::Auto(_));
             SettingGroup::new().title(question.label()).items([
                 SettingItem::new("Handling", mode_field)
-                    .description("Choose automatic handling or manual review.")
+                    .description("Choose automatic handling, manual review, or off.")
                     .keywords([question.label(), "auto apply or review", "classifier"]),
-                SettingItem::new("Confidence threshold", threshold_field)
-                    .description("Minimum confidence (%) required for automatic handling.")
-                    .keywords([question.label(), "classifier confidence threshold"])
-                    .disabled(review),
+                SettingItem::new("Confidence", confidence_field)
+                    .description("How sure the classifier must be for automatic handling.")
+                    .keywords([question.label(), "classifier confidence"])
+                    .disabled(!auto),
             ])
         });
         SettingPage::new("Classifier").resettable(false).groups(groups)

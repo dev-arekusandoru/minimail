@@ -62,7 +62,12 @@ impl Mailbox {
                     }
                 }
                 Change::Muted(t, was) => set_membership(&mut self.muted, t, was),
-                Change::Blocked(e, was) => set_membership(&mut self.blocked, e, was),
+                Change::Blocked(e, Some(at)) => {
+                    self.blocked.insert(e, at);
+                }
+                Change::Blocked(e, None) => {
+                    self.blocked.remove(&e);
+                }
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
                 Change::FolderPush(id) => self.folders.retain(|f| f.id != id),
                 Change::Materialised(id) => {
