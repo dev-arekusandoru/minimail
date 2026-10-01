@@ -79,6 +79,9 @@ impl MailApp {
                 .into_any_element();
         }
         let Some(msg) = self.opened().and_then(|id| self.mailbox.get(id)) else {
+            if self.mailbox.accounts().is_empty() {
+                return pane.into_any_element();
+            }
             return pane
                 .items_center()
                 .justify_center()

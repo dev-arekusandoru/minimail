@@ -153,15 +153,13 @@ pub struct MailApp {
     open_menu: Option<MenuKind>,
     /// The `+ Filter` picker or a pill's value editor, when one is open.
     filter_popover: Option<filters::FilterPopoverState>,
-    /// Local mail cache; `None` for mock-only sessions.
+    /// Local mail cache; `None` when it could not be opened.
     cache: Option<Rc<crate::sync::cache::Cache>>,
     providers: HashMap<AccountId, crate::sync::SharedProvider>,
     /// Last sync error shown, so each distinct error toasts once.
     sync_error: Option<String>,
     /// Latest round error per account, cleared by its next error-free round (Accounts settings).
     account_errors: HashMap<AccountId, String>,
-    /// The mailbox came from fixtures (replaced on first Gmail sign-in).
-    demo: bool,
     /// Run a server change check on the next round (Fetch mail, sign-in).
     force_check: bool,
     /// Time of the next scheduled check.
@@ -259,7 +257,6 @@ impl MailApp {
             providers: HashMap::new(),
             sync_error: None,
             account_errors: HashMap::new(),
-            demo: true,
             force_check: true,
             check_at: 0,
             throttled_until: None,
