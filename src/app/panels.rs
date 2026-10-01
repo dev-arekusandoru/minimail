@@ -9,7 +9,7 @@ use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
 use crate::app::ui::{button, run, shortcut};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
-    component::separator::Separator,
+    component::{alert::Alert, progress::Progress, scroll::ScrollableElement as _, separator::Separator},
     prelude::FluentBuilder as _,
     *,
 };
@@ -90,7 +90,7 @@ impl Render for RulesPanel {
             .p_3()
             .gap_1()
             .id("rules-panel")
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .child(
                 div()
                     .flex()
@@ -212,6 +212,7 @@ impl RenderOnce for SessionCard {
                 .child(button("session-close", "Close", "Close session summary", "escape", cx).on_click(run(ClearSelection))),
             (None, progress) => {
                 let (pos, total) = progress.unwrap_or((0, 0));
+                let pct = if total == 0 { 0. } else { pos as f32 / total as f32 * 100. };
                 div()
                     .flex()
                     .items_center()
@@ -220,7 +221,11 @@ impl RenderOnce for SessionCard {
                     .py_1()
                     .text_xs()
                     .text_color(t.muted_foreground)
-                    .child(SharedString::from(format!("{pos}/{total}")))
+                    .child(div().flex_1().min_w_0().child(
+                        Progress::new("session-progress")
+                            .value(pct)
+                            .accessibility_label(SharedString::from(format!("{pos}/{total}"))),
+                    ))
                     .child(button("session-end", "End session", "End the triage session", "escape", cx).on_click(run(ClearSelection)))
             }
         }
@@ -296,23 +301,28 @@ impl RenderOnce for RuleBanner {
         div()
             .flex()
             .items_center()
-            .justify_between()
             .gap_3()
             .px_3()
             .py_1()
             .border_b_1()
             .border_color(t.border)
-            .bg(t.primary.opacity(0.10))
             .text_sm()
             .text_color(t.foreground)
-            .child(SharedString::from(format!(
-                "Always move mail from {} to {}?",
-                self.rule.sender,
-                state_name(self.rule.state)
-            )))
+            .child(div().flex_1().min_w_0().child(
+                Alert::info(
+                    "rule-banner",
+                    format!(
+                        "Always move mail from {} to {}?",
+                        self.rule.sender,
+                        state_name(self.rule.state)
+                    ),
+                )
+                .banner(),
+            ))
             .child(
                 div()
                     .flex()
+                    .flex_none()
                     .items_center()
                     .gap_2()
                     .child(button("rule-accept", "Accept", "Accept rule", "shift-y", cx).on_click(run(AcceptRule)))

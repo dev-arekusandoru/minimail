@@ -8,7 +8,7 @@ use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::ThemeColor;
 use gpui_kit::{
     assets::IconName,
-    component::{button::{Button, ButtonVariants as _}, label::Label, separator::Separator, status_bar::StatusBar, Sizable as _},
+    component::{button::{Button, ButtonVariants as _}, label::Label, scroll::ScrollableElement as _, separator::Separator, status_bar::StatusBar, Sizable as _},
     prelude::FluentBuilder as _,
     *,
 };
@@ -265,6 +265,7 @@ impl Render for HelpPanel {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
+                    .vertical_scrollbar(&self.scroll)
                     .child(div().flex().gap_4().children(columns))
                     .child(div().flex_none().child(Separator::horizontal()))
                     .child(div().text_sm().text_color(t.primary).child("Icon legend"))
