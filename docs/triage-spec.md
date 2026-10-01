@@ -51,7 +51,7 @@ Tags are metadata beside the state.
 | Awaiting Reply | Classifier, on send, when a response is expected | A newer message arriving in the thread |
 | Follow Up | `tick`, when an Awaiting Reply thread passes the global timeout with no answer (thread returns to Inbox) | Any state change |
 | Reminder | `tick`, when a snooze wakes | Any state change |
-| New Sender | Sender not in contacts | Allow sender |
+| New Sender | Sender not in contacts (schema kept; off in v1 — see `src/known_senders.rs`) | Allow sender |
 | Possible Spam | Classifier | Any state change |
 | Urgent(n), Kind | Classifier | — |
 
@@ -74,8 +74,8 @@ Every user action is one undo step.
 - **Unblock**: Settings → Blocked senders list. Unsubscribe is one-way (resubscribe
   happens at the original subscription).
 - **Mark spam**: dialog *Block & Delete / Delete*.
-- **New sender**: Allow removes New Sender (and records the contact); Block runs the
-  block dialog.
+- **New sender**: off in v1 (see `src/known_senders.rs`). When enabled, Allow removes
+  New Sender (and records the contact); Block runs the block dialog.
 - **Sender-wide actions** always confirm first.
 
 ## Accounts & folders
@@ -95,11 +95,12 @@ Every user action is one undo step.
   - per account: Inbox, Snoozed, Sent, Archive, Trash, then folders (collapsible)
 - **Chip row**: quick filters, only on Inbox views (All Inboxes or one account's
   Inbox). Single-select, fixed set, no counts:
-  All · Needs Reply · Follow Up · Urgent · New Senders · Possible Spam
+  All · Needs Reply · Follow Up · Urgent · Possible Spam (New Senders is off in v1)
 - **Filter ▾ menu**: every location; filter by tag, Kind, account.
 - **Rows**: tag badges; account icon (per-account icon + color) before the sender in All Inboxes.
-- **Viewer**: Archive / File / Delete / Snooze in each message's `⋯` menu; banner for New Sender
-  (Allow / Block) and Possible Spam (Block & Delete / Delete).
+- **Accounts**: each has an icon + color (shown in the sidebar and All Inboxes rows) and an optional nickname (Settings → Accounts); a blank nickname means unset and the account name is shown.
+- **Viewer**: Archive / File / Delete / Snooze in each message's `⋯` menu; banner for
+  Possible Spam (Block & Delete / Delete). The New Sender (Allow / Block) banner is off in v1.
 
 ### Keys
 

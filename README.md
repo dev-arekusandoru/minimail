@@ -31,7 +31,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 📝 **Thread summaries** | Opt-in. Shows the summary, action items and dates above the thread. |
 | ⏰ **Snooze with a return time** | Tonight, tomorrow, Monday or a custom time (`3h`, `2d`). The message returns to the Inbox tagged *Reminder* when it's due. |
 | 🔁 **Follow-ups that come back** | Send a reply that expects an answer and the thread is tagged *Awaiting Reply*. With no answer after the *Follow-up after* timeout (Settings, default 3 days) it returns to the Inbox tagged *Follow Up*. |
-| 🛡️ **New senders & blocked mail** | First-time senders sit in the Inbox with a *New Sender* badge: `a` allows (writes the contact), `b` blocks after a confirm dialog. Blocked senders are listed in Settings → **Blocked senders**, each with an undoable *Unblock*. Unsubscribing (`shift-u`) is one-way: resubscribing happens at the source. |
+| 🛡️ **Blocked mail** | `b` blocks a sender after a confirm dialog; blocked senders are listed in Settings → **Blocked senders**, each with an undoable *Unblock*. Unsubscribing (`shift-u`) is one-way: resubscribing happens at the source. (The known/unknown *screener* — the New Sender badge and `a` allow — is off in v1; see `src/known_senders.rs`.) |
 | 🪄 **Rules from your habits** | Do the same thing to one sender twice and it offers to make it a rule. |
 | 🔍 **Search** | `from:`, `subject:`, `is:`, `before:`, `after:` and free text. |
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
@@ -39,7 +39,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🔕 **Mute & unsubscribe** | One key each. |
 | 🧵 **Group by thread** | `ctrl-g` (or Settings, or the palette) shows one row per conversation: latest sender and subject, message count, participants and newest date, sized to that content (plus the newest snippet while previews are on). `right`/`enter` or the chevron expands it inline, `left` collapses. Actions (`e` `f` `d` `s` `i`, `x`, shift-selection) on a thread row apply to every message of that thread *in the current panel* and undo as one step; sender-wide actions and mute are unchanged. A thread split across panels shows only that panel's messages in each. `]` / `[` step through the thread in date order in either mode (also clickable in the reader). |
 | 🎨 **Themes** | Atom One Dark Pro by default, plus Tokyo Night. Pick one in Settings (`cmd-,`, Appearance page, Theme dropdown). Your own gpui-kit theme files load (and hot-reload) from `~/.config/mail-classifier/themes/` (or `$MAIL_CLASSIFIER_THEMES`). |
-| 👁️ **Readable rows** | Each row is sender + date on the first line, the **full-width subject** on the second, then an optional muted preview. In **All Inboxes** the sender line starts with the account's icon in its color (choose both per account in Settings → Accounts); outgoing mail is labelled `To: <recipient>` instead of a sender. Triage tags (Needs Reply, Awaiting Reply, Follow Up, Reminder, New Sender, Possible Spam, Urgent, Kind) are distinct icons in their own theme colors, not text badges: at most a few fit (fewer in narrow windows) and the rest fold into a `+N` chip whose tooltip lists them. Hover any icon for its name; the `?` help ends with an **icon legend**. Unread mail is bold with a yellow left bar (red when urgent); an unaccepted AI suggestion is a single sparkle icon (click or `y` accepts, right-click or `n` rejects). Snoozed rows show their wake time as text (`↩ Mon 5 Oct 08:00`). |
+| 👁️ **Readable rows** | Each row is sender + date on the first line, the **full-width subject** on the second, then an optional muted preview. In **All Inboxes** the sender line starts with the account's icon in its color (choose both, plus an optional nickname shown instead of the account name in the sidebar, filters and toasts, per account in Settings → Accounts); outgoing mail is labelled `To: <recipient>` instead of a sender. Triage tags (Needs Reply, Awaiting Reply, Follow Up, Reminder, Possible Spam, Urgent, Kind) are distinct icons in their own theme colors, not text badges: at most a few fit (fewer in narrow windows) and the rest fold into a `+N` chip whose tooltip lists them. Hover any icon for its name; the `?` help ends with an **icon legend**. Unread mail is bold with a yellow left bar (red when urgent); an unaccepted AI suggestion is a single sparkle icon (click or `y` accepts, right-click or `n` rejects). Snoozed rows show their wake time as text (`↩ Mon 5 Oct 08:00`). |
 | 🔎 **Preview lines** | Settings → *Preview lines* (or palette → *Cycle preview lines*): Off, 1–5 lines of plain-text snippet under the subject, like Apple Mail. Quoted text (`>`), signatures and reply headers are stripped. Message rows are that tall, and a thread header sizes to its own content: one compact line (sender, subject, participants, count, date) plus at most two preview lines, so a collapsed thread reads as a group header rather than a full row. Rows are measured, not padded, and scrolling, `j`/`k` and the wheel follow the cursor. Default 2. |
 | 🗂️ **Reader tabs** | The reader has editor-style tabs, one per thread. Opening a message (click or `enter`) shows it in the *preview* tab (italic title), which the next open replaces; open a message of a thread that already has a tab and that tab comes forward instead. Double-click a tab, click inside the message, expand a collapsed thread message, reply, use a message **⋯** action, or press `enter` on the previewed message to pin it. `cmd-w` closes the active tab (or click its ×); `ctrl-tab` / `ctrl-shift-tab` and `cmd-shift-]` / `cmd-shift-[` switch, and the list cursor follows (selection untouched). Archiving, deleting or snoozing the last message of a previewed thread out of the list closes the preview; a pinned tab stays. Each tab keeps its own expansion, quoted-text, Reader-mode and scroll state; nothing persists across launches. A triage session hides the tab bar and shows only its message; the tabs come back afterwards. Each tab shows the monogram of the thread's latest sender (Settings → Appearance → *Show sender avatar in tabs*, on by default). |
 | 🔍 **Find in thread** | `cmd-f` opens a find bar under the reader tab bar (like Zed's buffer search): live match count (`3/12`), *match case* `alt-c`, *whole word* `alt-w` and *regex* `alt-r` toggles, `enter` / `cmd-g` next and `shift-enter` / `cmd-shift-g` previous (wrapping), `esc` hides it (the tab keeps its query, shown selected on the next `cmd-f`). Typing only updates the count and highlights; landing on a match happens on `enter`. It searches the subject and every message body of the tab's thread, collapsed messages and folded quoted text included; landing on a match expands its message (which pins the tab) or reveals its quote, and scrolls it into view. All matches are highlighted, the current one in the accent colour; an invalid regex finds nothing and turns the field red. Each tab keeps its own query until the tab closes. HTML bodies cannot be highlighted, so while they have matches they are shown in text form. `cmd-shift-f` focuses the global search, like `/`. |
@@ -59,9 +59,9 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `d` / `#` | Delete | `s` | Snooze, with a return time |
 | `i` | Move to Inbox | `r` | Reply (`cmd-enter` sends → post-send dialog) |
 | `shift-a` | Reply all (sender + To + Cc, minus your address) | `w` | Forward (empty editable To, `Fwd:` subject, forwarded-message block; `cmd-enter` sends) |
-| `a` / `b` | Allow / block sender | `!` | Mark spam (Block & Delete / Delete) |
+| `b` | Block sender | `!` | Mark spam (Block & Delete / Delete) |
 | `shift-e` `shift-d` `shift-f` `shift-s` | Archive / Delete / File / Snooze **all** from the sender (confirm first) | `shift-u` | Unsubscribe (confirm first) |
-| `1`–`6` | Chips: All · Needs Reply · Follow Up · Urgent · New Senders · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
+| `1`–`4`, `6` | Chips: All · Needs Reply · Follow Up · Urgent · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
 | `u` / `cmd-z` | Undo | `z` | Summarize thread |
 | `ctrl-g` | Group by thread on/off | `m` | Mute |
 | `x` | Select | `y` / `n` | Accept / reject AI badges |
@@ -75,7 +75,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `ctrl-tab` / `ctrl-shift-tab` | Next / previous reader tab (also `cmd-shift-]` / `cmd-shift-[`) | `cmd-f` | Find in the open thread (`enter` / `shift-enter` or `cmd-g` / `cmd-shift-g` step, `esc` closes) |
 | `cmd-shift-f` | Global search (same as `/`) | | |
 
-The reader shows the keys that apply to the current message in the footer (up to five; `?` shows the rest); `u` undo appears on the toast after an action. Each expanded message has Reply and **⋯** buttons in its header, and the New Sender / Possible Spam banners and the suggestion strip carry their own buttons.
+The reader shows the keys that apply to the current message in the footer (up to five; `?` shows the rest); `u` undo appears on the toast after an action. Each expanded message has Reply and **⋯** buttons in its header, and the Possible Spam banners and the suggestion strip carry their own buttons.
 
 #### HTML mail
 
@@ -123,7 +123,6 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 | CornerUpRight | Follow up (the await passed the timeout) | follow_up |
 | AlarmClock | Reminder (a snooze woke the message) | reminder |
 | Clock | Snoozed (wake time shown as text on the row) | state_snoozed |
-| UserPlus | New sender | new_sender |
 | Siren / Flame / Zap | Urgency 4–5 / 3 / 1–2 (1–2 only in `+N`) | urgent / muted |
 | BellOff | Muted thread | muted |
 | Paperclip | Subject or opening lines mention an attachment | muted |
@@ -149,8 +148,7 @@ Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 `~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
 its directory) on first launch, migrated forward through `PRAGMA user_version`,
 and seeded once from `fixtures/contacts_seed.json`; afterwards the file is
-yours, so deleting it just re-seeds on the next start. Allowing a new sender
-writes a contact there (undo takes it back out), and everything else
+yours, so deleting it just re-seeds on the next start. Everything else
 the app tracks (rules, themes) still comes from the fixtures. Messages come from
 the fixtures until a Gmail account is linked (below).
 
@@ -214,7 +212,7 @@ Not supported yet: sending from Gmail.
 
 ```
 src/
-├── model/        # triage states, undo, snooze, screener, outbox (pure logic; split by concern)
+├── model/        # triage states, undo, snooze, outbox (pure logic; split by concern)
 ├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding
 ├── judge/        # System 1 classifier interface, stub provider, routing policy
 ├── summary.rs    # thread summarizer interface + stub

@@ -60,3 +60,33 @@ fn picking_an_icon_in_settings_stores_it_on_the_account(cx: &mut TestAppContext)
     assert_eq!(after[0].as_deref(), Some(picked));
     assert_eq!(after[1], before[1], "other accounts keep theirs");
 }
+
+fn sidebar_names(h: &mut Harness<'_>) -> Vec<String> {
+    h.read(|a| a.mailbox.accounts().iter().map(|a| mail_classifier::account_style::display_name(a).to_owned()).collect())
+}
+
+#[gpui_kit::gpui::test]
+fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
+
+    h.keys("cmd-,");
+    h.click(format!("0-{ACCOUNTS}"));
+    let focus_nickname = |h: &mut Harness<'_>| {
+        h.cx.update_window(h.window, |_, window, cx| {
+            window.within("group-0").within("item-1").click(("account-nickname", 0usize), cx)
+        })
+        .expect("window alive");
+        h.cx.run_until_parked();
+    };
+    focus_nickname(&mut h);
+    h.type_text("  Home  ");
+    assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()).as_deref(), Some("Home"));
+    assert_eq!(sidebar_names(&mut h), vec!["Home", "Work"]);
+    assert_eq!(h.read(|a| a.mailbox.accounts()[1].nickname.clone()), None, "other accounts untouched");
+
+    // Clearing the text unsets it.
+    h.keys("cmd-a backspace");
+    assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()), None);
+    assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
+}

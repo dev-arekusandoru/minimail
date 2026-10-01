@@ -257,13 +257,19 @@ impl MailApp {
         if !self.mailbox.set_account_style(id, icon, color) {
             return;
         }
+        self.persist_account(id, window, cx);
+        cx.notify();
+    }
+
+    /// Save a Gmail account's icon, color and nickname to the cache (demo accounts live only in
+    /// memory).
+    fn persist_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let (Some(cache), Some(account)) = (&self.cache, self.mailbox.account(id))
             && account.provider == crate::model::ProviderKind::Gmail
             && let Err(e) = cache.upsert_account(account)
         {
-            self.show_toast(format!("Could not save the account style: {e}"), window, cx);
+            self.show_toast(format!("Could not save the account: {e}"), window, cx);
         }
-        cx.notify();
     }
 
     /// Rows for the settings Accounts page.
@@ -277,6 +283,7 @@ impl MailApp {
                 email: a.email.clone(),
                 color: a.color.clone(),
                 icon: crate::account_style::icon_key(a),
+                nickname: a.nickname.clone().unwrap_or_default(),
                 gmail: a.provider == crate::model::ProviderKind::Gmail,
             })
             .collect()
@@ -349,6 +356,11 @@ impl MailApp {
                 }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
                 SettingsEvent::RemoveAccount(id) => this.remove_linked_account(id, window, cx),
+                SettingsEvent::AccountNickname { id, nickname } => {
+                    this.mailbox.set_account_nickname(id, nickname);
+                    this.persist_account(id, window, cx);
+                    cx.notify();
+                }
                 SettingsEvent::AccountStyle { id, icon, color } => this.set_account_style(id, icon, color, window, cx),
                 SettingsEvent::Close => this.close_modals(window, cx),
             },

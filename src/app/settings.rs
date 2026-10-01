@@ -6,6 +6,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Selectable as _;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable as _};
 use std::collections::HashMap;
 
@@ -42,6 +43,8 @@ pub enum SettingsEvent {
     RemoveAccount(String),
     /// An account's icon key and `#rrggbb` color changed (`mailbox.set_account_style`).
     AccountStyle { id: String, icon: &'static str, color: String },
+    /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
+    AccountNickname { id: String, nickname: String },
     Close,
 }
 
@@ -54,6 +57,8 @@ pub struct AccountRow {
     pub color: String,
     /// Resolved icon key (see [`account_style::ICONS`]).
     pub icon: &'static str,
+    /// Raw nickname text; blank means unset (see [`account_style::normalize_nickname`]).
+    pub nickname: String,
     /// Linked Gmail account (removable); otherwise built-in demo data.
     pub gmail: bool,
 }
@@ -67,6 +72,13 @@ const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
 type Weak = WeakEntity<SettingsPanel>;
+
+/// Per-account widgets of the Accounts page; the subscriptions report their changes.
+struct AccountControls {
+    color: Entity<ColorPickerState>,
+    nickname: Entity<InputState>,
+    _subs: [Subscription; 2],
+}
 
 pub struct SettingsPanel {
     focus: FocusHandle,
@@ -83,8 +95,8 @@ pub struct SettingsPanel {
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
     accounts: Vec<AccountRow>,
-    /// One color picker per account, with the subscription that reports its changes.
-    pickers: HashMap<String, (Entity<ColorPickerState>, Subscription)>,
+    /// Color picker and nickname input per account (with their subscriptions).
+    controls: HashMap<String, AccountControls>,
     /// Account whose Remove button has been clicked once (awaiting confirm).
     confirm_remove: Option<String>,
     /// Gmail OAuth client credentials are present in the environment.
@@ -114,7 +126,7 @@ impl SettingsPanel {
             blocked: Vec::new(),
             unsubscribed: Vec::new(),
             accounts: Vec::new(),
-            pickers: HashMap::new(),
+            controls: HashMap::new(),
             confirm_remove: None,
             gmail_configured: false,
             start_page: 0,
@@ -261,26 +273,54 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    /// Give every account a color picker and drop the pickers of removed accounts.
-    fn sync_pickers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.pickers.retain(|id, _| self.accounts.iter().any(|a| &a.id == id));
-        let missing: Vec<(String, Hsla)> = self
+    /// Give every account a color picker and nickname input; drop those of removed accounts.
+    fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.controls.retain(|id, _| self.accounts.iter().any(|a| &a.id == id));
+        let missing: Vec<(String, Hsla, String)> = self
             .accounts
             .iter()
-            .filter(|a| !self.pickers.contains_key(&a.id))
-            .map(|a| (a.id.clone(), theme::parse_color(&a.color).unwrap_or_else(|| cx.theme().primary)))
+            .filter(|a| !self.controls.contains_key(&a.id))
+            .map(|a| {
+                let color = theme::parse_color(&a.color).unwrap_or_else(|| cx.theme().primary);
+                (a.id.clone(), color, a.nickname.clone())
+            })
             .collect();
-        for (id, color) in missing {
+        for (id, color, nickname) in missing {
             let state = cx.new(|cx| ColorPickerState::new(window, cx).default_value(color));
             let account = id.clone();
-            let sub = cx.subscribe(&state, move |this, _, event: &ColorPickerEvent, cx| {
+            let color_sub = cx.subscribe(&state, move |this, _, event: &ColorPickerEvent, cx| {
                 let ColorPickerEvent::Change(Some(color)) = event else {
                     return;
                 };
                 this.set_account_style(&account, None, Some(theme::to_hex(*color)), cx);
             });
-            self.pickers.insert(id, (state, sub));
+            let input = cx.new(|cx| {
+                let mut input = InputState::new(window, cx).placeholder("Optional, shown instead of the account name");
+                input.set_value(nickname, window, cx);
+                input
+            });
+            let account = id.clone();
+            let input_sub = cx.subscribe(&input, move |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = input.read(cx).value().to_string();
+                    this.set_account_nickname(&account, &text, cx);
+                }
+            });
+            self.controls.insert(id, AccountControls { color: state, nickname: input, _subs: [color_sub, input_sub] });
         }
+    }
+
+    /// Apply a typed nickname to the account row and tell the app (blank clears it).
+    fn set_account_nickname(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+        let Some(row) = self.accounts.iter_mut().find(|a| a.id == id) else {
+            return;
+        };
+        if row.nickname == text {
+            return;
+        }
+        row.nickname = text.to_owned();
+        cx.emit(SettingsEvent::AccountNickname { id: id.to_owned(), nickname: text.to_owned() });
+        cx.notify();
     }
 
     /// First click on Remove arms the confirm; the second emits the removal.
@@ -312,7 +352,9 @@ impl SettingsPanel {
             linked = linked.item(note("accounts-empty", "No accounts.").keywords(keywords));
         }
         for (index, account) in self.accounts.iter().cloned().enumerate() {
-            let picker = self.pickers.get(&account.id).map(|(state, _)| state.clone());
+            let controls = self.controls.get(&account.id);
+            let picker = controls.map(|c| c.color.clone());
+            let nickname_input = controls.map(|c| c.nickname.clone());
             let (style_icon, style_id) = (account.icon, account.id.clone());
             let style_weak = weak.clone();
             let weak = weak.clone();
@@ -324,7 +366,8 @@ impl SettingsPanel {
                     let t = cx.theme();
                     let color = theme::parse_color(&account.color).unwrap_or(t.primary);
                     let kind = if account.gmail { "Gmail" } else { "Demo data · replaced when you add Gmail" };
-                    let detail = if account.name == account.email {
+                    let shown = account_style::normalize_nickname(&account.nickname).unwrap_or_else(|| account.name.clone());
+                    let detail = if shown == account.email {
                         kind.to_owned()
                     } else {
                         format!("{} · {kind}", account.email)
@@ -348,7 +391,7 @@ impl SettingsPanel {
                                         .with_size(px(16.))
                                         .text_color(color),
                                 )
-                                .child(div().flex().flex_col().child(account.name.clone()).child(
+                                .child(div().flex().flex_col().child(shown).child(
                                     div().text_xs().text_color(t.muted_foreground).child(detail),
                                 )),
                         );
@@ -396,6 +439,13 @@ impl SettingsPanel {
                                 .enumerate()
                                 .map(|(i, (key, label))| pick(index * account_style::ICONS.len() + i, key, label)),
                         ))
+                        .when_some(nickname_input.clone(), |d, input| {
+                            d.child(
+                                div().flex().items_center().gap_2().child("Nickname").child(
+                                    div().flex_1().child(Input::new(&input).id(("account-nickname", index)).cleanable(true)),
+                                ),
+                            )
+                        })
                         .when_some(picker.clone(), |d, state| {
                             d.child(
                                 div().flex().items_center().gap_2().child("Color").child(
@@ -701,7 +751,7 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.sync_pickers(window, cx);
+        self.sync_controls(window, cx);
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
