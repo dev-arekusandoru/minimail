@@ -13,7 +13,7 @@ use crate::model::{
     Folder, FolderId, Mailbox, Message, MessageId, TriageState, format_rfc3339,
 };
 use crate::provider::{
-    MailProvider, ProviderError, RemoteFolder, RemoteId, RemoteMessage, RemoteState,
+    MailProvider, ProviderError, RemoteFolder, RemoteId, RemoteMessage, RemoteState, Scope, Window,
 };
 
 use cache::Cache;
@@ -316,16 +316,18 @@ pub fn background_pull(
     let (fetched, removed, cursor) = match changes {
         Some(changes) => {
             let removed = changes.removed;
-            let ids: Vec<RemoteId> =
-                with_refresh(changes.changed).into_iter().filter(|id| !removed.contains(id)).collect();
-            (p.fetch(&ids)?, removed, Some(changes.cursor))
+            let mut ids = changes.added;
+            ids.extend(changes.updated.into_iter().map(|(id, _)| id));
+            let ids: Vec<RemoteId> = with_refresh(ids).into_iter().filter(|id| !removed.contains(id)).collect();
+            (p.fetch_headers(&ids)?, removed, Some(changes.cursor))
         }
         None => {
-            let (ids, cursor) = p.recent(INITIAL_LIMIT)?;
+            let cursor = p.cursor()?;
+            let ids = p.list(&Scope::Inbox, Window::Since(0), None, INITIAL_LIMIT)?.ids;
             let missing: Vec<RemoteId> = ids.into_iter().filter(|id| !known.contains(id)).collect();
             let chunk = missing[..missing.len().min(IMPORT_CHUNK)].to_vec();
             let done = chunk.len() == missing.len();
-            (p.fetch(&with_refresh(chunk))?, Vec::new(), done.then_some(cursor))
+            (p.fetch_headers(&with_refresh(chunk))?, Vec::new(), done.then_some(cursor))
         }
     };
     Ok(Pull {
@@ -429,6 +431,11 @@ pub fn apply_fetched(
             None => remote_read,
         };
         let snooze = mb.snoozed_until(id).map(format_rfc3339);
+        // A downloaded body is never replaced by the snippet.
+        let (body, html, attachments, partial) = match existing.as_ref().filter(|e| !e.partial) {
+            Some(e) => (e.body.clone(), e.html.clone(), e.attachments.clone(), false),
+            None => (remote.snippet.clone(), None, Vec::new(), true),
+        };
         let message = Message {
             id,
             thread_id,
@@ -436,7 +443,7 @@ pub fn apply_fetched(
             from_email: remote.from_email.clone(),
             to: remote.to.clone(),
             subject: remote.subject.clone(),
-            body: remote.body.clone(),
+            body,
             received: format_rfc3339(remote.received),
             state,
             account: account.to_owned(),
@@ -444,10 +451,10 @@ pub fn apply_fetched(
             snooze,
             cc: remote.cc.clone(),
             bcc: remote.bcc.clone(),
-            html: remote.html.clone(),
-            attachments: remote.attachments.clone(),
+            html,
+            attachments,
             read,
-            partial: false,
+            partial,
         };
         mb.upsert_remote(message.clone());
         cache

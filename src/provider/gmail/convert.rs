@@ -7,7 +7,7 @@ use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 use base64::engine::{DecodePaddingMode, Engine as _};
 use serde_json::Value;
 
-use super::super::{RemoteMessage, RemoteState};
+use super::super::{Body, Changes, RemoteFlags, RemoteMessage, RemoteState, Scope, Window};
 use crate::clock::Timestamp;
 use crate::model::Attachment;
 
@@ -17,6 +17,7 @@ const LABEL_SENT: &str = "SENT";
 const LABEL_SPAM: &str = "SPAM";
 const LABEL_DRAFT: &str = "DRAFT";
 const LABEL_CHAT: &str = "CHAT";
+const LABEL_UNREAD: &str = "UNREAD";
 
 /// Labels to add and remove for a triage move. Archiving only strips `INBOX`,
 /// so other user labels are preserved.
@@ -167,46 +168,92 @@ fn walk(part: &Value, body: &mut String, html: &mut Option<String>, files: &mut 
     }
 }
 
-/// Converts one Gmail message resource. `None` means the message is filtered
-/// out (spam, draft, chat) or carries no id.
+fn labels_of(json: &Value) -> Vec<String> {
+    json.get("labelIds")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// Spam, drafts and chats never enter the mailbox.
+fn is_filtered(labels: &[String]) -> bool {
+    labels.iter().any(|l| l == LABEL_SPAM || l == LABEL_DRAFT || l == LABEL_CHAT)
+}
+
+/// State and unread flag from a message's labels.
+pub fn flags(labels: &[String], user_folders: &HashSet<String>) -> RemoteFlags {
+    RemoteFlags {
+        state: state_from_labels(labels, user_folders),
+        unread: labels.iter().any(|l| l == LABEL_UNREAD),
+    }
+}
+
+/// Decodes the HTML entities Gmail puts in snippets.
+pub fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+        let decoded = rest.find(';').filter(|&end| end <= 10).and_then(|end| {
+            let entity = &rest[1..end];
+            let ch = match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "nbsp" => Some(' '),
+                _ => entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                    .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                    .or_else(|| entity.strip_prefix('#').and_then(|d| d.parse().ok()))
+                    .and_then(char::from_u32),
+            }?;
+            Some((ch, end))
+        });
+        match decoded {
+            Some((ch, end)) => {
+                out.push(ch);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Converts a Gmail message resource (`format=metadata` or `full`) to headers,
+/// snippet and flags. `None` means the message is filtered out (spam, draft,
+/// chat) or carries no id.
 pub fn message(json: &Value, user_folders: &HashSet<String>) -> Option<RemoteMessage> {
     let id = json.get("id").and_then(Value::as_str)?;
-    let labels: Vec<String> = json
-        .get("labelIds")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    if labels
-        .iter()
-        .any(|l| l == LABEL_SPAM || l == LABEL_DRAFT || l == LABEL_CHAT)
-    {
+    let labels = labels_of(json);
+    if is_filtered(&labels) {
         return None;
     }
-    let payload = json.get("payload").unwrap_or(&Value::Null);
     let empty: Vec<Value> = Vec::new();
-    let headers: &[Value] = payload
-        .get("headers")
+    let headers: &[Value] = json
+        .get("payload")
+        .and_then(|p| p.get("headers"))
         .and_then(Value::as_array)
         .unwrap_or(&empty);
     let (from_name, from_email) = match header(headers, "From") {
         Some(v) => split_from(v),
         None => (String::new(), String::new()),
     };
-    let mut body = String::new();
-    let mut html = None;
-    let mut attachments = Vec::new();
-    walk(payload, &mut body, &mut html, &mut attachments);
     let received: Timestamp = json
         .get("internalDate")
         .and_then(Value::as_str)
         .and_then(|ms| ms.parse::<i64>().ok())
         .map(|ms| ms.div_euclid(1000))
         .unwrap_or(0);
+    let RemoteFlags { state, unread } = flags(&labels, user_folders);
     Some(RemoteMessage {
         id: id.to_owned(),
         thread: json
@@ -220,12 +267,102 @@ pub fn message(json: &Value, user_folders: &HashSet<String>) -> Option<RemoteMes
         cc: header(headers, "Cc").unwrap_or_default().to_owned(),
         bcc: header(headers, "Bcc").unwrap_or_default().to_owned(),
         subject: header(headers, "Subject").unwrap_or_default().to_owned(),
-        body,
-        html,
+        snippet: decode_entities(json.get("snippet").and_then(Value::as_str).unwrap_or_default()),
         received,
-        attachments,
-        state: state_from_labels(&labels, user_folders),
+        state,
         outgoing: labels.iter().any(|l| l == LABEL_SENT),
-        unread: labels.iter().any(|l| l == "UNREAD"),
+        unread,
     })
+}
+
+/// Body, html and attachments of a `format=full` message resource.
+pub fn body(json: &Value) -> Body {
+    let mut out = Body::default();
+    walk(
+        json.get("payload").unwrap_or(&Value::Null),
+        &mut out.body,
+        &mut out.html,
+        &mut out.attachments,
+    );
+    out
+}
+
+/// `messages.list` parameters for a scope and window: the `q` search string,
+/// a label filter, and whether trash must be included.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListQuery {
+    pub q: String,
+    pub label: Option<String>,
+    pub include_trash: bool,
+}
+
+pub fn list_query(scope: &Scope, window: Window) -> ListQuery {
+    let mut q = String::from("-in:spam -in:drafts -in:chats");
+    let mut label = None;
+    let mut include_trash = false;
+    match scope {
+        Scope::Inbox => q.push_str(" in:inbox"),
+        Scope::Archive => q.push_str(" -in:inbox -in:trash has:nouserlabels"),
+        Scope::Trash => {
+            q.push_str(" in:trash");
+            include_trash = true;
+        }
+        Scope::Folder(id) => label = Some(id.clone()),
+    }
+    match window {
+        Window::Since(t) => q.push_str(&format!(" after:{}", t - 1)),
+        Window::Before(t) => q.push_str(&format!(" before:{t}")),
+    }
+    ListQuery { q, label, include_trash }
+}
+
+/// Merges one `history.list` page into `out`. Label changes carry the
+/// message's full current label set, so they become flags without a fetch.
+pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Changes) {
+    if let Some(cursor) = json.get("historyId").and_then(Value::as_str) {
+        out.cursor = cursor.to_owned();
+    }
+    for record in json.get("history").and_then(Value::as_array).into_iter().flatten() {
+        let entries = |key: &str| {
+            record
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.get("message"))
+                .collect::<Vec<_>>()
+        };
+        for m in entries("messagesAdded") {
+            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+            if is_filtered(&labels_of(m)) || out.removed.iter().any(|r| r == id) {
+                continue;
+            }
+            if !out.added.iter().any(|a| a == id) {
+                out.added.push(id.to_owned());
+            }
+        }
+        for m in entries("labelsAdded").into_iter().chain(entries("labelsRemoved")) {
+            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+            if out.removed.iter().any(|r| r == id) {
+                continue;
+            }
+            let labels = labels_of(m);
+            out.updated.retain(|(u, _)| u != id);
+            if is_filtered(&labels) {
+                // Moved to spam: gone from every view.
+                out.added.retain(|a| a != id);
+                out.removed.push(id.to_owned());
+            } else {
+                out.updated.push((id.to_owned(), flags(&labels, user_folders)));
+            }
+        }
+        for m in entries("messagesDeleted") {
+            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+            out.added.retain(|a| a != id);
+            out.updated.retain(|(u, _)| u != id);
+            if !out.removed.iter().any(|r| r == id) {
+                out.removed.push(id.to_owned());
+            }
+        }
+    }
 }
