@@ -2,7 +2,7 @@
 //!
 //! Chips only make sense on an Inbox view, so the row (and the `1`–`6` keys behind it)
 //! exists only there.
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::{button::Button, Selectable as _, Sizable as _};
 
 use super::*;
 use super::sidebar::is_inbox_location;
@@ -22,13 +22,11 @@ fn chip_action(i: usize) -> Box<dyn Action> {
 
 impl MailApp {
     /// The chip row, or `None` on locations that are not Inbox views.
-    pub(super) fn render_chips(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_chips(&self) -> Option<AnyElement> {
         if self.mode != ListMode::State || !is_inbox_location(&self.triage.view.location) {
             return None;
         }
-        let t = cx.theme();
         let active = self.triage.view.chip;
-        let hover = t.list_hover;
         Some(
             div()
                 .id("chip-row")
@@ -41,23 +39,13 @@ impl MailApp {
                 .pb_2()
                 .children(Chip::ALL.into_iter().enumerate().map(|(i, chip)| {
                     let on = chip == active;
-                    div()
-                        .id(("chip", i))
-                        .test_support()
-                        .flex_none()
-                        .items_center()
-                        .h(px(20.))
-                        .px_2()
+                    Button::new(("chip", i))
+                        .outline()
+                        .xsmall()
                         .rounded_full()
-                        .border_1()
-                        .border_color(if on { t.primary } else { t.border })
-                        .bg(if on { t.list_active } else { t.secondary })
-                        .text_size(px(11.))
-                        .text_color(if on { t.primary } else { t.muted_foreground })
-                        .cursor_pointer()
-                        .when(!on, |d| d.hover(move |d| d.bg(hover)))
+                        .label(chip.label())
+                        .selected(on)
                         .on_click(move |_, window, cx| window.dispatch_action(chip_action(i), cx))
-                        .child(chip.label())
                         .into_any_element()
                 }))
                 .into_any_element(),
