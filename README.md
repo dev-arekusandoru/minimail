@@ -33,7 +33,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🔁 **Follow-ups that come back** | Send a reply that expects an answer and the thread is tagged *Awaiting Reply*. With no answer after the *Follow-up after* timeout (Settings, default 3 days) it returns to the Inbox tagged *Follow Up*. |
 | 🛡️ **Blocked mail** | `b` blocks a sender after a confirm dialog; blocked senders are listed in Settings → **Blocked senders**, each with an undoable *Unblock*. Unsubscribing (`shift-u`) is one-way: resubscribing happens at the source. (The known/unknown *screener* — the New Sender badge and `a` allow — is off in v1; see `src/known_senders.rs`.) |
 | 🪄 **Rules from your habits** | Do the same thing to one sender twice and it offers to make it a rule. |
-| 🔍 **Search** | `from:`, `subject:`, `is:`, `before:`, `after:` and free text. |
+| 🔍 **Search** | `from:`, `to:`, `cc:`, `bcc:`, `subject:`, `body:`, `is:`, `in:`, `tag:`, `kind:`, `account:`, `before:` / `after:` / `on:` (a date or `7d`, `2w`, `3m`, `1y`) and free text. Searching runs inside the folder you are in; remove its `in:` pill to search everywhere. |
 | 🎯 **Triage sessions** | Go through the Inbox one message at a time and finish with a count and the time taken. |
 | ↩️ **Undo send** | Replies wait 10 seconds in an outbox before they go. |
 | 🔕 **Mute & unsubscribe** | One key each. |
@@ -61,7 +61,8 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `shift-a` | Reply all (sender + To + Cc, minus your address) | `w` | Forward (empty editable To, `Fwd:` subject, forwarded-message block; `cmd-enter` sends) |
 | `b` | Block sender | `!` | Mark spam (Block & Delete / Delete) |
 | `shift-e` `shift-d` `shift-f` `shift-s` | Archive / Delete / File / Snooze **all** from the sender (confirm first) | `shift-u` | Unsubscribe (confirm first) |
-| `1`–`4`, `6` | Chips: All · Needs Reply · Follow Up · Urgent · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
+| `1`–`4`, `6` | Filter pills: clear · toggle Needs Reply · Follow Up · Urgent · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
+| `l` | Add a filter pill (`+ Filter`) | | |
 | `u` / `cmd-z` | Undo | `z` | Summarize thread |
 | `ctrl-g` | Group by thread on/off | `m` | Mute |
 | `x` | Select | `y` / `n` | Accept / reject AI badges |
@@ -100,7 +101,9 @@ The chrome stays out of the way: a sidebar of locations, one titlebar, and actio
 
 **Message menu (`⋯`)** — every expanded message in the reader has a **Reply** button (`r`) and a **⋯** menu, and both act on *that* message, not on whichever one the reader is opened on. The menu holds *Archive* (`e`), *Delete* (`d`), *Snooze…* (`s`) and *Move to inbox* (`i`) (each only when it would change something), *Accept AI* (`y`) / *Reject AI* (`n`) while a suggestion is pending, *File…* (`f`), *Mark spam…* (`!`), *Toggle select* (`x`), *Summarize thread* (`z`), *Mute thread* (`m`), *Unsubscribe* (`shift-u`) and the **Sender actions** submenu: *Archive · Delete · File · Move to inbox from this sender* (`shift-e` / `shift-d` / `shift-f` / `shift-i`).
 
-**Selection menu (`⋯` in the list header)** — with two or more messages selected, a **⋯** next to *Filter ▾* opens the actions that make sense for several messages: Archive, Delete, Snooze…, Move to inbox, File… and Mark spam…. They apply to the whole selection in one undo step.
+**List header** — one row that wraps to the list's width: the folder name and how many messages it shows (`Inbox · 100`, muted threads not counted), then the filters as removable pills, `+ Filter` (`l`) and `Clear`. The list is always one query over all mail and the pills *are* that query: there is no hidden filter. The folder is an `in:` value, hidden while it is the only one and shown as a pill as soon as anything else is applied, so removing it turns the list into a search over every folder. Selecting a folder in the sidebar starts over with just its `in:`. Values of one field sit side by side with an `and`/`or` toggle between them (click it to switch); click a value to edit it (dates get a calendar, and typed values like `7d` still work) and its × to remove it. `+ Filter` asks for a field (Tag, From, To, Cc, Bcc, Subject, Body, Date before/after/on, Is, Kind, Account, In) and then a value: a fuzzy list, free text or a date. `1` clears the filters (the folder stays), `2`–`4` and `6` toggle the Needs Reply, Follow Up, Urgent and Possible Spam pills, and `esc` clears them too. Filter changes are view state, not undo steps.
+
+**Selection menu (`⋯` in the list header)** — with two or more messages selected, a **⋯** next to the selection count opens the actions that make sense for several messages: Archive, Delete, Snooze…, Move to inbox, File… and Mark spam…. They apply to the whole selection in one undo step.
 
 Nothing was dropped: every action is still reachable from the titlebar, the menus, the command palette (`cmd-k`) and its own shortcut.
 
@@ -216,7 +219,8 @@ src/
 ├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding
 ├── judge/        # System 1 classifier interface, stub provider, routing policy
 ├── summary.rs    # thread summarizer interface + stub
-├── search.rs     # query parser
+├── search.rs     # structured query: parse, display, edit, match
+├── filters.rs    # what the filter pills and picker offer (fields, values, quick filters); pure
 ├── provider/     # MailProvider trait, keychain secrets, Gmail adapter (OAuth, REST, label/MIME conversion)
 ├── sync/         # SQLite mail cache and the sync engine (pending moves, pull merge); pure
 ├── rules.rs      # rule suggestions
