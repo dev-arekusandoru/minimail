@@ -151,7 +151,7 @@ pub struct Group {
     pub combinator: Combinator,
 }
 
-/// One removable chip: a single field value.
+/// One removable pill: a single field value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pill {
     pub field: Field,
@@ -351,6 +351,93 @@ impl Query {
         let before = self.groups.len();
         self.groups.retain(|g| g.field != field);
         self.groups.len() != before
+    }
+
+    /// Replaces `old` with `new` in `field`'s group, keeping its position. Replacing with a
+    /// value the group already holds just drops `old`. `false` if `old` is absent or `new`
+    /// is not a valid value (nothing changes).
+    pub fn replace(&mut self, field: Field, old: &str, new: &str) -> bool {
+        let (Some(old), Some(new)) = (field.normalize(old), field.normalize(new)) else {
+            return false;
+        };
+        let Some(group) = self.groups.iter_mut().find(|g| g.field == field) else {
+            return false;
+        };
+        let Some(i) = group.values.iter().position(|x| *x == old) else {
+            return false;
+        };
+        if old != new && group.values.contains(&new) {
+            group.values.remove(i);
+        } else {
+            group.values[i] = new;
+        }
+        true
+    }
+
+    fn normalize_text(raw: &str) -> Option<String> {
+        Some(unquote(raw).trim().to_lowercase()).filter(|t| !t.is_empty())
+    }
+
+    /// Adds a free-text term. `false` if blank or already present.
+    pub fn add_text(&mut self, term: &str) -> bool {
+        let Some(term) = Self::normalize_text(term) else {
+            return false;
+        };
+        if self.text.contains(&term) {
+            return false;
+        }
+        self.text.push(term);
+        true
+    }
+
+    /// Removes a free-text term. `false` if it was absent.
+    pub fn remove_text(&mut self, term: &str) -> bool {
+        let Some(term) = Self::normalize_text(term) else {
+            return false;
+        };
+        let before = self.text.len();
+        self.text.retain(|t| *t != term);
+        self.text.len() != before
+    }
+
+    /// Replaces a free-text term, keeping its position. `false` if `old` is absent or `new`
+    /// is blank.
+    pub fn replace_text(&mut self, old: &str, new: &str) -> bool {
+        let (Some(old), Some(new)) = (Self::normalize_text(old), Self::normalize_text(new)) else {
+            return false;
+        };
+        let Some(i) = self.text.iter().position(|t| *t == old) else {
+            return false;
+        };
+        if old != new && self.text.contains(&new) {
+            self.text.remove(i);
+        } else {
+            self.text[i] = new;
+        }
+        true
+    }
+
+    /// Drops every free-text term.
+    pub fn clear_text(&mut self) -> bool {
+        let had = !self.text.is_empty();
+        self.text.clear();
+        had
+    }
+
+    /// Lays `other` over this query: each field `other` constrains replaces this query's
+    /// group for that field, and `other`'s free-text terms are appended.
+    pub fn overlay(&mut self, other: &Query) {
+        for g in &other.groups {
+            self.clear_field(g.field);
+            for v in &g.values {
+                self.insert(g.field, v.clone(), g.combinator == Combinator::Or);
+            }
+        }
+        for t in &other.text {
+            if !self.text.contains(t) {
+                self.text.push(t.clone());
+            }
+        }
     }
 
     /// Every field value in display order, grouped by field.

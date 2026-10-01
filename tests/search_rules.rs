@@ -534,3 +534,37 @@ fn editing_preserves_free_text() {
     assert_eq!(q.to_string(), "\"budget\"");
     assert!(!q.is_empty());
 }
+
+#[test]
+fn replace_keeps_the_position_and_rejects_invalid_or_absent_values() {
+    let mut q = Query::parse("tag:needs-reply tag:urgent from:ann");
+    assert!(q.replace(Field::Tag, "needs-reply", "spam"));
+    assert_eq!(q.to_string(), "tag:spam tag:urgent from:ann", "the edited pill stays where it was");
+    assert!(!q.replace(Field::Tag, "spam", "bogus"), "an invalid value changes nothing");
+    assert!(!q.replace(Field::Tag, "reminder", "spam"), "an absent value changes nothing");
+    assert_eq!(q.to_string(), "tag:spam tag:urgent from:ann");
+    assert!(q.replace(Field::Tag, "spam", "urgent"), "replacing with a value already there merges");
+    assert_eq!(q.values(Field::Tag), ["urgent"]);
+    assert_eq!(Query::parse(&q.to_string()), q);
+}
+
+#[test]
+fn free_text_terms_add_remove_and_replace_like_pills() {
+    let mut q = Query::parse("in:inbox");
+    assert!(q.add_text("Budget"));
+    assert!(!q.add_text("budget"), "terms are case-insensitive and unique");
+    assert!(!q.add_text("   "), "blank is no term");
+    assert!(q.replace_text("budget", "invoice"));
+    assert_eq!(q.text(), ["invoice"]);
+    assert!(q.remove_text("INVOICE"));
+    assert!(!q.remove_text("invoice"));
+    assert_eq!(q, Query::parse("in:inbox"));
+}
+
+#[test]
+fn overlay_replaces_the_fields_it_names_and_appends_text() {
+    let mut q = Query::parse("in:inbox account:work tag:urgent");
+    q.overlay(&Query::parse("in:archived from:ann,bob lunch"));
+    assert_eq!(q.to_string(), "account:work tag:urgent in:archived from:ann,bob \"lunch\"");
+    assert_eq!(q.combinator(Field::From), Some(Combinator::Or), "the overlaid group keeps its combinator");
+}
