@@ -7,6 +7,54 @@ fn threads(t: &Tabs) -> Vec<(u32, bool)> {
 }
 
 #[test]
+fn reordering_moves_the_tab_and_keeps_it_open() {
+    let mut t = Tabs::default();
+    for th in 1..=3 {
+        t.open_pinned(th, th * 10);
+    }
+    t.activate(0);
+    assert!(t.reorder(0, 2));
+    assert_eq!(threads(&t), vec![(2, true), (3, true), (1, true)]);
+    assert_eq!(t.active_index(), Some(2), "the active tab follows its thread");
+    assert_eq!(t.opened(), Some(10));
+}
+
+#[test]
+fn reordering_a_tab_left_of_the_active_one_leaves_it_active() {
+    let mut t = Tabs::default();
+    for th in 1..=3 {
+        t.open_pinned(th, th * 10);
+    }
+    assert_eq!(t.active_index(), Some(2));
+    assert!(t.reorder(2, 0));
+    assert_eq!(threads(&t), vec![(3, true), (1, true), (2, true)]);
+    assert_eq!(t.opened(), Some(30));
+}
+
+#[test]
+fn reordering_carries_the_pin_state_and_the_opened_message() {
+    let mut t = Tabs::default();
+    t.open_pinned(1, 10);
+    t.open(2, 20);
+    assert!(t.reorder(1, 0));
+    assert_eq!(threads(&t), vec![(2, false), (1, true)]);
+    assert_eq!(t.tab_for(1), Some(&mail_classifier::tabs::Tab { thread: 1, msg: 10, pinned: true }));
+}
+
+#[test]
+fn reordering_an_unknown_slot_changes_nothing() {
+    let mut t = Tabs::default();
+    t.open_pinned(1, 10);
+    assert!(!t.reorder(1, 0), "target past the end");
+    assert!(!t.reorder(0, 1), "target past the end");
+    assert!(!t.reorder(3, 0));
+    assert_eq!(threads(&t), vec![(1, true)]);
+    assert_eq!(t.active_index(), Some(0));
+    let mut empty = Tabs::default();
+    assert!(!empty.reorder(0, 0), "no tabs at all");
+}
+
+#[test]
 fn opening_replaces_the_preview_in_place() {
     let mut t = Tabs::default();
     assert_eq!(t.open(1, 10), None);

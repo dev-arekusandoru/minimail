@@ -122,6 +122,23 @@ impl Tabs {
         true
     }
 
+    /// Move the tab at `from` to index `to` (where it ends up), keeping the tab that was active
+    /// active. False when either index is out of range. Pin state travels with the tab.
+    pub fn reorder(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.tabs.len() || to >= self.tabs.len() {
+            return false;
+        }
+        let active = self.active().map(|t| t.thread);
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        if let Some(thread) = active
+            && let Some(ix) = self.index_of(thread)
+        {
+            self.active = ix;
+        }
+        true
+    }
+
     /// Close tab `ix`. The active tab falls to its right neighbour, else its left one.
     pub fn close(&mut self, ix: usize) -> Option<u32> {
         if ix >= self.tabs.len() {
