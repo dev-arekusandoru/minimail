@@ -14,13 +14,123 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::base::ResizeHandleContext;
 use gpui_kit::component::dock::{
-    BasePanel, DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, NodeId, PaneRef, Panel, PanelControl,
-    PanelEvent, PanelId, PanelStyle, panel_handle,
+    AnyDrag, BasePanel, BasePanelView, DockArea, DockAreaRenderer, DockContext, DockEvent, DockLayout, DockPlacement,
+    DockSkin, DropIndicator, NodeId, PaneRef, Panel, PanelControl, PanelEvent, PanelId, PanelState, PanelStyle,
+    TabGroupContext, TabGroupRenderer, panel_handle,
 };
+
+/// A panel that takes a message dropped on its group.
+const READER_PANEL: &str = "mail.reader";
+
+/// The dock's look: the kit's skin for everything, minus the split preview.
+///
+/// Base draws that preview for any drag over any group, and a message drop never splits a
+/// pane here — the list and the sidebar do not take mail at all. So the dock draws no split
+/// preview anywhere and the reader group carries its own mark instead (see [`MailGroups`]).
+struct MailSkin {
+    inner: Rc<DockSkin>,
+}
+
+impl DockAreaRenderer for MailSkin {
+    // Everything but the groups themselves is the kit's chrome unchanged — including the
+    // sidebar's resize handle and collapse affordance, which the default hooks do not draw.
+    fn frame(&self, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.frame(window, cx)
+    }
+
+    fn split_frame(&self, node: NodeId, axis: Axis, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.split_frame(node, axis, window, cx)
+    }
+
+    fn center_frame(&self, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.center_frame(window, cx)
+    }
+
+    fn render_split_handle(
+        &self,
+        handle: &ResizeHandleContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        self.inner.render_split_handle(handle, window, cx)
+    }
+
+    fn render_dock(&self, dock: &DockContext, content: AnyElement, window: &mut Window, cx: &mut App) -> AnyElement {
+        self.inner.render_dock(dock, content, window, cx)
+    }
+
+    fn build_placeholder(
+        &self,
+        state: &PanelState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Arc<dyn BasePanelView>> {
+        self.inner.build_placeholder(state, window, cx)
+    }
+
+    /// The only hook that is not a plain forward: the kit's skin, with the two group-side
+    /// drop hooks adjusted (see [`MailGroups`]).
+    fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
+        Rc::new(MailGroups { inner: self.inner.tab_group_renderer() })
+    }
+}
+
+/// One group's chrome, delegated to the kit's skin except for the two hooks that decide how
+/// a message drag is advertised.
+struct MailGroups {
+    inner: Rc<dyn TabGroupRenderer>,
+}
+
+impl TabGroupRenderer for MailGroups {
+    fn frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        self.inner.frame(group, window, cx)
+    }
+
+    /// The reader group lights up for a drag, the way the kit's own drop targets do. Every
+    /// other group stays bare, so nothing invites a drop that would be ignored.
+    fn content_frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
+        let frame = self.inner.content_frame(group, window, cx);
+        if !takes_mail(group, cx) {
+            return frame;
+        }
+        frame.drag_over::<AnyDrag>(|this, _, _, cx| this.bg(cx.theme().tokens.drop_target))
+    }
+
+    fn render_tab_bar(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
+        self.inner.render_tab_bar(group, window, cx)
+    }
+
+    fn render_active_panel(
+        &self,
+        panel: AnyView,
+        group: &TabGroupContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        self.inner.render_active_panel(panel, group, window, cx)
+    }
+
+    /// Never. What base offers here is a split placement, which is a promise this app does
+    /// not keep: mail opens a tab, and only on the reader.
+    fn render_drop_indicator(&self, _: DropIndicator, _: &mut Window, _: &mut App) -> Option<AnyElement> {
+        None
+    }
+
+    fn render_empty(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        self.inner.render_empty(group, window, cx)
+    }
+}
+
+/// Whether this group holds the reader, and so opens what is dropped on it.
+fn takes_mail(group: &TabGroupContext, cx: &App) -> bool {
+    group.panels().iter().any(|panel| panel.panel_name(cx) == READER_PANEL)
+}
 
 use super::panes::{
     MAX_SIDEBAR_W, MIN_LIST_H, MIN_LIST_W, MIN_READER_H, MIN_READER_W, MIN_SIDEBAR_W, Orientation, SIDEBAR_W,
@@ -70,7 +180,15 @@ struct Built {
 impl Dock {
     pub(super) fn new(app: &WeakEntity<MailApp>, window: &mut Window, cx: &mut Context<MailApp>) -> Self {
         let app_entity = cx.entity();
-        let (area, skin) = DockSkin::dock_area("mail", None, window, cx);
+        // The kit builds its skin inside the area's constructor, because the skin needs the
+        // area's own weak handle. Ours wraps that skin and is installed the same way.
+        let mut inner = None;
+        let area = cx.new(|cx| {
+            let skin = DockSkin::new(cx);
+            inner = Some(skin.clone());
+            DockArea::new("mail", None, window, cx).with_renderer(Rc::new(MailSkin { inner: skin }))
+        });
+        let skin = inner.expect("the skin is built inside the area's constructor");
         // `Auto`, not `TabBar`: under `Auto` a group of one panel draws a plain title
         // only when that panel asks for one, so the sidebar and the list — both
         // `title_bar() == false` — stay bare while a reader group of two or more draws

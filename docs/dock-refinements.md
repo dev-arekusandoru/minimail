@@ -1,6 +1,11 @@
 # Dock refinements: honest drop affordances, and tabs on the message list
 
-Follows `docs/dock-migration.md`. Branch `dock-dnd`. Nothing here is implemented yet.
+Follows `docs/dock-migration.md`. Branch `dock-dnd`.
+
+**Status:** items 1 and 2 are implemented — the dock no longer draws base's split preview at
+all, and the reader group carries the drop mark instead (`MailSkin` / `MailGroups` in
+`src/app/mail_app/dock.rs`). Item 3 is not started. The reasoning below is kept as the record
+of why the lock route was not taken.
 
 ## 1 + 2. Stop advertising drops that do nothing
 
@@ -49,9 +54,15 @@ Plan: give the app its own `DockAreaRenderer` + `TabGroupRenderer`.
   `toggle_zoom` (`tab_group.rs:849-890`) — so this is lifting the skin's logic onto our own
   chrome, with tab contents still coming from `Panel::title()` as they do now.
 
-Cheaper interim, if we would rather not write a renderer yet: make the sidebar honest early by
+Interim (if we would rather not write a renderer yet): make the sidebar honest early by
 giving rows their own drop targets (S4). That still leaves the group-level preview on the
 sidebar, and does nothing for the list.
+
+**What the change costs.** The same preview was also what advertised *panel* placements —
+dragging a reader tab out of its group to split one. Those drags still work, but they no
+longer show where the panel would land. The hook to bring it back for panel drags only is
+`render_drop_indicator` gated on a "message drag in flight" flag: the drag preview entity is
+created when a message drag starts and released when it ends, so it can own that flag.
 
 ## 3. Tabs on the message list
 
