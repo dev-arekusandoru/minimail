@@ -107,8 +107,16 @@ pub struct SettingsPanel {
     theme_mode: theme::ThemeMode,
     light_theme: String,
     dark_theme: String,
-    /// Blocked sender addresses, sorted; `Unblock` removes one and emits [`SettingsEvent::Unblock`].
-    blocked: Vec<String>,
+    /// Blocked sender addresses with the time each was blocked, sorted;
+    /// `Unblock` removes one and emits [`SettingsEvent::Unblock`].
+    blocked: Vec<(String, Timestamp)>,
+    /// Address filter for the Senders page.
+    filter: String,
+    /// The filter's input (with its subscription).
+    filter_input: Entity<InputState>,
+    _filter_sub: Subscription,
+    /// The app's clock when the window opened, for relative dates.
+    now: Timestamp,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
     accounts: Vec<AccountRow>,
@@ -129,9 +137,17 @@ impl SettingsPanel {
         group: bool,
         preview_lines: u8,
         orientation: Orientation,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter by address"));
+        let filter_sub = cx.subscribe(&filter_input, |this, input, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let text = input.read(cx).value().to_string();
+                this.set_filter(text, cx);
+            }
+        });
         Self {
             focus: cx.focus_handle(),
             policy,
@@ -144,6 +160,10 @@ impl SettingsPanel {
             light_theme: String::new(),
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             blocked: Vec::new(),
+            filter: String::new(),
+            filter_input,
+            _filter_sub: filter_sub,
+            now: 0,
             accounts: Vec::new(),
             controls: HashMap::new(),
             confirm_remove: None,
@@ -179,14 +199,30 @@ impl SettingsPanel {
         self
     }
 
-    /// Seed the blocked-sender list and follow-up timeout (seconds).
-    pub fn mailbox_state(mut self, blocked: Vec<String>, follow_up_timeout: Timestamp) -> Self {
+    /// Seed the blocked-sender list, the app clock it dates rows against and the
+    /// follow-up timeout (seconds).
+    pub fn mailbox_state(
+        mut self,
+        blocked: Vec<(String, Timestamp)>,
+        now: Timestamp,
+        follow_up_timeout: Timestamp,
+    ) -> Self {
         self.blocked = blocked;
+        self.now = now;
         self.follow_up_days = follow_up_timeout
             .div_euclid(DAY)
             .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into())
             as u8;
         self
+    }
+
+    /// Re-read the blocked senders and the clock (undo restores a block).
+    pub fn set_blocked(&mut self, blocked: Vec<(String, Timestamp)>, now: Timestamp, cx: &mut Context<Self>) {
+        if self.blocked != blocked || self.now != now {
+            self.blocked = blocked;
+            self.now = now;
+            cx.notify();
+        }
     }
 
     fn changed(&self, cx: &mut Context<Self>) {
@@ -260,6 +296,11 @@ impl SettingsPanel {
             ("off", _) => Mode::Off,
             _ => Mode::Review,
         };
+        self.set_mode(question, mode, cx);
+    }
+
+    /// Route `question` by `mode`, persisting the policy when it changes.
+    fn set_mode(&mut self, question: QuestionKey, mode: Mode, cx: &mut Context<Self>) {
         if self.policy.mode(question) != mode {
             self.policy.set_mode(question, mode);
             self.changed(cx);
@@ -306,10 +347,27 @@ impl SettingsPanel {
         }
     }
 
-    /// Remove `email` from the local list and ask the app to unblock it.
+    /// Narrow the Senders page to addresses containing `text`.
+    fn set_filter(&mut self, text: String, cx: &mut Context<Self>) {
+        if self.filter != text {
+            self.filter = text;
+            cx.notify();
+        }
+    }
+
+    /// Blocked senders whose address contains the filter text.
+    fn filtered_blocked(&self) -> Vec<&(String, Timestamp)> {
+        let needle = self.filter.trim().to_lowercase();
+        self.blocked
+            .iter()
+            .filter(|(email, _)| needle.is_empty() || email.to_lowercase().contains(&needle))
+            .collect()
+    }
+
+    /// Drop `email` from the local list and ask the app to unblock it.
     fn unblock(&mut self, email: &str, cx: &mut Context<Self>) {
         let before = self.blocked.len();
-        self.blocked.retain(|blocked| blocked != email);
+        self.blocked.retain(|(blocked, _)| blocked != email);
         if self.blocked.len() != before {
             cx.emit(SettingsEvent::Unblock(email.to_owned()));
             cx.notify();

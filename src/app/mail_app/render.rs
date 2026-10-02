@@ -10,6 +10,7 @@ impl Focusable for MailApp {
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.reconcile_tabs();
+        self.sync_settings_blocked(cx);
         self.place_find_match(window, cx);
         self.refresh_find();
         let hint = self.hint_context();
