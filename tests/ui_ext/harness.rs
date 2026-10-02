@@ -23,6 +23,25 @@ pub struct Harness<'a> {
 }
 
 pub fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
+    harness_inner(cx, mailbox, None)
+}
+
+/// A harness whose app reads and writes preferences through `store`, as the real app does.
+/// The store is never a real database: tests pass an in-memory one they share with a second
+/// app to stand in for a restart.
+pub fn harness_with_prefs(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    store: Rc<mail_classifier::contacts::ContactStore>,
+) -> Harness<'_> {
+    harness_inner(cx, mailbox, Some(store))
+}
+
+fn harness_inner(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    prefs: Option<Rc<mail_classifier::contacts::ContactStore>>,
+) -> Harness<'_> {
     cx.update(|cx| {
         gpui_kit::init(cx);
         bind_keys(cx);
@@ -40,7 +59,13 @@ pub fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, c2, window, cx));
+                let view = cx.new(|cx| {
+                    let mut app = MailApp::new_with_clock(mailbox, c2, window, cx);
+                    if let Some(store) = prefs {
+                        app.load_preferences(store, window, cx);
+                    }
+                    app
+                });
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },
@@ -208,5 +233,107 @@ impl Harness<'_> {
         self.cx
             .update_window(self.window, |_, window, _| window.try_find(id).is_some())
             .unwrap_or(false)
+    }
+}
+
+// ---------------------------------------------------------------- Settings window
+
+impl Harness<'_> {
+    /// The handle of the open settings window, if any.
+    pub fn settings_window(&mut self) -> Option<AnyWindowHandle> {
+        self.read(|a| a.settings_window())
+    }
+
+    /// Open the settings window with ⌘, and return its handle. Settings lives in its own
+    /// window, so its elements are looked up there and not in the mail window.
+    pub fn open_settings(&mut self) -> AnyWindowHandle {
+        self.keys("cmd-,");
+        self.settings_handle()
+    }
+
+    fn settings_handle(&mut self) -> AnyWindowHandle {
+        self.settings_window().expect("the settings window is open")
+    }
+
+    /// Keystrokes into the settings window.
+    pub fn settings_keys(&mut self, keys: &str) {
+        let window = self.settings_handle();
+        self.cx.simulate_keystrokes(window, keys);
+        self.cx.run_until_parked();
+    }
+
+    /// Click an element of the settings window.
+    pub fn settings_click(&mut self, id: impl Into<gpui_kit::ElementId>) {
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| window.click(id, cx))
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Type text into the field the settings window has focused.
+    pub fn settings_type(&mut self, text: &str) {
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| window.input(text, cx))
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Whether an element is in the settings window's current frame. A page's groups live in
+    /// a measured list, so an element can take a few frames to show up: ask for a handful
+    /// before answering no.
+    pub fn settings_has(&mut self, id: impl Into<gpui_kit::ElementId>) -> bool {
+        let id = id.into();
+        let window = self.settings_handle();
+        for _ in 0..8 {
+            let found = self
+                .cx
+                .update_window(window, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.try_find(id.clone()).is_some()
+                })
+                .expect("settings window alive");
+            self.cx.run_until_parked();
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Click `target` inside item `item` of group `group` of the page on screen.
+    pub fn settings_click_in(
+        &mut self,
+        group: usize,
+        item: usize,
+        target: impl Into<gpui_kit::ElementId>,
+    ) {
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| {
+                window
+                    .within(format!("group-{group}"))
+                    .within(format!("item-{item}"))
+                    .click(target, cx)
+            })
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Open the dropdown of an item and choose its `option`-th entry.
+    pub fn settings_pick_option(&mut self, group: usize, item: usize, option: usize) {
+        self.settings_click_in(group, item, "btn");
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| window.within("popup-menu").click(option, cx))
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// The settings page the sidebar is on.
+    pub fn settings_page(&mut self) -> usize {
+        let panel = self.read(|a| a.settings_panel()).expect("the settings window is open");
+        panel.read_with(self.cx, |panel, _| panel.page())
     }
 }

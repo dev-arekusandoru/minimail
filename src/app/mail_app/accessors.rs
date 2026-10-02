@@ -22,6 +22,16 @@ impl MailApp {
         self.settings.is_some()
     }
 
+    /// The settings window, if it is open.
+    pub fn settings_window(&self) -> Option<AnyWindowHandle> {
+        self.settings_window
+    }
+
+    /// The settings panel of the open settings window.
+    pub fn settings_panel(&self) -> Option<Entity<SettingsPanel>> {
+        self.settings.clone()
+    }
+
     pub fn rules_open(&self) -> bool {
         self.rules_panel.is_some()
     }

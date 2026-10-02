@@ -1,5 +1,4 @@
-use gpui_kit::{AppContext, TestAppContext};
-use gpui_kit::test::TestWindowExt;
+use gpui_kit::TestAppContext;
 use mail_classifier::app::actions::{commands};
 use mail_classifier::clock::{DAY};
 use mail_classifier::judge::{Mode, QuestionKey};
@@ -23,21 +22,14 @@ pub fn spam_box() -> Mailbox {
 #[gpui_kit::gpui::test]
 pub fn sidebar_plus_opens_settings_on_the_accounts_page(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let on_accounts_page = |h: &mut Harness<'_>| {
-        h.cx.update_window(h.window, |_, window, cx| {
-            window.render_frame(cx);
-            window.try_find("account-add-gmail").is_some()
-        })
-        .unwrap()
-    };
-    assert!(!on_accounts_page(&mut h));
     h.click("sidebar-add-account");
-    assert!(h.read(|a| a.modal_open()), "settings opened");
-    assert!(on_accounts_page(&mut h), "opened on Accounts, not General");
-    // Plain cmd-, still opens on General.
-    h.keys("escape");
+    assert!(h.read(|a| a.settings_open()), "settings opened in its own window");
+    assert_eq!(h.settings_page(), 0, "opened on Accounts, not General");
+    // Plain cmd-, still opens on Accounts.
+    h.settings_keys("escape");
     h.keys("cmd-,");
-    assert!(!on_accounts_page(&mut h));
+    assert!(h.read(|a| a.settings_open()));
+    assert_eq!(h.settings_page(), 0);
 }
 
 /// Undo startup auto-labels until message 1 is a plain Inbox message again.
@@ -67,16 +59,11 @@ pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
 pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
     reset_spam(&mut h);
-    // Settings -> Classifier -> first question (Spam) -> Handling dropdown -> Review.
-    h.keys("cmd-,");
-    h.click("0-4");
-    h.cx.update_window(h.window, |_, window, cx| {
-        window.within("group-0").within("item-0").click("btn", cx);
-        window.within("popup-menu").click(1usize, cx);
-    })
-    .expect("window alive");
-    h.cx.run_until_parked();
-    h.keys("escape");
+    // Settings -> AI -> the Spam group -> Handling dropdown -> Review.
+    h.open_settings();
+    h.settings_click("0-3");
+    h.settings_pick_option(1, 0, 1);
+    h.settings_keys("escape");
     assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
     h.keys("c");
     assert!(!h.has_tag(1, Tag::PossibleSpam), "Review: no auto-applied label");
@@ -110,14 +97,11 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
     assert!(h.toast().contains("Enable summaries"), "toast was {:?}", h.toast());
     assert!(h.read(|a| a.summary_shown()).is_none());
 
-    h.keys("cmd-,");
-    h.cx.update_window(h.window, |_, window, cx| {
-        window.within("group-0").within("item-0").click("check", cx)
-    })
-    .expect("window alive");
-    h.cx.run_until_parked();
+    h.open_settings();
+    h.settings_click("0-3");
+    h.settings_click_in(0, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
-    h.keys("escape");
+    h.settings_keys("escape");
     assert!(!h.read(|a| a.settings_open()));
     h.keys("z");
     let summary = h.read(|a| a.summary_shown()).expect("summary shown after enabling");
