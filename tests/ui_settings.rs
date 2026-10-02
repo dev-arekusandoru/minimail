@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gpui_kit::{AnyWindowHandle, TestAppContext};
+use gpui_kit::TestAppContext;
 use mail_classifier::contacts::ContactStore;
 use mail_classifier::model::Mailbox;
 
@@ -28,20 +28,11 @@ fn prefs_store() -> Rc<ContactStore> {
     Rc::new(ContactStore::open_in_memory().expect("in-memory address book"))
 }
 
-/// Open the settings window and show `page` in its sidebar.
-fn open_page(h: &mut Harness<'_>, page: usize) -> AnyWindowHandle {
-    let window = h.open_settings();
-    if page != ACCOUNTS {
-        h.settings_click(format!("0-{page}"));
-    }
-    window
-}
-
 #[gpui_kit::gpui::test]
 fn the_summaries_switch_enables_summaries_and_escape_closes(cx: &mut TestAppContext) {
     let mut h = app(cx);
     assert!(!h.read(|a| a.summaries_enabled));
-    open_page(&mut h, AI);
+    h.settings_open_page(AI);
     assert!(h.read(|a| a.settings_open()));
     h.settings_click_in(0, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
@@ -56,12 +47,12 @@ fn the_summaries_switch_enables_summaries_and_escape_closes(cx: &mut TestAppCont
 fn the_tab_avatar_switch_turns_the_setting_off_and_back_on(cx: &mut TestAppContext) {
     let mut h = app(cx);
     assert!(h.read(|a| a.tab_avatars), "on by default");
-    open_page(&mut h, APPEARANCE);
+    h.settings_open_page(APPEARANCE);
     h.settings_click_in(0, 4, "check");
     assert!(!h.read(|a| a.tab_avatars));
     // The window reopens showing the current value, so the next click turns it back on.
     h.settings_keys("escape");
-    open_page(&mut h, APPEARANCE);
+    h.settings_open_page(APPEARANCE);
     h.settings_click_in(0, 4, "check");
     assert!(h.read(|a| a.tab_avatars));
 }
@@ -82,7 +73,7 @@ fn opening_settings_again_focuses_the_same_window(cx: &mut TestAppContext) {
 fn a_changed_setting_survives_a_restart_through_the_shared_store(cx: &mut TestAppContext) {
     let store = prefs_store();
     let mut h = harness_with_prefs(cx, Mailbox::load_default_with(store.clone()), store.clone());
-    open_page(&mut h, AI);
+    h.settings_open_page(AI);
     h.settings_click_in(0, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
     drop(h);
@@ -98,7 +89,7 @@ fn reset_all_restores_the_defaults_and_drops_the_stored_values(cx: &mut TestAppC
     let store = prefs_store();
     let scope = mail_classifier::prefs::Scope::Global;
     let mut h = harness_with_prefs(cx, Mailbox::load_default_with(store.clone()), store.clone());
-    open_page(&mut h, INBOX);
+    h.settings_open_page(INBOX);
     let grouped = h.read(|a| a.group_threads);
     h.settings_click_in(0, 0, "check");
     assert_eq!(h.read(|a| a.group_threads), !grouped);

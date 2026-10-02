@@ -251,6 +251,18 @@ impl Harness<'_> {
         self.settings_handle()
     }
 
+    /// Open Settings and show `page` of its sidebar, returning the window handle.
+    pub fn settings_open_page(&mut self, page: usize) -> AnyWindowHandle {
+        let window = self.open_settings();
+        if page != 0 {
+            self.cx
+                .update_window(window, |_, window, cx| window.click(format!("0-{page}"), cx))
+                .expect("settings window alive");
+            self.cx.run_until_parked();
+        }
+        window
+    }
+
     fn settings_handle(&mut self) -> AnyWindowHandle {
         self.settings_window().expect("the settings window is open")
     }

@@ -50,11 +50,6 @@ fn app(cx: &mut TestAppContext) -> Harness<'_> {
     harness_with(cx, with_gmail())
 }
 
-/// Open Settings and hand back the handle of its own window.
-fn open_settings(h: &mut Harness<'_>) -> AnyWindowHandle {
-    h.keys("cmd-,");
-    h.read(|a| a.settings_window_handle().expect("settings window"))
-}
 
 fn click(cx: &mut TestAppContext, window: AnyWindowHandle, id: impl Into<ElementId>) {
     let id = id.into();
@@ -141,12 +136,12 @@ fn without_oauth_client() {
 fn removing_an_account_asks_first_and_cancel_keeps_it(cx: &mut TestAppContext) {
     let mut h = app(cx);
     let before = linked(&mut h);
-    let settings = open_settings(&mut h);
-    click(&mut *h.cx, settings, ("account-overflow", 0usize));
+    let settings = h.open_settings();
+    h.settings_click(("account-overflow", 0usize));
     click_menu_row(&mut *h.cx, settings, "Remove…");
     settle(&mut *h.cx, settings);
 
-    assert!(has(&mut *h.cx, settings, "dialog"), "removing asks first");
+    assert!(h.settings_has("dialog"), "removing asks first");
     let shown = text(&mut *h.cx, settings);
     assert!(shown.contains("Remove"), "the dialog offers Remove: {shown}");
     assert!(shown.contains("Cancel"), "and Cancel: {shown}");
@@ -155,7 +150,7 @@ fn removing_an_account_asks_first_and_cancel_keeps_it(cx: &mut TestAppContext) {
     click_dialog_button(&mut *h.cx, settings, "cancel");
     redraw(&mut *h.cx, settings);
     assert_eq!(linked(&mut h), before, "Cancel keeps the account");
-    assert!(!has(&mut *h.cx, settings, "dialog"), "and the dialog closes");
+    assert!(!h.settings_has("dialog"), "and the dialog closes");
 }
 
 #[gpui_kit::gpui::test]
@@ -163,13 +158,13 @@ fn an_expired_sign_in_offers_signing_in_again_and_keeps_the_account(cx: &mut Tes
     without_oauth_client();
     let mut h = app(cx);
     let before = linked(&mut h);
-    let settings = open_settings(&mut h);
+    h.open_settings();
     // No stored token for the linked account: the app calls that an expired sign-in, and the
     // card's one action is a sign-in for that same account.
-    assert!(has(&mut *h.cx, settings, ("account-sign-in", 0usize)), "an expired sign-in offers one");
-    assert!(!has(&mut *h.cx, settings, ("account-retry", 0usize)), "a sign-in is not a failed round");
+    assert!(h.settings_has(("account-sign-in", 0usize)), "an expired sign-in offers one");
+    assert!(!h.settings_has(("account-retry", 0usize)), "a sign-in is not a failed round");
 
-    click(&mut *h.cx, settings, ("account-sign-in", 0usize));
+    h.settings_click(("account-sign-in", 0usize));
     assert_eq!(linked(&mut h), before, "signing in again neither adds nor drops an account");
     assert_eq!(h.read(|a| a.mailbox.account(GMAIL_ID).unwrap().nickname.clone()), None, "the nickname stays unset");
     assert!(
