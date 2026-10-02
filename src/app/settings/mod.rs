@@ -20,7 +20,7 @@ use gpui_kit::base::{StyledExt as _, TestSupportExt as _, h_flex, v_flex};
 use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, SettingsPrevPage, SettingsSearch};
 
 use crate::app::mail_app::panes::Orientation;
-use crate::app::ui::button;
+use crate::app::ui::icon_button;
 use crate::clock::{DAY, Timestamp};
 use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
@@ -995,19 +995,24 @@ impl Render for SettingsPanel {
         // follow `page_gen`.
         let settings = format!("settings-{}", self.page_gen);
         // The window draws the kit `TitleBar` itself (the window options come from
-        // `TitleBar::window_options`), so the bar carries the traffic lights, the drag
-        // region and the theme colors; the title sits left, the reset action right.
+        // `TitleBar::window_options`), laid out like the main window's bar: the kit's own
+        // left inset is dropped (`pl_0`) so the title keeps the traffic-light clearance, and
+        // the reset action is an icon button on the right.
         let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
-        // Wraps an interactive titlebar child so presses on it are not treated as a bar drag.
-        fn no_drag(child: impl IntoElement) -> Div {
-            div().flex_none().h_full().items_center().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(child)
-        }
-        let titlebar = TitleBar::new()
-            .child(div().flex_1().min_w_0().h_full().items_center().text_size(px(12.)).text_color(title_fg).child("Settings"))
-            // The reset action is a real control, so presses on it must not start a drag.
-            .child(no_drag(
-                button("settings-reset-all", "Reset all settings…", "Reset preferences to their defaults", "", cx)
-                    .ghost()
+        let left = div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .items_center()
+            .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
+            .pr_3()
+            .text_size(px(12.))
+            .text_color(title_fg)
+            .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child("Settings"));
+        // The reset action is a real control, so presses on it must not start a drag.
+        let reset_all = div().flex_none().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(
+            icon_button("settings-reset-all", IconName::Undo2, "Reset all settings…", "", cx)
                     .on_click(move |_, window, cx| {
                         let weak = weak.clone();
                         window.open_alert_dialog(cx, move |alert, _, _| {
@@ -1029,7 +1034,11 @@ impl Render for SettingsPanel {
                                 })
                         })
                     }),
-            ));
+            );
+        let titlebar = TitleBar::new()
+            .pl_0()
+            .child(left)
+            .child(div().flex().flex_none().items_center().h_full().pr_3().child(reset_all));
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
