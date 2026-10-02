@@ -19,10 +19,16 @@ fn set_state_and_sender_scope_are_undoable() {
 #[test]
 fn sender_set_moves_only_messages_in_the_source_state() {
     let mut mb = sample();
-    assert_eq!(mb.set_state_for_sender("a@x.test", State::Inbox, State::Deleted), 1);
+    assert_eq!(
+        mb.set_state_for_sender("a@x.test", State::Inbox, State::Deleted),
+        1
+    );
     assert_eq!(mb.state_of(3), Some(State::Archived));
     assert_eq!(mb.state_of(5), Some(State::Deleted));
-    assert_eq!(mb.set_state_for_sender("a@x.test", State::Archived, State::Inbox), 1);
+    assert_eq!(
+        mb.set_state_for_sender("a@x.test", State::Archived, State::Inbox),
+        1
+    );
     assert_eq!(mb.state_of(3), Some(State::Inbox));
     assert_eq!(mb.state_of(5), Some(State::Deleted));
 }
@@ -65,7 +71,12 @@ fn fixture_invariant_and_accounts() {
 #[test]
 fn fixture_covers_every_triage_state_with_real_folders_and_wake_times() {
     let mb = Mailbox::load_default();
-    for state in [State::Inbox, State::Snoozed, State::Archived, State::Deleted] {
+    for state in [
+        State::Inbox,
+        State::Snoozed,
+        State::Archived,
+        State::Deleted,
+    ] {
         assert!(
             mb.messages().iter().any(|m| m.state == state),
             "no fixture message is {state:?}"
@@ -87,9 +98,18 @@ fn fixture_covers_every_triage_state_with_real_folders_and_wake_times() {
         );
     }
     for m in mb.messages().iter().filter(|m| m.state == State::Snoozed) {
-        assert!(mb.snoozed_until(m.id).is_some(), "snoozed message {} has no wake time", m.id);
+        assert!(
+            mb.snoozed_until(m.id).is_some(),
+            "snoozed message {} has no wake time",
+            m.id
+        );
     }
-    assert!(mb.messages().iter().any(|m| m.outgoing && !m.bcc.is_empty()), "no sent mail with a Bcc");
+    assert!(
+        mb.messages()
+            .iter()
+            .any(|m| m.outgoing && !m.bcc.is_empty()),
+        "no sent mail with a Bcc"
+    );
 }
 #[test]
 fn empty_mailbox_views_are_empty() {

@@ -1,8 +1,8 @@
-use gpui_kit::component::ActiveTheme as _;
 use super::*;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::Button;
 use gpui_kit::base::component_traits::Disableable as _;
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::empty::{Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle};
 
 impl MailApp {
@@ -14,7 +14,9 @@ impl MailApp {
             .header(
                 EmptyHeader::new()
                     .title(EmptyTitle::new().child("No accounts yet"))
-                    .description(EmptyDescription::new().child("Add a Gmail account to see your mail here.")),
+                    .description(
+                        EmptyDescription::new().child("Add a Gmail account to see your mail here."),
+                    ),
             )
             .content(
                 EmptyContent::new()
@@ -25,7 +27,12 @@ impl MailApp {
                             .on_click(run(AddGmailAccount)),
                     )
                     .when(!configured, |c| {
-                        c.child(div().text_xs().text_color(muted).child(crate::app::settings::GMAIL_ENV_HINT))
+                        c.child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(crate::app::settings::GMAIL_ENV_HINT),
+                        )
                     }),
             )
             .into_any_element()
@@ -33,7 +40,11 @@ impl MailApp {
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let count = self.visible_ids().len();
-        let row_count = if self.grouped() { self.rows().len() } else { count };
+        let row_count = if self.grouped() {
+            self.rows().len()
+        } else {
+            count
+        };
         self.sync_list(row_count, cx);
         // Near the end of the list, ask the server for the next page of older mail.
         let cursor = self.cursor_ix();
@@ -62,8 +73,14 @@ impl MailApp {
                         .text_color(t.primary)
                         .child(format!("{selected} selected"))
                         .child(
-                            button("btn-clear-selection", "Clear", "Clear selection", "escape", cx)
-                                .on_click(run(ClearSelection)),
+                            button(
+                                "btn-clear-selection",
+                                "Clear",
+                                "Clear selection",
+                                "escape",
+                                cx,
+                            )
+                            .on_click(run(ClearSelection)),
                         )
                         .when(selected >= 2, |d| {
                             d.child(div().flex_none().child(self.menu_trigger(
@@ -135,7 +152,8 @@ impl MailApp {
             // Remember where the viewport ends, so a scroll near the last row can
             // ask the server for the next page of older mail.
             let end = self.list_visible_end.clone();
-            self.list_state.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
+            self.list_state
+                .set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
         }
         let shape = ListShape {
             count,
@@ -167,7 +185,9 @@ impl MailApp {
         if self.grouped() {
             match self.rows().get(ix) {
                 Some(row @ Row::Header { .. }) => {
-                    return self.render_group_header(row, ix, &newest, cx).into_any_element();
+                    return self
+                        .render_group_header(row, ix, &newest, cx)
+                        .into_any_element();
                 }
                 Some(row) => {
                     if let Some(msg) = self.mailbox.get(row.primary()) {
@@ -179,7 +199,11 @@ impl MailApp {
                 }
                 None => {}
             }
-        } else if let Some(msg) = self.visible_ids().get(ix).and_then(|id| self.mailbox.get(*id)) {
+        } else if let Some(msg) = self
+            .visible_ids()
+            .get(ix)
+            .and_then(|id| self.mailbox.get(*id))
+        {
             return self.render_row(msg, ix, &newest, cx).into_any_element();
         }
         // The row list shrank under this index between the layout pass and rendering.

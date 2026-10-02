@@ -3,7 +3,7 @@
 //! search and triage-session modes.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -14,30 +14,40 @@ use gpui_kit::*;
 
 use crate::app::actions::*;
 use crate::app::chrome::{HelpEvent, HelpPanel, HintBar};
-use crate::hints::{HintContext, HintMode};
-use crate::app::icons::{self, Glyph, GlyphInputs};
-use crate::app::row::{self, RowVisual};
-use crate::app::compose::{ComposeEvent, ComposeReply};
-use crate::draft::DraftKind;
+use crate::app::composer_state::ComposerState;
+use crate::app::composer_worker::Client as ComposerWorker;
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
+use crate::app::icons::{self, Glyph, GlyphInputs};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
+use crate::app::row::{self, RowVisual};
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
+use crate::app::ui::{button, icon_button, run};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
+use crate::hints::{HintContext, HintMode};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{JudgePolicy, Kind, QuestionKey, Routed, StubJudge, classify};
-use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
+use crate::model::{
+    AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState,
+};
+use crate::outgoing::{DraftId, DraftKind, Recovery};
 use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
 use crate::tabs::Tabs;
-use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
 
+/// How long between composer beats. Short enough that a save or sync the worker finished is
+/// on screen within a frame or two, and it is the clock the hold countdowns and the autosave
+/// debounce are read on.
+const BEAT_INTERVAL: Duration = Duration::from_millis(50);
+
 mod accessors;
+mod composer;
+use composer::{PendingOpen, PendingUi};
 mod actions;
 mod filters;
 mod grouping;
@@ -48,14 +58,14 @@ mod modals;
 mod mouse;
 pub mod panes;
 mod reader;
-mod render;
 mod reader_find;
 mod reader_state;
 mod reader_tabs;
-mod sidebar;
-mod titlebar;
-mod sync;
+mod render;
 mod rows;
+mod sidebar;
+mod sync;
+mod titlebar;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
@@ -91,7 +101,44 @@ pub struct MailApp {
     light_theme: String,
     dark_theme: String,
     pub palette: Option<Entity<CommandPalette>>,
-    pub compose: Option<Entity<ComposeReply>>,
+    /// Every draft the composer currently has open, by id. The strip and the reader show
+    /// the same entities, so expanding a draft moves it rather than copying it.
+    pub composers: HashMap<DraftId, Entity<crate::app::compose::Composer>>,
+    /// The draft shown inline under the conversation it answers, if any.
+    pub inline_composer: Option<DraftId>,
+    /// Durable draft state: what each open draft says and how it is saved.
+    pub composer: ComposerState,
+    /// The remote id of the last confirmed send, so the next sync adopts it instead of
+    /// adding the same message twice.
+    pub last_sent_remote: Option<String>,
+    /// Drafts waiting to be shown once the worker has given them their identity.
+    pub(crate) pending_composers: VecDeque<PendingOpen>,
+    /// What the last startup recovery found: drafts restored and drafts still in flight.
+    pub recovered: Recovery,
+    /// The composer worker. It owns the draft store, the attachment bytes and the
+    /// providers; the UI thread only holds the client end.
+    pub composer_worker: Option<ComposerWorker>,
+
+    /// Follow-ups a worker answer or a timer decided that can only be *carried out*
+    /// where there is a window: building a composer, focusing it, asking to discard, and
+    /// the hold toast. Drained by the heartbeat; rendering never starts work.
+    pending_ui: VecDeque<PendingUi>,
+    _composer_subs: Vec<Subscription>,
+    /// Drafts waiting for the RFC threading of the message they answer, keyed by the
+    /// account *and* that message's server-side id: remote ids are only unique within their
+    /// account, and more than one draft can be waiting on the same original.
+    threading_requests: HashMap<(String, String), Vec<DraftId>>,
+    /// Send intents frozen at their captured snapshot, until all preceding writes and
+    /// attachment operations complete and the hold is durably confirmed.
+    hold_after_save: HashSet<DraftId>,
+    /// File mutations are serialized separately from immediate local body saves.
+    pending_attachment_ops: HashMap<DraftId, VecDeque<composer::AttachmentOp>>,
+    pending_resolutions: HashMap<DraftId, crate::app::composer_worker::ResolveMode>,
+    /// Repaint active hold notifications only when their countdown changes.
+    hold_painted_at: Option<Timestamp>,
+    /// The Drafts list, when it is open: the way back to a draft that is not in a tab.
+    drafts_picker: Option<Entity<crate::app::compose::drafts::DraftsPicker>>,
+    _drafts_sub: Option<Subscription>,
     help: Option<Entity<HelpPanel>>,
     /// Toast text, if visible.
     pub toast: Option<SharedString>,
@@ -221,7 +268,11 @@ impl MailApp {
         .detach();
         let panes = Panes::new(cx);
         // Rows size themselves from the list pane, so a drag repaints the app as it moves.
-        let pane_subs = panes.states().into_iter().map(|state| cx.observe(state, |_, _, cx| cx.notify())).collect();
+        let pane_subs = panes
+            .states()
+            .into_iter()
+            .map(|state| cx.observe(state, |_, _, cx| cx.notify()))
+            .collect();
         let mut app = Self {
             mailbox,
             triage: Triage::new(Query::parse("in:inbox")),
@@ -232,7 +283,22 @@ impl MailApp {
             light_theme: crate::app_settings::DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             palette: None,
-            compose: None,
+            composers: HashMap::new(),
+            inline_composer: None,
+            composer: ComposerState::default(),
+            last_sent_remote: None,
+            pending_composers: VecDeque::new(),
+            recovered: Recovery::default(),
+            composer_worker: None,
+            pending_ui: VecDeque::new(),
+            _composer_subs: Vec::new(),
+            threading_requests: HashMap::new(),
+            hold_after_save: HashSet::new(),
+            pending_attachment_ops: HashMap::new(),
+            pending_resolutions: HashMap::new(),
+            hold_painted_at: None,
+            drafts_picker: None,
+            _drafts_sub: None,
             help: None,
             toast: None,
             summaries_enabled: false,
@@ -308,9 +374,13 @@ impl MailApp {
         self.tab_avatars = crate::app_settings::TAB_AVATARS.get(store.as_ref(), &scope);
         self.block_remote_images = crate::app_settings::BLOCK_REMOTE_IMAGES.get(store.as_ref(), &scope);
         self.group_threads = crate::app_settings::GROUP_THREADS.get(store.as_ref(), &scope);
-        self.preview_lines = crate::app_settings::PREVIEW_LINES.get(store.as_ref(), &scope).min(5);
+        self.preview_lines = crate::app_settings::PREVIEW_LINES
+            .get(store.as_ref(), &scope)
+            .min(5);
         self.summaries_enabled = crate::app_settings::SUMMARIES.get(store.as_ref(), &scope);
-        let days = crate::app_settings::FOLLOW_UP_DAYS.get(store.as_ref(), &scope).clamp(1, 14);
+        let days = crate::app_settings::FOLLOW_UP_DAYS
+            .get(store.as_ref(), &scope)
+            .clamp(1, 14);
         self.mailbox.set_follow_up_timeout(i64::from(days) * DAY);
         self.theme_mode = crate::app_settings::THEME_MODE.get(store.as_ref(), &scope);
         self.light_theme = crate::app_settings::LIGHT_THEME.get(store.as_ref(), &scope);
@@ -325,14 +395,27 @@ impl MailApp {
             self.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
         }
         let layout = crate::app_settings::PANE_LAYOUT.get(store.as_ref(), &scope);
-        self.panes.set_orientation(if layout == "stacked" { PaneLayout::Stacked } else { PaneLayout::SideBySide });
-        self.policy.set_mode(QuestionKey::Spam, crate::app_settings::MODE_SPAM.get(store.as_ref(), &scope));
+        self.panes.set_orientation(if layout == "stacked" {
+            PaneLayout::Stacked
+        } else {
+            PaneLayout::SideBySide
+        });
+        self.policy.set_mode(
+            QuestionKey::Spam,
+            crate::app_settings::MODE_SPAM.get(store.as_ref(), &scope),
+        );
         self.policy.set_mode(
             QuestionKey::NeedsReply,
             crate::app_settings::MODE_NEEDS_REPLY.get(store.as_ref(), &scope),
         );
-        self.policy.set_mode(QuestionKey::Urgency, crate::app_settings::MODE_URGENCY.get(store.as_ref(), &scope));
-        self.policy.set_mode(QuestionKey::Kind, crate::app_settings::MODE_KIND.get(store.as_ref(), &scope));
+        self.policy.set_mode(
+            QuestionKey::Urgency,
+            crate::app_settings::MODE_URGENCY.get(store.as_ref(), &scope),
+        );
+        self.policy.set_mode(
+            QuestionKey::Kind,
+            crate::app_settings::MODE_KIND.get(store.as_ref(), &scope),
+        );
         self.policy.set_mode(
             QuestionKey::ExpectsReply,
             crate::app_settings::MODE_EXPECTS_REPLY.get(store.as_ref(), &scope),
@@ -352,20 +435,59 @@ impl MailApp {
         cx.notify();
     }
     fn refresh_theme(&self, cx: &mut App) {
-        let dark = matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
-        let name = crate::theme::active_theme_name(self.theme_mode, &self.light_theme, &self.dark_theme, dark);
+        let dark = matches!(
+            cx.window_appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+        let name = crate::theme::active_theme_name(
+            self.theme_mode,
+            &self.light_theme,
+            &self.dark_theme,
+            dark,
+        );
         crate::theme::apply(cx, name);
     }
 
-    /// Advance time-based mailbox behavior, including snooze wake-up and outbox flush.
+    /// Advance time-based mailbox behavior: snoozed mail comes back.
+    ///
+    /// The composer's own beat ([`MailApp::composer_beat`]) runs on the retained timer
+    /// instead, because it needs a window and a render pass may not have side effects.
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         let now = self.now();
         self.mailbox.tick(now);
         cx.notify();
     }
 
+    /// Start the retained composer timer. It holds the real window, so each beat can drain
+    /// the worker, start due saves and flush expired holds, and carry out the window work
+    /// those decisions queued — all outside `render`, which only reads state.
+    ///
+    /// The worker signals its own threads, never this one: a GPUI task is woken on the
+    /// executor it was spawned on, so this beat polls rather than subscribing to a channel
+    /// the worker would have to wake from outside. The interval is short enough that a
+    /// finished save or sync is on screen within a frame or two, and the timer also drives
+    /// the hold countdowns and the autosave debounce.
+    pub(crate) fn spawn_composer_beat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let app = cx.weak_entity();
+        let handle = window.window_handle();
+        window
+            .spawn(cx, async move |cx| {
+                loop {
+                    cx.background_executor().timer(BEAT_INTERVAL).await;
+                    // The update runs on this window, so the beat carries out its own UI work
+                    // rather than queueing it for another pass.
+                    let gone = handle.update(cx, |_, window, cx| {
+                        app.update(cx, |this, cx| this.composer_beat(window, cx))
+                    });
+                    if !matches!(gone, Ok(Ok(_))) {
+                        break;
+                    }
+                }
+            })
+            .detach();
+    }
+
     pub fn focus_handle(&self) -> &FocusHandle {
         &self.focus_handle
     }
 }
-

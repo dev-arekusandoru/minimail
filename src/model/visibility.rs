@@ -125,7 +125,11 @@ impl Mailbox {
     }
     /// Blocked senders with the time each was blocked, sorted by address.
     pub fn blocked(&self) -> Vec<(String, Timestamp)> {
-        let mut v: Vec<_> = self.blocked.iter().map(|(e, at)| (e.clone(), *at)).collect();
+        let mut v: Vec<_> = self
+            .blocked
+            .iter()
+            .map(|(e, at)| (e.clone(), *at))
+            .collect();
         v.sort();
         v
     }

@@ -26,6 +26,9 @@ impl MailApp {
 
     /// Help body viewport bounds and how far it can scroll (for headless tests).
     pub fn help_metrics(&self) -> (Bounds<Pixels>, f32) {
-        (self.help_scroll.bounds(), f32::from(self.help_scroll.max_offset().y))
+        (
+            self.help_scroll.bounds(),
+            f32::from(self.help_scroll.max_offset().y),
+        )
     }
 }

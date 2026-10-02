@@ -3,10 +3,10 @@ use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
+    Sizable as _,
     button::{Button, ButtonVariants as _},
     kbd::Kbd,
     tooltip::Tooltip,
-    Sizable as _,
 };
 use gpui_kit::*;
 
@@ -15,9 +15,7 @@ pub type Observable = gpui_kit::base::ObservedElement<Stateful<Div>>;
 
 /// Click handler that dispatches `action` through the focused element's key path, exactly like
 /// pressing its shortcut.
-pub fn run<A: Action + Clone>(
-    action: A,
-) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+pub fn run<A: Action + Clone>(action: A) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     move |_, window, cx| window.dispatch_action(Box::new(action.clone()), cx)
 }
 
@@ -25,7 +23,10 @@ pub fn run<A: Action + Clone>(
 /// has (GPUI panics when it lays text out in a missing family).
 pub fn mono_font(cx: &App) -> SharedString {
     cx.try_global::<gpui_kit::component::theme::Theme>()
-        .map_or_else(|| SharedString::from(".SystemUIFont"), |k| k.mono_font_family.clone())
+        .map_or_else(
+            || SharedString::from(".SystemUIFont"),
+            |k| k.mono_font_family.clone(),
+        )
 }
 
 /// Font size of keycap pills: one step down from the kit default, so a pill fits a 24–28px row.
@@ -37,7 +38,11 @@ const KEYCAP_MIN_W: f32 = 14.;
 /// (`"e"`, `"shift-e"`, `"cmd-,"`). An unparseable key falls back to `space`, as the kit does.
 pub fn shortcut(key: &str) -> Kbd {
     let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
-    Kbd::new(stroke).text_size(px(KEYCAP_TEXT)).py_0().px(px(4.)).min_w(px(KEYCAP_MIN_W))
+    Kbd::new(stroke)
+        .text_size(px(KEYCAP_TEXT))
+        .py_0()
+        .px(px(4.))
+        .min_w(px(KEYCAP_MIN_W))
 }
 
 /// Keycaps for a possibly multi-stroke binding (`"g i"`): one pill per stroke, joined by
@@ -47,7 +52,12 @@ pub fn shortcut_chips(key: &str, cx: &App) -> Div {
     let mut el = div().flex().items_center().gap_1();
     for (i, part) in key.split_whitespace().enumerate() {
         if i > 0 {
-            el = el.child(div().text_size(px(KEYCAP_TEXT)).text_color(then).child("then"));
+            el = el.child(
+                div()
+                    .text_size(px(KEYCAP_TEXT))
+                    .text_color(then)
+                    .child("then"),
+            );
         }
         el = el.child(shortcut(part));
     }

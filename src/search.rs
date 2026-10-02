@@ -95,7 +95,9 @@ impl Field {
     }
 
     pub fn from_key(key: &str) -> Option<Field> {
-        Field::ALL.into_iter().find(|f| f.key().eq_ignore_ascii_case(key))
+        Field::ALL
+            .into_iter()
+            .find(|f| f.key().eq_ignore_ascii_case(key))
     }
 
     /// Canonical lowercase form of `raw` for this field, or `None` if it is not a valid value.
@@ -122,10 +124,17 @@ impl Field {
     }
 }
 
-pub(crate) const IS_VALUES: [&str; 7] =
-    ["inbox", "snoozed", "archived", "filed", "deleted", "sent", "new"];
-pub(crate) const TAG_VALUES: [&str; 6] =
-    ["needs-reply", "awaiting", "follow-up", "reminder", "spam", "urgent"];
+pub(crate) const IS_VALUES: [&str; 7] = [
+    "inbox", "snoozed", "archived", "filed", "deleted", "sent", "new",
+];
+pub(crate) const TAG_VALUES: [&str; 6] = [
+    "needs-reply",
+    "awaiting",
+    "follow-up",
+    "reminder",
+    "spam",
+    "urgent",
+];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Combinator {
@@ -252,14 +261,21 @@ impl Query {
     /// Whether `input` should be treated as a search rather than a palette command.
     pub fn is_search(input: &str) -> bool {
         let input = input.trim_start();
-        input.starts_with('/') || raw_tokens(input).into_iter().any(|t| split_key(t).is_some())
+        input.starts_with('/')
+            || raw_tokens(input)
+                .into_iter()
+                .any(|t| split_key(t).is_some())
     }
 
     fn insert(&mut self, field: Field, value: String, or: bool) -> bool {
         let group = match self.groups.iter().position(|g| g.field == field) {
             Some(i) => &mut self.groups[i],
             None => {
-                self.groups.push(Group { field, values: Vec::new(), combinator: Combinator::And });
+                self.groups.push(Group {
+                    field,
+                    values: Vec::new(),
+                    combinator: Combinator::And,
+                });
                 self.groups.last_mut().expect("just pushed")
             }
         };
@@ -295,16 +311,23 @@ impl Query {
 
     /// The group's combinator; `None` if the field has no values.
     pub fn combinator(&self, field: Field) -> Option<Combinator> {
-        self.groups.iter().find(|g| g.field == field).map(|g| g.combinator)
+        self.groups
+            .iter()
+            .find(|g| g.field == field)
+            .map(|g| g.combinator)
     }
 
     pub fn has(&self, field: Field, value: &str) -> bool {
-        field.normalize(value).is_some_and(|v| self.values(field).contains(&v))
+        field
+            .normalize(value)
+            .is_some_and(|v| self.values(field).contains(&v))
     }
 
     /// Adds `value` to `field`'s group. `false` if invalid or already present.
     pub fn add(&mut self, field: Field, value: &str) -> bool {
-        field.normalize(value).is_some_and(|v| self.insert(field, v, false))
+        field
+            .normalize(value)
+            .is_some_and(|v| self.insert(field, v, false))
     }
 
     /// Removes `value`, dropping the group when it empties. `false` if it was absent.

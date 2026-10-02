@@ -79,60 +79,6 @@ impl Mailbox {
             }
             report.followed_up.push(id);
         }
-        let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.outbox)
-            .into_iter()
-            .partition(|o| o.due <= now);
-        self.outbox = keep;
-        report.flushed = due.len();
-        for outgoing in due {
-            let Some(original) = self.get(outgoing.reply.in_reply_to).cloned() else {
-                continue;
-            };
-            let id = self
-                .messages
-                .iter()
-                .map(|m| m.id)
-                .max()
-                .unwrap_or(0)
-                .saturating_add(1);
-            let sent = Message {
-                id,
-                thread_id: original.thread_id,
-                from_name: "You".into(),
-                from_email: self
-                    .account(&original.account)
-                    .map_or_else(|| "you@example.com".into(), |a| a.email.clone()),
-                to: original.from_email.clone(),
-                subject: original.subject.clone(),
-                body: outgoing.reply.body.clone(),
-                received: original.received.clone(),
-                state: self.post_send.get(&outgoing.seq).copied().unwrap_or(original.state),
-                account: original.account.clone(),
-                outgoing: true,
-                snooze: None,
-                cc: String::new(),
-                bcc: String::new(),
-                html: None,
-                attachments: Vec::new(),
-                read: true,
-                partial: false,
-            };
-            self.index.insert(id, self.messages.len());
-            self.newest_first.insert(0, id);
-            self.meta.insert(id, Meta::default());
-            self.messages.push(sent);
-            let seq = outgoing.seq;
-            self.sent_ids.insert(seq, id);
-            self.sent.push(outgoing.reply);
-            if let Some(step) = self.undo.iter_mut().find(|step| {
-                step.changes
-                    .iter()
-                    .any(|change| matches!(change, Change::Queued(queued) if *queued == seq))
-            }) {
-                step.changes.push(Change::Materialised(id));
-                step.changes.push(Change::SentPush);
-            }
-        }
         report
     }
     /// A later message in the same thread, received after `since`.

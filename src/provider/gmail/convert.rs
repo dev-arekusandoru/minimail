@@ -59,7 +59,9 @@ pub fn is_rate_limited(status: u16, error_body: &Value) -> bool {
     let error = &error_body["error"];
     status == 403
         && (error["status"] == "RESOURCE_EXHAUSTED"
-            || error["message"].as_str().is_some_and(|m| m.starts_with("Quota exceeded"))
+            || error["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("Quota exceeded"))
             || error["errors"].as_array().into_iter().flatten().any(|e| {
                 matches!(
                     e["reason"].as_str(),
@@ -171,13 +173,20 @@ fn walk(part: &Value, body: &mut String, html: &mut Option<String>, files: &mut 
 fn labels_of(json: &Value) -> Vec<String> {
     json.get("labelIds")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 /// Spam, drafts and chats never enter the mailbox.
 fn is_filtered(labels: &[String]) -> bool {
-    labels.iter().any(|l| l == LABEL_SPAM || l == LABEL_DRAFT || l == LABEL_CHAT)
+    labels
+        .iter()
+        .any(|l| l == LABEL_SPAM || l == LABEL_DRAFT || l == LABEL_CHAT)
 }
 
 /// State and unread flag from a message's labels.
@@ -267,7 +276,11 @@ pub fn message(json: &Value, user_folders: &HashSet<String>) -> Option<RemoteMes
         cc: header(headers, "Cc").unwrap_or_default().to_owned(),
         bcc: header(headers, "Bcc").unwrap_or_default().to_owned(),
         subject: header(headers, "Subject").unwrap_or_default().to_owned(),
-        snippet: decode_entities(json.get("snippet").and_then(Value::as_str).unwrap_or_default()),
+        snippet: decode_entities(
+            json.get("snippet")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
         received,
         state,
         outgoing: labels.iter().any(|l| l == LABEL_SENT),
@@ -313,7 +326,11 @@ pub fn list_query(scope: &Scope, window: Window) -> ListQuery {
         Window::Since(t) => q.push_str(&format!(" after:{}", t - 1)),
         Window::Before(t) => q.push_str(&format!(" before:{t}")),
     }
-    ListQuery { q, label, include_trash }
+    ListQuery {
+        q,
+        label,
+        include_trash,
+    }
 }
 
 /// Merges one `history.list` page into `out`. Label changes carry the
@@ -322,7 +339,12 @@ pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Cha
     if let Some(cursor) = json.get("historyId").and_then(Value::as_str) {
         out.cursor = cursor.to_owned();
     }
-    for record in json.get("history").and_then(Value::as_array).into_iter().flatten() {
+    for record in json
+        .get("history")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let entries = |key: &str| {
             record
                 .get(key)
@@ -333,7 +355,9 @@ pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Cha
                 .collect::<Vec<_>>()
         };
         for m in entries("messagesAdded") {
-            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+            let Some(id) = m.get("id").and_then(Value::as_str) else {
+                continue;
+            };
             if is_filtered(&labels_of(m)) || out.removed.iter().any(|r| r == id) {
                 continue;
             }
@@ -341,8 +365,13 @@ pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Cha
                 out.added.push(id.to_owned());
             }
         }
-        for m in entries("labelsAdded").into_iter().chain(entries("labelsRemoved")) {
-            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+        for m in entries("labelsAdded")
+            .into_iter()
+            .chain(entries("labelsRemoved"))
+        {
+            let Some(id) = m.get("id").and_then(Value::as_str) else {
+                continue;
+            };
             if out.removed.iter().any(|r| r == id) {
                 continue;
             }
@@ -353,11 +382,14 @@ pub fn merge_history(json: &Value, user_folders: &HashSet<String>, out: &mut Cha
                 out.added.retain(|a| a != id);
                 out.removed.push(id.to_owned());
             } else {
-                out.updated.push((id.to_owned(), flags(&labels, user_folders)));
+                out.updated
+                    .push((id.to_owned(), flags(&labels, user_folders)));
             }
         }
         for m in entries("messagesDeleted") {
-            let Some(id) = m.get("id").and_then(Value::as_str) else { continue };
+            let Some(id) = m.get("id").and_then(Value::as_str) else {
+                continue;
+            };
             out.added.retain(|a| a != id);
             out.updated.retain(|(u, _)| u != id);
             if !out.removed.iter().any(|r| r == id) {
@@ -449,12 +481,21 @@ pub fn parse_batch(content_type: &str, body: &str) -> Vec<BatchPart> {
             if let Some((key, value)) = line.split_once(':')
                 && key.trim().eq_ignore_ascii_case("retry-after")
             {
-                retry_after = value.trim().parse::<u64>().ok().map(std::time::Duration::from_secs);
+                retry_after = value
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .map(std::time::Duration::from_secs);
             }
         }
         let text = lines.collect::<Vec<_>>().join("\n");
         let json = serde_json::from_str(&text).unwrap_or(Value::Null);
-        parts.push(BatchPart { id, status, json, retry_after });
+        parts.push(BatchPart {
+            id,
+            status,
+            json,
+            retry_after,
+        });
     }
     parts
 }

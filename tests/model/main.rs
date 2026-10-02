@@ -2,7 +2,7 @@ mod helpers;
 
 mod basics;
 mod cursor;
-mod outbox;
+mod replies;
 mod suggestions;
 mod timing;
 mod visibility;

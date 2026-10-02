@@ -5,8 +5,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -30,8 +30,14 @@ impl ClientConfig {
     /// Reads the OAuth desktop-client credentials from the environment.
     /// `None` when either is missing or blank.
     pub fn from_env() -> Option<Self> {
-        let client_id = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID").ok()?.trim().to_owned();
-        let client_secret = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET").ok()?.trim().to_owned();
+        let client_id = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID")
+            .ok()?
+            .trim()
+            .to_owned();
+        let client_secret = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET")
+            .ok()?
+            .trim()
+            .to_owned();
         if client_id.is_empty() || client_secret.is_empty() {
             return None;
         }
@@ -187,7 +193,9 @@ fn profile_email(http: &ureq::Agent, access: &str) -> Result<String, ProviderErr
         .read_to_string()
         .map_err(|e| ProviderError::Network(e.to_string()))?;
     if !(200..300).contains(&status) {
-        return Err(ProviderError::Auth(format!("profile request failed ({status})")));
+        return Err(ProviderError::Auth(format!(
+            "profile request failed ({status})"
+        )));
     }
     serde_json::from_str::<Value>(&text)
         .ok()
@@ -251,7 +259,9 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Provider
             Err(e) => format!("Sign-in failed: {e}"),
         };
         let result = outcome.and_then(|()| code.ok_or(ProviderError::Auth("no code".into())));
-        let html = format!("<!doctype html><meta charset=\"utf-8\"><title>mail-classifier</title><p>{page}");
+        let html = format!(
+            "<!doctype html><meta charset=\"utf-8\"><title>mail-classifier</title><p>{page}"
+        );
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}",
             html.len()
@@ -276,7 +286,8 @@ mod tests {
         let client = std::thread::spawn(move || {
             let mut reply = String::new();
             for path in &paths {
-                let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+                let mut stream =
+                    std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
                 stream
                     .write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
                     .expect("write");
@@ -307,7 +318,10 @@ mod tests {
         let (result, reply) = callback(&["/?code=abc123&state=st"], "st");
         assert_eq!(result.ok().as_deref(), Some("abc123"));
         assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
-        assert!(reply.contains("Signed in — you can close this tab."), "{reply}");
+        assert!(
+            reply.contains("Signed in — you can close this tab."),
+            "{reply}"
+        );
     }
 
     #[test]

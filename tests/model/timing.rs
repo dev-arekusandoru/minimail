@@ -26,7 +26,8 @@ fn snoozed_state_without_a_wake_seed_loads_as_inbox() {
 #[test]
 fn follow_up_timeout_returns_original_to_inbox_and_clears_on_newer_incoming() {
     let mut mb = threaded(&[(1, 7, "a@x.test", "2026-09-01T00:00:00Z", State::Archived)]);
-    mb.send_reply_at(1, "question".into(), true, T0);
+    let message = mb.get(1).unwrap().clone();
+    mb.record_sent(message, Some(1), true, T0);
     assert!(mb.tick(T0 + 3 * DAY - 1).followed_up.is_empty());
     assert_eq!(mb.tick(T0 + 3 * DAY).followed_up, vec![1]);
     assert_eq!(mb.state_of(1), Some(State::Inbox));
@@ -35,7 +36,8 @@ fn follow_up_timeout_returns_original_to_inbox_and_clears_on_newer_incoming() {
         (1, 7, "a@x.test", "2026-09-01T00:00:00Z", State::Archived),
         (2, 7, "a@x.test", "2026-10-02T00:00:00Z", State::Inbox),
     ]);
-    answered.send_reply_at(1, "question".into(), true, T0);
+    let message = answered.get(1).unwrap().clone();
+    answered.record_sent(message, Some(1), true, T0);
     answered.tick(T0 + 4 * DAY);
     assert!(!answered.tags(1).contains(&Tag::AwaitingReply));
     assert!(!answered.tags(1).contains(&Tag::FollowUp));
@@ -44,7 +46,8 @@ fn follow_up_timeout_returns_original_to_inbox_and_clears_on_newer_incoming() {
 fn follow_up_timeout_can_be_configured() {
     let mut mb = threaded(&[(1, 1, "a@x.test", "2026-09-01T00:00:00Z", State::Inbox)]);
     mb.set_follow_up_timeout(HOUR);
-    mb.send_reply_at(1, "x".into(), true, T0);
+    let message = mb.get(1).unwrap().clone();
+    mb.record_sent(message, Some(1), true, T0);
     assert!(mb.tick(T0 + HOUR - 1).followed_up.is_empty());
     assert_eq!(mb.tick(T0 + HOUR).followed_up, vec![1]);
 }

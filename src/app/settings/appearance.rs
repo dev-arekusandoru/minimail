@@ -1,11 +1,16 @@
 use super::*;
 
 /// Segmented theme mode control: one entry per [`theme::ThemeMode`] variant.
-const THEME_MODES: [(&str, &str); 3] =
-    [("mode-light", "Light"), ("mode-dark", "Dark"), ("mode-system", "System")];
+const THEME_MODES: [(&str, &str); 3] = [
+    ("mode-light", "Light"),
+    ("mode-dark", "Dark"),
+    ("mode-system", "System"),
+];
 /// Segmented pane layout control. The button ids are what the UI tests click.
-const PANE_LAYOUTS: [(&str, &str); 2] =
-    [("layout-side-by-side", "Side by side"), ("layout-stacked", "Stacked")];
+const PANE_LAYOUTS: [(&str, &str); 2] = [
+    ("layout-side-by-side", "Side by side"),
+    ("layout-stacked", "Stacked"),
+];
 
 /// Index of the active theme mode in [`THEME_MODES`].
 fn theme_mode_index(mode: theme::ThemeMode) -> usize {
@@ -121,7 +126,11 @@ impl SettingsPanel {
                     true,
                     SettingsPanel::set_tab_avatars,
                 ),
-                switch(weak, |this| this.tab_avatars, SettingsPanel::set_tab_avatars),
+                switch(
+                    weak,
+                    |this| this.tab_avatars,
+                    SettingsPanel::set_tab_avatars,
+                ),
             ));
         SettingPage::new("Appearance").resettable(true).group(group)
     }
@@ -134,7 +143,11 @@ fn theme_picker(
     get: fn(&SettingsPanel) -> String,
     set: fn(&mut SettingsPanel, String, &mut Context<SettingsPanel>),
 ) -> Control {
-    select(theme_entries(&names), theme_reader(weak, get), theme_writer(weak, set))
+    select(
+        theme_entries(&names),
+        theme_reader(weak, get),
+        theme_writer(weak, set),
+    )
 }
 
 /// The undo of a theme row: a reset puts back the app's default theme for it.
@@ -149,14 +162,14 @@ fn theme_undo(
 
 /// The name/value pairs a theme dropdown offers.
 fn theme_entries(names: &[SharedString]) -> Vec<(SharedString, SharedString)> {
-    names.iter().map(|name| (name.clone(), name.clone())).collect()
+    names
+        .iter()
+        .map(|name| (name.clone(), name.clone()))
+        .collect()
 }
 
 /// Reads the theme a dropdown row shows.
-fn theme_reader(
-    weak: &Weak,
-    get: fn(&SettingsPanel) -> String,
-) -> Read {
+fn theme_reader(weak: &Weak, get: fn(&SettingsPanel) -> String) -> Read {
     let weak = weak.clone();
     Rc::new(move |cx| match weak.read_with(cx, |this, _| get(this)) {
         Ok(name) => name.into(),
@@ -171,6 +184,7 @@ fn theme_writer(
 ) -> Write {
     let weak = weak.clone();
     Rc::new(move |name: SharedString, cx: &mut App| {
-        weak.update(cx, |this, cx| set(this, name.to_string(), cx)).ok();
+        weak.update(cx, |this, cx| set(this, name.to_string(), cx))
+            .ok();
     })
 }

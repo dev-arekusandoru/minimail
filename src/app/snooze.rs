@@ -5,8 +5,8 @@
 //! the surface, backdrop and `escape`.
 use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::ui::{button, shortcut};
 use crate::app::chrome::format_time;
+use crate::app::ui::{button, shortcut};
 use crate::clock::Timestamp;
 use crate::tz::Now;
 use gpui_kit::{
@@ -144,14 +144,22 @@ impl Render for SnoozePicker {
             .on_action(cx.listener(|this, _: &SnoozePreset1, _, cx| this.pick(0, cx)))
             .on_action(cx.listener(|this, _: &SnoozePreset2, _, cx| this.pick(1, cx)))
             .on_action(cx.listener(|this, _: &SnoozePreset3, _, cx| this.pick(2, cx)))
-            .on_action(cx.listener(|this, _: &SnoozeCustom, window, cx| this.open_custom(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &SnoozeCustom, window, cx| this.open_custom(window, cx)),
+            )
             .flex()
             .flex_col()
             .w_full()
             .p_2()
             .gap_1()
             .id("snooze-panel")
-            .child(div().px_2().text_xs().text_color(t.muted_foreground).child("Snooze until…"))
+            .child(
+                div()
+                    .px_2()
+                    .text_xs()
+                    .text_color(t.muted_foreground)
+                    .child("Snooze until…"),
+            )
             .children(self.presets.iter().enumerate().map(|(i, (label, ts))| {
                 Self::row(
                     t,
@@ -174,8 +182,14 @@ impl Render for SnoozePicker {
                 el.child(Input::new(&self.input))
                     .child(
                         div().flex().justify_end().child(
-                            button("snooze-set", "Set", "Snooze until the typed time", "enter", cx)
-                                .on_click(cx.listener(|this, _, _, cx| this.submit_custom(cx))),
+                            button(
+                                "snooze-set",
+                                "Set",
+                                "Snooze until the typed time",
+                                "enter",
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.submit_custom(cx))),
                         ),
                     )
                     .when(invalid, |el| {

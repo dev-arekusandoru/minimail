@@ -1,16 +1,18 @@
 //! Small presentational panels: rules list, session card, summary card, rule banner.
 use gpui_kit::component::ActiveTheme as _;
 
+use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
 use crate::app::chrome::format_time;
+use crate::app::ui::{button, run, shortcut};
 use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
 use crate::tz::Now;
-use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
-use crate::app::ui::{button, run, shortcut};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
-    component::{alert::Alert, progress::Progress, scroll::ScrollableElement as _, separator::Separator},
+    component::{
+        alert::Alert, progress::Progress, scroll::ScrollableElement as _, separator::Separator,
+    },
     prelude::FluentBuilder as _,
     *,
 };
@@ -141,11 +143,22 @@ impl Render for RulesPanel {
                                 div()
                                     .text_xs()
                                     .text_color(theme::state_color(t, rule.state))
-                                    .child(SharedString::from(format!("→ {}", state_name(rule.state)))),
+                                    .child(SharedString::from(format!(
+                                        "→ {}",
+                                        state_name(rule.state)
+                                    ))),
                             )
                             .child(
-                                button(("rule-revoke", i), "Revoke", "Revoke rule", "backspace", cx)
-                                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(RulesEvent::Revoke(i)))),
+                                button(
+                                    ("rule-revoke", i),
+                                    "Revoke",
+                                    "Revoke rule",
+                                    "backspace",
+                                    cx,
+                                )
+                                .on_click(
+                                    cx.listener(move |_, _, _, cx| cx.emit(RulesEvent::Revoke(i))),
+                                ),
                             ),
                     )
             }))
@@ -210,10 +223,23 @@ impl RenderOnce for SessionCard {
                         .child(shortcut("escape"))
                         .child("to close"),
                 )
-                .child(button("session-close", "Close", "Close session summary", "escape", cx).on_click(run(ClearSelection))),
+                .child(
+                    button(
+                        "session-close",
+                        "Close",
+                        "Close session summary",
+                        "escape",
+                        cx,
+                    )
+                    .on_click(run(ClearSelection)),
+                ),
             (None, progress) => {
                 let (pos, total) = progress.unwrap_or((0, 0));
-                let pct = if total == 0 { 0. } else { pos as f32 / total as f32 * 100. };
+                let pct = if total == 0 {
+                    0.
+                } else {
+                    pos as f32 / total as f32 * 100.
+                };
                 div()
                     .flex()
                     .items_center()
@@ -222,12 +248,23 @@ impl RenderOnce for SessionCard {
                     .py_1()
                     .text_xs()
                     .text_color(t.muted_foreground)
-                    .child(div().flex_1().min_w_0().child(
-                        Progress::new("session-progress")
-                            .value(pct)
-                            .accessibility_label(SharedString::from(format!("{pos}/{total}"))),
-                    ))
-                    .child(button("session-end", "End session", "End the triage session", "escape", cx).on_click(run(ClearSelection)))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Progress::new("session-progress")
+                                .value(pct)
+                                .accessibility_label(SharedString::from(format!("{pos}/{total}"))),
+                        ),
+                    )
+                    .child(
+                        button(
+                            "session-end",
+                            "End session",
+                            "End the triage session",
+                            "escape",
+                            cx,
+                        )
+                        .on_click(run(ClearSelection)),
+                    )
             }
         }
     }
@@ -309,25 +346,33 @@ impl RenderOnce for RuleBanner {
             .border_color(t.border)
             .text_sm()
             .text_color(t.foreground)
-            .child(div().flex_1().min_w_0().child(
-                Alert::info(
-                    "rule-banner",
-                    format!(
-                        "Always move mail from {} to {}?",
-                        self.rule.sender,
-                        state_name(self.rule.state)
-                    ),
-                )
-                .banner(),
-            ))
+            .child(
+                div().flex_1().min_w_0().child(
+                    Alert::info(
+                        "rule-banner",
+                        format!(
+                            "Always move mail from {} to {}?",
+                            self.rule.sender,
+                            state_name(self.rule.state)
+                        ),
+                    )
+                    .banner(),
+                ),
+            )
             .child(
                 div()
                     .flex()
                     .flex_none()
                     .items_center()
                     .gap_2()
-                    .child(button("rule-accept", "Accept", "Accept rule", "shift-y", cx).on_click(run(AcceptRule)))
-                    .child(button("rule-dismiss", "Dismiss", "Dismiss rule", "shift-n", cx).on_click(run(DismissRule))),
+                    .child(
+                        button("rule-accept", "Accept", "Accept rule", "shift-y", cx)
+                            .on_click(run(AcceptRule)),
+                    )
+                    .child(
+                        button("rule-dismiss", "Dismiss", "Dismiss rule", "shift-n", cx)
+                            .on_click(run(DismissRule)),
+                    ),
             )
     }
 }

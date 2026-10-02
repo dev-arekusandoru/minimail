@@ -71,7 +71,8 @@ impl Mailbox {
             }
         }
         for email in senders {
-            if let std::collections::hash_map::Entry::Vacant(v) = self.blocked.entry(email.clone()) {
+            if let std::collections::hash_map::Entry::Vacant(v) = self.blocked.entry(email.clone())
+            {
                 v.insert(now);
                 changes.push(Change::Blocked(email, None));
             }

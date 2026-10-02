@@ -112,7 +112,8 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui
         BarState::Selected => Some(t.primary),
         BarState::Partial => Some(t.primary.opacity(0.45)),
     };
-    row.test_support().relative()
+    row.test_support()
+        .relative()
         .w_full()
         .flex()
         .items_center()
@@ -120,12 +121,26 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui
         .pl(px(10.))
         .pr_2()
         .border_1()
-        .border_color(if v.cursor { t.primary.opacity(0.8) } else { transparent_black() })
+        .border_color(if v.cursor {
+            t.primary.opacity(0.8)
+        } else {
+            transparent_black()
+        })
         .when_some(bar, |d, color| {
-            d.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).bg(color))
+            d.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(3.))
+                    .bg(color),
+            )
         })
         .when(v.cursor, |d| d.bg(t.list_active))
-        .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.primary.opacity(0.14)))
+        .when((v.selected || v.open) && !v.cursor, |d| {
+            d.bg(t.primary.opacity(0.14))
+        })
         .hover(move |s| {
             s.bg(if v.cursor {
                 t.list_active
@@ -136,4 +151,3 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui
             })
         })
 }
-

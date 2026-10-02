@@ -29,7 +29,10 @@ impl Confidence {
         Self::ALL
             .into_iter()
             .min_by(|a, b| {
-                let (da, db) = ((a.threshold() - threshold).abs(), (b.threshold() - threshold).abs());
+                let (da, db) = (
+                    (a.threshold() - threshold).abs(),
+                    (b.threshold() - threshold).abs(),
+                );
                 da.total_cmp(&db)
             })
             .unwrap_or(Confidence::Medium)

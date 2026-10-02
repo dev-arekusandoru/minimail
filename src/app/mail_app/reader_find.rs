@@ -41,12 +41,21 @@ impl MailApp {
     pub fn find_count(&self) -> Option<(usize, usize)> {
         let ft = self.finds.get(&self.find_thread()?)?;
         let total = ft.matches.len();
-        Some((if total == 0 { 0 } else { ft.find.current(total) + 1 }, total))
+        Some((
+            if total == 0 {
+                0
+            } else {
+                ft.find.current(total) + 1
+            },
+            total,
+        ))
     }
 
     /// The active tab's find query is an invalid regex.
     pub fn find_invalid(&self) -> bool {
-        self.find_thread().and_then(|t| self.finds.get(&t)).is_some_and(|ft| ft.invalid)
+        self.find_thread()
+            .and_then(|t| self.finds.get(&t))
+            .is_some_and(|ft| ft.invalid)
     }
 
     /// Text in the active tab's find input.
@@ -57,13 +66,18 @@ impl MailApp {
 
     /// The active tab's find options.
     pub fn find_options(&self) -> Option<Options> {
-        self.finds.get(&self.find_thread()?).map(|ft| ft.find.options)
+        self.finds
+            .get(&self.find_thread()?)
+            .map(|ft| ft.find.options)
     }
 
     /// Thread of the active tab when its find bar is open.
     fn find_thread(&self) -> Option<u32> {
-        let thread = self.tabs.active()?.thread;
-        self.finds.get(&thread).is_some_and(|ft| ft.open).then_some(thread)
+        let thread = self.tabs.active()?.thread_id()?;
+        self.finds
+            .get(&thread)
+            .is_some_and(|ft| ft.open)
+            .then_some(thread)
     }
 
     /// The current match of `thread`'s find.
@@ -77,23 +91,40 @@ impl MailApp {
         if self.tabs_locked() {
             return;
         }
-        let Some(thread) = self.tabs.active().map(|t| t.thread) else { return };
+        let Some(thread) = self.tabs.active().and_then(|t| t.thread_id()) else {
+            return;
+        };
         if let std::collections::hash_map::Entry::Vacant(slot) = self.finds.entry(thread) {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in thread"));
-            let sub = cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let text = input.read(cx).value().to_string();
-                    this.set_find_query(thread, &text, cx);
-                }
+            let sub = cx.subscribe_in(
+                &input,
+                window,
+                move |this, input, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        let text = input.read(cx).value().to_string();
+                        this.set_find_query(thread, &text, cx);
+                    }
+                },
+            );
+            slot.insert(FindTab {
+                open: true,
+                find: Find::default(),
+                input,
+                matches: Vec::new(),
+                invalid: false,
+                _sub: sub,
             });
-            slot.insert(FindTab { open: true, find: Find::default(), input, matches: Vec::new(), invalid: false, _sub: sub });
         }
         if let Some(ft) = self.finds.get_mut(&thread) {
             ft.open = true;
             window.focus(&ft.input.focus_handle(cx), cx);
         }
         // Once the bar is painted and focused, select the old query so typing replaces it.
-        if self.finds.get(&thread).is_some_and(|ft| !ft.find.query.is_empty()) {
+        if self
+            .finds
+            .get(&thread)
+            .is_some_and(|ft| !ft.find.query.is_empty())
+        {
             self.find_select.set(2);
         }
         cx.notify();
@@ -123,7 +154,9 @@ impl MailApp {
     }
 
     fn set_find_query(&mut self, thread: u32, text: &str, cx: &mut Context<Self>) {
-        let Some(ft) = self.finds.get_mut(&thread) else { return };
+        let Some(ft) = self.finds.get_mut(&thread) else {
+            return;
+        };
         ft.find.set_query(text);
         self.recompute_find(thread);
         self.seek_find(thread);
@@ -135,7 +168,9 @@ impl MailApp {
         if self.tabs_locked() {
             return;
         }
-        let Some(thread) = self.find_thread() else { return };
+        let Some(thread) = self.find_thread() else {
+            return;
+        };
         self.recompute_find(thread);
         if let Some(ft) = self.finds.get_mut(&thread) {
             let total = ft.matches.len();
@@ -152,7 +187,9 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(thread) = self.find_thread() else { return };
+        let Some(thread) = self.find_thread() else {
+            return;
+        };
         if let Some(ft) = self.finds.get_mut(&thread) {
             let mut options = ft.find.options;
             flip(&mut options);
@@ -167,7 +204,9 @@ impl MailApp {
     /// Point the current match at the first one at or after the reader's position (the opened
     /// message), without landing on it: typing and toggling never expand, reveal or scroll.
     fn seek_find(&mut self, thread: u32) {
-        let Some(opened) = self.tabs.tab_for(thread).map(|t| t.msg) else { return };
+        let Some(opened) = self.tabs.tab_for(thread).and_then(|t| t.msg()) else {
+            return;
+        };
         let order = crate::threads::thread_order(self.mailbox.messages(), thread);
         if let Some(ft) = self.finds.get_mut(&thread) {
             ft.find.seek(&ft.matches, &order, opened);
@@ -176,9 +215,19 @@ impl MailApp {
 
     /// Search `thread` again: the thread's text or the opened message may have changed.
     fn recompute_find(&mut self, thread: u32) {
-        let Some(opened) = self.tabs.tab_for(thread).map(|t| t.msg) else { return };
-        let Some(ft) = self.finds.get_mut(&thread) else { return };
-        match find::find_in_thread(self.mailbox.messages(), thread, opened, &ft.find.query, ft.find.options) {
+        let Some(opened) = self.tabs.tab_for(thread).and_then(|t| t.msg()) else {
+            return;
+        };
+        let Some(ft) = self.finds.get_mut(&thread) else {
+            return;
+        };
+        match find::find_in_thread(
+            self.mailbox.messages(),
+            thread,
+            opened,
+            &ft.find.query,
+            ft.find.options,
+        ) {
             Ok(matches) => {
                 ft.matches = matches;
                 ft.invalid = false;
@@ -200,16 +249,25 @@ impl MailApp {
     /// Make the current match visible: expand its collapsed message (which pins the tab) or
     /// reveal its folded quote, then have the reader scroll to it.
     fn land_find(&mut self, thread: u32) {
-        let Some(m) = self.find_current(thread).cloned() else { return };
-        let opened = self.tabs.tab_for(thread).map(|t| t.msg);
-        if m.segment != Segment::Subject && Some(m.msg) != opened && !self.reader.is_expanded(thread, m.msg) {
+        let Some(m) = self.find_current(thread).cloned() else {
+            return;
+        };
+        let opened = self.tabs.tab_for(thread).and_then(|t| t.msg());
+        if m.segment != Segment::Subject
+            && Some(m.msg) != opened
+            && !self.reader.is_expanded(thread, m.msg)
+        {
             self.reader.expand(thread, m.msg);
             self.tabs.pin(thread);
         }
         if m.segment == Segment::Quoted {
             self.reader.show_quoted(thread, m.msg);
         }
-        self.reader_panes.borrow_mut().entry(thread).or_default().find_reveal = FindReveal::Message;
+        self.reader_panes
+            .borrow_mut()
+            .entry(thread)
+            .or_default()
+            .find_reveal = FindReveal::Message;
     }
 
     /// Highlights of one displayed string: every match of `thread`'s find in (`msg`, `segment`),
@@ -231,13 +289,21 @@ impl MailApp {
             return None;
         }
         let t = cx.theme();
-        let others = HighlightStyle { background_color: Some(t.warning.opacity(0.35)), ..Default::default() };
+        let others = HighlightStyle {
+            background_color: Some(t.warning.opacity(0.35)),
+            ..Default::default()
+        };
         let this = HighlightStyle {
             background_color: Some(t.primary),
             color: Some(t.primary_foreground),
             ..Default::default()
         };
-        Some(spans.into_iter().map(|(r, cur)| (r, if cur { this } else { others })).collect())
+        Some(
+            spans
+                .into_iter()
+                .map(|(r, cur)| (r, if cur { this } else { others }))
+                .collect(),
+        )
     }
 
     /// `text` as a reader element, with the tab's find matches highlighted. The layout of the
@@ -258,11 +324,17 @@ impl MailApp {
                 Segment::Main => "reader-sel-main",
                 Segment::Quoted => "reader-sel-quoted",
             };
-            return SelectableText::new(ElementId::NamedInteger(name.into(), u64::from(msg)), text.to_owned())
-                .into_any_element();
+            return SelectableText::new(
+                ElementId::NamedInteger(name.into(), u64::from(msg)),
+                text.to_owned(),
+            )
+            .into_any_element();
         };
         let styled = StyledText::new(text.to_owned()).with_highlights(highlights);
-        if self.find_current(thread).is_some_and(|m| m.msg == msg && m.segment == segment) {
+        if self
+            .find_current(thread)
+            .is_some_and(|m| m.msg == msg && m.segment == segment)
+        {
             *self.find_layout.borrow_mut() = Some(FindLayout {
                 key: (msg, segment),
                 layout: styled.layout().clone(),
@@ -277,7 +349,11 @@ impl MailApp {
     pub(super) fn find_forces_plain(&self, m: &Message) -> bool {
         !self.in_session()
             && self.finds.get(&m.thread_id).is_some_and(|ft| {
-                ft.open && ft.matches.iter().any(|x| x.msg == m.id && x.segment != Segment::Subject)
+                ft.open
+                    && ft
+                        .matches
+                        .iter()
+                        .any(|x| x.msg == m.id && x.segment != Segment::Subject)
             })
     }
 
@@ -297,21 +373,29 @@ impl MailApp {
                 window.request_animation_frame();
             }
         }
-        let Some(thread) = self.find_thread() else { return };
+        let Some(thread) = self.find_thread() else {
+            return;
+        };
         let mut panes = self.reader_panes.borrow_mut();
-        let Some(pane) = panes.get_mut(&thread) else { return };
+        let Some(pane) = panes.get_mut(&thread) else {
+            return;
+        };
         if pane.find_reveal != FindReveal::Line {
             return;
         }
         pane.find_reveal = FindReveal::Idle;
-        let Some(m) = self.find_current(thread) else { return };
+        let Some(m) = self.find_current(thread) else {
+            return;
+        };
         let stash = self.find_layout.borrow();
         let Some(stash) = stash.as_ref() else { return };
         // Only a layout from the previous frame has been painted (and so measured).
         if stash.key != (m.msg, m.segment) || stash.frame + 1 != self.find_gen.get() {
             return;
         }
-        let Some(at) = stash.layout.position_for_index(m.range.start) else { return };
+        let Some(at) = stash.layout.position_for_index(m.range.start) else {
+            return;
+        };
         let view = pane.scroll.bounds();
         let (top, bottom) = (view.top() + px(32.), view.bottom() - px(56.));
         let dy = if at.y < top {
@@ -328,6 +412,9 @@ impl MailApp {
 
     /// A frame is still owed to finish placing the match.
     pub(super) fn find_placement_pending(&self) -> bool {
-        self.reader_panes.borrow().values().any(|p| p.find_reveal == FindReveal::Line)
+        self.reader_panes
+            .borrow()
+            .values()
+            .any(|p| p.find_reveal == FindReveal::Line)
     }
 }

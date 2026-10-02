@@ -1,12 +1,12 @@
 //! Actions (namespace `mail`), keymap and the command list shown in the palette/help.
 
 use crate::app::chrome::HELP_CONTEXT;
-use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
-use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
-use crate::model::Location;
+use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
+use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
+use crate::model::Location;
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -33,8 +33,30 @@ gpui_kit::actions!(
         Reply,
         ReplyAll,
         Forward,
-        SendReply,
-        CancelCompose,
+        // Composer: opening, the durable draft's life, formatting and the send hold.
+        NewMail,
+        SendDraft,
+        CloseComposer,
+        DiscardDraft,
+        ExpandComposer,
+        CollapseComposer,
+        ToggleComposePreview,
+        ComposeBold,
+        ComposeItalic,
+        ComposeLink,
+        ComposeBulletedList,
+        ComposeNumberedList,
+        ComposeHeading,
+        ComposeQuote,
+        ComposeCodeBlock,
+        ComposeStrike,
+        ComposeTable,
+        AddAttachment,
+        ApproveConversion,
+        PasteAsPlain,
+        ShowDrafts,
+        ResolveConflict,
+        CheckDelivery,
         ToggleHelp,
         HelpPageUp,
         HelpPageDown,
@@ -93,7 +115,7 @@ gpui_kit::actions!(
 pub const MAIL_CONTEXT: &str = "MailApp";
 /// Binding predicate for the list keymap: `MailApp` but not while a text input has focus
 /// (a focused kit `Input` sets context `Input`; bare-letter bindings would otherwise steal typing).
-const MAIL_BINDING: &str = "MailApp && !Input && !PopupMenu";
+const MAIL_BINDING: &str = "MailApp && !Input && !Compose && !PopupMenu";
 /// Same, for bindings that may fire while an input has focus. `!PopupMenu`: the app keeps its
 /// `MailApp` context while a menu is open (the menu's keycaps are resolved through it), so
 /// the menu itself is what keeps list keys inert.
@@ -109,6 +131,9 @@ pub const COMPOSE_CONTEXT: &str = "Compose";
 pub fn bind_keys(cx: &mut App) {
     let m = Some(MAIL_BINDING);
     let p = Some(PALETTE_CONTEXT);
+    // Match the focused input depth as well as the compose surface. Otherwise the kit's
+    // Enter/Escape bindings win and can edit the selection before sending or closing.
+    let c = Some("Compose > Input || Compose");
     cx.bind_keys([
         KeyBinding::new("j", SelectNext, m),
         KeyBinding::new("down", SelectNext, m),
@@ -135,6 +160,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("u", Undo, m),
         KeyBinding::new("cmd-z", Undo, m),
         KeyBinding::new("cmd-k", ToggleCommandPalette, m),
+        KeyBinding::new("cmd-shift-p", ToggleCommandPalette, Some(MAIL_SCOPE)),
         KeyBinding::new("r", Reply, m),
         KeyBinding::new("shift-a", ReplyAll, m),
         KeyBinding::new("w", Forward, m),
@@ -236,15 +262,37 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("/", SettingsSearch, Some(SETTINGS_NAV)),
         KeyBinding::new("cmd-f", SettingsSearch, Some(SETTINGS_SCOPE)),
         KeyBinding::new("escape", SettingsDismiss, Some(SETTINGS_SCOPE)),
-        // Compose context.
-        KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
-        KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),
+        // Composer. The formatting chords are the familiar ones and reach the composer's
+        // own key context, so they act on the body selection while the composer is open —
+        // inline or in a tab.
+        KeyBinding::new("cmd-enter", SendDraft, c),
+        KeyBinding::new("escape", CloseComposer, c),
+        KeyBinding::new("cmd-b", ComposeBold, c),
+        KeyBinding::new("cmd-i", ComposeItalic, c),
+        KeyBinding::new("cmd-k", ComposeLink, c),
+        KeyBinding::new("cmd-shift-8", ComposeBulletedList, c),
+        KeyBinding::new("cmd-shift-7", ComposeNumberedList, c),
+        KeyBinding::new("cmd-shift-h", ComposeHeading, c),
+        KeyBinding::new("cmd-shift-.", ComposeQuote, c),
+        KeyBinding::new("cmd-shift-c", ComposeCodeBlock, c),
+        KeyBinding::new("cmd-shift-x", ComposeStrike, c),
+        KeyBinding::new("cmd-shift-t", ComposeTable, c),
+        KeyBinding::new("cmd-shift-v", ToggleComposePreview, c),
+        // `cmd-shift-d` opens the Drafts list: a closed draft is kept, and this is how it
+        // comes back. Modifier-chorded, so it works from an input without stealing a letter.
+        KeyBinding::new("cmd-shift-d", ShowDrafts, Some(MAIL_SCOPE)),
+        KeyBinding::new("cmd-shift-a", AddAttachment, c),
+        // A new message opens in its own draft tab. A modifier chord, so it belongs under
+        // `MAIL_SCOPE` rather than the bare-letter keymap: it works while the composer has
+        // focus, so a second draft can be started without closing the first.
+        KeyBinding::new("cmd-n", NewMail, Some(MAIL_SCOPE)),
         // Filter picker: `enter` and `space` belong to its list and inputs, not to the kit
         // popover around it (which would close on them).
         KeyBinding::new("enter", NoAction, Some(FILTER_PICKER_CONTEXT)),
         KeyBinding::new("space", NoAction, Some(FILTER_PICKER_CONTEXT)),
         // Palette dialog: the kit's Command owns navigation, enter and escape.
         KeyBinding::new("cmd-k", ToggleCommandPalette, p),
+        KeyBinding::new("cmd-shift-p", ToggleCommandPalette, p),
     ]);
 }
 
@@ -326,11 +374,54 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Sender, "Delete all from sender…", "shift-d", SenderDelete),
         cmd!(Sender, "File all from sender…", "shift-f", SenderFile),
         cmd!(Sender, "Snooze all from sender…", "shift-s", SenderSnooze),
-        cmd!(Sender, "Move all from sender to inbox…", "shift-i", SenderInbox),
+        cmd!(
+            Sender,
+            "Move all from sender to inbox…",
+            "shift-i",
+            SenderInbox
+        ),
         cmd!(Triage, "Undo", "u", Undo),
         cmd!(Triage, "Reply", "r", Reply),
         cmd!(Triage, "Reply all", "shift-a", ReplyAll),
         cmd!(Triage, "Forward", "w", Forward),
+        cmd!(Triage, "New message", "cmd-n", NewMail),
+        cmd!(Triage, "Send draft", "cmd-enter", SendDraft),
+        cmd!(Triage, "Close composer", "escape", CloseComposer),
+        cmd!(Triage, "Discard draft", "", DiscardDraft),
+        cmd!(View, "Expand composer to a tab", "", ExpandComposer),
+        cmd!(
+            View,
+            "Collapse composer into the thread",
+            "",
+            CollapseComposer
+        ),
+        cmd!(
+            View,
+            "Preview outgoing message",
+            "cmd-shift-v",
+            ToggleComposePreview
+        ),
+        cmd!(View, "Bold", "cmd-b", ComposeBold),
+        cmd!(View, "Italic", "cmd-i", ComposeItalic),
+        cmd!(View, "Insert link", "cmd-k", ComposeLink),
+        cmd!(View, "Bulleted list", "cmd-shift-8", ComposeBulletedList),
+        cmd!(View, "Numbered list", "cmd-shift-7", ComposeNumberedList),
+        cmd!(View, "Heading", "cmd-shift-h", ComposeHeading),
+        cmd!(View, "Quote", "cmd-shift-.", ComposeQuote),
+        cmd!(View, "Code block", "cmd-shift-c", ComposeCodeBlock),
+        cmd!(View, "Strikethrough", "cmd-shift-x", ComposeStrike),
+        cmd!(View, "Table", "cmd-shift-t", ComposeTable),
+        cmd!(Triage, "Attach files…", "cmd-shift-a", AddAttachment),
+        cmd!(
+            Triage,
+            "Preview converted formatting…",
+            "",
+            ApproveConversion
+        ),
+        cmd!(Triage, "Paste as plain text", "", PasteAsPlain),
+        cmd!(Triage, "Drafts…", "cmd-shift-d", ShowDrafts),
+        cmd!(Triage, "Resolve this draft's conflict", "", ResolveConflict),
+        cmd!(Triage, "Check this draft's delivery", "", CheckDelivery),
         cmd!(App, "Toggle command palette", "cmd-k", ToggleCommandPalette),
         cmd!(App, "Toggle help", "?", ToggleHelp),
         cmd!(Triage, "Snooze…", "s", OpenSnoozePicker),
@@ -369,7 +460,12 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Find, "Find: whole word", "alt-w", ToggleFindWord),
         cmd!(Find, "Find: regex", "alt-r", ToggleFindRegex),
         cmd!(View, "Toggle reader mode", "v", ToggleReaderMode),
-        cmd!(View, "Expand or collapse thread messages", "shift-o", ToggleThreadExpansion),
+        cmd!(
+            View,
+            "Expand or collapse thread messages",
+            "shift-o",
+            ToggleThreadExpansion
+        ),
         cmd!(View, "Grow list pane", "alt-right", GrowListPane),
         cmd!(View, "Shrink list pane", "alt-left", ShrinkListPane),
         cmd!(View, "Reset pane sizes", "alt-r", ResetPanes),
@@ -386,8 +482,14 @@ pub fn commands() -> Vec<CommandSpec> {
     ];
     // The number keys toggle the quick filter pills (all, needs reply, follow up, urgent,
     // new senders, possible spam), in that order.
-    const QUICK: [fn() -> Box<dyn Action>; 6] =
-        [|| Box::new(QuickFilter1), || Box::new(QuickFilter2), || Box::new(QuickFilter3), || Box::new(QuickFilter4), || Box::new(QuickFilter5), || Box::new(QuickFilter6)];
+    const QUICK: [fn() -> Box<dyn Action>; 6] = [
+        || Box::new(QuickFilter1),
+        || Box::new(QuickFilter2),
+        || Box::new(QuickFilter3),
+        || Box::new(QuickFilter4),
+        || Box::new(QuickFilter5),
+        || Box::new(QuickFilter6),
+    ];
     const KEYS: [&str; 6] = ["1", "2", "3", "4", "5", "6"];
     for (i, action) in QUICK.into_iter().enumerate() {
         if crate::filters::quick_filter(i).is_none() {
@@ -434,3 +536,26 @@ pub struct ShowLocation {
     pub location: Location,
 }
 
+// ---------------------------------------------------------------- Composer
+
+/// Drop one attachment from the draft it belongs to (the composer's × on a chip).
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct RemoveAttachment {
+    pub id: String,
+}
+
+/// Undo the send hold on one specific draft. Each countdown toast carries its own, so two
+/// drafts holding at once are recalled independently.
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct UndoSendHold {
+    pub draft: crate::outgoing::DraftId,
+}
+
+/// Send from a specific account rather than the draft's current one.
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ComposeAccount {
+    pub account: String,
+}

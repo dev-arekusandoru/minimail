@@ -74,17 +74,24 @@ impl ContactStore {
 
     /// `PRAGMA user_version`: how many migrations this database has applied.
     pub fn schema_version(&self) -> Result<i64> {
-        Ok(self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
     /// `PRAGMA journal_mode`, e.g. `wal`.
     pub fn journal_mode(&self) -> Result<String> {
-        Ok(self.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))?)
     }
 
     /// Whether cascades are enforced.
     pub fn foreign_keys_enabled(&self) -> Result<bool> {
-        Ok(self.conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))? == 1)
+        Ok(self
+            .conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))?
+            == 1)
     }
 }
 

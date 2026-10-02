@@ -4,9 +4,9 @@ use super::super::*;
 use super::parts::Look;
 use crate::tabs;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::Sizable as _;
 
 /// Longest tab title, in characters.
 const TITLE_MAX: usize = 28;
@@ -17,13 +17,31 @@ impl MailApp {
     pub(super) fn tab_bar(&self, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
         let messages = self.mailbox.messages();
         let children = self.tabs.tabs().iter().enumerate().map(|(ix, tab)| {
-            // The thread's latest message names it and sends its avatar, like its list header.
-            let latest = crate::threads::thread_order(messages, tab.thread)
-                .last()
-                .and_then(|id| self.mailbox.get(*id))
-                .or_else(|| self.mailbox.get(tab.msg));
-            let title = SharedString::from(tabs::title(latest.map_or("", |m| m.subject.as_str()), TITLE_MAX));
-            let thread = tab.thread as usize;
+            // A draft tab names the draft; a thread tab takes the thread's latest message,
+            // like its list header.
+            let draft = tab.draft_id();
+            let latest = tab
+                .thread_id()
+                .and_then(|thread| {
+                    crate::threads::thread_order(messages, thread)
+                        .last()
+                        .and_then(|id| self.mailbox.get(*id))
+                })
+                .or_else(|| tab.msg().and_then(|id| self.mailbox.get(id)));
+            let subject = match draft {
+                Some(id) => self
+                    .composer
+                    .record(id)
+                    .map(|r| r.subject.clone())
+                    .unwrap_or_default(),
+                None => latest.map_or("", |m| m.subject.as_str()).to_owned(),
+            };
+            let title = SharedString::from(if draft.is_some() && subject.trim().is_empty() {
+                "New message".to_owned()
+            } else {
+                tabs::title(&subject, TITLE_MAX)
+            });
+            let thread = tab.thread_id().unwrap_or(u32::MAX) as usize;
             let label = div()
                 .id(("reader-tab", thread))
                 .when(!tab.pinned, |d| d.italic())
@@ -47,7 +65,7 @@ impl MailApp {
                 .flex()
                 .items_center()
                 .gap_1()
-                .when(self.tab_avatars, |row| {
+                .when(self.tab_avatars && draft.is_none(), |row| {
                     row.child(match latest {
                         Some(m) => div()
                             .id(("reader-tab-avatar", thread))

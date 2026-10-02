@@ -79,7 +79,10 @@ impl FakeProvider {
         Self::build(messages, Vec::new())
     }
 
-    fn with_folders(messages: Vec<RemoteMessage>, folders: Vec<RemoteFolder>) -> (Handle, SharedProvider) {
+    fn with_folders(
+        messages: Vec<RemoteMessage>,
+        folders: Vec<RemoteFolder>,
+    ) -> (Handle, SharedProvider) {
         Self::build(messages, folders)
     }
 
@@ -99,7 +102,9 @@ impl FakeProvider {
             page_size: 50,
             recorded: Recorded::default(),
         }));
-        let provider = Arc::new(Mutex::new(Box::new(FakeProvider { state: state.clone() }) as Box<dyn MailProvider>));
+        let provider = Arc::new(Mutex::new(Box::new(FakeProvider {
+            state: state.clone(),
+        }) as Box<dyn MailProvider>));
         (state, provider)
     }
 }
@@ -107,20 +112,35 @@ impl FakeProvider {
 /// Change a remote message's state, as the provider would see it.
 fn remote_set(state: &Handle, id: &str, new_state: RemoteState) {
     let mut s = state.lock();
-    let m = s.messages.iter_mut().find(|m| m.id == id).expect("remote message");
+    let m = s
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id)
+        .expect("remote message");
     m.state = new_state;
 }
 
 fn remote_unread(state: &Handle, id: &str, unread: bool) {
     let mut s = state.lock();
-    let m = s.messages.iter_mut().find(|m| m.id == id).expect("remote message");
+    let m = s
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id)
+        .expect("remote message");
     m.unread = unread;
 }
 
 fn flags(state: &Handle, id: &str) -> RemoteFlags {
     let s = state.lock();
-    let m = s.messages.iter().find(|m| m.id == id).expect("remote message");
-    RemoteFlags { state: m.state.clone(), unread: m.unread }
+    let m = s
+        .messages
+        .iter()
+        .find(|m| m.id == id)
+        .expect("remote message");
+    RemoteFlags {
+        state: m.state.clone(),
+        unread: m.unread,
+    }
 }
 
 fn moves(state: &Handle) -> Vec<(RemoteId, RemoteState, RemoteState)> {
@@ -166,17 +186,15 @@ fn cursors(state: &Handle) -> usize {
 }
 
 /// Queue a history delta, so the next `changes` reports it.
-fn with_updates(
-    state: &Handle,
-    added: &[&str],
-    updates: &[(&str, RemoteFlags)],
-    removed: &[&str],
-) {
+fn with_updates(state: &Handle, added: &[&str], updates: &[(&str, RemoteFlags)], removed: &[&str]) {
     let mut s = state.lock();
     let cursor = s.cursor.clone();
     s.pending = Some(Changes {
         added: added.iter().map(|id| (*id).to_owned()).collect(),
-        updated: updates.iter().map(|(id, f)| ((*id).to_owned(), f.clone())).collect(),
+        updated: updates
+            .iter()
+            .map(|(id, f)| ((*id).to_owned(), f.clone()))
+            .collect(),
         removed: removed.iter().map(|id| (*id).to_owned()).collect(),
         cursor,
     });
@@ -186,7 +204,12 @@ fn with_updates(
 fn with_no_changes(state: &Handle) {
     let mut s = state.lock();
     let cursor = s.cursor.clone();
-    s.pending = Some(Changes { added: Vec::new(), updated: Vec::new(), removed: Vec::new(), cursor });
+    s.pending = Some(Changes {
+        added: Vec::new(),
+        updated: Vec::new(),
+        removed: Vec::new(),
+        cursor,
+    });
 }
 
 fn expire_cursor(state: &Handle) {
@@ -228,9 +251,10 @@ fn clone_error(e: &ProviderError) -> ProviderError {
         ProviderError::Network(m) => ProviderError::Network(m.clone()),
         ProviderError::CursorExpired => ProviderError::CursorExpired,
         ProviderError::RateLimited => ProviderError::RateLimited,
-        ProviderError::Api { status, message } => {
-            ProviderError::Api { status: *status, message: message.clone() }
-        }
+        ProviderError::Api { status, message } => ProviderError::Api {
+            status: *status,
+            message: message.clone(),
+        },
     }
 }
 
@@ -244,7 +268,10 @@ impl MailProvider for FakeProvider {
         s.next_label += 1;
         let id = format!("Label_{}", s.next_label);
         s.created.push(path.to_owned());
-        let folder = RemoteFolder { id, path: path.to_owned() };
+        let folder = RemoteFolder {
+            id,
+            path: path.to_owned(),
+        };
         s.folders.push(folder.clone());
         Ok(folder)
     }
@@ -279,13 +306,24 @@ impl MailProvider for FakeProvider {
         Ok(Page { ids, next })
     }
 
-    fn snapshot(&mut self, since: Timestamp) -> Result<Vec<(RemoteId, RemoteFlags)>, ProviderError> {
+    fn snapshot(
+        &mut self,
+        since: Timestamp,
+    ) -> Result<Vec<(RemoteId, RemoteFlags)>, ProviderError> {
         let mut s = self.state.lock();
         s.recorded.snapshots.push(since);
         Ok(s.messages
             .iter()
             .filter(|m| m.received >= since)
-            .map(|m| (m.id.clone(), RemoteFlags { state: m.state.clone(), unread: m.unread }))
+            .map(|m| {
+                (
+                    m.id.clone(),
+                    RemoteFlags {
+                        state: m.state.clone(),
+                        unread: m.unread,
+                    },
+                )
+            })
             .collect())
     }
 
@@ -302,13 +340,20 @@ impl MailProvider for FakeProvider {
     fn fetch_headers(&mut self, ids: &[RemoteId]) -> Result<Vec<RemoteMessage>, ProviderError> {
         let mut s = self.state.lock();
         s.recorded.fetches.push(ids.to_vec());
-        Ok(ids.iter().filter_map(|id| s.messages.iter().find(|m| &m.id == id).cloned()).collect())
+        Ok(ids
+            .iter()
+            .filter_map(|id| s.messages.iter().find(|m| &m.id == id).cloned())
+            .collect())
     }
 
     fn fetch_body(&mut self, id: &RemoteId) -> Result<Body, ProviderError> {
         let mut s = self.state.lock();
         s.recorded.bodies.push(id.clone());
-        Ok(Body { body: format!("full body of {id}"), html: None, attachments: Vec::new() })
+        Ok(Body {
+            body: format!("full body of {id}"),
+            html: None,
+            attachments: Vec::new(),
+        })
     }
 
     fn move_message(
@@ -424,11 +469,20 @@ fn remote_id_of(cache: &Cache, id: MessageId) -> RemoteId {
 }
 
 fn local_id(cache: &Cache, rid: &str) -> MessageId {
-    cache.message_by_remote(ACCOUNT, rid).unwrap().expect("cached")
+    cache
+        .message_by_remote(ACCOUNT, rid)
+        .unwrap()
+        .expect("cached")
 }
 
 /// Plan, run and apply one round, the way the app does.
-fn round(mb: &mut Mailbox, cache: &Cache, p: &SharedProvider, check: bool, older: &[Scope]) -> RoundSummary {
+fn round(
+    mb: &mut Mailbox,
+    cache: &Cache,
+    p: &SharedProvider,
+    check: bool,
+    older: &[Scope],
+) -> RoundSummary {
     let planned = plan_round(mb, cache, ACCOUNT, NOW, check, older);
     assert_eq!(planned.account(), ACCOUNT);
     apply_round(mb, cache, run_round(p, planned))
@@ -458,8 +512,16 @@ fn flush(mb: &mut Mailbox, cache: &Cache, p: &SharedProvider) {
         let mut provider = p.lock().unwrap_or_else(|e| e.into_inner());
         run_reads(provider.as_mut(), pending_reads(mb, cache, ACCOUNT))
     };
-    assert_eq!(apply_moves(mb, cache, &move_results), None, "apply_moves failed");
-    assert_eq!(apply_reads(cache, &read_results), None, "apply_reads failed");
+    assert_eq!(
+        apply_moves(mb, cache, &move_results),
+        None,
+        "apply_moves failed"
+    );
+    assert_eq!(
+        apply_reads(cache, &read_results),
+        None,
+        "apply_reads failed"
+    );
 }
 
 // --------------------------------------------------------------------- read
@@ -470,7 +532,8 @@ fn server_read_state_is_imported_and_follows_server_changes() {
     let mut mb = mailbox(Vec::new());
     let mut seen = remote("m1", "t1", 1_790_000_000);
     seen.unread = false;
-    let (state, provider) = FakeProvider::without_folders(vec![seen, remote("m2", "t2", 1_790_000_100)]);
+    let (state, provider) =
+        FakeProvider::without_folders(vec![seen, remote("m2", "t2", 1_790_000_100)]);
     drain(&mut mb, &cache, &provider, true);
 
     let (m1, m2) = (local_id(&cache, "m1"), local_id(&cache, "m2"));
@@ -479,11 +542,19 @@ fn server_read_state_is_imported_and_follows_server_changes() {
     // Read m2 and mark m1 unread in Gmail web.
     remote_unread(&state, "m1", true);
     remote_unread(&state, "m2", false);
-    with_updates(&state, &[], &[("m1", flags(&state, "m1")), ("m2", flags(&state, "m2"))], &[]);
+    with_updates(
+        &state,
+        &[],
+        &[("m1", flags(&state, "m1")), ("m2", flags(&state, "m2"))],
+        &[],
+    );
     assert!(round(&mut mb, &cache, &provider, true, &[]).checked);
 
     assert!(!mb.is_read(m1) && mb.is_read(m2));
-    assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty(), "server changes are not echoed back");
+    assert!(
+        pending_reads(&mb, &cache, ACCOUNT).is_empty(),
+        "server changes are not echoed back"
+    );
 }
 
 #[test]
@@ -538,7 +609,11 @@ fn a_cache_from_before_account_icons_loads_with_no_icon_and_keeps_its_color() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].icon, None);
     assert_eq!(accounts[0].color, "#e06c75");
-    assert_eq!(cache.cursor("a").unwrap().as_deref(), Some("c1"), "the cursor survives");
+    assert_eq!(
+        cache.cursor("a").unwrap().as_deref(),
+        Some("c1"),
+        "the cursor survives"
+    );
     let _ = std::fs::remove_file(&path);
     assert_eq!(accounts[0].nickname, None);
 }
@@ -557,11 +632,24 @@ fn the_last_completed_check_is_stored_and_old_caches_start_with_none() {
         .unwrap();
     }
     let cache = Cache::open(&path).unwrap();
-    assert_eq!(cache.synced_at("a").unwrap(), None, "an old account never recorded a check");
+    assert_eq!(
+        cache.synced_at("a").unwrap(),
+        None,
+        "an old account never recorded a check"
+    );
     cache.set_synced_at("a", 1_790_000_000).unwrap();
     assert_eq!(cache.synced_at("a").unwrap(), Some(1_790_000_000));
-    cache.upsert_account(&Account { id: "a".into(), ..account() }).unwrap();
-    assert_eq!(cache.synced_at("a").unwrap(), Some(1_790_000_000), "restyling keeps it");
+    cache
+        .upsert_account(&Account {
+            id: "a".into(),
+            ..account()
+        })
+        .unwrap();
+    assert_eq!(
+        cache.synced_at("a").unwrap(),
+        Some(1_790_000_000),
+        "restyling keeps it"
+    );
     let _ = std::fs::remove_file(&path);
 }
 
@@ -591,7 +679,10 @@ fn a_cache_from_before_read_sync_is_reconciled_against_the_window() {
     cache.set_cursor(ACCOUNT, "stale").unwrap();
     let (_, _, messages) = cache.load().unwrap();
     let mut mb = mailbox(messages);
-    assert!(pending_reads(&mb, &cache, ACCOUNT).is_empty(), "unknown rows are never pushed");
+    assert!(
+        pending_reads(&mb, &cache, ACCOUNT).is_empty(),
+        "unknown rows are never pushed"
+    );
 
     let mut read_in_gmail = remote("m1", "t1", 1_790_000_000);
     read_in_gmail.unread = false;
@@ -601,9 +692,16 @@ fn a_cache_from_before_read_sync_is_reconciled_against_the_window() {
     let summary = round(&mut mb, &cache, &provider, true, &[]);
 
     assert!(summary.checked, "the round still reports a completed check");
-    assert!(mb.is_read(1), "the server's read state replaces the unknown one");
+    assert!(
+        mb.is_read(1),
+        "the server's read state replaces the unknown one"
+    );
     assert!(!cache.has_unknown_read(ACCOUNT).unwrap());
-    assert_eq!(snapshots(&state), [CUTOFF], "one listing of the 30-day window");
+    assert_eq!(
+        snapshots(&state),
+        [CUTOFF],
+        "one listing of the 30-day window"
+    );
 }
 
 // ---------------------------------------------------------------- backfill
@@ -621,9 +719,15 @@ fn the_inbox_is_backfilled_before_archive_trash_and_labels() {
             remote("f1", "t5", 1_790_000_400),
         ],
         vec![
-            RemoteFolder { id: "Label_9".to_owned(), path: "Work".to_owned() },
+            RemoteFolder {
+                id: "Label_9".to_owned(),
+                path: "Work".to_owned(),
+            },
             // A nested label whose parent is not listed is its own scope.
-            RemoteFolder { id: "Label_7".to_owned(), path: "Work/Reports".to_owned() },
+            RemoteFolder {
+                id: "Label_7".to_owned(),
+                path: "Work/Reports".to_owned(),
+            },
         ],
     );
     remote_set(&state, "a1", RemoteState::Archived);
@@ -643,7 +747,11 @@ fn the_inbox_is_backfilled_before_archive_trash_and_labels() {
         ],
         "one page per scope, in priority order"
     );
-    assert_eq!(fetched_ids(&state), ["i2", "i1", "a1", "x1", "f1"], "listings are newest-first");
+    assert_eq!(
+        fetched_ids(&state),
+        ["i2", "i1", "a1", "x1", "f1"],
+        "listings are newest-first"
+    );
     assert_eq!(mb.messages().len(), 5);
     assert_eq!(inbox(&mb).len(), 2);
 }
@@ -658,7 +766,10 @@ fn the_cursor_is_stored_before_any_backfill_page() {
     round(&mut mb, &cache, &provider, true, &[]);
     assert_eq!(cache.cursor(ACCOUNT).unwrap().as_deref(), Some("1"));
     assert_eq!(cursors(&state), 1);
-    assert!(lists(&state).is_empty(), "nothing is listed before the cursor is stored");
+    assert!(
+        lists(&state).is_empty(),
+        "nothing is listed before the cursor is stored"
+    );
 
     let second = round(&mut mb, &cache, &provider, false, &[]);
     assert_eq!(listed_scopes(&state), [Scope::Inbox]);
@@ -686,7 +797,11 @@ fn a_backfill_page_imports_fifty_ids_at_a_time() {
         sizes.extend(fetched(&state)[seen..].iter().map(|ids| ids.len()));
     }
 
-    assert_eq!(sizes, [50, 50, 20], "each round fetches only the next uncached page");
+    assert_eq!(
+        sizes,
+        [50, 50, 20],
+        "each round fetches only the next uncached page"
+    );
     assert_eq!(mb.messages().len(), 120);
     assert_eq!(
         listed_scopes(&state).first(),
@@ -702,7 +817,8 @@ fn load_more_lists_before_the_cutoff_and_stops_when_done() {
     let old: Vec<RemoteMessage> = (0..70)
         .map(|i| remote(&format!("old{i:02}"), &format!("s{i:02}"), 1_000_000 + i))
         .collect();
-    let (state, provider) = FakeProvider::without_folders([vec![remote("new", "t1", 1_790_000_000)], old].concat());
+    let (state, provider) =
+        FakeProvider::without_folders([vec![remote("new", "t1", 1_790_000_000)], old].concat());
     set_page_size(&state, 50);
 
     drain(&mut mb, &cache, &provider, true);
@@ -711,7 +827,11 @@ fn load_more_lists_before_the_cutoff_and_stops_when_done() {
     assert!(summary.more, "a second older page remains");
     let calls = lists(&state);
     let last = calls.last().unwrap();
-    assert_eq!(last.window, Window::Before(CUTOFF), "load-more walks backwards in time");
+    assert_eq!(
+        last.window,
+        Window::Before(CUTOFF),
+        "load-more walks backwards in time"
+    );
     assert_eq!(last.max, 50);
 
     round(&mut mb, &cache, &provider, false, &[Scope::Inbox]);
@@ -739,7 +859,9 @@ fn load_more_finishes_the_recent_pass_first() {
     assert!(window.more, "the window still has a page left");
     assert_eq!(lists(&state).last().unwrap().window, Window::Since(CUTOFF));
     assert!(
-        !lists(&state).iter().any(|c| c.window == Window::Before(CUTOFF)),
+        !lists(&state)
+            .iter()
+            .any(|c| c.window == Window::Before(CUTOFF)),
         "nothing older is listed before the window is done"
     );
 }
@@ -761,10 +883,24 @@ fn a_history_label_change_updates_read_state_and_triage_without_a_fetch() {
 
     round(&mut mb, &cache, &provider, true, &[]);
 
-    assert_eq!(mb.state_of(id), Some(TriageState::Deleted), "the label change is applied");
-    assert!(mb.is_read(id), "the read flag from the same history entry lands too");
-    assert_eq!(fetched(&state).len(), fetches, "a cached message is never downloaded again");
-    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty(), "the applied change is not pushed back");
+    assert_eq!(
+        mb.state_of(id),
+        Some(TriageState::Deleted),
+        "the label change is applied"
+    );
+    assert!(
+        mb.is_read(id),
+        "the read flag from the same history entry lands too"
+    );
+    assert_eq!(
+        fetched(&state).len(),
+        fetches,
+        "a cached message is never downloaded again"
+    );
+    assert!(
+        pending_moves(&mb, &cache, ACCOUNT).is_empty(),
+        "the applied change is not pushed back"
+    );
 }
 
 #[test]
@@ -786,12 +922,31 @@ fn an_expired_cursor_reconciles_the_window() {
     let summary = round(&mut mb, &cache, &provider, true, &[]);
 
     assert!(summary.checked);
-    assert_eq!(snapshots(&state), [CUTOFF], "the window is listed by id only");
-    assert_eq!(mb.state_of(m1), Some(TriageState::Deleted), "the reconcile applies the flags");
-    assert!(mb.get(m2).is_none(), "a message missing from the window is dropped");
+    assert_eq!(
+        snapshots(&state),
+        [CUTOFF],
+        "the window is listed by id only"
+    );
+    assert_eq!(
+        mb.state_of(m1),
+        Some(TriageState::Deleted),
+        "the reconcile applies the flags"
+    );
+    assert!(
+        mb.get(m2).is_none(),
+        "a message missing from the window is dropped"
+    );
     assert_eq!(cache.message_by_remote(ACCOUNT, "m2").unwrap(), None);
-    assert_eq!(cache.cursor(ACCOUNT).unwrap().as_deref(), Some("1"), "a fresh cursor is stored");
-    assert_eq!(fetched(&state).len(), 1, "the reconcile itself downloads no message");
+    assert_eq!(
+        cache.cursor(ACCOUNT).unwrap().as_deref(),
+        Some("1"),
+        "a fresh cursor is stored"
+    );
+    assert_eq!(
+        fetched(&state).len(),
+        1,
+        "the reconcile itself downloads no message"
+    );
 }
 
 #[test]
@@ -801,15 +956,30 @@ fn a_reconcile_imports_mail_the_window_listing_found() {
     let (state, provider) = FakeProvider::without_folders(vec![remote("m1", "t1", 1_790_000_000)]);
     drain(&mut mb, &cache, &provider, true);
 
-    state.lock().messages.push(remote("m2", "t2", 1_790_000_100));
+    state
+        .lock()
+        .messages
+        .push(remote("m2", "t2", 1_790_000_100));
     expire_cursor(&state);
     // The reconcile itself only knows ids: it resets the backfill, and the page
     // that re-lists the window is what imports m2.
-    assert_eq!(fetched(&state).len(), 1, "the reconcile downloads no message");
+    assert_eq!(
+        fetched(&state).len(),
+        1,
+        "the reconcile downloads no message"
+    );
     round(&mut mb, &cache, &provider, true, &[]);
-    assert_eq!(inbox(&mb).len(), 1, "the reset progress is planned into the next round");
+    assert_eq!(
+        inbox(&mb).len(),
+        1,
+        "the reset progress is planned into the next round"
+    );
     round(&mut mb, &cache, &provider, false, &[]);
-    assert_eq!(inbox(&mb).len(), 2, "the reset backfill imports what the window listed");
+    assert_eq!(
+        inbox(&mb).len(),
+        2,
+        "the reset backfill imports what the window listed"
+    );
     assert!(
         listed_scopes(&state).contains(&Scope::Inbox),
         "the reset progress makes the backfill re-list the window"
@@ -830,17 +1000,37 @@ fn a_remote_trash_takes_effect_unless_a_local_change_is_pending() {
     // One message has a local archive the provider has not taken yet: the push
     // is rejected, so the change is still pending when the check lands.
     mb.set_state(&[busy], TriageState::Archived);
-    state.lock().fail_move = Some(ProviderError::Api { status: 500, message: "no".to_owned() });
+    state.lock().fail_move = Some(ProviderError::Api {
+        status: 500,
+        message: "no".to_owned(),
+    });
     remote_set(&state, "m1", RemoteState::Trash);
     remote_set(&state, "m2", RemoteState::Trash);
-    with_updates(&state, &[], &[("m1", flags(&state, "m1")), ("m2", flags(&state, "m2"))], &[]);
+    with_updates(
+        &state,
+        &[],
+        &[("m1", flags(&state, "m1")), ("m2", flags(&state, "m2"))],
+        &[],
+    );
 
     let summary = round(&mut mb, &cache, &provider, true, &[]);
 
     assert!(summary.error.is_some(), "the rejected push is reported");
-    assert_eq!(mb.state_of(quiet), Some(TriageState::Deleted), "the server's state wins");
-    assert_eq!(mb.state_of(busy), Some(TriageState::Archived), "the pending local change is not clobbered");
-    assert_eq!(pending_moves(&mb, &cache, ACCOUNT).len(), 1, "it is still waiting to be pushed");
+    assert_eq!(
+        mb.state_of(quiet),
+        Some(TriageState::Deleted),
+        "the server's state wins"
+    );
+    assert_eq!(
+        mb.state_of(busy),
+        Some(TriageState::Archived),
+        "the pending local change is not clobbered"
+    );
+    assert_eq!(
+        pending_moves(&mb, &cache, ACCOUNT).len(),
+        1,
+        "it is still waiting to be pushed"
+    );
 }
 
 #[test]
@@ -879,7 +1069,11 @@ fn a_check_with_no_changes_changes_nothing() {
 
     assert!(summary.checked);
     assert_eq!(summary.new_messages, 0);
-    assert_eq!((mb.messages().len(), fetched(&state).len()), before, "nothing changed");
+    assert_eq!(
+        (mb.messages().len(), fetched(&state).len()),
+        before,
+        "nothing changed"
+    );
 }
 
 // ------------------------------------------------------------------ folders
@@ -896,21 +1090,34 @@ fn filing_creates_the_remote_label_once_per_batch() {
     let ids = inbox(&mb);
 
     let parent = mb.create_folder(ACCOUNT, "Parent", None);
-    cache.upsert_folder(mb.folder(parent).unwrap(), None).unwrap();
+    cache
+        .upsert_folder(mb.folder(parent).unwrap(), None)
+        .unwrap();
     mb.set_state(&ids, TriageState::Filed(parent));
     persist_local(&mb, &cache);
 
     let planned = plan_round(&mb, &cache, ACCOUNT, NOW, false, &[]);
-    assert!(!planned.is_empty(), "an unpushed file is work for the next round");
+    assert!(
+        !planned.is_empty(),
+        "an unpushed file is work for the next round"
+    );
     let results = {
         let mut p = provider.lock().unwrap_or_else(|e| e.into_inner());
         run_moves(p.as_mut(), pending_moves(&mb, &cache, ACCOUNT))
     };
 
-    assert_eq!(created(&state), ["Parent".to_owned()], "one label per batch");
+    assert_eq!(
+        created(&state),
+        ["Parent".to_owned()],
+        "one label per batch"
+    );
     let calls = moves(&state);
     assert_eq!(calls.len(), 2);
-    assert!(calls.iter().all(|(_, _, to)| *to == RemoteState::Folder("Label_1".to_owned())));
+    assert!(
+        calls
+            .iter()
+            .all(|(_, _, to)| *to == RemoteState::Folder("Label_1".to_owned()))
+    );
     assert_eq!(apply_moves(&mb, &cache, &results), None);
     assert_eq!(
         cache.folder_remote_id(parent).unwrap().as_deref(),
@@ -934,9 +1141,19 @@ fn a_nested_folder_is_created_under_its_full_path() {
 
     flush(&mut mb, &cache, &provider);
     assert_eq!(created(&state), ["Work/Reports".to_owned()]);
-    assert_eq!(moves(&state)[0].2, RemoteState::Folder("Label_1".to_owned()));
-    assert_eq!(cache.folder_remote_id(child).unwrap().as_deref(), Some("Label_1"));
-    assert_eq!(cache.folder_remote_id(parent).unwrap(), None, "only the filed folder gets a label");
+    assert_eq!(
+        moves(&state)[0].2,
+        RemoteState::Folder("Label_1".to_owned())
+    );
+    assert_eq!(
+        cache.folder_remote_id(child).unwrap().as_deref(),
+        Some("Label_1")
+    );
+    assert_eq!(
+        cache.folder_remote_id(parent).unwrap(),
+        None,
+        "only the filed folder gets a label"
+    );
     assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty());
 }
 
@@ -947,15 +1164,26 @@ fn a_folder_from_the_provider_becomes_a_local_folder() {
     let (state, provider) = FakeProvider::with_folders(
         vec![remote("m1", "t1", 1_790_000_000)],
         vec![
-            RemoteFolder { id: "Label_9".to_owned(), path: "Work/Reports".to_owned() },
-            RemoteFolder { id: "Label_8".to_owned(), path: "Work".to_owned() },
+            RemoteFolder {
+                id: "Label_9".to_owned(),
+                path: "Work/Reports".to_owned(),
+            },
+            RemoteFolder {
+                id: "Label_8".to_owned(),
+                path: "Work".to_owned(),
+            },
         ],
     );
     remote_set(&state, "m1", RemoteState::Folder("Label_9".to_owned()));
 
     drain(&mut mb, &cache, &provider, true);
 
-    let id = mb.messages().iter().find(|m| m.account == ACCOUNT).unwrap().id;
+    let id = mb
+        .messages()
+        .iter()
+        .find(|m| m.account == ACCOUNT)
+        .unwrap()
+        .id;
     let TriageState::Filed(folder) = mb.state_of(id).unwrap() else {
         panic!("expected the message to be filed");
     };
@@ -964,8 +1192,14 @@ fn a_folder_from_the_provider_becomes_a_local_folder() {
     let parent = mb.folder(folder.parent.unwrap()).expect("parent exists");
     assert_eq!(parent.name, "Work");
     assert_eq!(parent.parent, None);
-    assert_eq!(cache.folder_remote_id(folder.id).unwrap().as_deref(), Some("Label_9"));
-    assert_eq!(cache.folder_by_remote(ACCOUNT, "Label_8").unwrap(), Some(parent.id));
+    assert_eq!(
+        cache.folder_remote_id(folder.id).unwrap().as_deref(),
+        Some("Label_9")
+    );
+    assert_eq!(
+        cache.folder_by_remote(ACCOUNT, "Label_8").unwrap(),
+        Some(parent.id)
+    );
 }
 
 #[test]
@@ -974,13 +1208,20 @@ fn empty_remote_folders_are_imported_and_survive_a_restart() {
     let mut mb = mailbox(Vec::new());
     let (_state, provider) = FakeProvider::with_folders(
         Vec::new(),
-        vec![RemoteFolder { id: "Label_3".to_owned(), path: "Receipts".to_owned() }],
+        vec![RemoteFolder {
+            id: "Label_3".to_owned(),
+            path: "Receipts".to_owned(),
+        }],
     );
 
     drain(&mut mb, &cache, &provider, true);
 
     let names = |folders: &[Folder]| -> Vec<String> {
-        folders.iter().filter(|f| f.account == ACCOUNT).map(|f| f.name.clone()).collect()
+        folders
+            .iter()
+            .filter(|f| f.account == ACCOUNT)
+            .map(|f| f.name.clone())
+            .collect()
     };
     assert_eq!(names(mb.all_folders()), ["Receipts"]);
     let (_, cached, _) = cache.load().unwrap();
@@ -1003,7 +1244,11 @@ fn snooze_archives_remotely_and_survives_a_check_until_it_wakes() {
 
     let planned = pending_moves(&mb, &cache, ACCOUNT);
     assert_eq!(planned.len(), 1);
-    assert_eq!(planned[0].to, RemoteState::Archived, "no snooze exists remotely");
+    assert_eq!(
+        planned[0].to,
+        RemoteState::Archived,
+        "no snooze exists remotely"
+    );
     flush(&mut mb, &cache, &provider);
 
     // A check reporting Archived must not wake the message early.
@@ -1037,14 +1282,25 @@ fn a_check_never_pushes_the_archived_copy_of_a_snoozed_message() {
     // The push never lands, and a check reports the message read while it is
     // still in the inbox. The snooze must survive that, and stay queued: the
     // server has not seen the archive yet.
-    state.lock().fail_move = Some(ProviderError::Api { status: 500, message: "no".to_owned() });
+    state.lock().fail_move = Some(ProviderError::Api {
+        status: 500,
+        message: "no".to_owned(),
+    });
     remote_unread(&state, "m1", false);
     with_updates(&state, &[], &[("m1", flags(&state, "m1"))], &[]);
     round(&mut mb, &cache, &provider, true, &[]);
     persist_local(&mb, &cache);
 
-    assert_eq!(mb.state_of(id), Some(TriageState::Snoozed), "a flag change is not a wake-up");
-    assert_eq!(mb.snoozed_until(id), Some(clock.now() + 60), "the deadline survives the check");
+    assert_eq!(
+        mb.state_of(id),
+        Some(TriageState::Snoozed),
+        "a flag change is not a wake-up"
+    );
+    assert_eq!(
+        mb.snoozed_until(id),
+        Some(clock.now() + 60),
+        "the deadline survives the check"
+    );
     let moves = pending_moves(&mb, &cache, ACCOUNT);
     assert_eq!(moves.len(), 1, "the snooze is still waiting to be pushed");
     assert_eq!(moves[0].to, RemoteState::Archived);
@@ -1071,7 +1327,10 @@ fn a_body_download_clears_partial_and_survives_a_later_flag_change() {
     let msg = mb.get(id).unwrap();
     assert!(!msg.partial);
     assert_eq!(msg.body, "full body of m1");
-    assert!(body_request(&mb, &cache, id).is_none(), "a downloaded body is not requested again");
+    assert!(
+        body_request(&mb, &cache, id).is_none(),
+        "a downloaded body is not requested again"
+    );
     assert_eq!(bodies(&state), ["m1".to_owned()]);
 
     // A later label change must not put the snippet back.
@@ -1110,7 +1369,10 @@ fn a_rate_limited_provider_stops_the_round_and_pauses() {
     let summary = round(&mut mb, &cache, &provider, false, &[]);
 
     assert!(summary.throttled, "the loop pauses instead of toasting");
-    assert_eq!(summary.error, None, "a rate limit is not a user-facing error");
+    assert_eq!(
+        summary.error, None,
+        "a rate limit is not a user-facing error"
+    );
     assert_eq!(lists(&state).len(), 1, "no further pages are tried");
     assert!(mb.messages().is_empty());
 }
@@ -1137,8 +1399,14 @@ fn scopes_follow_the_view_and_only_cached_accounts() {
     let cache = seeded();
     let mb = mailbox(Vec::new());
 
-    assert_eq!(scopes_for(&mb, &cache, &Location::AllInboxes), [(ACCOUNT.to_owned(), Scope::Inbox)]);
-    assert_eq!(scopes_for(&mb, &cache, &inbox_location()), [(ACCOUNT.to_owned(), Scope::Inbox)]);
+    assert_eq!(
+        scopes_for(&mb, &cache, &Location::AllInboxes),
+        [(ACCOUNT.to_owned(), Scope::Inbox)]
+    );
+    assert_eq!(
+        scopes_for(&mb, &cache, &inbox_location()),
+        [(ACCOUNT.to_owned(), Scope::Inbox)]
+    );
     assert_eq!(
         scopes_for(&mb, &cache, &Location::Archive(ACCOUNT.to_owned())),
         [(ACCOUNT.to_owned(), Scope::Archive)]
@@ -1160,7 +1428,10 @@ fn a_folder_view_loads_more_under_its_label() {
     let mut mb = mailbox(Vec::new());
     let (state, provider) = FakeProvider::with_folders(
         vec![remote("f1", "t1", 1_790_000_000)],
-        vec![RemoteFolder { id: "Label_5".to_owned(), path: "Work".to_owned() }],
+        vec![RemoteFolder {
+            id: "Label_5".to_owned(),
+            path: "Work".to_owned(),
+        }],
     );
     remote_set(&state, "f1", RemoteState::Folder("Label_5".to_owned()));
     drain(&mut mb, &cache, &provider, true);
@@ -1170,7 +1441,11 @@ fn a_folder_view_loads_more_under_its_label() {
         scopes_for(&mb, &cache, &Location::Folder(folder)),
         [(ACCOUNT.to_owned(), Scope::Folder("Label_5".to_owned()))]
     );
-    assert!(has_older(&cache, ACCOUNT, &Scope::Folder("Label_5".to_owned())));
+    assert!(has_older(
+        &cache,
+        ACCOUNT,
+        &Scope::Folder("Label_5".to_owned())
+    ));
 }
 
 // ---------------------------------------------------------------- persistence
@@ -1194,8 +1469,12 @@ fn pending_states_and_snoozes_survive_a_restart() {
     let (accounts, folders, messages) = cache.load().unwrap();
     assert_eq!(accounts, vec![account()]);
     assert!(folders.is_empty());
-    let restored =
-        Mailbox::from_parts(messages, accounts, folders, Rc::new(contacts::open_seeded_in_memory().unwrap()));
+    let restored = Mailbox::from_parts(
+        messages,
+        accounts,
+        folders,
+        Rc::new(contacts::open_seeded_in_memory().unwrap()),
+    );
     assert_eq!(restored.state_of(ids[0]), Some(TriageState::Snoozed));
     assert_eq!(
         restored.snoozed_until(ids[0]),
@@ -1240,7 +1519,11 @@ fn a_network_failure_stops_the_push_batch_and_keeps_the_rest_pending() {
         run_moves(p.as_mut(), pending_moves(&mb, &cache, ACCOUNT))
     };
     assert_eq!(results.len(), 1, "the batch stops at the first failure");
-    assert!(apply_moves(&mb, &cache, &results).unwrap().contains("offline"));
+    assert!(
+        apply_moves(&mb, &cache, &results)
+            .unwrap()
+            .contains("offline")
+    );
     assert_eq!(pending_moves(&mb, &cache, ACCOUNT).len(), 2);
 
     state.lock().fail_move = None;
@@ -1260,7 +1543,11 @@ fn a_re_listed_page_is_not_downloaded_twice() {
     assert_eq!(before, ["m1".to_owned()]);
     cache.reset_recent(ACCOUNT).unwrap();
     round(&mut mb, &cache, &provider, false, &[]);
-    assert_eq!(fetched_ids(&state), before, "a re-listed page is not downloaded again");
+    assert_eq!(
+        fetched_ids(&state),
+        before,
+        "a re-listed page is not downloaded again"
+    );
     assert_eq!(mb.messages().len(), 1);
 }
 
@@ -1278,5 +1565,8 @@ fn a_local_message_with_a_high_id_is_not_reused_by_an_import() {
     let ids = inbox(&mb);
     assert_eq!(ids.len(), 2, "both pulled messages land in the gmail inbox");
     assert!(ids.iter().all(|id| *id != 7), "local id 7 is untouched");
-    assert_eq!(mb.get(7).map(|m| m.account.clone()), Some("personal".to_owned()));
+    assert_eq!(
+        mb.get(7).map(|m| m.account.clone()),
+        Some("personal".to_owned())
+    );
 }

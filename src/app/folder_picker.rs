@@ -30,7 +30,11 @@ pub struct FolderOption {
 }
 
 impl FolderOption {
-    pub fn new(id: FolderId, name: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+    pub fn new(
+        id: FolderId,
+        name: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+    ) -> Self {
         Self {
             id,
             name: name.into(),
@@ -79,7 +83,9 @@ impl FolderPicker {
 
     /// Focus the filter field.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
-        self.state.clone().update(cx, |state, cx| state.focus(window, cx));
+        self.state
+            .clone()
+            .update(cx, |state, cx| state.focus(window, cx));
     }
 
     /// The visible rows, top to bottom, as labels.
@@ -153,7 +159,11 @@ impl Render for FolderPicker {
                     .text_color(cx.theme().muted_foreground)
                     .child("No folders in this account yet.")
             })
-            .items(labels.into_iter().map(|label| CommandItem::new().label(label)))
+            .items(
+                labels
+                    .into_iter()
+                    .map(|label| CommandItem::new().label(label)),
+            )
             .on_query(move |q, _, cx| {
                 on_query
                     .update(cx, |picker, cx| {
@@ -166,7 +176,9 @@ impl Render for FolderPicker {
                     .ok();
             })
             .on_confirm(move |ix: IndexPath, _, cx| {
-                let Some(event) = events.get(ix.row) else { return };
+                let Some(event) = events.get(ix.row) else {
+                    return;
+                };
                 let event = match event {
                     FolderPickerEvent::File(id) => FolderPickerEvent::File(*id),
                     FolderPickerEvent::Create(name) => FolderPickerEvent::Create(name.clone()),

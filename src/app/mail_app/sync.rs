@@ -62,14 +62,20 @@ impl MailApp {
             let token = KeyringStore.get(&account.email);
             match (&client, token) {
                 (Some(client), Some(token)) => {
-                    self.register_provider(&account.id, Box::new(GmailProvider::new(client.clone(), token)));
+                    self.register_provider(
+                        &account.id,
+                        Box::new(GmailProvider::new(client.clone(), token)),
+                        cx,
+                    );
                 }
                 _ => {
                     // Called while the window is being built: the kit's root (which hosts
                     // notifications) doesn't exist yet, so toast after this frame's setup.
                     let shown = crate::account_style::nickname_or(&account, &account.email);
                     let text = format!("Gmail ({shown}): sign in again via “Add Gmail account”");
-                    cx.defer_in(window, move |this, window, cx| this.show_toast(text, window, cx));
+                    cx.defer_in(window, move |this, window, cx| {
+                        this.show_toast(text, window, cx)
+                    });
                 }
             }
         }
@@ -82,7 +88,9 @@ impl MailApp {
             let mut wait = Duration::ZERO;
             loop {
                 // Sleep until the next round is due, or until something wakes us.
-                let _ = futures::future::select(Box::pin(executor.timer(wait)), Box::pin(rx.next())).await;
+                let _ =
+                    futures::future::select(Box::pin(executor.timer(wait)), Box::pin(rx.next()))
+                        .await;
                 // The loop stops only when the view is gone. An idle app (`Ok(None)`)
                 // means there is nothing due yet, not that the loop should end: it
                 // must stay alive to wake on the next `wake_sync` (Fetch mail, sign-in)
@@ -104,7 +112,9 @@ impl MailApp {
                 let results = executor
                     .spawn(async move { step.into_iter().map(run_job).collect::<Vec<_>>() })
                     .await;
-                let Ok(step) = this.update_in(cx, |this, window, cx| this.sync_finish(results, window, cx)) else {
+                let Ok(step) =
+                    this.update_in(cx, |this, window, cx| this.sync_finish(results, window, cx))
+                else {
                     break;
                 };
                 wait = step.wait;
@@ -113,8 +123,17 @@ impl MailApp {
         .detach();
     }
 
-    fn register_provider(&mut self, account: &str, provider: Box<dyn MailProvider>) {
-        self.providers.insert(account.to_owned(), Arc::new(Mutex::new(provider)));
+    fn register_provider(
+        &mut self,
+        account: &str,
+        provider: Box<dyn MailProvider>,
+        cx: &mut Context<Self>,
+    ) {
+        self.providers
+            .insert(account.to_owned(), Arc::new(Mutex::new(provider)));
+        // A new account can send and receive drafts, so the composer learns about it now
+        // rather than at the next restart.
+        self.refresh_composer_accounts(cx);
     }
 
     /// Main-thread half of one loop iteration: persist local state, then plan
@@ -145,7 +164,11 @@ impl MailApp {
             }
             self.retry_accounts.remove(account);
             self.older_in_flight.insert(account.clone());
-            jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), round });
+            jobs.push(AccountJob {
+                account: account.clone(),
+                provider: provider.clone(),
+                round,
+            });
         }
         (!jobs.is_empty()).then_some(jobs)
     }
@@ -236,7 +259,11 @@ impl MailApp {
     /// Ask the server for changes on the next round (within ~2 s), then report the result.
     pub(super) fn fetch_mail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.providers.is_empty() {
-            self.show_toast("No Gmail account linked — add one with the sidebar +".into(), window, cx);
+            self.show_toast(
+                "No Gmail account linked — add one with the sidebar +".into(),
+                window,
+                cx,
+            );
             return;
         }
         self.force_check = true;
@@ -274,7 +301,9 @@ impl MailApp {
         let Some(cache) = self.cache.clone() else {
             return;
         };
-        let Some(location) = self.location() else { return };
+        let Some(location) = self.location() else {
+            return;
+        };
         let scopes: Vec<(AccountId, Scope)> = sync::scopes_for(&self.mailbox, &cache, &location)
             .into_iter()
             .filter(|(account, scope)| sync::has_older(&cache, account, scope))
@@ -306,8 +335,14 @@ impl MailApp {
     pub(super) fn body_targets(&self) -> Vec<MessageId> {
         let opened = self.opened();
         let visible = self.visible_ids();
-        let start = opened.and_then(|id| visible.iter().position(|v| *v == id)).unwrap_or(0);
-        let mut ids: Vec<MessageId> = visible[start..].iter().take(BODY_PREFETCH + 1).copied().collect();
+        let start = opened
+            .and_then(|id| visible.iter().position(|v| *v == id))
+            .unwrap_or(0);
+        let mut ids: Vec<MessageId> = visible[start..]
+            .iter()
+            .take(BODY_PREFETCH + 1)
+            .copied()
+            .collect();
         if let Some(id) = opened
             && !ids.contains(&id)
         {
@@ -336,7 +371,8 @@ impl MailApp {
             let task = cx.background_spawn(async move { sync::run_body(&provider, req) });
             cx.spawn(async move |this, cx| {
                 let (req, result) = task.await;
-                this.update(cx, |this, cx| this.finish_body(req, result, cx)).ok();
+                this.update(cx, |this, cx| this.finish_body(req, result, cx))
+                    .ok();
             })
             .detach();
         }
@@ -388,7 +424,6 @@ impl MailApp {
         self.row_cursor = 0;
     }
 
-
     pub(super) fn add_gmail_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.start_gmail_sign_in(None, window, cx);
     }
@@ -425,7 +460,8 @@ impl MailApp {
     ) {
         let Some(client) = ClientConfig::from_env() else {
             self.show_toast(
-                "Set MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET".into(),
+                "Set MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET"
+                    .into(),
                 window,
                 cx,
             );
@@ -448,21 +484,19 @@ impl MailApp {
                 cx.update(|_, app| app.open_url(&url)).ok();
             }
             let result = task.await;
-            this.update_in(cx, |this, window, cx| {
-                match result {
-                    Ok((tokens, email)) => this.finish_gmail_sign_in(
-                        SignIn {
-                            client,
-                            cache,
-                            refresh: tokens.refresh,
-                            email,
-                            existing,
-                        },
-                        window,
-                        cx,
-                    ),
-                    Err(e) => this.show_toast(format!("Gmail sign-in failed: {e}"), window, cx),
-                }
+            this.update_in(cx, |this, window, cx| match result {
+                Ok((tokens, email)) => this.finish_gmail_sign_in(
+                    SignIn {
+                        client,
+                        cache,
+                        refresh: tokens.refresh,
+                        email,
+                        existing,
+                    },
+                    window,
+                    cx,
+                ),
+                Err(e) => this.show_toast(format!("Gmail sign-in failed: {e}"), window, cx),
             })
             .ok();
         })
@@ -472,7 +506,13 @@ impl MailApp {
     /// Store the new token. A sign-in for an already linked account re-attaches it to that
     /// account instead of creating a second one.
     fn finish_gmail_sign_in(&mut self, sign: SignIn, window: &mut Window, cx: &mut Context<Self>) {
-        let SignIn { client, cache, refresh, email, existing } = sign;
+        let SignIn {
+            client,
+            cache,
+            refresh,
+            email,
+            existing,
+        } = sign;
         if let Some(id) = existing {
             return self.finish_gmail_reauth(&id, client, refresh, email, window, cx);
         }
@@ -497,7 +537,7 @@ impl MailApp {
         let id = account.id.clone();
         let label = account.email.clone();
         self.mailbox.add_account(account);
-        self.register_provider(&id, Box::new(GmailProvider::new(client, refresh)));
+        self.register_provider(&id, Box::new(GmailProvider::new(client, refresh)), cx);
         self.force_check = true;
         self.fetch_baseline = Some(self.mailbox.messages().len());
         self.wake_sync();
@@ -519,8 +559,13 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(account) = self.mailbox.account(id) else { return };
-        let (address, label) = (account.email.clone(), crate::account_style::nickname_or(account, &account.email).to_owned());
+        let Some(account) = self.mailbox.account(id) else {
+            return;
+        };
+        let (address, label) = (
+            account.email.clone(),
+            crate::account_style::nickname_or(account, &account.email).to_owned(),
+        );
         if !address.eq_ignore_ascii_case(&email) {
             self.show_toast(
                 format!("That sign-in is for {email}, not {label}. Add it as a separate account."),
@@ -533,7 +578,7 @@ impl MailApp {
             self.show_toast(format!("Gmail sign-in failed: keychain: {e}"), window, cx);
             return;
         }
-        self.register_provider(id, Box::new(GmailProvider::new(client, refresh)));
+        self.register_provider(id, Box::new(GmailProvider::new(client, refresh)), cx);
         self.account_errors.remove(id);
         self.force_check = true;
         self.fetch_baseline = Some(self.mailbox.messages().len());
@@ -553,13 +598,24 @@ impl MailApp {
 
     /// Unlink an account: stop syncing it, forget its token, and drop its cached and shown mail.
     /// Mail on the server is untouched.
-    pub(super) fn remove_linked_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn remove_linked_account(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((email, label)) = self.mailbox.account(id).map(|a| {
-            (a.email.clone(), crate::account_style::nickname_or(a, &a.email).to_owned())
+            (
+                a.email.clone(),
+                crate::account_style::nickname_or(a, &a.email).to_owned(),
+            )
         }) else {
             return;
         };
         self.providers.remove(id);
+        // The account is signed out, so the composer must stop being able to send through it:
+        // its draft stays local and editable rather than being reachable by a stale backend.
+        self.refresh_composer_accounts(cx);
         if self.providers.is_empty() {
             self.fetch_baseline = None;
         }

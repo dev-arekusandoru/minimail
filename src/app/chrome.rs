@@ -9,7 +9,14 @@ use crate::theme::ThemeColor;
 use crate::tz::{MONTHS, Now, WEEKDAYS};
 use gpui_kit::{
     assets::IconName,
-    component::{button::{Button, ButtonVariants as _}, label::Label, scroll::ScrollableElement as _, separator::Separator, status_bar::StatusBar, Sizable as _},
+    component::{
+        Sizable as _,
+        button::{Button, ButtonVariants as _},
+        label::Label,
+        scroll::ScrollableElement as _,
+        separator::Separator,
+        status_bar::StatusBar,
+    },
     prelude::FluentBuilder as _,
     *,
 };
@@ -20,7 +27,12 @@ fn hint(t: &ThemeColor, key: &str, what: &str, cx: &App) -> impl IntoElement {
         .items_center()
         .gap_1()
         .child(shortcut_chips(key, cx))
-        .child(div().text_xs().text_color(t.muted_foreground).child(SharedString::from(what.to_owned())))
+        .child(
+            div()
+                .text_xs()
+                .text_color(t.muted_foreground)
+                .child(SharedString::from(what.to_owned())),
+        )
 }
 
 /// Wall-clock label for a return time on the user's own clock, e.g. `"Mon 5 Oct 08:00"`.
@@ -88,7 +100,11 @@ impl RenderOnce for HintBar {
             _ => None,
         };
         let budget = f32::from(window.viewport_size().width) - BAR_PAD;
-        let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. };
+        let reserved = if selected.is_some() {
+            SELECTED_LABEL_W
+        } else {
+            0.
+        };
         let shown = fit_hints(&self.ctx, budget, reserved);
         let hints = div()
             .flex()
@@ -96,7 +112,11 @@ impl RenderOnce for HintBar {
             .gap_3()
             .min_w_0()
             .overflow_hidden()
-            .children(shown.iter().map(|h| hint(t, h.key, h.label, cx).into_any_element()));
+            .children(
+                shown
+                    .iter()
+                    .map(|h| hint(t, h.key, h.label, cx).into_any_element()),
+            );
         StatusBar::new()
             .h(px(28.))
             .px_3()
@@ -106,7 +126,12 @@ impl RenderOnce for HintBar {
             .bg(t.sidebar)
             .left(hints)
             .when_some(selected, |bar, n| {
-                bar.right(div().text_xs().text_color(t.primary).child(format!("{n} selected")))
+                bar.right(
+                    div()
+                        .text_xs()
+                        .text_color(t.primary)
+                        .child(format!("{n} selected")),
+                )
             })
     }
 }
@@ -144,7 +169,10 @@ pub struct HelpPanel {
 impl HelpPanel {
     pub fn new(scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
         scroll.set_offset(point(px(0.), px(0.)));
-        Self { scroll, focus: cx.focus_handle() }
+        Self {
+            scroll,
+            focus: cx.focus_handle(),
+        }
     }
 
     fn scroll_by(&mut self, dy: f32, cx: &mut Context<Self>) {

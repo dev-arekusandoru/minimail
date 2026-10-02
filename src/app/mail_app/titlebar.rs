@@ -15,10 +15,18 @@ use crate::app::ui::{button, icon_button, primary_button, run, shortcut};
 const SEARCH_SIDE: f32 = 190.;
 
 impl MailApp {
-    pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_titlebar(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = cx.theme();
         let searching = self.is_filtered();
-        let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
+        let title_fg = if window.is_window_active() {
+            t.foreground
+        } else {
+            t.muted_foreground
+        };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());
         let view: SharedString = self.location_label().into();
         // The box is a kit outline `Button` (icon + placeholder/query label) that opens the
@@ -39,40 +47,88 @@ impl MailApp {
                     .icon(IconName::Search)
                     .w_full()
                     .justify_start()
-                    .text_color(if searching { t.foreground } else { t.muted_foreground })
+                    .text_color(if searching {
+                        t.foreground
+                    } else {
+                        t.muted_foreground
+                    })
                     .on_click(run(OpenSearch)),
             )
             .child(
-                div().absolute().right_1().top_0().bottom_0().flex().items_center().child(if searching {
-                    icon_button("search-clear", IconName::Close, "Clear search", "escape", cx)
+                div()
+                    .absolute()
+                    .right_1()
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .child(if searching {
+                        icon_button(
+                            "search-clear",
+                            IconName::Close,
+                            "Clear search",
+                            "escape",
+                            cx,
+                        )
                         .on_click(|event, window, cx| {
                             run(ClearSelection)(event, window, cx);
                             cx.stop_propagation();
                         })
                         .into_any_element()
-                } else {
-                    shortcut("/").into_any_element()
-                }),
+                    } else {
+                        shortcut("/").into_any_element()
+                    }),
             );
 
         let width = f32::from(window.viewport_size().width);
-        let sidebar_icon = if self.sidebar_visible() { IconName::PanelLeftClose } else { IconName::PanelLeftOpen };
-        let left = div().flex().flex_1().flex_basis(px(0.)).min_w_0().overflow_hidden().h_full().child(
-            div()
-                .flex()
-                .items_center()
-                .min_w_0()
-                .h_full()
-                .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
-                .gap_2()
-                .child(no_drag(
-                    icon_button("btn-sidebar", sidebar_icon, "Toggle the sidebar", "cmd-b", cx).on_click(run(ToggleSidebar)),
-                ))
-                .pr_3()
-                .text_size(px(12.))
-                .text_color(title_fg)
-                .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(view)),
-        );
+        let sidebar_icon = if self.sidebar_visible() {
+            IconName::PanelLeftClose
+        } else {
+            IconName::PanelLeftOpen
+        };
+        let left = div()
+            .flex()
+            .flex_1()
+            .flex_basis(px(0.))
+            .min_w_0()
+            .overflow_hidden()
+            .h_full()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .min_w_0()
+                    .h_full()
+                    .pl(px(
+                        if cfg!(target_os = "macos") && !window.is_fullscreen() {
+                            80.
+                        } else {
+                            12.
+                        },
+                    ))
+                    .gap_2()
+                    .child(no_drag(
+                        icon_button(
+                            "btn-sidebar",
+                            sidebar_icon,
+                            "Toggle the sidebar",
+                            "cmd-b",
+                            cx,
+                        )
+                        .on_click(run(ToggleSidebar)),
+                    ))
+                    .pr_3()
+                    .text_size(px(12.))
+                    .text_color(title_fg)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .child(view),
+                    ),
+            );
         let right_buttons = div()
             .flex()
             .flex_none()
@@ -93,10 +149,19 @@ impl MailApp {
                 .on_click(run(StartSession)),
             ))
             .child(no_drag(
-                icon_button("btn-layout", self.layout_icon(), "Stack the panes the other way", "alt-l", cx)
-                    .on_click(run(TogglePaneLayout)),
+                icon_button(
+                    "btn-layout",
+                    self.layout_icon(),
+                    "Stack the panes the other way",
+                    "alt-l",
+                    cx,
+                )
+                .on_click(run(TogglePaneLayout)),
             ))
-            .child(no_drag(icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
+            .child(no_drag(
+                icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx)
+                    .on_click(run(ToggleSettings)),
+            ))
             .child(no_drag(self.menu_trigger(
                 MenuKind::Global,
                 icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx),
@@ -140,5 +205,8 @@ impl MailApp {
 
 /// Wraps an interactive titlebar child so presses on it are not treated as a bar drag.
 fn no_drag(child: impl IntoElement) -> Div {
-    div().flex_none().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(child)
+    div()
+        .flex_none()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(child)
 }

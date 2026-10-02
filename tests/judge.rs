@@ -166,8 +166,14 @@ fn each_confidence_preset_gates_auto_against_review_inclusively() {
     for c in Confidence::ALL {
         p.set_mode(QuestionKey::Spam, Mode::Auto(c));
         // Spam is the first question.
-        assert!(matches!(spam_route(c.threshold(), &p)[0], Routed::Auto(_)), "{c:?} at threshold");
-        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Review(_)), "{c:?} below");
+        assert!(
+            matches!(spam_route(c.threshold(), &p)[0], Routed::Auto(_)),
+            "{c:?} at threshold"
+        );
+        assert!(
+            matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Review(_)),
+            "{c:?} below"
+        );
     }
     p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::Low));
     assert!(matches!(spam_route(0.65, &p)[0], Routed::Auto(_)));

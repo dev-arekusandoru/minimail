@@ -6,7 +6,11 @@ use mail_classifier::find::{
 use mail_classifier::model::Mailbox;
 
 fn src(msg: u32, segment: Segment, text: &str) -> Source {
-    Source { msg, segment, text: text.to_owned() }
+    Source {
+        msg,
+        segment,
+        text: text.to_owned(),
+    }
 }
 
 fn ranges(matches: &[Match]) -> Vec<(u32, std::ops::Range<usize>)> {
@@ -21,15 +25,24 @@ fn plain() -> Options {
 fn matching_ignores_case_unless_asked() {
     let s = [src(1, Segment::Main, "Plan plan PLAN")];
     assert_eq!(find(&s, "plan", plain()).unwrap().len(), 3);
-    let cased = Options { case_sensitive: true, ..plain() };
+    let cased = Options {
+        case_sensitive: true,
+        ..plain()
+    };
     assert_eq!(ranges(&find(&s, "plan", cased).unwrap()), vec![(1, 5..9)]);
 }
 
 #[test]
 fn whole_word_skips_matches_inside_words() {
     let s = [src(1, Segment::Main, "plan planet replan plan_b plan.")];
-    let word = Options { whole_word: true, ..plain() };
-    assert_eq!(ranges(&find(&s, "plan", word).unwrap()), vec![(1, 0..4), (1, 26..30)]);
+    let word = Options {
+        whole_word: true,
+        ..plain()
+    };
+    assert_eq!(
+        ranges(&find(&s, "plan", word).unwrap()),
+        vec![(1, 0..4), (1, 26..30)]
+    );
     // A query ending in punctuation still matches as a word on its word-character side.
     let s = [src(1, Segment::Main, "use c++ or c")];
     assert_eq!(ranges(&find(&s, "c++", word).unwrap()), vec![(1, 4..7)]);
@@ -38,27 +51,57 @@ fn whole_word_skips_matches_inside_words() {
 #[test]
 fn regex_mode_interprets_the_query_and_plain_mode_escapes_it() {
     let s = [src(1, Segment::Main, "a1 b22 c333 (x)")];
-    let re = Options { regex: true, ..plain() };
-    assert_eq!(ranges(&find(&s, r"\d+", re).unwrap()), vec![(1, 1..2), (1, 4..6), (1, 8..11)]);
-    assert_eq!(ranges(&find(&s, "(x)", plain()).unwrap()), vec![(1, 12..15)], "metacharacters are literal");
-    let both = Options { regex: true, whole_word: true, ..plain() };
-    assert_eq!(ranges(&find(&s, r"b\d", both).unwrap()), vec![], "whole word applies to regexes too");
+    let re = Options {
+        regex: true,
+        ..plain()
+    };
+    assert_eq!(
+        ranges(&find(&s, r"\d+", re).unwrap()),
+        vec![(1, 1..2), (1, 4..6), (1, 8..11)]
+    );
+    assert_eq!(
+        ranges(&find(&s, "(x)", plain()).unwrap()),
+        vec![(1, 12..15)],
+        "metacharacters are literal"
+    );
+    let both = Options {
+        regex: true,
+        whole_word: true,
+        ..plain()
+    };
+    assert_eq!(
+        ranges(&find(&s, r"b\d", both).unwrap()),
+        vec![],
+        "whole word applies to regexes too"
+    );
 }
 
 #[test]
 fn an_invalid_regex_is_an_error_not_a_panic() {
     let s = [src(1, Segment::Main, "anything")];
-    let re = Options { regex: true, ..plain() };
+    let re = Options {
+        regex: true,
+        ..plain()
+    };
     assert!(find(&s, "(unclosed", re).is_err());
-    assert!(find(&s, "(unclosed", plain()).unwrap().is_empty(), "plain mode takes it literally");
+    assert!(
+        find(&s, "(unclosed", plain()).unwrap().is_empty(),
+        "plain mode takes it literally"
+    );
 }
 
 #[test]
 fn an_empty_query_and_empty_matches_find_nothing() {
     let s = [src(1, Segment::Main, "abc")];
     assert!(find(&s, "", plain()).unwrap().is_empty());
-    let re = Options { regex: true, ..plain() };
-    assert!(find(&s, "x*", re).unwrap().is_empty(), "zero-length matches are skipped");
+    let re = Options {
+        regex: true,
+        ..plain()
+    };
+    assert!(
+        find(&s, "x*", re).unwrap().is_empty(),
+        "zero-length matches are skipped"
+    );
 }
 
 #[test]
@@ -67,9 +110,14 @@ fn unicode_matches_fold_case_and_report_byte_ranges() {
     let found = find(&s, "üNï", plain()).unwrap();
     assert_eq!(ranges(&found), vec![(1, 0..5), (1, 12..17)]);
     for m in &found {
-        assert!(s[0].text.is_char_boundary(m.range.start) && s[0].text.is_char_boundary(m.range.end));
+        assert!(
+            s[0].text.is_char_boundary(m.range.start) && s[0].text.is_char_boundary(m.range.end)
+        );
     }
-    assert_eq!(ranges(&find(&s, "café", plain()).unwrap()), vec![(1, 6..11)]);
+    assert_eq!(
+        ranges(&find(&s, "café", plain()).unwrap()),
+        vec![(1, 6..11)]
+    );
 }
 
 #[test]
@@ -81,7 +129,10 @@ fn matches_come_in_source_order_then_text_order() {
         src(3, Segment::Main, "go"),
     ];
     let found = find(&s, "go", plain()).unwrap();
-    let order: Vec<_> = found.iter().map(|m| (m.msg, m.segment, m.range.start)).collect();
+    let order: Vec<_> = found
+        .iter()
+        .map(|m| (m.msg, m.segment, m.range.start))
+        .collect();
     assert_eq!(
         order,
         vec![
@@ -104,7 +155,12 @@ fn thread() -> Mailbox {
     };
     Mailbox::from_json(
         &serde_json::json!([
-            m(2, 2, "Re: Budget", "Agreed on the budget.\n\n> The budget is tight."),
+            m(
+                2,
+                2,
+                "Re: Budget",
+                "Agreed on the budget.\n\n> The budget is tight."
+            ),
             m(1, 1, "Budget", "Draft budget attached."),
             m(3, 3, "Re: Budget", "Thanks"),
         ])
@@ -128,7 +184,10 @@ fn thread_sources_cover_subject_every_body_and_hidden_quotes_oldest_first() {
             (3, Segment::Main),
         ]
     );
-    assert_eq!(sources[0].text, "Re: Budget", "the opened message's subject");
+    assert_eq!(
+        sources[0].text, "Re: Budget",
+        "the opened message's subject"
+    );
 }
 
 #[test]
@@ -146,8 +205,16 @@ fn finding_in_a_thread_spans_messages_segments_and_collapsed_text() {
         ]
     );
     let by_msg = highlights(&found, 2, 2, Segment::Main);
-    assert_eq!(by_msg, vec![(found[2].range.clone(), true)], "flags the current match");
-    assert!(highlights(&found, 2, 1, Segment::Main).iter().all(|(_, current)| !current));
+    assert_eq!(
+        by_msg,
+        vec![(found[2].range.clone(), true)],
+        "flags the current match"
+    );
+    assert!(
+        highlights(&found, 2, 1, Segment::Main)
+            .iter()
+            .all(|(_, current)| !current)
+    );
 }
 
 #[test]
@@ -170,13 +237,20 @@ fn the_current_match_wraps_and_clamps() {
     f.set_query("xy");
     assert_eq!(f.current(3), 0, "new text starts over");
     f.step(3, 1);
-    f.set_options(Options { regex: true, ..Options::default() });
+    f.set_options(Options {
+        regex: true,
+        ..Options::default()
+    });
     assert_eq!(f.current(3), 0, "new options start over");
 }
 
 #[test]
 fn seek_picks_the_first_match_at_or_after_a_message_and_the_first_enter_stays_there() {
-    let hit = |msg| Match { msg, segment: Segment::Main, range: 0..1 };
+    let hit = |msg| Match {
+        msg,
+        segment: Segment::Main,
+        range: 0..1,
+    };
     let matches = [hit(1), hit(2), hit(2), hit(4)];
     let order = [1, 2, 3, 4];
     let mut f = Find::default();
@@ -193,5 +267,9 @@ fn seek_picks_the_first_match_at_or_after_a_message_and_the_first_enter_stays_th
     assert_eq!(f.current(4), 2, "later steps move on");
     f.seek(&matches, &order, 2);
     f.step(4, -1);
-    assert_eq!(f.current(4), 0, "going back first steps before the chosen match");
+    assert_eq!(
+        f.current(4),
+        0,
+        "going back first steps before the chosen match"
+    );
 }

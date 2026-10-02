@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use super::ContactStore;
 use super::error::{Error, Result};
 use super::model::{
     ContactSource, ContactUrl, EmailAddress, Label, NewContact, PhoneNumber, PostalAddress,
 };
-use super::ContactStore;
 
 /// Seed fixture, embedded at build time.
 pub const SEED_JSON: &str = include_str!("../../fixtures/contacts_seed.json");
@@ -25,7 +25,9 @@ pub fn default_db_path() -> PathBuf {
     {
         return PathBuf::from(path);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     home.join("Library/Application Support/mail-classifier/contacts.db")
 }
 
@@ -53,11 +55,9 @@ pub fn seed_if_empty(store: &ContactStore) -> Result<usize> {
     let key = format!("seed_version_{SEED_VERSION}");
     let seeded = store
         .conn()
-        .query_row(
-            "SELECT 1 FROM store_meta WHERE key = ?1",
-            [&key],
-            |r| r.get::<_, i64>(0),
-        )
+        .query_row("SELECT 1 FROM store_meta WHERE key = ?1", [&key], |r| {
+            r.get::<_, i64>(0)
+        })
         .is_ok();
     if seeded {
         return Ok(0);
@@ -227,7 +227,10 @@ impl SeedContact {
             urls: self
                 .urls
                 .iter()
-                .map(|u| ContactUrl { url: u.url.clone(), label: Label::parse(&u.label) })
+                .map(|u| ContactUrl {
+                    url: u.url.clone(),
+                    label: Label::parse(&u.label),
+                })
                 .collect(),
             groups: self.groups.clone(),
         }

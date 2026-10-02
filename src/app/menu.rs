@@ -27,7 +27,10 @@ pub enum MenuItem {
         action: ActionFn,
     },
     /// Opens a nested menu.
-    Submenu { label: SharedString, items: Vec<MenuItem> },
+    Submenu {
+        label: SharedString,
+        items: Vec<MenuItem>,
+    },
     Separator,
 }
 
@@ -42,7 +45,11 @@ impl MenuItem {
         label: impl Into<SharedString>,
         action: impl Fn() -> Box<dyn Action> + 'static,
     ) -> Self {
-        MenuItem::Action { label: label.into(), checked: false, action: Rc::new(action) }
+        MenuItem::Action {
+            label: label.into(),
+            checked: false,
+            action: Rc::new(action),
+        }
     }
 
     /// Mark an action row as the active choice.
@@ -55,7 +62,10 @@ impl MenuItem {
 
     /// A row that opens a nested menu.
     pub fn submenu(label: impl Into<SharedString>, items: Vec<MenuItem>) -> Self {
-        MenuItem::Submenu { label: label.into(), items }
+        MenuItem::Submenu {
+            label: label.into(),
+            items,
+        }
     }
 
     pub fn separator() -> Self {
@@ -81,7 +91,11 @@ pub fn populate(
 ) -> PopupMenu {
     items.iter().fold(menu, |menu, item| match item {
         MenuItem::Separator => menu.separator(),
-        MenuItem::Action { label, checked, action } => {
+        MenuItem::Action {
+            label,
+            checked,
+            action,
+        } => {
             let (run, build) = (run.clone(), action.clone());
             // The click handler replaces the kit's own dispatch, so the owner can scope the
             // action; the action is still attached so the row shows its key binding.

@@ -166,7 +166,12 @@ pub fn names_for(cx: &App, light: bool) -> Vec<SharedString> {
     let registry = ThemeRegistry::global(cx);
     names(cx)
         .into_iter()
-        .filter(|n| registry.themes().get(n).is_some_and(|t| t.mode.is_dark() != light))
+        .filter(|n| {
+            registry
+                .themes()
+                .get(n)
+                .is_some_and(|t| t.mode.is_dark() != light)
+        })
         .collect()
 }
 
@@ -282,4 +287,3 @@ mod tests {
         assert_eq!(pick(ThemeMode::System, true), "Night");
     }
 }
-

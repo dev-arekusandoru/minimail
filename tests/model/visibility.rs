@@ -28,10 +28,17 @@ fn the_block_time_survives_unblock_and_undo_and_is_not_reset_by_blocking_again()
     mb.block_sender("A@x.test", None, NOW + 100);
     assert_eq!(
         mb.blocked(),
-        vec![("a@x.test".to_owned(), NOW + 100), ("b@x.test".to_owned(), NOW)],
+        vec![
+            ("a@x.test".to_owned(), NOW + 100),
+            ("b@x.test".to_owned(), NOW)
+        ],
         "sorted by address, each with its own time"
     );
-    assert_eq!(mb.block_sender("a@x.test", None, NOW + 999), 0, "already blocked");
+    assert_eq!(
+        mb.block_sender("a@x.test", None, NOW + 999),
+        0,
+        "already blocked"
+    );
     assert!(mb.unblock_sender("a@x.test"));
     assert!(mb.undo());
     assert_eq!(mb.blocked()[0], ("a@x.test".to_owned(), NOW + 100));
@@ -100,10 +107,14 @@ fn a_location_query_round_trips_through_its_tokens() {
         "in:inbox plus account: is that account's inbox"
     );
     let all = mb.location_query(&Location::AllInboxes);
-    assert_eq!(mb.query_location(&all), Some(Location::AllInboxes), "a bare in:inbox is every inbox");
+    assert_eq!(
+        mb.query_location(&all),
+        Some(Location::AllInboxes),
+        "a bare in:inbox is every inbox"
+    );
 
-    mb.send_reply_at(1, "sent".into(), false, 0);
-    mb.tick(10);
+    let message = mb.get(1).unwrap().clone();
+    let sent_id = mb.record_sent(message, Some(1), false, 0);
     let sent = mb.location_query(&Location::Sent("personal".into()));
     assert_eq!(mb.ids_matching(&sent, &utc(NOW)).len(), 1);
     assert_eq!(mb.query_location(&sent), Some(Location::Sent("personal".into())));

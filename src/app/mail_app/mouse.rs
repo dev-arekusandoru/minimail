@@ -33,7 +33,7 @@ impl MailApp {
             self.triage.clear_selection();
             self.cursor_to(ix);
             if let Some(id) = self.cursor_id() {
-                self.open_message(id, event.click_count() >= 2);
+                self.open_message(id, event.click_count() >= 2, cx);
             }
         }
         self.scroll_to_cursor();
@@ -86,7 +86,11 @@ impl MailApp {
     }
 
     /// Full-height selection hit target at the row's left edge.
-    pub(super) fn row_selection_target(&self, ix: usize, cx: &Context<Self>) -> crate::app::ui::Observable {
+    pub(super) fn row_selection_target(
+        &self,
+        ix: usize,
+        cx: &Context<Self>,
+    ) -> crate::app::ui::Observable {
         let t = cx.theme();
         let hover = t.primary.opacity(0.2);
         div()

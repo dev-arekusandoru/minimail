@@ -1,10 +1,10 @@
-use gpui_kit::component::ActiveTheme as _;
 use super::*;
+use gpui_kit::component::ActiveTheme as _;
 
 impl MailApp {
     /// Which surface the footer sits under right now.
     pub fn hint_mode(&self) -> HintMode {
-        if self.compose.is_some() {
+        if self.compose_open() {
             HintMode::Compose
         } else if self.snooze.is_some() {
             HintMode::Snooze
@@ -39,8 +39,14 @@ impl MailApp {
             ctx.suggestions = !self.mailbox.pending(id).is_empty();
             if let Some(m) = self.mailbox.get(id) {
                 let tid = m.thread_id;
-                ctx.multi_message =
-                    self.mailbox.messages().iter().filter(|x| x.thread_id == tid).take(2).count() > 1;
+                ctx.multi_message = self
+                    .mailbox
+                    .messages()
+                    .iter()
+                    .filter(|x| x.thread_id == tid)
+                    .take(2)
+                    .count()
+                    > 1;
             }
         }
         ctx
@@ -76,6 +82,7 @@ impl MailApp {
                 format!("{month} {day}")
             }
         }
+
     }
 
     pub(super) fn newest(&self) -> String {
@@ -100,11 +107,13 @@ impl MailApp {
 
     /// Cursor / open / selected / unread state of the row for message `id`.
     pub fn row_visual(&self, id: MessageId) -> RowVisual {
-        let unread = !self.mailbox.is_read(id)
-            && self.mailbox.state_of(id) == Some(TriageState::Inbox);
-        let urgent = self.mailbox.tags(id).iter().any(|tag| {
-            matches!(tag, crate::model::Tag::Urgent(_))
-        });
+        let unread =
+            !self.mailbox.is_read(id) && self.mailbox.state_of(id) == Some(TriageState::Inbox);
+        let urgent = self
+            .mailbox
+            .tags(id)
+            .iter()
+            .any(|tag| matches!(tag, crate::model::Tag::Urgent(_)));
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
@@ -141,7 +150,13 @@ impl MailApp {
     }
 
     /// Message row: sender + date, full-width subject, optional preview, icon cluster.
-    pub(super) fn render_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> crate::app::ui::Observable {
+    pub(super) fn render_row(
+        &self,
+        msg: &Message,
+        ix: usize,
+        newest: &str,
+        cx: &Context<Self>,
+    ) -> crate::app::ui::Observable {
         let t = cx.theme();
         let mut visual = self.row_visual(msg.id);
         visual.cursor = ix == self.cursor_ix();
@@ -154,117 +169,135 @@ impl MailApp {
         let unread = visual.unread;
         let (shown, hidden) = self.row_icons(msg.id, self.list_w);
         let pending = self.mailbox.pending(msg.id);
-        let emphasis = if unread || visual.open { FontWeight::SEMIBOLD } else { FontWeight::NORMAL };
+        let emphasis = if unread || visual.open {
+            FontWeight::SEMIBOLD
+        } else {
+            FontWeight::NORMAL
+        };
         let lines = self.preview_lines;
         let hint = icons::suggestion_summary(&pending);
         let ix_id = msg.id as usize;
         let sender = row::sender_label(msg);
-        let account_icon = if row::shows_account_icon(&self.location().unwrap_or(Location::AllInboxes)) {
-            self.mailbox.account(&msg.account).map(|account| {
-                icons::account_icon(crate::account_style::icon_key(account), &account.color, t, 13.)
-            })
-        } else {
-            None
-        };
-        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, t)
-            .child(self.row_selection_target(ix, cx))
-            .child(
-                div()
-                    .id(("row-body", ix_id))
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .overflow_hidden()
-                    .on_click(Self::row_click(ix, cx))
-                    .child(
-                        div()
-                            .h(px(18.))
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .when_some(account_icon, |d, icon| {
-                                d.child(
-                                    div()
-                                        .id(("row-account-icon", ix_id))
-                                        .test_support()
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .child(icon),
-                                )
-                            })
-                            .child(
+        let account_icon =
+            if row::shows_account_icon(&self.location().unwrap_or(Location::AllInboxes)) {
+                self.mailbox.account(&msg.account).map(|account| {
+                    icons::account_icon(
+                        crate::account_style::icon_key(account),
+                        &account.color,
+                        t,
+                        13.,
+                    )
+                })
+            } else {
+                None
+            };
+        row::frame(
+            div().id(("row", ix_id)).h(px(self.message_row_h())),
+            visual,
+            t,
+        )
+        .child(self.row_selection_target(ix, cx))
+        .child(
+            div()
+                .id(("row-body", ix_id))
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .justify_center()
+                .overflow_hidden()
+                .on_click(Self::row_click(ix, cx))
+                .child(
+                    div()
+                        .h(px(18.))
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .when_some(account_icon, |d, icon| {
+                            d.child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(t.foreground)
-                                    .font_weight(emphasis)
-                                    .child(sender),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .h(px(18.))
-                            .truncate()
-                            .text_color(t.foreground)
-                            .font_weight(emphasis)
-                            .child(msg.subject.clone()),
-                    )
-                    .when(lines > 0, |d| {
-                        d.child(
+                                    .id(("row-account-icon", ix_id))
+                                    .test_support()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .child(icon),
+                            )
+                        })
+                        .child(
                             div()
-                                .h(px(row::PREVIEW_LINE_H * f32::from(lines)))
-                                .line_clamp(lines as usize)
-                                .text_size(px(12.))
-                                .line_height(px(row::PREVIEW_LINE_H))
-                                .text_color(t.muted_foreground)
-                                .child(crate::preview::snippet(&crate::reading::reader_text(msg))),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .items_end()
-                    .justify_start()
-                    .pt(px(3.))
-                    .child(
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(t.foreground)
+                                .font_weight(emphasis)
+                                .child(sender),
+                        ),
+                )
+                .child(
+                    div()
+                        .h(px(18.))
+                        .truncate()
+                        .text_color(t.foreground)
+                        .font_weight(emphasis)
+                        .child(msg.subject.clone()),
+                )
+                .when(lines > 0, |d| {
+                    d.child(
                         div()
-                            .id(("row-date", ix_id))
-                            .h(px(18.))
-                            .flex()
-                            .items_center()
-                            .text_size(px(11.))
-                            .text_color(if unread { t.primary } else { t.muted_foreground })
-                            .on_click(Self::row_click(ix, cx))
-                            .child(date),
+                            .h(px(row::PREVIEW_LINE_H * f32::from(lines)))
+                            .line_clamp(lines as usize)
+                            .text_size(px(12.))
+                            .line_height(px(row::PREVIEW_LINE_H))
+                            .text_color(t.muted_foreground)
+                            .child(crate::preview::snippet(&crate::reading::reader_text(msg))),
                     )
-                    .child(
-                        div()
-                            .id(("row-badges", ix_id))
-                            .h(px(18.))
-                            .flex()
-                            .items_center()
-                            .when(!pending.is_empty(), |d| {
-                                d.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                                    this.suggestions_at(ix, true, w, cx)
-                                }))
-                                .on_mouse_down(
-                                    MouseButton::Right,
-                                    cx.listener(move |this, _: &MouseDownEvent, w, cx| {
-                                        this.suggestions_at(ix, false, w, cx)
-                                    }),
-                                )
-                            })
-                            .child(icons::cluster(&shown, &hidden, &hint, t, ix_id)),
-                    ),
-            )
+                }),
+        )
+        .child(
+            div()
+                .h_full()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .items_end()
+                .justify_start()
+                .pt(px(3.))
+                .child(
+                    div()
+                        .id(("row-date", ix_id))
+                        .h(px(18.))
+                        .flex()
+                        .items_center()
+                        .text_size(px(11.))
+                        .text_color(if unread {
+                            t.primary
+                        } else {
+                            t.muted_foreground
+                        })
+                        .on_click(Self::row_click(ix, cx))
+                        .child(date),
+                )
+                .child(
+                    div()
+                        .id(("row-badges", ix_id))
+                        .h(px(18.))
+                        .flex()
+                        .items_center()
+                        .when(!pending.is_empty(), |d| {
+                            d.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                                this.suggestions_at(ix, true, w, cx)
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, _: &MouseDownEvent, w, cx| {
+                                    this.suggestions_at(ix, false, w, cx)
+                                }),
+                            )
+                        })
+                        .child(icons::cluster(&shown, &hidden, &hint, t, ix_id)),
+                ),
+        )
     }
 }

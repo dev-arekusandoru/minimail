@@ -34,7 +34,8 @@ impl Haystack<'_> {
     }
 
     fn body(&self) -> &str {
-        self.body.get_or_init(|| crate::reading::reader_text(self.m).to_lowercase())
+        self.body
+            .get_or_init(|| crate::reading::reader_text(self.m).to_lowercase())
     }
 
     /// The message's calendar day on the user's clock, `yyyy-mm-dd`. An unreadable
@@ -76,10 +77,10 @@ impl Haystack<'_> {
                 "archived" => self.state == TriageState::Archived,
                 "deleted" => self.state == TriageState::Deleted,
                 folder => match self.state {
-                    TriageState::Filed(id) => self
-                        .mailbox
-                        .folder(id)
-                        .is_some_and(|f| f.name.to_lowercase() == folder || self.mailbox.folder_path(id).to_lowercase() == folder),
+                    TriageState::Filed(id) => self.mailbox.folder(id).is_some_and(|f| {
+                        f.name.to_lowercase() == folder
+                            || self.mailbox.folder_path(id).to_lowercase() == folder
+                    }),
                     _ => false,
                 },
             },
@@ -129,7 +130,10 @@ impl Query {
         };
         self.groups.iter().all(|g| h.group(g))
             && self.text.iter().all(|t| {
-                h.subject().contains(t) || h.name().contains(t) || h.email().contains(t) || h.body().contains(t)
+                h.subject().contains(t)
+                    || h.name().contains(t)
+                    || h.email().contains(t)
+                    || h.body().contains(t)
             })
     }
 }

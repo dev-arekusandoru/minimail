@@ -1,5 +1,9 @@
 //! Built-in, typed global preferences. This module is independent of GPUI.
-use crate::{judge::{Confidence, Mode}, prefs::Setting, theme::ThemeMode};
+use crate::{
+    judge::{Confidence, Mode},
+    prefs::Setting,
+    theme::ThemeMode,
+};
 
 pub const THEME_MODE: Setting<ThemeMode> = Setting::new("theme_mode", ThemeMode::System);
 pub const LIGHT_THEME: Setting<String> =

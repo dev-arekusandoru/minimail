@@ -1,5 +1,5 @@
-use gpui_kit::component::ActiveTheme as _;
 use super::*;
+use gpui_kit::component::ActiveTheme as _;
 
 impl Focusable for MailApp {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -29,10 +29,7 @@ impl Render for MailApp {
         // region when the panes are stacked.
         self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);
         let list = (!in_session).then(|| self.render_list(cx));
-        let reader = match &self.compose {
-            Some(compose) => div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element(),
-            None => self.render_reader(cx),
-        };
+        let reader = self.render_reader(cx);
         if self.find_placement_pending() {
             window.request_animation_frame();
         }
@@ -42,9 +39,7 @@ impl Render for MailApp {
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
-            .when(!self.modal_open(), |d| {
-                d.key_context(MAIL_CONTEXT)
-            })
+            .when(!self.modal_open(), |d| d.key_context(MAIL_CONTEXT))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
@@ -95,22 +90,36 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &ClearSelection, window, cx| this.escape(window, cx)))
             .on_action(cx.listener(|this, _: &OpenMessage, _, cx| {
-                this.open_cursor();
+                this.open_cursor(cx);
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &Archive, w, cx| this.mark(TriageState::Archived, w, cx)))
-            .on_action(cx.listener(|this, _: &Delete, w, cx| this.mark(TriageState::Deleted, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &Archive, w, cx| this.mark(TriageState::Archived, w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &Delete, w, cx| this.mark(TriageState::Deleted, w, cx)),
+            )
             .on_action(cx.listener(|this, _: &File, w, cx| {
                 if !this.modal_open() {
                     this.open_file_picker(w, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &MoveToInbox, w, cx| this.mark(TriageState::Inbox, w, cx)))
-            .on_action(cx.listener(|this, _: &SenderArchive, w, cx| this.confirm_sender(TriageState::Archived, w, cx)))
-            .on_action(cx.listener(|this, _: &SenderDelete, w, cx| this.confirm_sender(TriageState::Deleted, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &MoveToInbox, w, cx| this.mark(TriageState::Inbox, w, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SenderArchive, w, cx| {
+                this.confirm_sender(TriageState::Archived, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SenderDelete, w, cx| {
+                this.confirm_sender(TriageState::Deleted, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &SenderFile, w, cx| this.confirm_sender_file(w, cx)))
-            .on_action(cx.listener(|this, _: &SenderSnooze, w, cx| this.confirm_sender_snooze(w, cx)))
-            .on_action(cx.listener(|this, _: &SenderInbox, w, cx| this.confirm_sender(TriageState::Inbox, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &SenderSnooze, w, cx| this.confirm_sender_snooze(w, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SenderInbox, w, cx| {
+                this.confirm_sender(TriageState::Inbox, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &MarkSpam, w, cx| {
                 if !this.modal_open() {
                     this.open_spam_dialog(w, cx);
@@ -137,16 +146,18 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &Reply, window, cx| {
                 if !this.modal_open() {
-                    this.open_compose(window, cx);
+                    this.reply_to_cursor(DraftKind::Reply, window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ReplyAll, window, cx| {
-                this.open_compose_kind(crate::draft::DraftKind::ReplyAll, window, cx);
+                this.reply_to_cursor(DraftKind::ReplyAll, window, cx);
             }))
             .on_action(cx.listener(|this, _: &Forward, window, cx| {
-                this.open_compose_kind(crate::draft::DraftKind::Forward, window, cx);
+                this.reply_to_cursor(DraftKind::Forward, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
             .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &OpenFind, window, cx| this.open_find(window, cx)))
@@ -162,13 +173,19 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ToggleFindRegex, window, cx| {
                 this.toggle_find_option(|o| o.regex = !o.regex, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &CancelCompose, window, cx| {
-                if this.compose.is_some() {
-                    this.close_modals(window, cx);
-                }
+            .on_action(cx.listener(|this, _: &NewMail, window, cx| this.new_mail(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ShowDrafts, window, cx| this.open_drafts_picker(window, cx)),
+            )
+            // Each countdown toast undoes its own draft; the key path recalls the oldest
+            // hold when nothing has been clicked.
+            .on_action(cx.listener(|this, ev: &UndoSendHold, _, cx| {
+                this.undo_send_hold(ev.draft, cx);
             }))
             // Sidebar navigation and the list header's filter pills.
-            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
+            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| {
+                this.show_location(ev.location.clone(), cx)
+            }))
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))
@@ -181,15 +198,21 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &QuickFilter5, _, cx| this.quick_filter(4, cx)))
             .on_action(cx.listener(|this, _: &QuickFilter6, _, cx| this.quick_filter(5, cx)))
             .on_action(cx.listener(|this, _: &ClearFilters, _, cx| this.clear_filters(cx)))
-            .on_action(cx.listener(|this, _: &AddFilter, window, cx| this.open_add_filter(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &AddFilter, window, cx| this.open_add_filter(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleHelp, w, cx| this.toggle_help(w, cx)))
             .on_action(cx.listener(|this, _: &OpenSnoozePicker, w, cx| {
                 if !this.modal_open() {
                     this.open_snooze(w, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
-            .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
+            .on_action(
+                cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)),
+            )
             .on_action(cx.listener(|this, _: &AcceptRule, w, cx| this.accept_rule(w, cx)))
             .on_action(cx.listener(|this, _: &DismissRule, _, cx| this.dismiss_rule(cx)))
             .on_action(cx.listener(|this, _: &ToggleRules, w, cx| this.toggle_rules(w, cx)))
@@ -199,8 +222,12 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &Unsubscribe, w, cx| this.unsubscribe(w, cx)))
             .on_action(cx.listener(|this, _: &SummarizeThread, w, cx| this.summarize(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSettings, w, cx| this.toggle_settings(w, cx)))
-            .on_action(cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)))
-            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| this.open_settings(true, w, cx)))
+            .on_action(
+                cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ManageAccounts, w, cx| this.open_settings(true, w, cx)),
+            )
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
@@ -210,7 +237,10 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
                 this.preview_lines = crate::preview::cycle_lines(this.preview_lines);
-                let text = format!("Preview: {}", crate::preview::lines_label(this.preview_lines));
+                let text = format!(
+                    "Preview: {}",
+                    crate::preview::lines_label(this.preview_lines)
+                );
                 this.show_toast(text, w, cx);
                 cx.notify();
             }))
@@ -226,12 +256,18 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &NextInThread, w, cx| this.step_thread(1, w, cx)))
             .on_action(cx.listener(|this, _: &PrevInThread, w, cx| this.step_thread(-1, w, cx)))
-            .on_action(cx.listener(|this, _: &ToggleReaderMode, _, cx| this.toggle_opened_reader_mode(cx)))
-            .on_action(cx.listener(|this, _: &ToggleThreadExpansion, _, cx| this.toggle_thread_expansion(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleReaderMode, _, cx| this.toggle_opened_reader_mode(cx)),
+            )
+            .on_action(cx.listener(|this, _: &ToggleThreadExpansion, _, cx| {
+                this.toggle_thread_expansion(cx)
+            }))
             .on_action(cx.listener(|this, _: &GrowListPane, w, cx| this.grow_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
-            .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
+            .on_action(
+                cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .child(self.render_titlebar(window, cx))
             .child(self.render_panes(list, reader, window, cx))

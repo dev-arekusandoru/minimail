@@ -23,7 +23,13 @@ fn mailbox() -> Mailbox {
     Mailbox::from_json(
         &serde_json::json!([
             m(1, 1, 1, "Budget", "Draft budget attached."),
-            m(2, 1, 2, "Re: Budget", "Agreed on the budget.\n\n> The budget is tight."),
+            m(
+                2,
+                1,
+                2,
+                "Re: Budget",
+                "Agreed on the budget.\n\n> The budget is tight."
+            ),
             m(3, 1, 3, "Re: Budget", "Thanks"),
             m(4, 2, 4, "Lunch", "Noon?"),
         ])
@@ -72,7 +78,11 @@ fn cmd_f_opens_the_bar_and_typing_counts_matches(cx: &mut TestAppContext) {
     assert_eq!(h.found(), Some((0, 0)), "nothing typed yet");
 
     h.type_text("budget");
-    assert_eq!(h.found(), Some((1, 4)), "subject, two bodies and one folded quote; first is current");
+    assert_eq!(
+        h.found(),
+        Some((1, 4)),
+        "subject, two bodies and one folded quote; first is current"
+    );
     h.type_text("x");
     assert_eq!(h.found(), Some((0, 0)), "\"budgetx\" matches nothing");
 }
@@ -82,7 +92,10 @@ fn typing_only_counts_and_highlights_and_enter_lands(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
     h.find("budget");
     assert_eq!(h.found(), Some((1, 4)));
-    assert!(!h.read(|a| a.reader_expanded(1) || a.reader_expanded(2)), "typing expands nothing");
+    assert!(
+        !h.read(|a| a.reader_expanded(1) || a.reader_expanded(2)),
+        "typing expands nothing"
+    );
     assert!(!h.read(|a| a.reader_quoted_open(2)), "and reveals no quote");
     assert!(!h.read(|a| a.tabs.tabs()[0].pinned), "and does not pin");
     h.type_text("x");
@@ -93,10 +106,16 @@ fn typing_only_counts_and_highlights_and_enter_lands(cx: &mut TestAppContext) {
     // The first enter lands on the match typing chose (the opened message's subject).
     h.keys("enter");
     assert_eq!(h.found(), Some((1, 4)));
-    assert!(!h.read(|a| a.tabs.tabs()[0].pinned), "that match needs nothing revealed");
+    assert!(
+        !h.read(|a| a.tabs.tabs()[0].pinned),
+        "that match needs nothing revealed"
+    );
     h.keys("enter");
     assert_eq!(h.found(), Some((2, 4)), "now in message 1's body");
-    assert!(h.read(|a| a.reader_expanded(1)), "landing expands the collapsed message");
+    assert!(
+        h.read(|a| a.reader_expanded(1)),
+        "landing expands the collapsed message"
+    );
     assert!(h.read(|a| a.tabs.tabs()[0].pinned), "which pins the tab");
 }
 
@@ -114,7 +133,10 @@ fn enter_steps_through_matches_expanding_collapsed_messages_and_quotes(cx: &mut 
 
     h.keys("enter");
     assert_eq!(h.found(), Some((4, 4)), "the folded quote of message 2");
-    assert!(h.read(|a| a.reader_quoted_open(2)), "landing in hidden quoted text reveals it");
+    assert!(
+        h.read(|a| a.reader_quoted_open(2)),
+        "landing in hidden quoted text reveals it"
+    );
 
     h.keys("enter");
     assert_eq!(h.found(), Some((1, 4)), "wraps forward");
@@ -124,7 +146,11 @@ fn enter_steps_through_matches_expanding_collapsed_messages_and_quotes(cx: &mut 
     assert_eq!(h.found(), Some((3, 4)));
     h.keys("cmd-g");
     assert_eq!(h.found(), Some((4, 4)));
-    assert_eq!(h.opened(), Some(3), "finding never changes the opened message");
+    assert_eq!(
+        h.opened(),
+        Some(3),
+        "finding never changes the opened message"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -134,7 +160,11 @@ fn the_option_toggles_change_the_results(cx: &mut TestAppContext) {
     assert_eq!(h.found(), Some((1, 4)));
 
     h.keys("alt-c");
-    assert_eq!(h.found(), Some((1, 3)), "case-sensitive: \"Budget\" in the subject no longer matches");
+    assert_eq!(
+        h.found(),
+        Some((1, 3)),
+        "case-sensitive: \"Budget\" in the subject no longer matches"
+    );
     h.keys("alt-c");
     assert_eq!(h.found(), Some((1, 4)));
 
@@ -152,7 +182,11 @@ fn the_option_toggles_change_the_results(cx: &mut TestAppContext) {
 
     h.type_text("(");
     assert!(h.read(|a| a.find_invalid()), "\"bud.et(\" does not compile");
-    assert_eq!(h.found(), Some((0, 0)), "an invalid regex matches nothing and does not panic");
+    assert_eq!(
+        h.found(),
+        Some((0, 0)),
+        "an invalid regex matches nothing and does not panic"
+    );
     h.keys("backspace");
     assert!(!h.read(|a| a.find_invalid()));
     assert_eq!(h.found(), Some((1, 4)));
@@ -170,10 +204,18 @@ fn escape_closes_the_bar_and_returns_focus_to_the_app(cx: &mut TestAppContext) {
     h.keys("escape");
     assert!(!h.read(|a| a.find_open()));
     assert!(!h.exists("find-bar"));
-    assert_eq!(h.found(), None, "no count and no highlights while the bar is closed");
+    assert_eq!(
+        h.found(),
+        None,
+        "no count and no highlights while the bar is closed"
+    );
     let before = h.read(|a| a.triage.cursor_index());
     h.keys("k");
-    assert_ne!(h.read(|a| a.triage.cursor_index()), before, "list keys work again");
+    assert_ne!(
+        h.read(|a| a.triage.cursor_index()),
+        before,
+        "list keys work again"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -190,8 +232,15 @@ fn reopening_shows_the_previous_query_selected(cx: &mut TestAppContext) {
         h.cx.run_until_parked();
     }
     assert!(h.read(|a| a.find_open()));
-    assert_eq!(h.app.read_with(h.cx, |a, cx| a.find_query(cx)), Some("budget".to_owned()));
-    assert_eq!(h.found(), Some((1, 3)), "the options came back too (case-sensitive)");
+    assert_eq!(
+        h.app.read_with(h.cx, |a, cx| a.find_query(cx)),
+        Some("budget".to_owned())
+    );
+    assert_eq!(
+        h.found(),
+        Some((1, 3)),
+        "the options came back too (case-sensitive)"
+    );
     h.type_text("lunch");
     assert_eq!(
         h.app.read_with(h.cx, |a, cx| a.find_query(cx)),
@@ -206,19 +255,30 @@ fn each_tab_keeps_its_own_find_and_closing_the_tab_drops_it(cx: &mut TestAppCont
     h.find("budget");
     h.keys("enter enter");
     assert_eq!(h.found(), Some((2, 4)));
-    assert!(h.read(|a| a.tabs.tabs()[0].pinned), "landing pinned the tab");
+    assert!(
+        h.read(|a| a.tabs.tabs()[0].pinned),
+        "landing pinned the tab"
+    );
 
     h.row(4);
     assert!(!h.read(|a| a.find_open()), "the new tab has no find bar");
     assert!(!h.exists("find-bar"));
     h.click(("reader-tab", 1usize));
-    assert_eq!(h.found(), Some((2, 4)), "back on the first tab: same query, same position");
+    assert_eq!(
+        h.found(),
+        Some((2, 4)),
+        "back on the first tab: same query, same position"
+    );
     assert!(h.exists("find-bar"));
 
     h.keys("escape cmd-w");
     h.row(3);
     h.keys("cmd-f");
-    assert_eq!(h.found(), Some((0, 0)), "a reopened tab starts with an empty query");
+    assert_eq!(
+        h.found(),
+        Some((0, 0)),
+        "a reopened tab starts with an empty query"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -227,7 +287,10 @@ fn cmd_shift_f_opens_global_search_like_slash(cx: &mut TestAppContext) {
     h.row(3);
     h.keys("cmd-shift-f");
     assert!(h.read(|a| a.palette_open()));
-    assert_eq!(h.app.read_with(h.cx, |a, cx| a.palette_query(cx)), Some("/".to_owned()));
+    assert_eq!(
+        h.app.read_with(h.cx, |a, cx| a.palette_query(cx)),
+        Some("/".to_owned())
+    );
     h.keys("escape escape");
     assert!(!h.read(|a| a.palette_open()));
     h.keys("/");

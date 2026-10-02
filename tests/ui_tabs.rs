@@ -44,7 +44,13 @@ impl Harness<'_> {
     }
     /// `(thread, pinned)` of every tab, left to right.
     fn tabs(&mut self) -> Vec<(u32, bool)> {
-        self.read(|a| a.tabs.tabs().iter().map(|t| (t.thread, t.pinned)).collect())
+        self.read(|a| {
+            a.tabs
+                .tabs()
+                .iter()
+                .filter_map(|t| t.thread_id().map(|thread| (thread, t.pinned)))
+                .collect()
+        })
     }
     fn opened(&mut self) -> Option<MessageId> {
         self.read(|a| a.opened())
@@ -57,7 +63,11 @@ fn opening_another_message_replaces_the_preview_tab(cx: &mut TestAppContext) {
     h.row(3);
     assert_eq!(h.tabs(), vec![(2, false)]);
     h.row(4);
-    assert_eq!(h.tabs(), vec![(3, false)], "the preview was replaced, not added to");
+    assert_eq!(
+        h.tabs(),
+        vec![(3, false)],
+        "the preview was replaced, not added to"
+    );
     assert_eq!(h.opened(), Some(4));
 }
 
@@ -109,7 +119,11 @@ fn opening_a_message_of_a_tabbed_thread_reuses_its_tab(cx: &mut TestAppContext) 
     h.row(2);
     h.row(1);
     assert_eq!(h.tabs(), vec![(1, false)]);
-    assert_eq!(h.opened(), Some(1), "the tab now shows the message that was opened");
+    assert_eq!(
+        h.opened(),
+        Some(1),
+        "the tab now shows the message that was opened"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -139,7 +153,11 @@ fn the_close_button_closes_only_its_tab(cx: &mut TestAppContext) {
     h.row(4);
     h.click(("reader-tab-close", 2usize));
     assert_eq!(h.tabs(), vec![(3, false)]);
-    assert_eq!(h.opened(), Some(4), "closing another tab does not switch to it");
+    assert_eq!(
+        h.opened(),
+        Some(4),
+        "closing another tab does not switch to it"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -166,16 +184,26 @@ fn switching_tabs_moves_the_list_cursor_but_not_the_selection(cx: &mut TestAppCo
 }
 
 #[gpui_kit::gpui::test]
-fn a_preview_closes_when_its_thread_leaves_the_list_but_a_pinned_tab_stays(cx: &mut TestAppContext) {
+fn a_preview_closes_when_its_thread_leaves_the_list_but_a_pinned_tab_stays(
+    cx: &mut TestAppContext,
+) {
     let mut h = harness_with(cx, mailbox());
     h.row(3);
     h.keys("e");
-    assert_eq!(h.tabs(), vec![], "archiving the only message closes the preview");
+    assert_eq!(
+        h.tabs(),
+        vec![],
+        "archiving the only message closes the preview"
+    );
 
     h.row(4);
     h.keys("enter e");
     assert_eq!(h.tabs(), vec![(3, true)], "a pinned tab stays open");
-    assert_eq!(h.opened(), Some(4), "and keeps showing the archived message");
+    assert_eq!(
+        h.opened(),
+        Some(4),
+        "and keeps showing the archived message"
+    );
 
     // A thread that still has a message in the list keeps its preview.
     h.row(2);
@@ -190,7 +218,10 @@ fn tabs_keep_their_thread_state_while_another_tab_is_active(cx: &mut TestAppCont
     h.keys("shift-o");
     assert!(h.read(|a| a.reader_expanded(1)));
     h.row(4);
-    assert!(h.read(|a| a.reader_expanded(1)), "thread 1 keeps its expansion in the background");
+    assert!(
+        h.read(|a| a.reader_expanded(1)),
+        "thread 1 keeps its expansion in the background"
+    );
     h.click(("reader-tab", 1usize));
     assert!(h.read(|a| a.reader_expanded(1)));
     assert_eq!(h.opened(), Some(2));
@@ -204,7 +235,10 @@ fn a_session_hides_the_tabs_and_they_return_afterwards(cx: &mut TestAppContext) 
     assert!(h.exists(("reader-tab", 2usize)));
     h.keys("t");
     assert_eq!(h.opened(), Some(4), "the session shows its own message");
-    assert!(!h.exists(("reader-tab", 2usize)), "no tab bar during a session");
+    assert!(
+        !h.exists(("reader-tab", 2usize)),
+        "no tab bar during a session"
+    );
     assert_eq!(h.tabs(), vec![(2, true)], "the tabs are untouched");
     h.keys("escape");
     assert!(h.exists(("reader-tab", 2usize)));
@@ -229,9 +263,8 @@ fn the_avatar_setting_controls_the_tab_icon(cx: &mut TestAppContext) {
 fn tab_avatar_title_and_close_are_evenly_spaced(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
     h.row(3);
-    let (avatar, title, close) = h
-        .cx
-        .update_window(h.window, |_, window, cx| {
+    let (avatar, title, close) =
+        h.cx.update_window(h.window, |_, window, cx| {
             window.render_frame(cx);
             (
                 window.find(("reader-tab-avatar", 2usize)).bounds(),
@@ -244,7 +277,10 @@ fn tab_avatar_title_and_close_are_evenly_spaced(cx: &mut TestAppContext) {
     let after = f32::from(close.left() - title.right());
     assert!((before - after).abs() <= 1., "gaps {before} vs {after}");
     assert!(before <= 8., "gap {before} too wide");
-    assert!(f32::from(avatar.size.height) >= 16., "avatar clipped: {avatar:?}");
+    assert!(
+        f32::from(avatar.size.height) >= 16.,
+        "avatar clipped: {avatar:?}"
+    );
     let (a, c) = (avatar.center().y, close.center().y);
     assert!((f32::from(a - c)).abs() <= 1., "not vertically aligned");
 }

@@ -2,10 +2,10 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, AnyWindowHandle, Pixels, TestAppContext, point, px};
+use gpui_kit::{AnyWindowHandle, AppContext, Pixels, TestAppContext, point, px};
 use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::clock::DAY;
-use mail_classifier::model::{Tag, TriageState};
+use mail_classifier::model::{self, Tag, TriageState};
 use mail_classifier::theme::ThemeMode;
 
 #[path = "ui_ext/harness.rs"]
@@ -18,13 +18,15 @@ const APPEARANCE: usize = 1;
 const INBOX: usize = 2;
 
 fn app(cx: &mut TestAppContext) -> Harness<'_> {
-    harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]))
+    harness_with(
+        cx,
+        mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]),
+    )
 }
 
 /// Name of the theme the app is showing right now.
 fn theme_name(h: &mut Harness<'_>, window: AnyWindowHandle) -> String {
-    h.cx
-        .update_window(window, |_, _, cx| cx.theme().theme_name().to_string())
+    h.cx.update_window(window, |_, _, cx| cx.theme().theme_name().to_string())
         .unwrap()
 }
 
@@ -33,11 +35,12 @@ fn theme_name(h: &mut Harness<'_>, window: AnyWindowHandle) -> String {
 fn follow_up_width(h: &mut Harness<'_>) -> Pixels {
     let window = h.settings_window().expect("the settings window is open");
     for _ in 0..8 {
-        let found = h
-            .cx
-            .update_window(window, |_, window, cx| {
+        let found =
+            h.cx.update_window(window, |_, window, cx| {
                 window.render_frame(cx);
-                window.try_find("number-2-0-2").map(|field| field.bounds().size.width)
+                window
+                    .try_find("number-2-0-2")
+                    .map(|field| field.bounds().size.width)
             })
             .expect("settings window alive");
         h.cx.run_until_parked();
@@ -66,7 +69,11 @@ fn choosing_a_mode_applies_that_appearance_theme(cx: &mut TestAppContext) {
 
     h.settings_click("mode-system");
     assert_eq!(h.read(|a| a.theme_preferences()).0, ThemeMode::System);
-    assert_eq!(h.read(|a| a.theme_preferences()).1, light, "the light pick survives the round trip");
+    assert_eq!(
+        h.read(|a| a.theme_preferences()).1,
+        light,
+        "the light pick survives the round trip"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -76,26 +83,37 @@ fn the_picker_of_the_current_mode_offers_that_appearance_theme(cx: &mut TestAppC
     // user really sees.
     h.cx.update(mail_classifier::theme::init);
     let window = h.settings_open_page(APPEARANCE);
-    let dark_names = h
-        .cx
-        .update_window(window, |_, _, cx| mail_classifier::theme::names_for(cx, false))
+    let dark_names =
+        h.cx.update_window(window, |_, _, cx| {
+            mail_classifier::theme::names_for(cx, false)
+        })
         .unwrap();
-    let light_names = h
-        .cx
-        .update_window(window, |_, _, cx| mail_classifier::theme::names_for(cx, true))
+    let light_names =
+        h.cx.update_window(window, |_, _, cx| {
+            mail_classifier::theme::names_for(cx, true)
+        })
         .unwrap();
-    assert!(dark_names.len() > 1, "more than one dark theme to pick from");
+    assert!(
+        dark_names.len() > 1,
+        "more than one dark theme to pick from"
+    );
 
     // In dark mode the first picker lists the dark themes, and picking one applies it.
     h.settings_click("mode-dark");
     h.settings_pick_option(0, 1, 1);
-    assert_eq!(h.read(|a| a.theme_preferences()).2, dark_names[1].to_string());
+    assert_eq!(
+        h.read(|a| a.theme_preferences()).2,
+        dark_names[1].to_string()
+    );
     assert_eq!(theme_name(&mut h, window), dark_names[1].to_string());
 
     // The light mode shows the light themes instead, and the dark pick is remembered.
     h.settings_click("mode-light");
     assert_eq!(theme_name(&mut h, window), light_names[0].to_string());
-    assert_eq!(h.read(|a| a.theme_preferences()).2, dark_names[1].to_string());
+    assert_eq!(
+        h.read(|a| a.theme_preferences()).2,
+        dark_names[1].to_string()
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -103,17 +121,25 @@ fn a_chosen_theme_survives_closing_the_settings_window(cx: &mut TestAppContext) 
     let mut h = app(cx);
     h.cx.update(mail_classifier::theme::init);
     let window = h.settings_open_page(APPEARANCE);
-    let dark_names = h
-        .cx
-        .update_window(window, |_, _, cx| mail_classifier::theme::names_for(cx, false))
+    let dark_names =
+        h.cx.update_window(window, |_, _, cx| {
+            mail_classifier::theme::names_for(cx, false)
+        })
         .unwrap();
     h.settings_click("mode-dark");
     h.settings_pick_option(0, 1, 1);
 
     h.settings_keys("escape");
     let window = h.settings_open_page(APPEARANCE);
-    assert_eq!(h.read(|a| a.theme_preferences()).2, dark_names[1].to_string());
-    assert_eq!(theme_name(&mut h, window), dark_names[1].to_string(), "still the chosen theme");
+    assert_eq!(
+        h.read(|a| a.theme_preferences()).2,
+        dark_names[1].to_string()
+    );
+    assert_eq!(
+        theme_name(&mut h, window),
+        dark_names[1].to_string(),
+        "still the chosen theme"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -185,15 +211,18 @@ fn the_follow_up_row_shows_its_number_and_steps_it(cx: &mut TestAppContext) {
     // Typing in the field reaches the app the same way stepping does: click the digits,
     // left of the ± buttons, and type over them.
     let window = h.settings_window().expect("the settings window is open");
-    h.cx
-        .update_window(window, |_, window, cx| {
-            window.click_at("number-2-0-2", point(px(24.), px(12.)), cx)
-        })
-        .expect("settings window alive");
+    h.cx.update_window(window, |_, window, cx| {
+        window.click_at("number-2-0-2", point(px(24.), px(12.)), cx)
+    })
+    .expect("settings window alive");
     h.cx.run_until_parked();
     h.settings_keys("cmd-a");
     h.settings_type("7");
-    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 7 * DAY, "a typed value is applied");
+    assert_eq!(
+        h.read(|a| a.mailbox.follow_up_timeout()),
+        7 * DAY,
+        "a typed value is applied"
+    );
     assert!(
         follow_up_width(&mut h) >= px(64.),
         "the field still has room to show the typed number"
@@ -204,23 +233,46 @@ fn the_follow_up_row_shows_its_number_and_steps_it(cx: &mut TestAppContext) {
 fn a_changed_row_undoes_itself_and_the_page_reset_still_works(cx: &mut TestAppContext) {
     let mut h = app(cx);
     h.settings_open_page(INBOX);
-    assert!(!h.settings_has("row-undo-2-0-2"), "a row at its default has nothing to undo");
+    assert!(
+        !h.settings_has("row-undo-2-0-2"),
+        "a row at its default has nothing to undo"
+    );
 
     h.settings_click_in(0, 2, "increment");
-    assert!(h.settings_has("row-undo-2-0-2"), "the changed row offers its own undo");
-    assert!(h.settings_has("reset"), "the page offers a reset while a row differs");
+    assert!(
+        h.settings_has("row-undo-2-0-2"),
+        "the changed row offers its own undo"
+    );
+    assert!(
+        h.settings_has("reset"),
+        "the page offers a reset while a row differs"
+    );
 
     h.settings_click("row-undo-2-0-2");
-    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 3 * DAY, "only that row went back");
-    assert!(!h.settings_has("row-undo-2-0-2"), "a restored row has nothing left to undo");
+    assert_eq!(
+        h.read(|a| a.mailbox.follow_up_timeout()),
+        3 * DAY,
+        "only that row went back"
+    );
+    assert!(
+        !h.settings_has("row-undo-2-0-2"),
+        "a restored row has nothing left to undo"
+    );
 
     // Two rows off at once: the page reset puts both back.
     h.settings_click_in(0, 0, "check");
     h.settings_click_in(0, 1, "increment");
     assert!(h.read(|a| a.group_threads));
     h.settings_click("reset");
-    assert!(!h.read(|a| a.group_threads), "the page reset took the switch back");
-    assert_eq!(h.read(|a| a.preview_lines), 2, "and the preview lines with it");
+    assert!(
+        !h.read(|a| a.group_threads),
+        "the page reset took the switch back"
+    );
+    assert_eq!(
+        h.read(|a| a.preview_lines),
+        2,
+        "and the preview lines with it"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -235,9 +287,34 @@ fn the_group_switch_reaches_the_inbox(cx: &mut TestAppContext) {
 fn lowering_the_follow_up_row_resurfaces_a_waiting_thread_on_tick(cx: &mut TestAppContext) {
     let mut h = app(cx);
     // Reply and expect an answer: the thread now waits on the default 3-day timeout.
-    h.app.update(h.cx, |a, _| a.mailbox.send_reply_at(1, "on it".into(), true, harness::NOON));
+    // A confirmed reply of our own: the app only creates these when a provider confirms a
+    // send, so the test records one directly on the model it is exercising.
+    h.app.update(h.cx, |a, _| {
+        let original = a.mailbox.get(1).cloned().expect("message 1");
+        a.mailbox.record_sent(
+            model::Message {
+                id: 0,
+                thread_id: original.thread_id,
+                from_name: "You".into(),
+                from_email: "you@example.com".into(),
+                to: "alice@example.com".into(),
+                subject: original.subject.clone(),
+                body: "on it".into(),
+                received: "2026-09-01T09:05:00Z".into(),
+                state: model::TriageState::Inbox,
+                account: original.account.clone(),
+                ..original.clone()
+            },
+            Some(1),
+            true,
+            harness::NOON,
+        );
+    });
     h.advance(DAY);
-    assert!(!h.has_tag(1, Tag::FollowUp), "three days of patience: one day is not enough");
+    assert!(
+        !h.has_tag(1, Tag::FollowUp),
+        "three days of patience: one day is not enough"
+    );
 
     h.settings_open_page(INBOX);
     h.settings_click_in(0, 2, "decrement");
@@ -247,6 +324,12 @@ fn lowering_the_follow_up_row_resurfaces_a_waiting_thread_on_tick(cx: &mut TestA
 
     h.tick();
     assert_eq!(h.state_of(1), TriageState::Inbox);
-    assert!(h.has_tag(1, Tag::FollowUp), "the overdue thread is flagged for follow-up");
-    assert!(!h.has_tag(1, Tag::AwaitingReply), "resurfacing clears Awaiting Reply");
+    assert!(
+        h.has_tag(1, Tag::FollowUp),
+        "the overdue thread is flagged for follow-up"
+    );
+    assert!(
+        !h.has_tag(1, Tag::AwaitingReply),
+        "resurfacing clears Awaiting Reply"
+    );
 }

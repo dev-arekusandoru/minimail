@@ -43,12 +43,18 @@ impl CommandPalette {
         if !query.is_empty() {
             state.update(cx, |state, cx| state.set_query(query, window, cx));
         }
-        Self { state, query: query.to_owned(), commands: actions::commands() }
+        Self {
+            state,
+            query: query.to_owned(),
+            commands: actions::commands(),
+        }
     }
 
     /// Focus the search field.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
-        self.state.clone().update(cx, |state, cx| state.focus(window, cx));
+        self.state
+            .clone()
+            .update(cx, |state, cx| state.focus(window, cx));
     }
 
     /// The typed text.
@@ -132,7 +138,9 @@ impl Render for CommandPalette {
 
         div()
             .key_context(PALETTE_CONTEXT)
-            .on_action(cx.listener(|_, _: &ToggleCommandPalette, _, cx| cx.emit(PaletteEvent::Dismiss)))
+            .on_action(
+                cx.listener(|_, _: &ToggleCommandPalette, _, cx| cx.emit(PaletteEvent::Dismiss)),
+            )
             .child(command)
     }
 }
@@ -145,7 +153,9 @@ impl Render for CommandPalette {
 fn command_item(spec: &CommandSpec, window: &Window) -> CommandItem {
     let item = CommandItem::new().label(spec.name);
     let action = (spec.action)();
-    let documented = Keystroke::parse(spec.key).ok().filter(|_| !spec.key.contains(' '));
+    let documented = Keystroke::parse(spec.key)
+        .ok()
+        .filter(|_| !spec.key.contains(' '));
     let bound = window.highest_precedence_binding_for_action(action.as_ref());
     let faithful = match (&documented, &bound) {
         (Some(doc), Some(bound)) => match bound.keystrokes() {
@@ -166,7 +176,13 @@ fn command_item(spec: &CommandSpec, window: &Window) -> CommandItem {
     }
     let (name, key) = (spec.name, spec.key);
     item.child(move |_, cx| {
-        div().flex().w_full().items_center().justify_between().child(name).child(shortcut_chips(key, cx))
+        div()
+            .flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(name)
+            .child(shortcut_chips(key, cx))
     })
 }
 
@@ -190,7 +206,10 @@ fn sections(query: &str, commands: &[CommandSpec]) -> Vec<(Category, Vec<usize>)
         })
         .collect();
     found.sort_by_key(|&(best, ..)| best);
-    found.into_iter().map(|(_, category, rows)| (category, rows)).collect()
+    found
+        .into_iter()
+        .map(|(_, category, rows)| (category, rows))
+        .collect()
 }
 
 #[cfg(test)]
@@ -214,7 +233,10 @@ mod tests {
         let found = sections("archive", &cmds);
         assert!(found.iter().all(|(_, rows)| !rows.is_empty()));
         let (_, first_rows) = &found[0];
-        assert_eq!(cmds[first_rows[0]].name, "Archive", "prefix beats the `Go to archive` substring");
+        assert_eq!(
+            cmds[first_rows[0]].name, "Archive",
+            "prefix beats the `Go to archive` substring"
+        );
     }
 
     #[test]

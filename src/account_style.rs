@@ -8,8 +8,9 @@
 use crate::model::Account;
 
 /// Account tint colors (`#rrggbb`), the first six being the colors accounts always had.
-pub const COLORS: [&str; 8] =
-    ["#61afef", "#c678dd", "#98c379", "#e5c07b", "#e06c75", "#56b6c2", "#d19a66", "#be5046"];
+pub const COLORS: [&str; 8] = [
+    "#61afef", "#c678dd", "#98c379", "#e5c07b", "#e06c75", "#56b6c2", "#d19a66", "#be5046",
+];
 
 /// Lucide icon keys an account can pick from, as `(key, label)`. Keys are what gets stored.
 pub const ICONS: [(&str, &str); 16] = [
@@ -40,13 +41,18 @@ pub struct AccountStyle {
 
 /// Style for the `index`-th account created: palette order, wrapping.
 pub fn style_for_index(index: usize) -> AccountStyle {
-    AccountStyle { icon: ICONS[index % ICONS.len()].0, color: COLORS[index % COLORS.len()] }
+    AccountStyle {
+        icon: ICONS[index % ICONS.len()].0,
+        color: COLORS[index % COLORS.len()],
+    }
 }
 
 /// Style for an account that has no stored icon: stable per id (FNV-1a), so it survives
 /// accounts being added or removed.
 pub fn style_for_id(id: &str) -> AccountStyle {
-    let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+    let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+    });
     style_for_index(hash as usize)
 }
 
@@ -58,12 +64,19 @@ pub fn known_icon(key: &str) -> Option<&'static str> {
 /// The icon key to draw for `account`: its stored icon, or the id-derived default when none (or
 /// an unknown one, e.g. from a newer build) is stored.
 pub fn icon_key(account: &Account) -> &'static str {
-    account.icon.as_deref().and_then(known_icon).unwrap_or_else(|| style_for_id(&account.id).icon)
+    account
+        .icon
+        .as_deref()
+        .and_then(known_icon)
+        .unwrap_or_else(|| style_for_id(&account.id).icon)
 }
 
 /// The label of an icon key, `None` when unknown.
 pub fn icon_label(key: &str) -> Option<&'static str> {
-    ICONS.iter().find(|(k, _)| *k == key).map(|(_, label)| *label)
+    ICONS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, label)| *label)
 }
 
 /// A nickname as stored: trimmed, and `None` when empty or whitespace-only.
@@ -73,7 +86,11 @@ pub fn normalize_nickname(input: &str) -> Option<String> {
 }
 
 fn set_nickname(account: &Account) -> Option<&str> {
-    account.nickname.as_deref().map(str::trim).filter(|n| !n.is_empty())
+    account
+        .nickname
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
 }
 
 /// How the UI names `account`: its nickname when set, else its `name`.
@@ -95,11 +112,19 @@ mod tests {
     #[test]
     fn an_account_stored_without_an_icon_still_parses() {
         let old: Account =
-            serde_json::from_str(r##"{"id":"x","name":"X","email":"x@y.z","color":"#61afef"}"##).unwrap();
+            serde_json::from_str(r##"{"id":"x","name":"X","email":"x@y.z","color":"#61afef"}"##)
+                .unwrap();
         assert_eq!(old.icon, None);
         let json = serde_json::to_string(&old).unwrap();
-        assert!(!json.contains("icon"), "unset icons are not written: {json}");
-        let styled = Account { icon: Some("star".into()), nickname: Some("Mine".into()), ..old };
+        assert!(
+            !json.contains("icon"),
+            "unset icons are not written: {json}"
+        );
+        let styled = Account {
+            icon: Some("star".into()),
+            nickname: Some("Mine".into()),
+            ..old
+        };
         let back: Account = serde_json::from_str(&serde_json::to_string(&styled).unwrap()).unwrap();
         assert_eq!(back, styled);
     }
@@ -130,7 +155,11 @@ mod tests {
         assert_eq!(display_name(&a), "Alice");
         assert_eq!(nickname_or(&a, "a@x.io"), "a@x.io");
         a.nickname = Some("  ".into());
-        assert_eq!(display_name(&a), "Alice", "a blank stored nickname is unset");
+        assert_eq!(
+            display_name(&a),
+            "Alice",
+            "a blank stored nickname is unset"
+        );
         assert_eq!(nickname_or(&a, "a@x.io"), "a@x.io");
         a.nickname = Some("Home".into());
         assert_eq!(display_name(&a), "Home");
@@ -139,7 +168,13 @@ mod tests {
 
     #[test]
     fn index_styles_walk_the_palette_and_wrap() {
-        assert_eq!(style_for_index(0), AccountStyle { icon: "mail", color: "#61afef" });
+        assert_eq!(
+            style_for_index(0),
+            AccountStyle {
+                icon: "mail",
+                color: "#61afef"
+            }
+        );
         assert_eq!(style_for_index(1).icon, "briefcase");
         assert_eq!(style_for_index(COLORS.len()).color, COLORS[0]);
         assert_ne!(style_for_index(COLORS.len()).icon, style_for_index(0).icon);
@@ -168,8 +203,9 @@ mod tests {
     #[test]
     fn id_default_is_deterministic_and_independent_of_other_accounts() {
         assert_eq!(style_for_id("gmail:me@x.io"), style_for_id("gmail:me@x.io"));
-        let distinct: std::collections::HashSet<_> =
-            (0..40).map(|i| style_for_id(&format!("gmail:user{i}@x.io")).icon).collect();
+        let distinct: std::collections::HashSet<_> = (0..40)
+            .map(|i| style_for_id(&format!("gmail:user{i}@x.io")).icon)
+            .collect();
         assert!(distinct.len() > 4);
     }
 

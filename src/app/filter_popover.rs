@@ -28,7 +28,11 @@ pub const FILTER_PICKER_CONTEXT: &str = "FilterPicker";
 
 pub enum FilterPopoverEvent {
     /// Add `value` to `field`, or swap it in for `replacing` when editing a pill.
-    Apply { field: Field, value: String, replacing: Option<String> },
+    Apply {
+        field: Field,
+        value: String,
+        replacing: Option<String>,
+    },
     Dismiss,
 }
 
@@ -64,19 +68,27 @@ impl FilterPopover {
         let command = cx.new(|cx| CommandState::new(window, cx));
         let input = cx.new(|cx| InputState::new(window, cx));
         let calendar = cx.new(|cx| CalendarState::new(window, cx));
-        cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
-            InputEvent::PressEnter { .. } => this.submit_text(window, cx),
-            InputEvent::Change => {
-                this.invalid = false;
-                cx.notify();
-            }
-            _ => {}
-        })
+        cx.subscribe_in(
+            &input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.submit_text(window, cx),
+                InputEvent::Change => {
+                    this.invalid = false;
+                    cx.notify();
+                }
+                _ => {}
+            },
+        )
         .detach();
         cx.subscribe(&calendar, |this, _, event: &CalendarEvent, cx| {
             let CalendarEvent::Selected(date) = event;
             if let (Step::Value(field), Some(day)) = (this.step, date.start()) {
-                this.apply(field, filters::format_ymd(day.year(), day.month(), day.day()), cx);
+                this.apply(
+                    field,
+                    filters::format_ymd(day.year(), day.month(), day.day()),
+                    cx,
+                );
             }
         })
         .detach();
@@ -109,8 +121,16 @@ impl FilterPopover {
     /// Labels of the listed rows (field or value step); empty on a text or date step.
     pub fn rows(&self) -> Vec<String> {
         match self.step {
-            Step::Field => self.field_rows().into_iter().map(|c| c.label.to_owned()).collect(),
-            Step::Value(field) => self.value_rows(field).into_iter().map(|c| c.label).collect(),
+            Step::Field => self
+                .field_rows()
+                .into_iter()
+                .map(|c| c.label.to_owned())
+                .collect(),
+            Step::Value(field) => self
+                .value_rows(field)
+                .into_iter()
+                .map(|c| c.label)
+                .collect(),
         }
     }
 
@@ -120,7 +140,10 @@ impl FilterPopover {
             Step::Value(field) if filters::value_input(field) != ValueInput::Pick => {
                 window.focus(&self.input.focus_handle(cx), cx);
             }
-            _ => self.command.clone().update(cx, |state, cx| state.focus(window, cx)),
+            _ => self
+                .command
+                .clone()
+                .update(cx, |state, cx| state.focus(window, cx)),
         }
     }
 
@@ -148,18 +171,28 @@ impl FilterPopover {
         filters::rank_choices(all, &self.query)
     }
 
-    fn enter_value_step(&mut self, field: Field, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+    fn enter_value_step(
+        &mut self,
+        field: Field,
+        prefill: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.step = Step::Value(field);
         self.invalid = false;
         self.query.clear();
-        self.command.clone().update(cx, |state, cx| state.set_query("", window, cx));
+        self.command
+            .clone()
+            .update(cx, |state, cx| state.set_query("", window, cx));
         let text = prefill.unwrap_or_default();
-        self.input.update(cx, |input, cx| input.set_value(text, window, cx));
+        self.input
+            .update(cx, |input, cx| input.set_value(text, window, cx));
         if filters::value_input(field) == ValueInput::Date
             && let Some((y, m, d)) = filters::parse_ymd(text)
             && let Some(day) = NaiveDate::from_ymd_opt(y, m, d)
         {
-            self.calendar.update(cx, |calendar, cx| calendar.set_date(day, window, cx));
+            self.calendar
+                .update(cx, |calendar, cx| calendar.set_date(day, window, cx));
         }
         self.focus(window, cx);
         cx.notify();
@@ -168,18 +201,26 @@ impl FilterPopover {
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.step = Step::Field;
         self.query.clear();
-        self.command.clone().update(cx, |state, cx| state.set_query("", window, cx));
+        self.command
+            .clone()
+            .update(cx, |state, cx| state.set_query("", window, cx));
         self.focus(window, cx);
         cx.notify();
     }
 
     fn apply(&mut self, field: Field, value: String, cx: &mut Context<Self>) {
-        cx.emit(FilterPopoverEvent::Apply { field, value, replacing: self.replacing.clone() });
+        cx.emit(FilterPopoverEvent::Apply {
+            field,
+            value,
+            replacing: self.replacing.clone(),
+        });
     }
 
     /// Enter in the text/date input: the typed value, or flag it invalid.
     fn submit_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Step::Value(field) = self.step else { return };
+        let Step::Value(field) = self.step else {
+            return;
+        };
         if filters::value_input(field) == ValueInput::Pick {
             return;
         }
@@ -211,7 +252,10 @@ impl FilterPopover {
     }
 
     fn field_label(field: Field) -> &'static str {
-        filters::FIELD_CHOICES.iter().find(|c| c.field == field).map_or("", |c| c.label)
+        filters::FIELD_CHOICES
+            .iter()
+            .find(|c| c.field == field)
+            .map_or("", |c| c.label)
     }
 }
 
@@ -227,7 +271,11 @@ impl Render for FilterPopover {
             Step::Value(field) if filters::value_input(field) != ValueInput::Pick => {
                 let dated = filters::value_input(field) == ValueInput::Date;
                 let invalid = self.invalid;
-                let hint = if dated { "yyyy-mm-dd, or 7d, 2w, 3m, 1y" } else { "" };
+                let hint = if dated {
+                    "yyyy-mm-dd, or 7d, 2w, 3m, 1y"
+                } else {
+                    ""
+                };
                 div()
                     .id("filter-popover")
                     .key_context(FILTER_PICKER_CONTEXT)
@@ -238,23 +286,38 @@ impl Render for FilterPopover {
                     .child(heading(Self::field_label(field).to_owned()))
                     .when(dated, |d| d.child(Calendar::new(&self.calendar)))
                     .child(Input::new(&self.input))
-                    .when(dated, |d| d.child(div().px_2().text_xs().text_color(muted).child(hint)))
+                    .when(dated, |d| {
+                        d.child(div().px_2().text_xs().text_color(muted).child(hint))
+                    })
                     .when(invalid, |d| {
-                        d.child(div().px_2().text_xs().text_color(danger).child("Not a valid value"))
+                        d.child(
+                            div()
+                                .px_2()
+                                .text_xs()
+                                .text_color(danger)
+                                .child("Not a valid value"),
+                        )
                     })
                     .child(
                         div()
                             .flex()
                             .justify_between()
                             .when(!self.is_editing(), |d| {
-                                d.child(button("filter-back", "Back", "Choose another field", "", cx).on_click(
-                                    cx.listener(|this, _, window, cx| this.back(window, cx)),
-                                ))
+                                d.child(
+                                    button("filter-back", "Back", "Choose another field", "", cx)
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.back(window, cx)
+                                            }),
+                                        ),
+                                )
                             })
                             .child(div().flex_1())
                             .child(
                                 button("filter-apply", "Apply", "Apply the value", "enter", cx)
-                                    .on_click(cx.listener(|this, _, window, cx| this.submit_text(window, cx))),
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.submit_text(window, cx)
+                                    })),
                             ),
                     )
                     .into_any_element()
@@ -262,7 +325,11 @@ impl Render for FilterPopover {
             step => {
                 let (items, title, placeholder): (Vec<String>, String, &str) = match step {
                     Step::Field => (self.rows(), "Filter by".to_owned(), "Choose a field…"),
-                    Step::Value(field) => (self.rows(), Self::field_label(field).to_owned(), "Choose a value…"),
+                    Step::Value(field) => (
+                        self.rows(),
+                        Self::field_label(field).to_owned(),
+                        "Choose a value…",
+                    ),
                 };
                 let on_query = weak.clone();
                 div()
@@ -276,8 +343,18 @@ impl Render for FilterPopover {
                             .filterable(false)
                             .max_h(px(280.))
                             .placeholder(placeholder)
-                            .empty(move |_, _, _| div().p_3().text_xs().text_color(muted).child("Nothing matches"))
-                            .items(items.into_iter().map(|label| CommandItem::new().label(label)))
+                            .empty(move |_, _, _| {
+                                div()
+                                    .p_3()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child("Nothing matches")
+                            })
+                            .items(
+                                items
+                                    .into_iter()
+                                    .map(|label| CommandItem::new().label(label)),
+                            )
                             .on_query(move |q, _, cx| {
                                 on_query
                                     .update(cx, |this, cx| {
@@ -290,7 +367,8 @@ impl Render for FilterPopover {
                                     .ok();
                             })
                             .on_confirm(move |ix: IndexPath, window, cx| {
-                                weak.update(cx, |this, cx| this.confirm(ix.row, window, cx)).ok();
+                                weak.update(cx, |this, cx| this.confirm(ix.row, window, cx))
+                                    .ok();
                             }),
                     )
                     .into_any_element()

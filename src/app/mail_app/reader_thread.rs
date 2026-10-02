@@ -11,20 +11,35 @@ pub(super) const COLLAPSED_H: f32 = 46.;
 
 impl MailApp {
     /// `THREAD · N MORE` with the expand-all / collapse-all toggle (`shift-o`).
-    pub(super) fn thread_title(&self, opened: &Message, others: &[MessageId], look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn thread_title(
+        &self,
+        opened: &Message,
+        others: &[MessageId],
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = &look.t;
-        let all_open = others.iter().all(|id| self.reader.is_expanded(opened.thread_id, *id));
+        let all_open = others
+            .iter()
+            .all(|id| self.reader.is_expanded(opened.thread_id, *id));
         div()
             .h(px(22.))
             .flex()
             .items_center()
             .justify_between()
             .gap_2()
-            .child(look.mono(format!("THREAD · {} MORE", others.len()), t.muted_foreground))
+            .child(look.mono(
+                format!("THREAD · {} MORE", others.len()),
+                t.muted_foreground,
+            ))
             .child(
                 look.link(
                     "reader-thread-toggle",
-                    if all_open { "COLLAPSE ALL" } else { "EXPAND ALL" },
+                    if all_open {
+                        "COLLAPSE ALL"
+                    } else {
+                        "EXPAND ALL"
+                    },
                     Some("shift-o"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_thread_expansion(cx))),
@@ -51,7 +66,13 @@ impl MailApp {
     }
 
     /// One compact line: sender, muted snippet, paperclip when it has attachments, mono date.
-    pub(super) fn collapsed_line(&self, m: &Message, newest: &str, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn collapsed_line(
+        &self,
+        m: &Message,
+        newest: &str,
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = &look.t;
         let mid = m.id;
         let hover = t.list_hover;

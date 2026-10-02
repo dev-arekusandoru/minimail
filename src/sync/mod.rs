@@ -80,18 +80,14 @@ pub fn pending_moves(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<Move> {
         // A folder the provider has never seen still needs a move, so build
         // the target by hand; `to_remote` alone reports nothing to do.
         let (to, create_folder) = match message.state {
-            TriageState::Filed(folder) => {
-                match cache.folder_remote_id(folder).ok().flatten() {
-                    Some(rid) => (RemoteState::Folder(rid), None),
-                    None => (
-                        RemoteState::Folder(String::new()),
-                        Some((folder, folder_path(mb, folder))),
-                    ),
-                }
-            }
-            _ => match to_remote(message.state, |f| {
-                cache.folder_remote_id(f).ok().flatten()
-            }) {
+            TriageState::Filed(folder) => match cache.folder_remote_id(folder).ok().flatten() {
+                Some(rid) => (RemoteState::Folder(rid), None),
+                None => (
+                    RemoteState::Folder(String::new()),
+                    Some((folder, folder_path(mb, folder))),
+                ),
+            },
+            _ => match to_remote(message.state, |f| cache.folder_remote_id(f).ok().flatten()) {
                 Some(to) => (to, None),
                 None => continue,
             },
@@ -237,7 +233,11 @@ pub fn pending_reads(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<ReadChan
                 return None;
             }
             let (_, remote_id, _) = cache.remote_state(m.id).ok().flatten()?;
-            Some(ReadChange { id: m.id, remote_id, read: m.read })
+            Some(ReadChange {
+                id: m.id,
+                remote_id,
+                read: m.read,
+            })
         })
         .collect()
 }
@@ -260,7 +260,10 @@ pub fn run_reads(
 }
 
 /// Record confirmed read changes; returns the first error, if any.
-pub fn apply_reads(cache: &Cache, results: &[(ReadChange, Result<(), ProviderError>)]) -> Option<String> {
+pub fn apply_reads(
+    cache: &Cache,
+    results: &[(ReadChange, Result<(), ProviderError>)],
+) -> Option<String> {
     let mut first = None;
     for (change, result) in results {
         let outcome = match result {
@@ -276,7 +279,10 @@ pub fn apply_reads(cache: &Cache, results: &[(ReadChange, Result<(), ProviderErr
 
 /// Errors that make the rest of a round pointless.
 fn is_fatal(e: &ProviderError) -> bool {
-    matches!(e, ProviderError::Auth(_) | ProviderError::Network(_) | ProviderError::RateLimited)
+    matches!(
+        e,
+        ProviderError::Auth(_) | ProviderError::Network(_) | ProviderError::RateLimited
+    )
 }
 
 fn err(e: rusqlite::Error) -> String {
@@ -373,7 +379,9 @@ pub fn plan_round(
     let moves = pending_moves(mb, cache, account);
     let reads = pending_reads(mb, cache, account);
     let cursor = cache.cursor(account).ok().flatten();
-    let since = cache.window_since(account, now).unwrap_or(now - WINDOW_DAYS * DAY);
+    let since = cache
+        .window_since(account, now)
+        .unwrap_or(now - WINDOW_DAYS * DAY);
     // Rows cached before read sync existed have no server read state; only a
     // fresh window listing can fill it in.
     let reconcile = cache.has_unknown_read(account).unwrap_or(false);
@@ -381,7 +389,9 @@ pub fn plan_round(
 
     let mut older_jobs = Vec::new();
     for scope in older {
-        let mut state = cache.backfill(account, scope).unwrap_or_else(|_| Backfill::new(since));
+        let mut state = cache
+            .backfill(account, scope)
+            .unwrap_or_else(|_| Backfill::new(since));
         if state.since == 0 {
             state.since = since;
         }
@@ -391,30 +401,49 @@ pub fn plan_round(
         } else {
             (Window::Since(state.since), state.recent_page.clone())
         };
-        older_jobs.push(PageJob { scope: scope.clone(), window, page, state, older: is_older });
+        older_jobs.push(PageJob {
+            scope: scope.clone(),
+            window,
+            page,
+            state,
+            older: is_older,
+        });
     }
 
     // The backfill runs one page per round, in scope order, and only once the
     // account has a cursor to check changes against.
     let backfill = cursor.as_ref().and_then(|_| {
-        backfill_scopes(cache, account).into_iter().find_map(|scope| {
-            if older_jobs.iter().any(|job| job.scope == scope) {
-                return None;
-            }
-            let mut state = cache.backfill(account, &scope).unwrap_or_else(|_| Backfill::new(since));
-            if state.since == 0 {
-                state.since = since;
-            }
-            if state.recent_done {
-                return None;
-            }
-            let page = state.recent_page.clone();
-            Some(PageJob { scope, window: Window::Since(state.since), page, state, older: false })
-        })
+        backfill_scopes(cache, account)
+            .into_iter()
+            .find_map(|scope| {
+                if older_jobs.iter().any(|job| job.scope == scope) {
+                    return None;
+                }
+                let mut state = cache
+                    .backfill(account, &scope)
+                    .unwrap_or_else(|_| Backfill::new(since));
+                if state.since == 0 {
+                    state.since = since;
+                }
+                if state.recent_done {
+                    return None;
+                }
+                let page = state.recent_page.clone();
+                Some(PageJob {
+                    scope,
+                    window: Window::Since(state.since),
+                    page,
+                    state,
+                    older: false,
+                })
+            })
     });
     let more_backfill = cursor.is_some()
         && backfill_scopes(cache, account).iter().any(|scope| {
-            !cache.backfill(account, scope).map(|s| s.recent_done).unwrap_or(false)
+            !cache
+                .backfill(account, scope)
+                .map(|s| s.recent_done)
+                .unwrap_or(false)
         });
 
     Round {
@@ -553,7 +582,13 @@ pub fn run_round(provider: &SharedProvider, round: Round) -> RoundResult {
             stop = if reconcile_first {
                 reconcile(provider, &mut result)
             } else {
-                check(provider, &known, cursor.as_deref(), &mut result, &mut fetched)
+                check(
+                    provider,
+                    &known,
+                    cursor.as_deref(),
+                    &mut result,
+                    &mut fetched,
+                )
             };
         }
         if !stop && !fetched.is_empty() {
@@ -601,10 +636,7 @@ fn stop_error(result: &mut RoundResult, e: &ProviderError) -> bool {
 
 /// Record the first fatal error among a batch's results; non-fatal ones are
 /// reported by [`stop_error`] when they are collected.
-fn first_fatal<T, R>(
-    result: &mut RoundResult,
-    results: &[(T, Result<R, ProviderError>)],
-) -> bool {
+fn first_fatal<T, R>(result: &mut RoundResult, results: &[(T, Result<R, ProviderError>)]) -> bool {
     let mut stop = false;
     for (_, r) in results {
         if let Err(e) = r
@@ -615,7 +647,6 @@ fn first_fatal<T, R>(
     }
     stop
 }
-
 
 /// The cursor is stored first when there is none, so nothing that lands during
 /// the backfill is missed; otherwise the change history is read.
@@ -774,13 +805,21 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(id, _, _, remote)| {
-                Some(RemoteFolder { id: remote?, path: folder_path(mb, id) })
+                Some(RemoteFolder {
+                    id: remote?,
+                    path: folder_path(mb, id),
+                })
             })
             .collect()
     });
-    let by_path: HashMap<&str, &str> =
-        folders.iter().map(|f| (f.path.as_str(), f.id.as_str())).collect();
-    let by_id: HashMap<&str, &str> = folders.iter().map(|f| (f.id.as_str(), f.path.as_str())).collect();
+    let by_path: HashMap<&str, &str> = folders
+        .iter()
+        .map(|f| (f.path.as_str(), f.id.as_str()))
+        .collect();
+    let by_id: HashMap<&str, &str> = folders
+        .iter()
+        .map(|f| (f.id.as_str(), f.path.as_str()))
+        .collect();
     for folder in &folders {
         if let Err(e) = ensure_folder(mb, cache, &result.account, &by_path, &folder.path) {
             error(e);
@@ -788,7 +827,14 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
     }
 
     if let Some(changes) = &result.changes {
-        if let Err(e) = apply_flags(mb, cache, &result.account, &by_path, &by_id, &changes.updated) {
+        if let Err(e) = apply_flags(
+            mb,
+            cache,
+            &result.account,
+            &by_path,
+            &by_id,
+            &changes.updated,
+        ) {
             error(e);
         }
         if let Err(e) = remove_ids(mb, cache, &result.account, &changes.removed) {
@@ -853,11 +899,7 @@ fn from_remote(
 
 /// The local state of a cached message after the server's flags, honouring
 /// local changes that have not been pushed yet.
-fn merged_state(
-    existing: &Message,
-    flags_state: &RemoteState,
-    pending: bool,
-) -> TriageState {
+fn merged_state(existing: &Message, flags_state: &RemoteState, pending: bool) -> TriageState {
     let snoozed = existing.state == TriageState::Snoozed;
     if pending || (snoozed && flags_state == &RemoteState::Archived) {
         existing.state
@@ -873,7 +915,11 @@ fn merged_state(
 
 /// Whether a local change is still waiting for the provider to confirm it.
 fn has_pending(cache: &Cache, existing: &Message) -> bool {
-    let stored = cache.remote_state(existing.id).ok().flatten().map(|(_, _, s)| s);
+    let stored = cache
+        .remote_state(existing.id)
+        .ok()
+        .flatten()
+        .map(|(_, _, s)| s);
     let want = to_remote(existing.state, |f| cache.folder_remote_id(f).ok().flatten());
     want != stored
 }
@@ -910,7 +956,9 @@ fn apply_flags(
         // A snooze lives in the mailbox's metadata, not in the flags.
         message.snooze = mb.snoozed_until(id).map(format_rfc3339);
         mb.upsert_remote(message.clone());
-        cache.upsert_message(&message, remote_id, &remote.state, !remote.unread).map_err(err)?;
+        cache
+            .upsert_message(&message, remote_id, &remote.state, !remote.unread)
+            .map_err(err)?;
     }
     Ok(())
 }
@@ -931,7 +979,13 @@ fn drop_vanished(
         .into_iter()
         .filter(|m| m.account == account)
         .filter(|m| m.received_at().is_some_and(|t| t >= since))
-        .filter_map(|m| cache.remote_state(m.id).ok().flatten().map(|(_, remote, _)| remote))
+        .filter_map(|m| {
+            cache
+                .remote_state(m.id)
+                .ok()
+                .flatten()
+                .map(|(_, remote, _)| remote)
+        })
         .filter(|remote| !present.contains(remote.as_str()))
         .collect();
     remove_ids(mb, cache, account, &gone)
@@ -977,7 +1031,9 @@ fn apply_message(
     };
     let id = match cached {
         Some(id) => id,
-        None => mb.next_message_id().max(cache.next_message_id().map_err(err)?),
+        None => mb
+            .next_message_id()
+            .max(cache.next_message_id().map_err(err)?),
     };
     let thread_id = cache
         .thread_id(account, &remote.thread, || {
@@ -1054,7 +1110,9 @@ fn ensure_folder(
         return Ok(id);
     }
     let folder = Folder {
-        id: mb.next_folder_id().max(cache.next_folder_id().map_err(err)?),
+        id: mb
+            .next_folder_id()
+            .max(cache.next_folder_id().map_err(err)?),
         account: account.to_owned(),
         name: name.to_owned(),
         parent,
@@ -1088,7 +1146,9 @@ pub fn scopes_for(mb: &Mailbox, cache: &Cache, location: &Location) -> Vec<(Stri
         Location::Archive(account) => scoped(account, Scope::Archive),
         Location::Trash(account) => scoped(account, Scope::Trash),
         Location::Folder(folder) => {
-            let Some(f) = mb.folder(*folder) else { return Vec::new() };
+            let Some(f) = mb.folder(*folder) else {
+                return Vec::new();
+            };
             let Ok(Some(remote)) = cache.folder_remote_id(f.id) else {
                 return Vec::new();
             };
@@ -1123,21 +1183,40 @@ pub fn body_request(mb: &Mailbox, cache: &Cache, id: MessageId) -> Option<BodyRe
         return None;
     }
     let (account, remote_id, _) = cache.remote_state(id).ok().flatten()?;
-    Some(BodyRequest { id: message.id, account, remote_id })
+    Some(BodyRequest {
+        id: message.id,
+        account,
+        remote_id,
+    })
 }
 
 /// Download one message body, off the main thread.
-pub fn run_body(provider: &SharedProvider, req: BodyRequest) -> (BodyRequest, Result<Body, ProviderError>) {
+pub fn run_body(
+    provider: &SharedProvider,
+    req: BodyRequest,
+) -> (BodyRequest, Result<Body, ProviderError>) {
     let (id, account, remote_id) = (req.id, req.account, req.remote_id);
     let result = match lock(provider) {
         Ok(mut p) => p.fetch_body(&remote_id),
         Err(e) => Err(e),
     };
-    (BodyRequest { id, account, remote_id }, result)
+    (
+        BodyRequest {
+            id,
+            account,
+            remote_id,
+        },
+        result,
+    )
 }
 
 /// Store a downloaded body, on the main thread.
-pub fn apply_body(mb: &mut Mailbox, cache: &Cache, req: &BodyRequest, body: Body) -> Result<(), String> {
+pub fn apply_body(
+    mb: &mut Mailbox,
+    cache: &Cache,
+    req: &BodyRequest,
+    body: Body,
+) -> Result<(), String> {
     if mb.get(req.id).is_none() {
         return Ok(());
     }

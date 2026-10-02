@@ -4,7 +4,11 @@ use super::*;
 
 impl Mailbox {
     pub fn next_message_id(&self) -> MessageId {
-        self.messages.iter().map(|m| m.id).max().map_or(1, |m| m + 1)
+        self.messages
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .map_or(1, |m| m + 1)
     }
 
     pub fn next_folder_id(&self) -> FolderId {
@@ -12,7 +16,11 @@ impl Mailbox {
     }
 
     pub fn next_thread_id(&self) -> u32 {
-        self.messages.iter().map(|m| m.thread_id).max().map_or(1, |m| m + 1)
+        self.messages
+            .iter()
+            .map(|m| m.thread_id)
+            .max()
+            .map_or(1, |m| m + 1)
     }
 
     pub fn all_folders(&self) -> &[Folder] {
@@ -72,9 +80,9 @@ impl Mailbox {
         };
         // `newest_first` is sorted by (stamp desc, id desc); find the first
         // entry that sorts after the new one.
-        let pos = self.newest_first.partition_point(|other| {
-            key(other).cmp(&stamp).then_with(|| other.cmp(&id)).is_gt()
-        });
+        let pos = self
+            .newest_first
+            .partition_point(|other| key(other).cmp(&stamp).then_with(|| other.cmp(&id)).is_gt());
         self.newest_first.insert(pos, id);
     }
 

@@ -110,7 +110,9 @@ impl MailApp {
             return;
         }
         let Some(row) = self.cursor_row() else { return };
-        let Some(thread) = row.thread_id() else { return };
+        let Some(thread) = row.thread_id() else {
+            return;
+        };
         if expand {
             self.expanded.insert(thread);
         } else {
@@ -135,14 +137,18 @@ impl MailApp {
     }
 
     /// `enter`: open the cursor message; a collapsed thread header also expands.
-    pub(super) fn open_cursor(&mut self) {
+    pub(super) fn open_cursor(&mut self, cx: &mut Context<Self>) {
         if self.grouped()
-            && let Some(Row::Header { expanded: false, thread_id, .. }) = self.cursor_row()
+            && let Some(Row::Header {
+                expanded: false,
+                thread_id,
+                ..
+            }) = self.cursor_row()
         {
             self.expanded.insert(thread_id);
         }
         if let Some(id) = self.cursor_id() {
-            self.open_message(id, true);
+            self.open_message(id, true, cx);
         }
     }
 
@@ -155,13 +161,16 @@ impl MailApp {
         if self.grouped() {
             let thread = self.mailbox.get(id).map(|m| m.thread_id);
             let in_panel = self.visible_ids().contains(&id);
-            if reveal && in_panel && let Some(t) = thread {
+            if reveal
+                && in_panel
+                && let Some(t) = thread
+            {
                 self.expanded.insert(t);
             }
             let rows = self.rows();
-            let exact = rows.iter().position(|r| {
-                matches!(r, Row::Single(x) | Row::Child { id: x, .. } if *x == id)
-            });
+            let exact = rows
+                .iter()
+                .position(|r| matches!(r, Row::Single(x) | Row::Child { id: x, .. } if *x == id));
             let header = || {
                 rows.iter()
                     .position(|r| matches!(r, Row::Header { ids, .. } if ids.contains(&id)))
@@ -193,7 +202,11 @@ impl MailApp {
 
     pub(super) fn toggle_grouping(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_grouping(!self.group_threads);
-        let text = if self.group_threads { "Grouped by thread" } else { "Ungrouped" };
+        let text = if self.group_threads {
+            "Grouped by thread"
+        } else {
+            "Ungrouped"
+        };
         self.show_toast(text.into(), window, cx);
         self.scroll_to_cursor();
         cx.notify();
@@ -201,7 +214,12 @@ impl MailApp {
 
     /// `]` / `[`: open the next/previous message of the current thread in date order. The message
     /// left behind and the target both end up expanded; stepping never collapses anything.
-    pub(super) fn step_thread(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn step_thread(
+        &mut self,
+        delta: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.in_session() {
             return;
         }
@@ -216,12 +234,16 @@ impl MailApp {
             Some(target) => {
                 self.reader.expand(thread, from);
                 self.reader.expand(thread, target);
-                self.open_message(target, false);
+                self.open_message(target, false, cx);
                 self.focus_message(target, true);
                 self.scroll_to_cursor();
             }
             None => {
-                let text = if delta > 0 { "Last message in thread" } else { "First message in thread" };
+                let text = if delta > 0 {
+                    "Last message in thread"
+                } else {
+                    "First message in thread"
+                };
                 self.show_toast(text.into(), window, cx);
             }
         }
@@ -241,7 +263,12 @@ impl MailApp {
         newest: &str,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
-        let Row::Header { thread_id, ids, expanded } = row else {
+        let Row::Header {
+            thread_id,
+            ids,
+            expanded,
+        } = row
+        else {
             unreachable!("render_group_header takes header rows")
         };
         let t = cx.theme();
@@ -251,15 +278,24 @@ impl MailApp {
             .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), self.clock_label(&m.received, newest, &now)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
-        let selected_count = ids.iter().filter(|id| self.triage.is_selected(**id)).count();
+        let selected_count = ids
+            .iter()
+            .filter(|id| self.triage.is_selected(**id))
+            .count();
         let unread = ids.iter().any(|id| {
-            !self.mailbox.is_read(*id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
-        });
-        let urgent = unread && ids.iter().any(|id| {
             !self.mailbox.is_read(*id)
                 && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
-                && self.mailbox.tags(*id).iter().any(|tag| matches!(tag, crate::model::Tag::Urgent(_)))
         });
+        let urgent = unread
+            && ids.iter().any(|id| {
+                !self.mailbox.is_read(*id)
+                    && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
+                    && self
+                        .mailbox
+                        .tags(*id)
+                        .iter()
+                        .any(|tag| matches!(tag, crate::model::Tag::Urgent(_)))
+            });
         let visual = crate::app::row::RowVisual {
             cursor: ix == self.cursor_ix(),
             open: self.opened().is_some_and(|id| ids.contains(&id)),
@@ -280,90 +316,96 @@ impl MailApp {
             visual,
             t,
         )
-            .child(self.row_selection_target(ix, cx))
-            .child(
-                div()
-                    .id(("thread-chevron", thread as usize))
-                    .flex_none()
-                    .w(px(12.))
-                    .text_color(t.muted_foreground)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.cursor_to(ix);
-                        this.toggle_thread(thread);
-                        window.focus(&this.focus_handle, cx);
-                        cx.notify();
-                    }))
-                    .child(if *expanded { "▾" } else { "▸" }),
-            )
-            .child(
-                div()
-                    .id(("thread-body", thread as usize))
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                        this.click_row(ix, ev, window, cx)
-                    }))
-                    .child(
-                        div()
-                            .h(px(row::LINE_H))
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(108.))
-                                    .flex_none()
-                                    .truncate()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(from),
-                            )
-                            .child(div().flex_1().truncate().text_color(t.muted_foreground).child(subject))
-                            .child(
-                                div()
-                                    .w(px(90.))
-                                    .flex_none()
-                                    .truncate()
-                                    .text_size(px(11.))
-                                    .text_color(t.muted_foreground)
-                                    .child(people),
-                            ),
-                    )
-                    .when(preview > 0, |d| {
-                        d.child(
+        .child(self.row_selection_target(ix, cx))
+        .child(
+            div()
+                .id(("thread-chevron", thread as usize))
+                .flex_none()
+                .w(px(12.))
+                .text_color(t.muted_foreground)
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.cursor_to(ix);
+                    this.toggle_thread(thread);
+                    window.focus(&this.focus_handle, cx);
+                    cx.notify();
+                }))
+                .child(if *expanded { "▾" } else { "▸" }),
+        )
+        .child(
+            div()
+                .id(("thread-body", thread as usize))
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                    this.click_row(ix, ev, window, cx)
+                }))
+                .child(
+                    div()
+                        .h(px(row::LINE_H))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
                             div()
-                                .h(px(row::PREVIEW_LINE_H * f32::from(preview)))
-                                .line_clamp(preview as usize)
-                                .text_size(px(12.))
-                                .line_height(px(row::PREVIEW_LINE_H))
-                                .text_color(t.muted_foreground)
-                                .child(snippet),
+                                .w(px(108.))
+                                .flex_none()
+                                .truncate()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(from),
                         )
-                    }),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .px_1()
-                    .rounded_sm()
-                    .text_size(px(11.))
-                    .border_1()
-                    .border_color(t.border)
-                    .text_color(t.muted_foreground)
-                    .child(format!("{}", ids.len())),
-            )
-            .child(
-                div()
-                    .id(("thread-date", thread as usize))
-                    .flex_none()
-                    .text_size(px(11.))
-                    .text_color(t.muted_foreground)
-                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                        this.click_row(ix, ev, window, cx)
-                    }))
-                    .child(date),
-            )
+                        .child(
+                            div()
+                                .flex_1()
+                                .truncate()
+                                .text_color(t.muted_foreground)
+                                .child(subject),
+                        )
+                        .child(
+                            div()
+                                .w(px(90.))
+                                .flex_none()
+                                .truncate()
+                                .text_size(px(11.))
+                                .text_color(t.muted_foreground)
+                                .child(people),
+                        ),
+                )
+                .when(preview > 0, |d| {
+                    d.child(
+                        div()
+                            .h(px(row::PREVIEW_LINE_H * f32::from(preview)))
+                            .line_clamp(preview as usize)
+                            .text_size(px(12.))
+                            .line_height(px(row::PREVIEW_LINE_H))
+                            .text_color(t.muted_foreground)
+                            .child(snippet),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .flex_none()
+                .px_1()
+                .rounded_sm()
+                .text_size(px(11.))
+                .border_1()
+                .border_color(t.border)
+                .text_color(t.muted_foreground)
+                .child(format!("{}", ids.len())),
+        )
+        .child(
+            div()
+                .id(("thread-date", thread as usize))
+                .flex_none()
+                .text_size(px(11.))
+                .text_color(t.muted_foreground)
+                .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                    this.click_row(ix, ev, window, cx)
+                }))
+                .child(date),
+        )
     }
 }

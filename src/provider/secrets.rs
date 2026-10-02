@@ -58,7 +58,10 @@ struct Bundle<R> {
 
 impl<R: RawKeychain> Bundle<R> {
     fn new(raw: R) -> Self {
-        Self { raw, cache: Mutex::new(None) }
+        Self {
+            raw,
+            cache: Mutex::new(None),
+        }
     }
 
     /// Runs `f` on the loaded map. A failed read (e.g. access denied) is not cached.
@@ -66,7 +69,8 @@ impl<R: RawKeychain> Bundle<R> {
         let mut guard = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
             let map = match self.raw.read(BUNDLE)? {
-                Some(json) => serde_json::from_str(&json).map_err(|e| format!("corrupt keychain item: {e}"))?,
+                Some(json) => serde_json::from_str(&json)
+                    .map_err(|e| format!("corrupt keychain item: {e}"))?,
                 None => HashMap::new(),
             };
             *guard = Some(map);
@@ -161,7 +165,9 @@ impl SecretStore for MemorySecrets {
     }
 
     fn set(&self, account: &str, secret: &str) -> Result<(), String> {
-        self.0.borrow_mut().insert(account.to_owned(), secret.to_owned());
+        self.0
+            .borrow_mut()
+            .insert(account.to_owned(), secret.to_owned());
         Ok(())
     }
 
@@ -191,7 +197,9 @@ mod tests {
         }
         fn write(&self, name: &str, value: &str) -> Result<(), String> {
             *self.writes.borrow_mut() += 1;
-            self.items.borrow_mut().insert(name.to_owned(), value.to_owned());
+            self.items
+                .borrow_mut()
+                .insert(name.to_owned(), value.to_owned());
             Ok(())
         }
         fn remove(&self, name: &str) -> Result<(), String> {
@@ -228,10 +236,15 @@ mod tests {
     #[test]
     fn legacy_per_account_items_migrate_into_the_bundle() {
         let raw = FakeRaw::default();
-        raw.items.borrow_mut().insert("a@x.com".into(), "old".into());
+        raw.items
+            .borrow_mut()
+            .insert("a@x.com".into(), "old".into());
         let store = Bundle::new(raw.clone());
         assert_eq!(store.get("a@x.com").as_deref(), Some("old"));
-        assert!(!raw.items.borrow().contains_key("a@x.com"), "legacy item removed");
+        assert!(
+            !raw.items.borrow().contains_key("a@x.com"),
+            "legacy item removed"
+        );
         let fresh = Bundle::new(raw.clone());
         assert_eq!(fresh.get("a@x.com").as_deref(), Some("old"));
     }

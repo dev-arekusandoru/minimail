@@ -23,7 +23,13 @@ pub struct Backfill {
 
 impl Backfill {
     pub fn new(since: Timestamp) -> Self {
-        Self { since, recent_page: None, recent_done: false, older_page: None, older_done: false }
+        Self {
+            since,
+            recent_page: None,
+            recent_done: false,
+            older_page: None,
+            older_done: false,
+        }
     }
 }
 
@@ -42,7 +48,9 @@ pub fn default_cache_path() -> PathBuf {
     {
         return PathBuf::from(path);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     home.join("Library/Application Support/mail-classifier/mail.db")
 }
 
@@ -184,9 +192,7 @@ impl Cache {
             .filter_map(|r| r.ok())
             .collect();
 
-        let mut stmt = self
-            .conn
-            .prepare("SELECT json FROM messages ORDER BY id")?;
+        let mut stmt = self.conn.prepare("SELECT json FROM messages ORDER BY id")?;
         let messages = stmt
             .query_map([], |row| row.get::<_, String>(0))?
             .filter_map(|json| json.ok())
@@ -227,7 +233,10 @@ impl Cache {
 
     /// Record when a server check of `account` last completed without error.
     pub fn set_synced_at(&self, account: &str, at: Timestamp) -> rusqlite::Result<()> {
-        self.conn.execute("UPDATE accounts SET synced_at=?2 WHERE id=?1", params![account, at])?;
+        self.conn.execute(
+            "UPDATE accounts SET synced_at=?2 WHERE id=?1",
+            params![account, at],
+        )?;
         Ok(())
     }
 
@@ -235,9 +244,11 @@ impl Cache {
     pub fn synced_at(&self, account: &str) -> rusqlite::Result<Option<Timestamp>> {
         let at = self
             .conn
-            .query_row("SELECT synced_at FROM accounts WHERE id=?1", [account], |row| {
-                row.get::<_, Option<Timestamp>>(0)
-            })
+            .query_row(
+                "SELECT synced_at FROM accounts WHERE id=?1",
+                [account],
+                |row| row.get::<_, Option<Timestamp>>(0),
+            )
             .optional()?;
         Ok(at.flatten())
     }
@@ -245,9 +256,11 @@ impl Cache {
     pub fn cursor(&self, account: &str) -> rusqlite::Result<Option<String>> {
         let cursor = self
             .conn
-            .query_row("SELECT cursor FROM accounts WHERE id=?1", [account], |row| {
-                row.get::<_, Option<String>>(0)
-            })
+            .query_row(
+                "SELECT cursor FROM accounts WHERE id=?1",
+                [account],
+                |row| row.get::<_, Option<String>>(0),
+            )
             .optional()?;
         Ok(cursor.flatten())
     }
@@ -274,9 +287,11 @@ impl Cache {
     pub fn folder_remote_id(&self, id: FolderId) -> rusqlite::Result<Option<String>> {
         Ok(self
             .conn
-            .query_row("SELECT remote_id FROM folders WHERE id=?1", [id as i64], |row| {
-                row.get::<_, Option<String>>(0)
-            })
+            .query_row(
+                "SELECT remote_id FROM folders WHERE id=?1",
+                [id as i64],
+                |row| row.get::<_, Option<String>>(0),
+            )
             .optional()?
             .flatten())
     }
@@ -340,9 +355,27 @@ impl Cache {
             .map(|id| id as MessageId))
     }
 
+    /// The provider's thread id a cached message belongs to, resolved through the thread
+    /// mapping. This is what tells a confirmed send's thread apart from an unrelated message
+    /// that merely shares its subject: only the server's own grouping can say so.
+    pub fn remote_thread_of(&self, id: MessageId) -> rusqlite::Result<Option<RemoteId>> {
+        self
+            .conn
+            .query_row(
+                "SELECT threads.remote_id FROM messages
+                 JOIN threads ON threads.account = messages.account AND threads.id = messages.thread_id
+                 WHERE messages.id = ?1",
+                [id as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+    }
+
     /// Remote ids of every cached message of `account`.
     pub fn remote_ids(&self, account: &str) -> rusqlite::Result<std::collections::HashSet<String>> {
-        let mut stmt = self.conn.prepare("SELECT remote_id FROM messages WHERE account=?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT remote_id FROM messages WHERE account=?1")?;
         let ids = stmt.query_map([account], |row| row.get(0))?;
         ids.collect()
     }
@@ -377,7 +410,10 @@ impl Cache {
     }
 
     /// Account, remote id and last confirmed remote state of a cached message.
-    pub fn remote_state(&self, id: MessageId) -> rusqlite::Result<Option<(String, RemoteId, RemoteState)>> {
+    pub fn remote_state(
+        &self,
+        id: MessageId,
+    ) -> rusqlite::Result<Option<(String, RemoteId, RemoteState)>> {
         let row = self
             .conn
             .query_row(
@@ -424,16 +460,20 @@ impl Cache {
     pub fn remote_read(&self, id: MessageId) -> rusqlite::Result<Option<bool>> {
         Ok(self
             .conn
-            .query_row("SELECT remote_read FROM messages WHERE id=?1", [id as i64], |row| {
-                row.get::<_, Option<bool>>(0)
-            })
+            .query_row(
+                "SELECT remote_read FROM messages WHERE id=?1",
+                [id as i64],
+                |row| row.get::<_, Option<bool>>(0),
+            )
             .optional()?
             .flatten())
     }
 
     pub fn set_remote_read(&self, id: MessageId, read: bool) -> rusqlite::Result<()> {
-        self.conn
-            .execute("UPDATE messages SET remote_read=?2 WHERE id=?1", params![id as i64, read])?;
+        self.conn.execute(
+            "UPDATE messages SET remote_read=?2 WHERE id=?1",
+            params![id as i64, read],
+        )?;
         Ok(())
     }
 
@@ -474,7 +514,9 @@ impl Cache {
 
     /// Ids of every cached account.
     pub fn account_ids(&self) -> rusqlite::Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM accounts ORDER BY rowid")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM accounts ORDER BY rowid")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         rows.collect()
     }
@@ -508,7 +550,13 @@ impl Cache {
         let Ok((since, recent_page, recent_done, older_page, older_done)) = row else {
             return Ok(Backfill::new(0));
         };
-        Ok(Backfill { since, recent_page, recent_done, older_page, older_done })
+        Ok(Backfill {
+            since,
+            recent_page,
+            recent_done,
+            older_page,
+            older_done,
+        })
     }
 
     /// The cutoff every scope of `account` is measured against: the one its first
@@ -568,7 +616,6 @@ impl Cache {
         Ok(count > 0)
     }
 
-
     pub fn delete_message(&self, id: MessageId) -> rusqlite::Result<()> {
         self.conn
             .execute("DELETE FROM messages WHERE id=?1", [id as i64])?;
@@ -581,7 +628,8 @@ impl Cache {
             self.conn
                 .execute(&format!("DELETE FROM {table} WHERE account=?1"), [account])?;
         }
-        self.conn.execute("DELETE FROM accounts WHERE id=?1", [account])?;
+        self.conn
+            .execute("DELETE FROM accounts WHERE id=?1", [account])?;
         Ok(())
     }
 

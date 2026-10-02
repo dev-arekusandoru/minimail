@@ -1,23 +1,25 @@
 //! Settings window panel. Its entity owns transient page state and emits
 //! [`SettingsEvent`]s for changes applied live by the mail window.
-use gpui_kit::prelude::*;
+use crate::app::actions::{
+    SettingsDismiss, SettingsEnterBody, SettingsNextPage, SettingsPrevPage, SettingsSearch,
+};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::Selectable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInput};
-use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::menu::PopupMenuItem;
-use gpui_kit::component::label::Label;
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::TitleBar;
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
-use std::collections::HashMap;
-use std::rc::Rc;
 use gpui_kit::base::AxisExt as _;
 use gpui_kit::base::{StyledExt as _, TestSupportExt as _, h_flex, v_flex};
-use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, SettingsPrevPage, SettingsSearch};
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::Selectable as _;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::TitleBar;
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInput};
+use gpui_kit::component::label::Label;
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::switch::Switch;
+use gpui_kit::prelude::*;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::icon_button;
@@ -33,9 +35,9 @@ use gpui_kit::{
 };
 
 mod accounts;
+mod ai;
 mod appearance;
 mod inbox;
-mod ai;
 mod senders;
 
 /// Key context of the panel.
@@ -55,7 +57,11 @@ pub enum SettingsEvent {
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
     BlockRemoteImages(bool),
     PreviewLines(u8),
-    Theme { mode: theme::ThemeMode, light: String, dark: String },
+    Theme {
+        mode: theme::ThemeMode,
+        light: String,
+        dark: String,
+    },
     PaneLayout(Orientation),
     /// New global follow-up timeout, in seconds (`mailbox.set_follow_up_timeout`).
     FollowUp(Timestamp),
@@ -66,19 +72,28 @@ pub enum SettingsEvent {
     /// Remove a linked account (confirmed in the panel).
     RemoveAccount(String),
     /// An account's icon key and `#rrggbb` color changed (`mailbox.set_account_style`).
-    AccountStyle { id: String, icon: &'static str, color: String },
+    AccountStyle {
+        id: String,
+        icon: &'static str,
+        color: String,
+    },
     /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
-    AccountNickname { id: String, nickname: String },
+    AccountNickname {
+        id: String,
+        nickname: String,
+    },
     /// The user picked what the account's sync status allows.
-    SyncAction { id: String, action: crate::sync_status::SyncAction },
+    SyncAction {
+        id: String,
+        action: crate::sync_status::SyncAction,
+    },
     Close,
     ResetAll,
 }
 
 /// One row of the Accounts page.
 /// Shown beside "Add Gmail…" when the OAuth client is not configured.
-pub const GMAIL_ENV_HINT: &str =
-    "Needs MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET set at launch.";
+pub const GMAIL_ENV_HINT: &str = "Needs MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET set at launch.";
 
 #[derive(Clone, Debug)]
 pub struct AccountRow {
@@ -102,7 +117,8 @@ pub struct AccountRow {
 /// Index of the Accounts page in [`SettingsPanel::pages`].
 const ACCOUNTS_PAGE: usize = 0;
 
-const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
+const CLASSIFIER_MODES: [(&str, &str); 3] =
+    [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
 const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
@@ -168,7 +184,12 @@ impl NumberRow {
             }
             cx.notify();
         });
-        Self { input, text, write_back: false, _sub: sub }
+        Self {
+            input,
+            text,
+            write_back: false,
+            _sub: sub,
+        }
     }
 
     /// Put `value` in the field at the next render, as a reset or a reseed does.
@@ -365,7 +386,9 @@ impl SettingsPanel {
 
     /// Whether the sidebar, and not a field or a control inside the page, has focus.
     fn nav_has_focus(&self, window: &Window, cx: &App) -> bool {
-        window.focused(cx).is_some_and(|focused| focused == self.focus)
+        window
+            .focused(cx)
+            .is_some_and(|focused| focused == self.focus)
     }
 
     /// Step into the page content. The body starts at the kit's search field, which is
@@ -417,10 +440,10 @@ impl SettingsPanel {
     ) -> Self {
         self.blocked = blocked;
         self.now = now;
-        self.follow_up_days = follow_up_timeout
-            .div_euclid(DAY)
-            .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into())
-            as u8;
+        self.follow_up_days = follow_up_timeout.div_euclid(DAY).clamp(
+            (*FOLLOW_UP_DAYS.start()).into(),
+            (*FOLLOW_UP_DAYS.end()).into(),
+        ) as u8;
         self.follow_up.set(self.follow_up_days);
         self
     }
@@ -493,7 +516,12 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    fn set_confidence(&mut self, question: QuestionKey, confidence: Confidence, cx: &mut Context<Self>) {
+    fn set_confidence(
+        &mut self,
+        question: QuestionKey,
+        confidence: Confidence,
+        cx: &mut Context<Self>,
+    ) {
         if matches!(self.policy.mode(question), Mode::Auto(c) if c != confidence) {
             self.policy.set_mode(question, Mode::Auto(confidence));
             self.changed(cx);
@@ -610,7 +638,13 @@ impl SettingsPanel {
     }
 
     /// Apply a picked icon and/or color to the account row and tell the app.
-    fn set_account_style(&mut self, id: &str, icon: Option<&'static str>, color: Option<String>, cx: &mut Context<Self>) {
+    fn set_account_style(
+        &mut self,
+        id: &str,
+        icon: Option<&'static str>,
+        color: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = self.accounts.iter_mut().find(|a| a.id == id) else {
             return;
         };
@@ -621,13 +655,18 @@ impl SettingsPanel {
         }
         row.icon = new_icon;
         row.color = new_color.clone();
-        cx.emit(SettingsEvent::AccountStyle { id: id.to_owned(), icon: new_icon, color: new_color });
+        cx.emit(SettingsEvent::AccountStyle {
+            id: id.to_owned(),
+            icon: new_icon,
+            color: new_color,
+        });
         cx.notify();
     }
 
     /// Give every account a nickname input; drop those of removed accounts.
     fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.controls.retain(|id, _| self.accounts.iter().any(|a| &a.id == id));
+        self.controls
+            .retain(|id, _| self.accounts.iter().any(|a| &a.id == id));
         let missing: Vec<(String, String, String)> = self
             .accounts
             .iter()
@@ -647,7 +686,13 @@ impl SettingsPanel {
                     this.set_account_nickname(&account, &text, cx);
                 }
             });
-            self.controls.insert(id, AccountControls { nickname: input, _sub: sub });
+            self.controls.insert(
+                id,
+                AccountControls {
+                    nickname: input,
+                    _sub: sub,
+                },
+            );
         }
     }
 
@@ -660,7 +705,10 @@ impl SettingsPanel {
             return;
         }
         row.nickname = text.to_owned();
-        cx.emit(SettingsEvent::AccountNickname { id: id.to_owned(), nickname: text.to_owned() });
+        cx.emit(SettingsEvent::AccountNickname {
+            id: id.to_owned(),
+            nickname: text.to_owned(),
+        });
         cx.notify();
     }
 
@@ -704,9 +752,10 @@ impl SettingsPanel {
 
 /// The default number of days to wait for a reply, clamped to the row's range.
 fn default_follow_up_days() -> u8 {
-    (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
-        .clamp(i64::from(*FOLLOW_UP_DAYS.start()), i64::from(*FOLLOW_UP_DAYS.end()))
-        as u8
+    (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY).clamp(
+        i64::from(*FOLLOW_UP_DAYS.start()),
+        i64::from(*FOLLOW_UP_DAYS.end()),
+    ) as u8
 }
 
 /// Reports whether one row differs from its default.
@@ -734,8 +783,14 @@ struct Undo {
 }
 
 impl Undo {
-    fn new(is_dirty: impl Fn(&App) -> bool + 'static, reset: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        Self { dirty: Rc::new(is_dirty), restore: Rc::new(reset) }
+    fn new(
+        is_dirty: impl Fn(&App) -> bool + 'static,
+        reset: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            dirty: Rc::new(is_dirty),
+            restore: Rc::new(reset),
+        }
     }
 
     /// The undo of a row whose dirty check and reset are methods of the panel, so both
@@ -748,7 +803,10 @@ impl Undo {
         let (read, write) = (weak.clone(), weak.clone());
         let reset: Restore = Rc::new(reset);
         Self::new(
-            move |cx| read.read_with(cx, |this, _| is_dirty(this)).unwrap_or_default(),
+            move |cx| {
+                read.read_with(cx, |this, _| is_dirty(this))
+                    .unwrap_or_default()
+            },
             move |_window, cx| {
                 let reset = reset.clone();
                 write.update(cx, move |this, cx| reset(this, cx)).ok();
@@ -840,7 +898,10 @@ fn row(
             .child(div().id("field").child(control))
     })
     .keywords(search)
-    .on_reset(move |cx| (page_reset.dirty)(cx), move |window, cx| (page_reset.restore)(window, cx))
+    .on_reset(
+        move |cx| (page_reset.dirty)(cx),
+        move |window, cx| (page_reset.restore)(window, cx),
+    )
 }
 
 /// A switch control: the panel bool and the setter a click uses.
@@ -879,7 +940,10 @@ fn switch_undo(
 
 /// The buttons of a segmented row, in order.
 fn segments(entries: &[(&'static str, &'static str)]) -> Vec<(String, String)> {
-    entries.iter().map(|(id, label)| ((*id).to_owned(), (*label).to_owned())).collect()
+    entries
+        .iter()
+        .map(|(id, label)| ((*id).to_owned(), (*label).to_owned()))
+        .collect()
 }
 
 /// A single-selection segmented control (one kit `ButtonGroup`): `entries` are the
@@ -894,10 +958,16 @@ fn segmented(
     let (read, write) = (weak.clone(), weak.clone());
     let apply: Apply = Rc::new(apply);
     Rc::new(move |_, _, cx| {
-        let active = read.read_with(cx, |this, _| selected(this)).unwrap_or_default();
+        let active = read
+            .read_with(cx, |this, _| selected(this))
+            .unwrap_or_default();
         let mut control = ButtonGroup::new(group.clone()).compact().small();
         for (index, (id, label)) in entries.iter().enumerate() {
-            control = control.child(Button::new(id.clone()).label(label.clone()).selected(index == active));
+            control = control.child(
+                Button::new(id.clone())
+                    .label(label.clone())
+                    .selected(index == active),
+            );
         }
         let write = write.clone();
         let apply = apply.clone();
@@ -905,7 +975,9 @@ fn segmented(
             .on_click(move |clicks: &Vec<usize>, _, cx| {
                 if let Some(index) = clicks.first() {
                     let apply = apply.clone();
-                    write.update(cx, move |this, cx| apply(this, *index, cx)).ok();
+                    write
+                        .update(cx, move |this, cx| apply(this, *index, cx))
+                        .ok();
                 }
             })
             .into_any_element()
@@ -925,14 +997,22 @@ fn number_field(
     Rc::new(move |options, window, cx| {
         // Only a change made outside the field (a reset or a reseed) is written back;
         // pushing the panel's text on every render would overwrite what is being typed.
-        let text = write_back.update(cx, |this, _| row(this).take_write_back()).ok().flatten();
+        let text = write_back
+            .update(cx, |this, _| row(this).take_write_back())
+            .ok()
+            .flatten();
         if let Some(text) = text {
             input.update(cx, |input, cx| input.set_value(text, window, cx));
         }
         // `NumberInput` carries no id of its own, so the frame around it names the row's
         // field and nothing else may reuse that name.
         div()
-            .id(format!("number-{}-{}-{}", options.page_ix(), options.group_ix(), options.item_ix()))
+            .id(format!(
+                "number-{}-{}-{}",
+                options.page_ix(),
+                options.group_ix(),
+                options.item_ix()
+            ))
             .test_support()
             .child(
                 NumberInput::new(&input)
@@ -956,11 +1036,7 @@ fn number_field(
 /// A select control: a Small outline kit button showing the current label and opening
 /// the kit's dropdown menu. This is the control the kit's own dropdown field uses, so
 /// our dropdown rows look like the kit's.
-fn select(
-    entries: Vec<(SharedString, SharedString)>,
-    read: Read,
-    write: Write,
-) -> Control {
+fn select(entries: Vec<(SharedString, SharedString)>, read: Read, write: Write) -> Control {
     Rc::new(move |options, _, cx| {
         let value = read(cx);
         let label = entries
@@ -993,13 +1069,20 @@ fn select(
 }
 
 fn options(pairs: &[(&'static str, &'static str)]) -> Vec<(SharedString, SharedString)> {
-    pairs.iter().map(|(value, label)| ((*value).into(), (*label).into())).collect()
+    pairs
+        .iter()
+        .map(|(value, label)| ((*value).into(), (*label).into()))
+        .collect()
 }
 
 /// A muted one-line placeholder row.
 fn note(id: &'static str, text: &'static str) -> SettingItem {
     SettingItem::render(move |_, _, cx| {
-        div().id(id).text_sm().text_color(cx.theme().muted_foreground).child(text)
+        div()
+            .id(id)
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .child(text)
     })
 }
 
@@ -1024,57 +1107,102 @@ impl Render for SettingsPanel {
         // `TitleBar::window_options`), laid out like the main window's bar: the kit's own
         // left inset is dropped (`pl_0`) so the title keeps the traffic-light clearance, and
         // the reset action is an icon button on the right.
-        let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
+        let title_fg = if window.is_window_active() {
+            t.foreground
+        } else {
+            t.muted_foreground
+        };
         let left = div()
             .flex()
             .flex_1()
             .min_w_0()
             .h_full()
             .items_center()
-            .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
+            .pl(px(
+                if cfg!(target_os = "macos") && !window.is_fullscreen() {
+                    80.
+                } else {
+                    12.
+                },
+            ))
             .pr_3()
             .text_size(px(12.))
             .text_color(title_fg)
-            .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child("Settings"));
-        // The reset action is a real control, so presses on it must not start a drag.
-        let reset_all = div().flex_none().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(
-            icon_button("settings-reset-all", IconName::Undo2, "Reset all settings…", "", cx)
-                    .on_click(move |_, window, cx| {
-                        let weak = weak.clone();
-                        window.open_alert_dialog(cx, move |alert, _, _| {
-                            let weak = weak.clone();
-                            alert
-                                .title("Reset all settings?")
-                                .description("This affects preferences only, not accounts or mail.")
-                                .confirm()
-                                .ok_text("Reset")
-                                .ok_variant(ButtonVariant::Danger)
-                                .cancel_text("Cancel")
-                                .on_ok(move |_, _, cx| {
-                                    weak.update(cx, |this, cx| {
-                                        this.reset_fields(cx);
-                                        cx.emit(SettingsEvent::ResetAll);
-                                    })
-                                    .ok();
-                                    true
-                                })
-                        })
-                    }),
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .child("Settings"),
             );
-        let titlebar = TitleBar::new()
-            .pl_0()
-            .child(left)
-            .child(div().flex().flex_none().items_center().h_full().pr_3().child(reset_all));
+        // The reset action is a real control, so presses on it must not start a drag.
+        let reset_all = div()
+            .flex_none()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                icon_button(
+                    "settings-reset-all",
+                    IconName::Undo2,
+                    "Reset all settings…",
+                    "",
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    let weak = weak.clone();
+                    window.open_alert_dialog(cx, move |alert, _, _| {
+                        let weak = weak.clone();
+                        alert
+                            .title("Reset all settings?")
+                            .description("This affects preferences only, not accounts or mail.")
+                            .confirm()
+                            .ok_text("Reset")
+                            .ok_variant(ButtonVariant::Danger)
+                            .cancel_text("Cancel")
+                            .on_ok(move |_, _, cx| {
+                                weak.update(cx, |this, cx| {
+                                    this.reset_fields(cx);
+                                    cx.emit(SettingsEvent::ResetAll);
+                                })
+                                .ok();
+                                true
+                            })
+                    })
+                }),
+            );
+        let titlebar = TitleBar::new().pl_0().child(left).child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .h_full()
+                .pr_3()
+                .child(reset_all),
+        );
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
-            .on_action(cx.listener(|this, _: &SettingsNextPage, window, cx| this.step_page(1, window, cx)))
-            .on_action(cx.listener(|this, _: &SettingsPrevPage, window, cx| this.step_page(-1, window, cx)))
-            .on_action(cx.listener(|this, _: &SettingsEnterBody, window, cx| this.enter_body(window, cx)))
-            .on_action(cx.listener(|this, _: &SettingsSearch, window, cx| this.focus_search(window, cx)))
-            .on_action(cx.listener(|this, _: &SettingsDismiss, window, cx| this.dismiss(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &SettingsNextPage, window, cx| this.step_page(1, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SettingsPrevPage, window, cx| {
+                    this.step_page(-1, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &SettingsEnterBody, window, cx| this.enter_body(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SettingsSearch, window, cx| this.focus_search(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SettingsDismiss, window, cx| this.dismiss(window, cx)),
+            )
             // Capture phase, so text swallowed by the search field is still seen.
-            .capture_key_down(cx.listener(|this, event, window, cx| this.note_typing(event, window, cx)))
+            .capture_key_down(
+                cx.listener(|this, event, window, cx| this.note_typing(event, window, cx)),
+            )
             .flex()
             .flex_col()
             .size_full()
@@ -1087,13 +1215,21 @@ impl Render for SettingsPanel {
                     .flex_col()
                     // Stepping stone in front of the kit sidebar, so ⌘F and `/` reach its
                     // search field without counting the stops above it.
-                    .child(div().size(px(0.)).flex_none().track_focus(&self.search_anchor))
+                    .child(
+                        div()
+                            .size(px(0.))
+                            .flex_none()
+                            .track_focus(&self.search_anchor),
+                    )
                     .child(
                         div().flex_1().min_h_0().child(
                             Settings::new(settings)
                                 .small()
                                 .sidebar_width(px(190.))
-                                .default_selected_index(SelectIndex { page_ix: self.page, group_ix: None })
+                                .default_selected_index(SelectIndex {
+                                    page_ix: self.page,
+                                    group_ix: None,
+                                })
                                 .pages(pages),
                         ),
                     ),

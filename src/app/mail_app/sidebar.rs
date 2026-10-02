@@ -13,9 +13,9 @@ use super::*;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
+    Icon, Sizable as _,
     sidebar::{Sidebar, SidebarCollapsible, SidebarMenuItem},
     tag::Tag,
-    Icon, Sizable as _,
 };
 
 /// Titlebar and list-header label for a location, e.g. `"All Inboxes"`, `"Work · Archive"`
@@ -58,9 +58,10 @@ fn location_account(loc: &Location) -> AccountId {
 }
 
 fn account_name(mailbox: &Mailbox, id: &str) -> String {
-    mailbox
-        .account(id)
-        .map_or_else(|| id.to_owned(), |a| crate::account_style::display_name(a).to_owned())
+    mailbox.account(id).map_or_else(
+        || id.to_owned(),
+        |a| crate::account_style::display_name(a).to_owned(),
+    )
 }
 
 /// Icon and tint of a location.
@@ -84,7 +85,11 @@ fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Tag {
     } else {
         (t.secondary, t.muted_foreground)
     };
-    Tag::custom(bg, fg, bg).small().rounded_full().flex_none().child(n.to_string())
+    Tag::custom(bg, fg, bg)
+        .small()
+        .rounded_full()
+        .flex_none()
+        .child(n.to_string())
 }
 
 impl MailApp {
@@ -137,22 +142,39 @@ impl MailApp {
             .w_full()
             .items_center()
             .justify_between()
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Mailboxes"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Mailboxes"),
+            )
             .child(
                 div()
                     .flex()
                     .gap_1()
                     .when(self.has_remote_accounts(), |row| {
                         row.child(
-                            icon_button("sidebar-fetch-mail", IconName::RefreshCw, "Fetch mail", "cmd-shift-n", cx)
-                                .loading(self.is_fetching())
-                                .loading_icon(IconName::RefreshCw)
-                                .on_click(run(FetchMail)),
+                            icon_button(
+                                "sidebar-fetch-mail",
+                                IconName::RefreshCw,
+                                "Fetch mail",
+                                "cmd-shift-n",
+                                cx,
+                            )
+                            .loading(self.is_fetching())
+                            .loading_icon(IconName::RefreshCw)
+                            .on_click(run(FetchMail)),
                         )
                     })
                     .child(
-                        icon_button("sidebar-add-account", IconName::Plus, "Add or manage accounts", "", cx)
-                            .on_click(run(ManageAccounts)),
+                        icon_button(
+                            "sidebar-add-account",
+                            IconName::Plus,
+                            "Add or manage accounts",
+                            "",
+                            cx,
+                        )
+                        .on_click(run(ManageAccounts)),
                     ),
             );
         Sidebar::new("sidebar")

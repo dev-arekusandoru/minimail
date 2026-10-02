@@ -79,11 +79,19 @@ pub struct EmailAddress {
 
 impl EmailAddress {
     pub fn new(address: impl Into<String>) -> Self {
-        Self { address: address.into(), label: Label::Unlabeled, primary: false }
+        Self {
+            address: address.into(),
+            label: Label::Unlabeled,
+            primary: false,
+        }
     }
 
     pub fn primary(address: impl Into<String>) -> Self {
-        Self { address: address.into(), label: Label::Unlabeled, primary: true }
+        Self {
+            address: address.into(),
+            label: Label::Unlabeled,
+            primary: true,
+        }
     }
 }
 
@@ -96,7 +104,11 @@ pub struct PhoneNumber {
 
 impl PhoneNumber {
     pub fn new(number: impl Into<String>) -> Self {
-        Self { number: number.into(), label: Label::Unlabeled, primary: false }
+        Self {
+            number: number.into(),
+            label: Label::Unlabeled,
+            primary: false,
+        }
     }
 }
 
@@ -191,7 +203,10 @@ pub struct NewContact {
 impl NewContact {
     /// A contact with just a display name; everything else empty.
     pub fn new(display_name: impl Into<String>) -> Self {
-        Self { display_name: display_name.into(), ..Self::default() }
+        Self {
+            display_name: display_name.into(),
+            ..Self::default()
+        }
     }
 
     /// The minimal contact the Screener creates for an unknown sender.

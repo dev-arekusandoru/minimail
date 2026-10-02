@@ -14,11 +14,11 @@ use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
 use crate::search::{Field, Query};
 use crate::tz::Now;
 
+mod remote;
 mod replies;
 mod states;
 mod suggestions;
 mod timing;
-mod remote;
 mod triage;
 mod undo;
 mod visibility;
@@ -156,22 +156,6 @@ pub enum Location {
     Folder(FolderId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Reply {
-    pub in_reply_to: MessageId,
-    pub body: String,
-}
-
-/// A reply held back for `OUTBOX_DELAY` seconds so it can still be recalled.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Outgoing {
-    pub reply: Reply,
-    pub due: Timestamp,
-    seq: u64,
-}
-
-/// Seconds a reply waits in the outbox before `tick` sends it.
-pub const OUTBOX_DELAY: Timestamp = 10;
 pub const DEFAULT_FOLLOW_UP_TIMEOUT: Timestamp = 3 * DAY;
 
 /// Badge attached to a message (accepted AI labels and resurfacing notes).
@@ -191,7 +175,6 @@ pub enum Tag {
 pub struct TickReport {
     pub woken: Vec<MessageId>,
     pub followed_up: Vec<MessageId>,
-    pub flushed: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -215,14 +198,7 @@ enum Change {
     Unsubscribed(String),
     /// Whole pending-suggestion list before the action.
     Pending(Vec<Suggestion>),
-    /// Outbox reply with this seq was queued; undo removes it if still there.
-    Queued(u64),
-    /// Post-send filing recorded for a queued reply: the seq, its previous value,
-    /// and the state a reply materialised after the filing should go back to.
-    PostSend(u64, Option<TriageState>, TriageState),
-    SentPush,
     FolderPush(FolderId),
-    Materialised(MessageId),
 }
 
 #[derive(Clone, Debug)]
@@ -232,7 +208,8 @@ struct UndoStep {
 
 fn fixture_accounts() -> (Vec<Account>, Vec<Folder>) {
     let data: Vec<serde_json::Value> =
-        serde_json::from_str(include_str!("../../fixtures/accounts.json")).expect("account fixture");
+        serde_json::from_str(include_str!("../../fixtures/accounts.json"))
+            .expect("account fixture");
     let accounts = data
         .iter()
         .map(|v| serde_json::from_value(v.clone()).expect("account"))
@@ -262,9 +239,6 @@ pub struct Mailbox {
     index: HashMap<MessageId, usize>,
     newest_first: Vec<MessageId>,
     undo: Vec<UndoStep>,
-    sent: Vec<Reply>,
-    outbox: Vec<Outgoing>,
-    next_seq: u64,
     meta: HashMap<MessageId, Meta>,
     known: HashSet<String>,
     contacts: Option<Rc<ContactStore>>,
@@ -276,10 +250,6 @@ pub struct Mailbox {
     accounts: Vec<Account>,
     folders: Vec<Folder>,
     follow_up_timeout: Timestamp,
-    /// State a still-queued reply should materialise with (post-send filing), by outbox seq.
-    post_send: HashMap<u64, TriageState>,
-    /// Replies the outbox materialised, by the outbox entry they came from.
-    sent_ids: HashMap<u64, MessageId>,
 }
 
 impl Mailbox {
@@ -355,9 +325,6 @@ impl Mailbox {
             index,
             newest_first,
             undo: Vec::new(),
-            sent: Vec::new(),
-            outbox: Vec::new(),
-            next_seq: 0,
             meta,
             known,
             blocked: HashMap::new(),
@@ -368,8 +335,6 @@ impl Mailbox {
             accounts,
             folders,
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
-            post_send: HashMap::new(),
-            sent_ids: HashMap::new(),
         }
     }
 
@@ -430,7 +395,13 @@ impl Mailbox {
     }
 
     /// Store a downloaded body and clear `partial`. Not an undo step.
-    pub fn set_body(&mut self, id: MessageId, body: String, html: Option<String>, attachments: Vec<Attachment>) {
+    pub fn set_body(
+        &mut self,
+        id: MessageId,
+        body: String,
+        html: Option<String>,
+        attachments: Vec<Attachment>,
+    ) {
         if let Some(&i) = self.index.get(&id) {
             let m = &mut self.messages[i];
             m.body = body;

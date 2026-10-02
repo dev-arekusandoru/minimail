@@ -51,8 +51,18 @@ const MAX_ACTION_ITEMS: usize = 5;
 const MAX_DATES: usize = 6;
 
 const IMPERATIVES: [&str; 12] = [
-    "please", "send", "reply", "review", "confirm", "check", "let me know", "add", "approve",
-    "pay", "sign", "book",
+    "please",
+    "send",
+    "reply",
+    "review",
+    "confirm",
+    "check",
+    "let me know",
+    "add",
+    "approve",
+    "pay",
+    "sign",
+    "book",
 ];
 
 const MONTHS: [&str; 12] = [

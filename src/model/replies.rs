@@ -1,123 +1,87 @@
 use super::*;
 
 impl Mailbox {
-    pub fn send_reply(&mut self, to: MessageId, body: String) {
-        self.send_reply_at(to, body, false, 0);
-    }
-    pub fn send_reply_at(
+    /// Record provider-confirmed delivery. Unlike filing, delivery cannot be undone.
+    pub fn record_sent(
         &mut self,
-        to: MessageId,
-        body: String,
+        mut message: Message,
+        original: Option<MessageId>,
         awaiting_reply: bool,
         now: Timestamp,
-    ) {
-        let Some(&i) = self.index.get(&to) else {
-            return;
-        };
-        let original = self.messages[i].clone();
-        let mut changes = vec![self.snapshot(to)];
-        for m in &self.messages {
-            if m.thread_id == original.thread_id
-                && self
-                    .meta
-                    .get(&m.id)
-                    .is_some_and(|meta| meta.tags.contains(&Tag::NeedsReply))
-            {
-                changes.push(self.snapshot(m.id));
-                self.meta
-                    .entry(m.id)
-                    .or_default()
-                    .tags
-                    .retain(|t| *t != Tag::NeedsReply);
+    ) -> MessageId {
+        message.id = self
+            .messages
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("message id space exhausted");
+        message.outgoing = true;
+        message.read = true;
+        message.partial = false;
+        let mut meta = Meta::default();
+        if let Some(original) = original.and_then(|id| self.get(id)).cloned() {
+            message.thread_id = original.thread_id;
+            message.state = original.state;
+            if original.state == TriageState::Snoozed {
+                meta.snoozed_until = self.snoozed_until(original.id);
+                message.snooze = original.snooze.clone();
             }
+            for m in &self.messages {
+                if m.thread_id == original.thread_id {
+                    self.meta
+                        .entry(m.id)
+                        .or_default()
+                        .tags
+                        .retain(|tag| *tag != Tag::NeedsReply);
+                }
+            }
+            let original_meta = self.meta.entry(original.id).or_default();
+            original_meta.tags.retain(|tag| *tag != Tag::AwaitingReply);
+            original_meta.awaiting_since = awaiting_reply.then_some(now);
+            if awaiting_reply {
+                original_meta.tags.push(Tag::AwaitingReply);
+            }
+        } else if message.state == TriageState::Snoozed {
+            // A newly composed message has no existing wake time to inherit.
+            message.state = TriageState::Archived;
+            message.snooze = None;
         }
-        let meta = self.meta.entry(to).or_default();
-        meta.tags.retain(|t| *t != Tag::AwaitingReply);
-        meta.awaiting_since = None;
-        if awaiting_reply {
-            meta.tags.push(Tag::AwaitingReply);
-            meta.awaiting_since = Some(now);
+        if message.state != TriageState::Snoozed {
+            message.snooze = None;
         }
-        let seq = self.next_seq;
-        self.next_seq += 1;
-        self.outbox.push(Outgoing {
-            reply: Reply {
-                in_reply_to: to,
-                body,
-            },
-            due: now + OUTBOX_DELAY,
-            seq,
-        });
-        changes.push(Change::Queued(seq));
-        self.push_undo(changes);
+        let id = message.id;
+        self.index.insert(id, self.messages.len());
+        self.newest_first.insert(0, id);
+        self.meta.insert(id, meta);
+        self.messages.push(message);
+        id
     }
+
+    /// File the original and confirmed outgoing messages together in one undo step.
     pub fn file_after_reply(&mut self, original: MessageId, state: TriageState) -> usize {
         assert_ne!(state, TriageState::Snoozed, "use snooze");
-        let Some(m) = self.get(original).cloned() else {
+        let Some(thread) = self.get(original).map(|m| m.thread_id) else {
             return 0;
         };
-        // What a reply materialised from the outbox would have had: the original's
-        // state before this filing.
-        let before = m.state;
         let ids: Vec<_> = self
             .messages
             .iter()
-            .filter(|x| x.id == original || (x.outgoing && x.thread_id == m.thread_id))
-            .map(|x| x.id)
+            .filter(|m| m.id == original || (m.outgoing && m.thread_id == thread))
+            .filter(|m| m.state != state)
+            .map(|m| m.id)
             .collect();
-        let mut changes = Vec::new();
+        let changes = ids.iter().map(|id| self.snapshot(*id)).collect();
         for id in &ids {
-            if let Some(&i) = self.index.get(id)
-                && self.messages[i].state != state
-            {
-                changes.push(self.snapshot(*id));
-                self.messages[i].state = state;
-                let meta = self.meta.entry(*id).or_default();
-                meta.snoozed_until = None;
-                meta.awaiting_since = None;
-                meta.tags.retain(|t| {
-                    !matches!(t, Tag::Reminder | Tag::FollowUp | Tag::PossibleSpam)
-                });
-            }
+            self.set_raw(*id, state);
+            self.meta
+                .entry(*id)
+                .or_default()
+                .tags
+                .retain(|tag| !matches!(tag, Tag::Reminder | Tag::FollowUp | Tag::PossibleSpam));
         }
-        // Replies still in the outbox materialise with this state, and the same undo
-        // step has to reach them once they are sent.
-        let queued: Vec<u64> = self
-            .outbox
-            .iter()
-            .filter(|o| {
-                self.get(o.reply.in_reply_to)
-                    .is_some_and(|x| x.thread_id == m.thread_id)
-            })
-            .map(|o| o.seq)
-            .collect();
-        for seq in queued {
-            let was = self.post_send.insert(seq, state);
-            changes.push(Change::PostSend(seq, was, before));
-        }
-        let changed = changes
-            .iter()
-            .filter(|c| matches!(c, Change::Msg(..)))
-            .count();
         self.push_undo(changes);
-        changed
-    }
-    pub fn sent(&self) -> &[Reply] {
-        &self.sent
-    }
-    pub fn outbox(&self) -> &[Outgoing] {
-        &self.outbox
-    }
-    pub fn recall_last(&mut self, _now: Timestamp) -> Option<Reply> {
-        let seq = self.outbox.last()?.seq;
-        let pos = self.undo.iter().rposition(|s| {
-            s.changes
-                .iter()
-                .any(|c| matches!(c, Change::Queued(q) if *q == seq))
-        })?;
-        let step = self.undo.remove(pos);
-        let reply = self.outbox.last().map(|o| o.reply.clone());
-        self.revert(step);
-        reply
+        ids.len()
     }
 }

@@ -1,12 +1,16 @@
 //! Provider-agnostic mail backend interface. No GPUI, no model ids: providers
 //! speak in remote ids only; the sync layer maps to local ids.
 
+use compose::ComposeProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::clock::Timestamp;
 use crate::model::Attachment;
 
+pub mod compose;
 pub mod gmail;
+pub mod mime;
+pub mod mock;
 pub mod secrets;
 
 pub type RemoteId = String;
@@ -102,7 +106,10 @@ pub enum ProviderError {
     Network(String),
     /// Still throttled after the provider's own retries; try again later.
     RateLimited,
-    Api { status: u16, message: String },
+    Api {
+        status: u16,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for ProviderError {
@@ -135,7 +142,8 @@ pub trait MailProvider: Send + 'static {
     ) -> Result<Page, ProviderError>;
     /// Flags of every message received at/after `since`, across all scopes, for
     /// reconciling after an expired cursor. Built from listings only.
-    fn snapshot(&mut self, since: Timestamp) -> Result<Vec<(RemoteId, RemoteFlags)>, ProviderError>;
+    fn snapshot(&mut self, since: Timestamp)
+    -> Result<Vec<(RemoteId, RemoteFlags)>, ProviderError>;
     /// [`ProviderError::CursorExpired`] when `cursor` is too old.
     fn changes(&mut self, cursor: &str) -> Result<Changes, ProviderError>;
     /// Headers, snippet and flags, in the order of `ids`. Unknown or filtered ids
@@ -150,4 +158,11 @@ pub trait MailProvider: Send + 'static {
     ) -> Result<(), ProviderError>;
     /// Mark the message read (`true`) or unread on the server.
     fn set_read(&mut self, id: &RemoteId, read: bool) -> Result<(), ProviderError>;
+    /// Composing, sending and attachment bytes, when the backend has them.
+    /// Defaults to `None`: a backend that cannot compose says so instead of
+    /// implementing a seam that pretends, and the caller keeps the draft
+    /// local.
+    fn compose(&mut self) -> Option<&mut dyn ComposeProvider> {
+        None
+    }
 }

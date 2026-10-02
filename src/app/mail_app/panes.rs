@@ -144,13 +144,18 @@ impl Panes {
     /// The list pane as last laid out, along the stacking axis.
     fn measured_list(&self, cx: &App) -> Option<f32> {
         let state = self.list_state().read(cx);
-        (state.container_size() > px(0.)).then(|| state.sizes().first().map_or(0., |s| f32::from(*s)))
+        (state.container_size() > px(0.))
+            .then(|| state.sizes().first().map_or(0., |s| f32::from(*s)))
     }
 
     /// The sidebar as last laid out (or as it was when hidden).
     fn measured_sidebar(&self, cx: &App) -> f32 {
         let state = self.main.read(cx);
-        state.sizes().first().filter(|_| state.container_size() > px(0.)).map_or(SIDEBAR_W, |s| f32::from(*s))
+        state
+            .sizes()
+            .first()
+            .filter(|_| state.container_size() > px(0.))
+            .map_or(SIDEBAR_W, |s| f32::from(*s))
     }
 }
 
@@ -177,11 +182,18 @@ impl MailApp {
 
     /// Width the list rows get: the list pane side by side, the whole pane region when stacked.
     pub(super) fn list_width(&self, viewport_w: f32, cx: &App) -> f32 {
-        let sidebar = if self.panes.sidebar_visible { self.panes.measured_sidebar(cx) } else { 0. };
+        let sidebar = if self.panes.sidebar_visible {
+            self.panes.measured_sidebar(cx)
+        } else {
+            0.
+        };
         let available = available_width(viewport_w, sidebar);
         match self.panes.orientation {
             Orientation::Stacked => available,
-            Orientation::SideBySide => self.panes.measured_list(cx).unwrap_or_else(|| Orientation::SideBySide.default_list(available)),
+            Orientation::SideBySide => self
+                .panes
+                .measured_list(cx)
+                .unwrap_or_else(|| Orientation::SideBySide.default_list(available)),
         }
     }
 
@@ -194,21 +206,33 @@ impl MailApp {
     }
 
     /// Move the divider along the stacking axis; the panel ranges keep both panes usable.
-    pub(super) fn nudge_list_pane(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(size) = self.panes.measured_list(cx) else { return };
+    pub(super) fn nudge_list_pane(
+        &mut self,
+        delta: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(size) = self.panes.measured_list(cx) else {
+            return;
+        };
         let state = self.panes.list_state().clone();
-        state.update(cx, |state, cx| state.resize_panel(0, px(size + delta), window, cx));
+        state.update(cx, |state, cx| {
+            state.resize_panel(0, px(size + delta), window, cx)
+        });
     }
 
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for (orientation, state) in
-            [(Orientation::SideBySide, &self.panes.side_by_side), (Orientation::Stacked, &self.panes.stacked)]
-        {
+        for (orientation, state) in [
+            (Orientation::SideBySide, &self.panes.side_by_side),
+            (Orientation::Stacked, &self.panes.stacked),
+        ] {
             let container = f32::from(state.read(cx).container_size());
             if container > 0. {
                 let size = orientation.default_list(container);
-                state.clone().update(cx, |state, cx| state.resize_panel(0, px(size), window, cx));
+                state
+                    .clone()
+                    .update(cx, |state, cx| state.resize_panel(0, px(size), window, cx));
             }
         }
         self.show_toast("Pane sizes reset".into(), window, cx);
@@ -217,7 +241,9 @@ impl MailApp {
     /// Back to the default sidebar width.
     pub(super) fn reset_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let main = self.panes.main.clone();
-        main.update(cx, |state, cx| state.resize_panel(0, px(SIDEBAR_W), window, cx));
+        main.update(cx, |state, cx| {
+            state.resize_panel(0, px(SIDEBAR_W), window, cx)
+        });
     }
 
     /// Stack the panes the other way round: list left, or list on top.
@@ -226,7 +252,12 @@ impl MailApp {
         self.set_pane_layout(next, window, cx);
     }
 
-    pub(super) fn set_pane_layout(&mut self, orientation: Orientation, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn set_pane_layout(
+        &mut self,
+        orientation: Orientation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.panes.orientation = orientation;
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
@@ -246,11 +277,14 @@ impl MailApp {
         place: impl FnOnce(Div) -> Div,
         reset: fn(&mut Self, &mut Window, &mut Context<Self>),
     ) -> impl IntoElement {
-        place(div().absolute()).id(id).test_support().on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-            if ev.click_count() == 2 {
-                reset(this, window, cx);
-            }
-        }))
+        place(div().absolute())
+            .id(id)
+            .test_support()
+            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                if ev.click_count() == 2 {
+                    reset(this, window, cx);
+                }
+            }))
     }
 
     /// The three panes: sidebar | list | reader in nested resizable groups, with the
@@ -270,18 +304,41 @@ impl MailApp {
         let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
         let shown = self.panes.sidebar_visible;
         let sidebar_w = self.panes.measured_sidebar(cx);
-        let reader = div().size_full().min_w_0().min_h_0().flex().flex_col().child(reader);
+        let reader = div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(reader);
 
         let content = match list {
             None => reader.into_any_element(),
             Some(list) => {
-                let available = if stacked { available_height(vh) } else { available_width(vw, if shown { sidebar_w } else { 0. }) };
+                let available = if stacked {
+                    available_height(vh)
+                } else {
+                    available_width(vw, if shown { sidebar_w } else { 0. })
+                };
                 let (min_list, min_reader) = orientation.minimums();
-                let group = if stacked { v_resizable("panes-stacked") } else { h_resizable("panes-side-by-side") };
+                let group = if stacked {
+                    v_resizable("panes-stacked")
+                } else {
+                    h_resizable("panes-side-by-side")
+                };
                 group
                     .with_state(self.panes.list_state())
-                    .child(resizable_panel().size(px(orientation.default_list(available))).size_range(px(min_list)..Pixels::MAX).child(list))
-                    .child(resizable_panel().size_range(px(min_reader)..Pixels::MAX).child(reader))
+                    .child(
+                        resizable_panel()
+                            .size(px(orientation.default_list(available)))
+                            .size_range(px(min_list)..Pixels::MAX)
+                            .child(list),
+                    )
+                    .child(
+                        resizable_panel()
+                            .size_range(px(min_reader)..Pixels::MAX)
+                            .child(reader),
+                    )
                     .into_any_element()
             }
         };
@@ -295,9 +352,19 @@ impl MailApp {
                         .size_range(px(MIN_SIDEBAR_W)..px(MAX_SIDEBAR_W))
                         .flex_none()
                         .bg(t.sidebar)
-                        .child(div().size_full().flex().flex_col().child(self.render_sidebar(cx))),
+                        .child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .flex_col()
+                                .child(self.render_sidebar(cx)),
+                        ),
                 )
-                .child(resizable_panel().size_range(px(MIN_LIST_W + MIN_READER_W)..Pixels::MAX).child(content))
+                .child(
+                    resizable_panel()
+                        .size_range(px(MIN_LIST_W + MIN_READER_W)..Pixels::MAX)
+                        .child(content),
+                )
                 .into_any_element()
         } else {
             content
@@ -309,21 +376,47 @@ impl MailApp {
         if body_w > 0. {
             let half = DIVIDER_HIT / 2.;
             if shown {
-                let place = |d: Div| d.top_0().bottom_0().left(px(sidebar_w - half)).w(px(DIVIDER_HIT));
-                targets.push(self.divider_target("sidebar-divider", cx, place, Self::reset_sidebar).into_any_element());
+                let place = |d: Div| {
+                    d.top_0()
+                        .bottom_0()
+                        .left(px(sidebar_w - half))
+                        .w(px(DIVIDER_HIT))
+                };
+                targets.push(
+                    self.divider_target("sidebar-divider", cx, place, Self::reset_sidebar)
+                        .into_any_element(),
+                );
             }
-            if let (Some(list), false) = (self.panes.measured_list(cx), self.in_session() || self.session_end.is_some()) {
+            if let (Some(list), false) = (
+                self.panes.measured_list(cx),
+                self.in_session() || self.session_end.is_some(),
+            ) {
                 let origin = if shown { sidebar_w } else { 0. };
                 let place = move |d: Div| {
                     if stacked {
-                        d.left(px(origin)).right_0().top(px(list - half)).h(px(DIVIDER_HIT))
+                        d.left(px(origin))
+                            .right_0()
+                            .top(px(list - half))
+                            .h(px(DIVIDER_HIT))
                     } else {
-                        d.top_0().bottom_0().left(px(origin + list - half)).w(px(DIVIDER_HIT))
+                        d.top_0()
+                            .bottom_0()
+                            .left(px(origin + list - half))
+                            .w(px(DIVIDER_HIT))
                     }
                 };
-                targets.push(self.divider_target("pane-divider", cx, place, Self::reset_panes).into_any_element());
+                targets.push(
+                    self.divider_target("pane-divider", cx, place, Self::reset_panes)
+                        .into_any_element(),
+                );
             }
         }
-        div().relative().flex_1().min_h_0().child(panes).children(targets).into_any_element()
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .child(panes)
+            .children(targets)
+            .into_any_element()
     }
 }

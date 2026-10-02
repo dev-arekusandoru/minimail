@@ -25,7 +25,9 @@ gpui_kit::assets::icon_assets!(
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
-        ReplyAll, Forward, Regex, WholeWord
+        ReplyAll, Forward, Regex, WholeWord,
+        // Composer formatting controls.
+        Bold, Italic, Link, List, ListOrdered, Heading, Quote, Code, Strikethrough, Table
     ]
 );
 
@@ -106,7 +108,6 @@ pub enum Glyph {
     KindOther,
 }
 
-
 /// Everything the UI needs to draw and explain a [`Glyph`].
 #[derive(Clone, Copy, Debug)]
 pub struct Spec {
@@ -133,7 +134,15 @@ const fn spec(
     priority: u8,
     low_signal: bool,
 ) -> Spec {
-    Spec { icon, token, label, description, group, priority, low_signal }
+    Spec {
+        icon,
+        token,
+        label,
+        description,
+        group,
+        priority,
+        low_signal,
+    }
 }
 
 impl Glyph {
@@ -162,24 +171,168 @@ impl Glyph {
     pub const fn spec(self) -> Spec {
         use Token::*;
         match self {
-            Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
-            Glyph::PossibleSpam => spec(IconName::ShieldAlert, PossibleSpam, "Possible spam", "Classified as possible spam.", "Classifier labels", 1, false),
-            Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
-            Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
-            Glyph::AwaitingReply => spec(IconName::Hourglass, AwaitingReply, "Awaiting reply", "A reply has been sent and an answer is expected.", "Reply status", 4, false),
-            Glyph::FollowUp => spec(IconName::CornerUpRight, FollowUp, "Follow up", "A reply is overdue: follow up with this thread.", "Reply status", 5, false),
-            Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A snoozed message woke back up in the inbox.", "Reply status", 6, false),
-            Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
-            Glyph::Snoozed => spec(IconName::Clock, Snoozed, "Snoozed", "Hidden until the wake time shown on the row.", "Mail state", 8, false),
-            Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 3 out of 5.", "Urgency", 7, false),
-            Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
-            Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),
-            Glyph::KindPerson => spec(IconName::User, Kind, "Person", "Written by a person.", "Kind", 10, false),
-            Glyph::KindReceipt => spec(IconName::Receipt, Kind, "Receipt", "A receipt or statement.", "Kind", 10, false),
-            Glyph::KindNewsletter => spec(IconName::Newspaper, Kind, "Newsletter", "A newsletter or bulk mailing.", "Kind", 10, false),
-            Glyph::KindNotification => spec(IconName::Bell, Kind, "Notification", "An automatic notification.", "Kind", 10, false),
-            Glyph::UrgentLow => spec(IconName::Zap, Muted, "Low urgency", "Urgency 1 or 2 out of 5 (low signal, folded into +N).", "Urgency", 11, true),
-            Glyph::KindOther => spec(IconName::Tag, Muted, "Other", "Uncategorised (low signal, folded into +N).", "Kind", 12, true),
+            Glyph::Suggestion => spec(
+                IconName::Sparkles,
+                Accent,
+                "AI suggestion",
+                "A label the classifier proposes. y or click accepts, n or right-click rejects.",
+                "Classifier labels",
+                0,
+                false,
+            ),
+            Glyph::PossibleSpam => spec(
+                IconName::ShieldAlert,
+                PossibleSpam,
+                "Possible spam",
+                "Classified as possible spam.",
+                "Classifier labels",
+                1,
+                false,
+            ),
+            Glyph::UrgentHigh => spec(
+                IconName::Siren,
+                Urgent,
+                "Very urgent",
+                "Urgency 4 or 5 out of 5.",
+                "Urgency",
+                2,
+                false,
+            ),
+            Glyph::NeedsReply => spec(
+                IconName::Reply,
+                NeedsReply,
+                "Needs reply",
+                "The sender expects an answer.",
+                "Classifier labels",
+                3,
+                false,
+            ),
+            Glyph::AwaitingReply => spec(
+                IconName::Hourglass,
+                AwaitingReply,
+                "Awaiting reply",
+                "A reply has been sent and an answer is expected.",
+                "Reply status",
+                4,
+                false,
+            ),
+            Glyph::FollowUp => spec(
+                IconName::CornerUpRight,
+                FollowUp,
+                "Follow up",
+                "A reply is overdue: follow up with this thread.",
+                "Reply status",
+                5,
+                false,
+            ),
+            Glyph::Reminder => spec(
+                IconName::AlarmClock,
+                Reminder,
+                "Reminder",
+                "A snoozed message woke back up in the inbox.",
+                "Reply status",
+                6,
+                false,
+            ),
+            Glyph::NewSender => spec(
+                IconName::UserPlus,
+                NewSender,
+                "New sender",
+                "First mail from this sender.",
+                "Mail state",
+                7,
+                false,
+            ),
+            Glyph::Snoozed => spec(
+                IconName::Clock,
+                Snoozed,
+                "Snoozed",
+                "Hidden until the wake time shown on the row.",
+                "Mail state",
+                8,
+                false,
+            ),
+            Glyph::UrgentMid => spec(
+                IconName::Flame,
+                Urgent,
+                "Urgent",
+                "Urgency 3 out of 5.",
+                "Urgency",
+                7,
+                false,
+            ),
+            Glyph::Muted => spec(
+                IconName::BellOff,
+                Muted,
+                "Muted thread",
+                "New replies in this thread are hidden from the inbox.",
+                "Mail state",
+                8,
+                false,
+            ),
+            Glyph::Attachment => spec(
+                IconName::Paperclip,
+                Muted,
+                "Attachment",
+                "The subject or opening lines mention an attachment.",
+                "Mail state",
+                9,
+                false,
+            ),
+            Glyph::KindPerson => spec(
+                IconName::User,
+                Kind,
+                "Person",
+                "Written by a person.",
+                "Kind",
+                10,
+                false,
+            ),
+            Glyph::KindReceipt => spec(
+                IconName::Receipt,
+                Kind,
+                "Receipt",
+                "A receipt or statement.",
+                "Kind",
+                10,
+                false,
+            ),
+            Glyph::KindNewsletter => spec(
+                IconName::Newspaper,
+                Kind,
+                "Newsletter",
+                "A newsletter or bulk mailing.",
+                "Kind",
+                10,
+                false,
+            ),
+            Glyph::KindNotification => spec(
+                IconName::Bell,
+                Kind,
+                "Notification",
+                "An automatic notification.",
+                "Kind",
+                10,
+                false,
+            ),
+            Glyph::UrgentLow => spec(
+                IconName::Zap,
+                Muted,
+                "Low urgency",
+                "Urgency 1 or 2 out of 5 (low signal, folded into +N).",
+                "Urgency",
+                11,
+                true,
+            ),
+            Glyph::KindOther => spec(
+                IconName::Tag,
+                Muted,
+                "Other",
+                "Uncategorised (low signal, folded into +N).",
+                "Kind",
+                12,
+                true,
+            ),
         }
     }
 
@@ -290,8 +443,12 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
             QuestionKey::Spam => "spam?".to_owned(),
             QuestionKey::NeedsReply => "needs reply?".to_owned(),
             QuestionKey::ExpectsReply => "expects reply?".to_owned(),
-            QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
-            QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
+            QuestionKey::Urgency => s
+                .urgency()
+                .map_or("urgent?".into(), |n| format!("urgent {n}?")),
+            QuestionKey::Kind => s
+                .kind()
+                .map_or("kind?".into(), |k| format!("{}?", k.label())),
         })
         .collect();
     parts.join(", ")
@@ -300,7 +457,9 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
 /// The themed icon of a glyph at `size` pixels.
 pub fn icon(glyph: Glyph, t: &ThemeColor, size: f32) -> Icon {
     let spec = glyph.spec();
-    Icon::new(spec.icon).with_size(px(size)).text_color(spec.token.color(t))
+    Icon::new(spec.icon)
+        .with_size(px(size))
+        .text_color(spec.token.color(t))
 }
 
 /// The Lucide icon for an [`crate::account_style::ICONS`] key; `None` for an unknown key.
@@ -330,7 +489,9 @@ pub fn account_icon_name(key: &str) -> Option<IconName> {
 /// not parse). Pass [`crate::account_style::icon_key`] for an account.
 pub fn account_icon(key: &str, color: &str, t: &ThemeColor, size: f32) -> Icon {
     let name = account_icon_name(key).unwrap_or(IconName::Mail);
-    Icon::new(name).with_size(px(size)).text_color(theme::parse_color(color).unwrap_or(t.primary))
+    Icon::new(name)
+        .with_size(px(size))
+        .text_color(theme::parse_color(color).unwrap_or(t.primary))
 }
 
 fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
@@ -361,7 +522,11 @@ pub fn cluster(
             .tooltip(tip(label))
     });
     let more = (!hidden.is_empty()).then(|| {
-        let list = hidden.iter().map(|g| g.spec().label).collect::<Vec<_>>().join(" · ");
+        let list = hidden
+            .iter()
+            .map(|g| g.spec().label)
+            .collect::<Vec<_>>()
+            .join(" · ");
         div()
             .id(("glyph-more", id))
             .flex_none()
@@ -370,16 +535,37 @@ pub fn cluster(
             .child(format!("+{}", hidden.len()))
             .tooltip(tip(list))
     });
-    div().flex().items_center().gap(px(4.)).children(icons).children(more)
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .children(icons)
+        .children(more)
 }
 
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Unread", theme::unread(t), "Yellow bar; sender and subject are bold."),
-        ("Urgent unread", theme::urgent(t), "Red bar; the urgency icon remains in the icon cluster."),
-        ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
-        ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
+        (
+            "Unread",
+            theme::unread(t),
+            "Yellow bar; sender and subject are bold.",
+        ),
+        (
+            "Urgent unread",
+            theme::urgent(t),
+            "Red bar; the urgency icon remains in the icon cluster.",
+        ),
+        (
+            "Selected / open",
+            t.primary,
+            "Blue bar; opening a message uses the same treatment as a one-item selection.",
+        ),
+        (
+            "Partial thread selection",
+            t.primary.opacity(0.45),
+            "Dimmed blue bar when only some messages are selected.",
+        ),
     ];
     let row_state_section = div()
         .flex()
@@ -416,9 +602,25 @@ pub fn legend_view(t: &ThemeColor) -> Div {
                     .gap_2()
                     .text_xs()
                     .child(div().w(px(16.)).flex_none().child(icon(g, t, 13.)))
-                    .child(div().w(px(96.)).flex_none().text_color(t.foreground).child(s.label))
-                    .child(div().flex_1().text_color(t.muted_foreground).child(s.description))
+                    .child(
+                        div()
+                            .w(px(96.))
+                            .flex_none()
+                            .text_color(t.foreground)
+                            .child(s.label),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_color(t.muted_foreground)
+                            .child(s.description),
+                    )
             }))
     });
-    div().flex().flex_col().gap_2().child(row_state_section).children(sections)
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(row_state_section)
+        .children(sections)
 }

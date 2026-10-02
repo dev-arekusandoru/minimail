@@ -1,11 +1,10 @@
-use gpui_kit::{TestAppContext};
+use crate::harness::{MIDNIGHT, NOON, harness_with, mailbox, msg};
+use gpui_kit::TestAppContext;
 use mail_classifier::clock::{DAY, HOUR, Timestamp};
 use mail_classifier::model::Mailbox;
 use mail_classifier::model::TriageState::*;
-use crate::harness::{MIDNIGHT, NOON, harness_with, mailbox, msg};
 
 // ---------------------------------------------------------------- Snooze
-
 
 pub fn snooze_box() -> Mailbox {
     mailbox(&[
@@ -32,15 +31,27 @@ pub fn snooze_presets_hide_until_time_then_return(cx: &mut TestAppContext) {
         h.keys(key);
         assert!(!h.read(|a| a.snooze_open()));
         assert_eq!(h.state_of(id), Snoozed, "preset {key}");
-        assert_eq!(h.read(|a| a.mailbox.snoozed_until(id)), Some(*until), "preset {key}");
+        assert_eq!(
+            h.read(|a| a.mailbox.snoozed_until(id)),
+            Some(*until),
+            "preset {key}"
+        );
         assert!(!h.visible().contains(&id));
 
         h.clock.set(*until - 1);
         h.tick();
-        assert_eq!(h.state_of(id), Snoozed, "still asleep 1s early (preset {key})");
+        assert_eq!(
+            h.state_of(id),
+            Snoozed,
+            "still asleep 1s early (preset {key})"
+        );
         h.clock.set(*until);
         h.tick();
-        assert_eq!(h.state_of(id), Inbox, "wakes at the return time (preset {key})");
+        assert_eq!(
+            h.state_of(id),
+            Inbox,
+            "wakes at the return time (preset {key})"
+        );
     }
     h.assert_invariant("snooze presets");
 }
@@ -59,7 +70,10 @@ pub fn snooze_custom_duration_and_escape(cx: &mut TestAppContext) {
     h.type_text("3h");
     h.keys("enter");
     assert_eq!(h.state_of(id), Snoozed);
-    assert_eq!(h.read(|a| a.mailbox.snoozed_until(id)), Some(NOON + 3 * HOUR));
+    assert_eq!(
+        h.read(|a| a.mailbox.snoozed_until(id)),
+        Some(NOON + 3 * HOUR)
+    );
 
     h.advance(3 * HOUR - 1);
     assert_eq!(h.state_of(id), Snoozed);
@@ -83,7 +97,10 @@ pub fn snoozed_view_lists_message_with_return_time(cx: &mut TestAppContext) {
     let id = h.cursor().unwrap();
     h.keys("s 2");
     h.keys("g s");
-    assert_eq!(h.read(|a| a.location()), Some(mail_classifier::model::Location::Snoozed("personal".into())));
+    assert_eq!(
+        h.read(|a| a.location()),
+        Some(mail_classifier::model::Location::Snoozed("personal".into()))
+    );
     assert_eq!(h.visible(), vec![id]);
     assert!(h.read(|a| a.mailbox.snoozed_until(id)).is_some());
 }

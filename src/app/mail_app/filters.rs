@@ -5,8 +5,8 @@
 //! the same query. The pills *are* the state: what they show is what the list applies, and
 //! nothing is filtered behind their back.
 use gpui_kit::assets::IconName;
-use gpui_kit::component::popover::Popover;
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::prelude::FluentBuilder as _;
 
 use super::*;
@@ -64,7 +64,10 @@ impl MailApp {
         let q = &self.triage.query;
         let own = self.implicit_query();
         let keeps_folder = q.values(Field::In) == own.values(Field::In)
-            && own.values(Field::Account).iter().all(|a| q.values(Field::Account).contains(a));
+            && own
+                .values(Field::Account)
+                .iter()
+                .all(|a| q.values(Field::Account).contains(a));
         if keeps_folder {
             Some(self.folder.clone())
         } else {
@@ -124,13 +127,18 @@ impl MailApp {
         if !self.grouped() {
             return format!(" · {count}");
         }
-        let headers = self.rows().iter().filter(|row| !matches!(row, Row::Child { .. })).count();
+        let headers = self
+            .rows()
+            .iter()
+            .filter(|row| !matches!(row, Row::Child { .. }))
+            .count();
         format!(" · {count} · {headers} threads")
     }
 
     /// `Some("search: …")` while anything beyond the location is applied.
     pub fn search_header(&self) -> Option<String> {
-        self.is_filtered().then(|| format!("search: {}", self.triage.query.describe()))
+        self.is_filtered()
+            .then(|| format!("search: {}", self.triage.query.describe()))
     }
 
     /// The pill row as text, left to right: each pill, with its group's `and`/`or` before
@@ -246,7 +254,9 @@ impl MailApp {
     }
 
     fn popover_is(&self, target: &OpenFilterPopover) -> bool {
-        self.filter_popover.as_ref().is_some_and(|p| &p.target == target)
+        self.filter_popover
+            .as_ref()
+            .is_some_and(|p| &p.target == target)
     }
 
     /// Open the `+ Filter` picker (the `l` key) with the cursor in it.
@@ -281,7 +291,12 @@ impl MailApp {
             &entity,
             window,
             |this, _, event: &FilterPopoverEvent, window, cx| {
-                if let FilterPopoverEvent::Apply { field, value, replacing } = event {
+                if let FilterPopoverEvent::Apply {
+                    field,
+                    value,
+                    replacing,
+                } = event
+                {
                     match replacing.clone() {
                         Some(old) => this.add_pill(*field, value.clone(), Some(old), cx),
                         None => this.add_pill(*field, value.clone(), None, cx),
@@ -294,7 +309,11 @@ impl MailApp {
         );
         let focus = entity.read(cx).focus_handle_for_focus(cx);
         focus.focus(window, cx);
-        self.filter_popover = Some(FilterPopoverState { target, entity, _sub: sub });
+        self.filter_popover = Some(FilterPopoverState {
+            target,
+            entity,
+            _sub: sub,
+        });
         cx.notify();
     }
 
@@ -309,7 +328,9 @@ impl MailApp {
 
     /// Which step the open picker is on: the field list, or the field being filled.
     pub fn filter_popover_step(&self, cx: &App) -> Option<Step> {
-        self.filter_popover.as_ref().map(|p| p.entity.read(cx).step())
+        self.filter_popover
+            .as_ref()
+            .map(|p| p.entity.read(cx).step())
     }
 
     /// Labels of the rows the open picker lists, top to bottom.
@@ -326,28 +347,27 @@ impl MailApp {
     /// toggles, `+ Filter` and, while anything is applied, `Clear`.
     pub(super) fn render_pills(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
-        let mut row = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .text_size(px(12.))
-                    .text_color(t.foreground)
-                    .child(self.location_label())
-                    .child(
-                        div()
-                            .text_color(t.muted_foreground)
-                            .child(self.header_count(self.visible_ids().len())),
-                    ),
-            );
+        let mut row = div().flex().flex_wrap().items_center().gap_2().child(
+            div()
+                .flex()
+                .flex_none()
+                .text_size(px(12.))
+                .text_color(t.foreground)
+                .child(self.location_label())
+                .child(
+                    div()
+                        .text_color(t.muted_foreground)
+                        .child(self.header_count(self.visible_ids().len())),
+                ),
+        );
         let mut in_group = 0;
         let mut last_field = None;
         for pill in self.visible_pills() {
-            in_group = if last_field == Some(pill.field) && !pill.text { in_group + 1 } else { 0 };
+            in_group = if last_field == Some(pill.field) && !pill.text {
+                in_group + 1
+            } else {
+                0
+            };
             last_field = (!pill.text).then_some(pill.field);
             if pill.combinator.is_some() {
                 let field = pill.field;
@@ -380,10 +400,16 @@ impl MailApp {
         let t = cx.theme();
         let id = pill.id();
         let label = self.pill_label(&pill);
-        let value = button(format!("pill-value-{id}"), label, "Edit this filter", "", cx)
-            .h(px(22.))
-            .px_2()
-            .border_color(t.border);
+        let value = button(
+            format!("pill-value-{id}"),
+            label,
+            "Edit this filter",
+            "",
+            cx,
+        )
+        .h(px(22.))
+        .px_2()
+        .border_color(t.border);
         let editing_pill = Pill {
             field: pill.field,
             value: pill.value.clone(),
@@ -430,10 +456,16 @@ impl MailApp {
             .bg(t.secondary)
             .child(value)
             .child(
-                icon_button(format!("pill-remove-{id}"), IconName::X, "Remove this filter", "", cx)
-                    .h(px(18.))
-                    .w(px(18.))
-                    .on_click(cx.listener(move |this, _, _, cx| this.remove_pill_shown(&pill, cx))),
+                icon_button(
+                    format!("pill-remove-{id}"),
+                    IconName::X,
+                    "Remove this filter",
+                    "",
+                    cx,
+                )
+                .h(px(18.))
+                .w(px(18.))
+                .on_click(cx.listener(move |this, _, _, cx| this.remove_pill_shown(&pill, cx))),
             )
             .into_any_element()
     }

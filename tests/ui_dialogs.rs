@@ -45,7 +45,13 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx));
+                let view = cx.new(|cx| {
+                    let mut app = MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx);
+                    // The real composer over in-memory stores, as the app runs: the send a test
+                    // drives here is the one the user gets, hold and provider round trip included.
+                    app.attach_composer_in_memory(window, cx);
+                    app
+                });
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },
@@ -128,7 +134,9 @@ impl Harness<'_> {
         self.cx.run_until_parked();
         if !was_open && self.read(|a| a.modal_open()) {
             std::thread::sleep(std::time::Duration::from_millis(300));
-            self.cx.update_window(self.window, |_, window, cx| window.draw(cx).clear(cx)).unwrap();
+            self.cx
+                .update_window(self.window, |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
         }
     }
 
@@ -178,7 +186,13 @@ impl Harness<'_> {
     }
 
     fn blocked(&mut self) -> Vec<String> {
-        self.read(|a| a.mailbox.blocked().into_iter().map(|(email, _)| email).collect())
+        self.read(|a| {
+            a.mailbox
+                .blocked()
+                .into_iter()
+                .map(|(email, _)| email)
+                .collect()
+        })
     }
 
     fn has_tag(&mut self, id: MessageId, tag: Tag) -> bool {
@@ -193,7 +207,7 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.folders("personal").len())
     }
 
-    /// The outgoing message materialised by the outbox flush.
+    /// The outgoing messages a confirmed send put in the mailbox.
     fn outgoing_ids(&mut self) -> Vec<MessageId> {
         self.read(|a| {
             a.mailbox
@@ -205,32 +219,63 @@ impl Harness<'_> {
         })
     }
 
-    fn advance(&mut self, secs: Timestamp) {
-        self.clock.advance(secs);
+    /// One beat of the app. The composer heartbeat runs from its own retained timer, so the
+    /// test clock is moved past one of those beats before the app is ticked.
+    fn tick(&mut self) {
+        self.cx
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(50));
         self.app.update(self.cx, |a, cx| a.tick(cx));
         self.cx.run_until_parked();
     }
 
+    fn advance(&mut self, secs: Timestamp) {
+        self.clock.advance(secs);
+        self.tick();
+    }
+
+    /// Wait until `done` holds, ticking in between. Bounded: the composer worker is a real
+    /// thread, so a durable draft lands after the keystroke that asked for it, and one that
+    /// never lands fails the test instead of hanging it.
+    fn await_state(&mut self, what: &str, done: impl Fn(&MailApp) -> bool) {
+        for _ in 0..400 {
+            if self.read(&done) {
+                return;
+            }
+            self.tick();
+            if self.read(&done) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("{what}");
+    }
+
+    /// Reply, submit it and wait out the send hold, so the provider has confirmed the send
+    /// and the app has offered what to do with the original.
     fn send_reply(&mut self, body: &str) {
         self.keys("r");
+        self.await_state("the reply opens", |a| a.compose_open());
         self.type_text(body);
         self.keys("cmd-enter");
+        self.await_state("the send holds before it leaves", |a| {
+            a.hold_in_flight().is_some()
+        });
+        self.advance(mail_classifier::outgoing::HOLD_SECONDS + 1);
+        self.await_state("the provider confirms the send", |a| {
+            a.mailbox.messages().iter().any(|m| m.outgoing)
+        });
     }
 }
 
+/// The filing choice is offered only once the provider has confirmed the send, and it files
+/// the original together with the reply that was just delivered: one action, one undo.
 #[gpui_kit::gpui::test]
 fn post_send_dialog_files_original_and_reply_in_one_undo(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
-    // First reply: keep it and let the outbox send it, so the message exists.
-    h.send_reply("First");
-    h.keys("4");
-    h.advance(11);
-    let first = h.outgoing_ids();
-    assert_eq!(first.len(), 1, "the first reply was sent");
-    assert_eq!(h.state_of(first[0]), TriageState::Inbox);
-
-    // Second reply: the dialog files the original and the sent reply in one step.
     h.send_reply("Second, let me know when");
+    let sent = h.outgoing_ids();
+    assert_eq!(sent.len(), 1, "the confirmed send is in the mailbox");
     assert!(h.dialog_open(), "the post-send dialog opens");
     assert_eq!(
         h.dialog_options(),
@@ -240,27 +285,49 @@ fn post_send_dialog_files_original_and_reply_in_one_undo(cx: &mut TestAppContext
 
     h.keys("1");
     assert!(!h.dialog_open());
-    assert_eq!(h.state_of(1), TriageState::Archived);
-    assert_eq!(h.state_of(first[0]), TriageState::Archived, "the sent reply follows");
+    assert_eq!(
+        h.state_of(1),
+        TriageState::Archived,
+        "the original is archived"
+    );
+    assert_eq!(
+        h.state_of(sent[0]),
+        TriageState::Archived,
+        "and the reply that was just sent goes with it"
+    );
 
-    h.advance(11);
     h.keys("u");
     assert_eq!(h.state_of(1), TriageState::Inbox);
-    assert_eq!(h.state_of(first[0]), TriageState::Inbox, "one undo reverts the filing");
+    assert_eq!(
+        h.state_of(sent[0]),
+        TriageState::Inbox,
+        "one undo puts both back"
+    );
 }
 
+/// The dialog is not offered before anything was confirmed: a hold that has not run out
+/// changes nothing about the original, and recalling it gives the draft back whole.
 #[gpui_kit::gpui::test]
-fn post_send_dialog_files_the_pending_reply_when_it_sends(cx: &mut TestAppContext) {
+fn no_filing_choice_before_the_provider_confirms(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
-    h.send_reply("Sure, let me know when");
-    h.keys("1");
-    assert_eq!(h.state_of(1), TriageState::Archived);
+    h.keys("r");
+    h.await_state("the reply opens", |a| a.compose_open());
+    h.type_text("Sure, let me know when");
+    h.keys("cmd-enter");
+    h.await_state("the send holds before it leaves", |a| {
+        a.hold_in_flight().is_some()
+    });
+    assert!(
+        h.outgoing_ids().is_empty(),
+        "nothing is delivered inside the hold"
+    );
+    assert!(!h.dialog_open(), "and nothing is offered to file");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
 
-    // The outbox flush materialises the reply; it mirrors the original's state.
-    h.advance(11);
-    let outgoing = h.outgoing_ids();
-    assert_eq!(outgoing.len(), 1, "the reply was sent");
-    assert_eq!(h.state_of(outgoing[0]), TriageState::Archived);
+    h.keys("u");
+    h.await_state("the hold is recalled", |a| a.hold_in_flight().is_none());
+    assert!(h.outgoing_ids().is_empty());
+    assert_eq!(h.state_of(1), TriageState::Inbox);
 }
 
 #[gpui_kit::gpui::test]
@@ -297,7 +364,11 @@ fn block_dialog_moves_sender_mail_and_undo_restores(cx: &mut TestAppContext) {
     h.goto(1);
     h.keys("b");
     assert!(h.dialog_open());
-    assert!(h.dialog_title().starts_with("Block spam"), "{}", h.dialog_title());
+    assert!(
+        h.dialog_title().starts_with("Block spam"),
+        "{}",
+        h.dialog_title()
+    );
     assert_eq!(
         h.dialog_options(),
         vec!["Delete", "Archive", "File…", "Leave"]
@@ -383,7 +454,10 @@ fn sender_wide_confirm_cancel_changes_nothing(cx: &mut TestAppContext) {
     );
     h.keys("shift-e");
     assert!(h.dialog_open());
-    assert_eq!(h.dialog_title(), "Archive all 2 messages from alice in Inbox?");
+    assert_eq!(
+        h.dialog_title(),
+        "Archive all 2 messages from alice in Inbox?"
+    );
     h.keys("2");
     assert!(!h.dialog_open());
     assert_eq!(h.count(TriageState::Archived), 0, "cancel archives nothing");
@@ -405,19 +479,29 @@ fn sender_wide_delete_and_inbox_confirm(cx: &mut TestAppContext) {
         ]),
     );
     h.keys("shift-d");
-    assert_eq!(h.dialog_title(), "Delete all 2 messages from alice in Inbox?");
+    assert_eq!(
+        h.dialog_title(),
+        "Delete all 2 messages from alice in Inbox?"
+    );
     h.keys("1");
     assert_eq!(h.count(TriageState::Deleted), 2);
 
     // From Trash, the sender-wide move brings the sender's trashed mail back.
     h.keys("g d");
     h.keys("shift-i");
-    assert_eq!(h.dialog_title(), "Move to Inbox all 2 messages from alice in Trash?");
+    assert_eq!(
+        h.dialog_title(),
+        "Move to Inbox all 2 messages from alice in Trash?"
+    );
     h.keys("1");
     assert_eq!(h.count(TriageState::Inbox), 2);
     assert_eq!(h.count(TriageState::Deleted), 0);
     h.keys("u");
-    assert_eq!(h.count(TriageState::Deleted), 2, "one undo step restores both");
+    assert_eq!(
+        h.count(TriageState::Deleted),
+        2,
+        "one undo step restores both"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -432,9 +516,15 @@ fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
 
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-s");
-    assert_eq!(h.dialog_title(), "Snooze all 1 message from alice in Inbox?");
+    assert_eq!(
+        h.dialog_title(),
+        "Snooze all 1 message from alice in Inbox?"
+    );
     h.keys("1");
-    assert!(h.read(|a| a.snooze_open()), "confirm opens the snooze picker");
+    assert!(
+        h.read(|a| a.snooze_open()),
+        "confirm opens the snooze picker"
+    );
     h.keys("1");
     assert_eq!(h.state_of(1), TriageState::Snoozed);
 }
@@ -497,7 +587,11 @@ fn folder_picker_arrows_move_the_highlight_and_escape_changes_nothing(cx: &mut T
 
     h.keys("f");
     h.keys("down down enter");
-    assert_eq!(h.state_of(1), TriageState::Filed(3), "two downs reach the third folder");
+    assert_eq!(
+        h.state_of(1),
+        TriageState::Filed(3),
+        "two downs reach the third folder"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -506,7 +600,11 @@ fn folder_picker_typing_letters_never_triggers_mail_bindings(cx: &mut TestAppCon
     h.keys("f");
     h.keys("e d r");
     assert!(h.read(|a| a.folder_picker_open()));
-    assert_eq!(h.state_of(1), TriageState::Inbox, "e, d and r went to the filter");
+    assert_eq!(
+        h.state_of(1),
+        TriageState::Inbox,
+        "e, d and r went to the filter"
+    );
     assert_eq!(h.folder_rows(), vec!["Create “edr”"]);
 }
 
@@ -554,22 +652,6 @@ fn spam_banner_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn undo_after_the_flush_reverts_the_filed_reply_too(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
-    h.send_reply("Sure, let me know when");
-    h.keys("1");
-    assert_eq!(h.state_of(1), TriageState::Archived);
-
-    h.advance(11);
-    let reply = h.outgoing_ids()[0];
-    assert_eq!(h.state_of(reply), TriageState::Archived, "the reply materialises filed");
-
-    h.keys("u");
-    assert_eq!(h.state_of(1), TriageState::Inbox);
-    assert_eq!(h.state_of(reply), TriageState::Inbox, "the later-sent reply reverts too");
-}
-
-#[gpui_kit::gpui::test]
 fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestAppContext) {
     // Sender-wide file into a folder that does not exist yet.
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
@@ -583,7 +665,10 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     assert_eq!(h.folder(folder).as_deref(), Some("Zebra"));
     h.keys("u");
     assert_eq!(h.state_of(1), TriageState::Inbox);
-    assert!(h.folder(folder).is_none(), "the folder and the move revert together");
+    assert!(
+        h.folder(folder).is_none(),
+        "the folder and the move revert together"
+    );
     assert_eq!(h.folder_count(), before);
 
     // Block and file into a folder that does not exist yet.

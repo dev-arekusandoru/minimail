@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, Transaction, params};
 
-use super::error::{Error, invalid, Result};
+use super::error::{Error, Result, invalid};
 use super::model::{Contact, ContactSource, EmailAddress, NewContact};
 use super::{ContactStore, children, groups, normalize_email};
 
@@ -37,9 +37,25 @@ impl ContactStore {
                 job_title = ?11, birthday = ?12, notes = ?13, photo = ?14, favorite = ?15,
                 source = ?16, updated_at = ?17
              WHERE id = ?1",
-            params![id, new.prefix, new.given_name, new.middle_name, new.family_name, new.suffix,
-                new.nickname, new.display_name, new.organization, new.department, new.job_title,
-                new.birthday, new.notes, new.photo, new.favorite, new.source.as_str(), now],
+            params![
+                id,
+                new.prefix,
+                new.given_name,
+                new.middle_name,
+                new.family_name,
+                new.suffix,
+                new.nickname,
+                new.display_name,
+                new.organization,
+                new.department,
+                new.job_title,
+                new.birthday,
+                new.notes,
+                new.photo,
+                new.favorite,
+                new.source.as_str(),
+                now
+            ],
         )?;
         if changed == 0 {
             return Err(Error::NotFound(format!("contact {id}")));
@@ -72,20 +88,31 @@ impl ContactStore {
             return Ok((existing, false));
         }
         let fallback = address.split('@').next().unwrap_or_default().to_string();
-        let name = display_name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&fallback);
+        let name = display_name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&fallback);
         let contact = self.create(NewContact::from_email(address, name).source(source))?;
         Ok((contact, true))
     }
 
     /// Mark or unmark a contact as a favorite.
     pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<()> {
-        self.touch_row(id, "UPDATE contacts SET favorite = ?2 WHERE id = ?1", favorite as i64)
+        self.touch_row(
+            id,
+            "UPDATE contacts SET favorite = ?2 WHERE id = ?1",
+            favorite as i64,
+        )
     }
 
     /// Record that the contact was contacted just now.
     pub fn touch(&self, id: i64) -> Result<()> {
         let now = self.now();
-        self.touch_row(id, "UPDATE contacts SET last_contacted_at = ?2, updated_at = ?2 WHERE id = ?1", now)
+        self.touch_row(
+            id,
+            "UPDATE contacts SET last_contacted_at = ?2, updated_at = ?2 WHERE id = ?1",
+            now,
+        )
     }
 
     fn touch_row(&self, id: i64, sql: &str, value: impl rusqlite::ToSql) -> Result<()> {
@@ -97,7 +124,8 @@ impl ContactStore {
     }
 
     fn require(&self, id: i64) -> Result<Contact> {
-        self.get(id)?.ok_or_else(|| Error::NotFound(format!("contact {id}")))
+        self.get(id)?
+            .ok_or_else(|| Error::NotFound(format!("contact {id}")))
     }
 }
 
@@ -112,9 +140,25 @@ fn insert_contact(
             display_name, organization, department, job_title, birthday, notes, photo, favorite,
             source, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)",
-        params![id, new.prefix, new.given_name, new.middle_name, new.family_name, new.suffix,
-            new.nickname, new.display_name, new.organization, new.department, new.job_title,
-            new.birthday, new.notes, new.photo, new.favorite, new.source.as_str(), now],
+        params![
+            id,
+            new.prefix,
+            new.given_name,
+            new.middle_name,
+            new.family_name,
+            new.suffix,
+            new.nickname,
+            new.display_name,
+            new.organization,
+            new.department,
+            new.job_title,
+            new.birthday,
+            new.notes,
+            new.photo,
+            new.favorite,
+            new.source.as_str(),
+            now
+        ],
     )?;
     Ok(tx.last_insert_rowid())
 }
@@ -123,32 +167,47 @@ fn insert_contact(
 /// collection alone when `new` leaves it empty.
 fn write_children(tx: &Transaction, id: i64, new: &NewContact) -> Result<()> {
     if !new.emails.is_empty() {
-        tx.execute("DELETE FROM contact_emails WHERE contact_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM contact_emails WHERE contact_id = ?1",
+            params![id],
+        )?;
         for email in &new.emails {
             insert_email(tx, id, email)?;
         }
         enforce_one_primary(tx, id)?;
     }
     if !new.phones.is_empty() {
-        tx.execute("DELETE FROM contact_phones WHERE contact_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM contact_phones WHERE contact_id = ?1",
+            params![id],
+        )?;
         for phone in &new.phones {
             children::insert_phone(tx, id, phone)?;
         }
     }
     if !new.addresses.is_empty() {
-        tx.execute("DELETE FROM contact_addresses WHERE contact_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM contact_addresses WHERE contact_id = ?1",
+            params![id],
+        )?;
         for address in &new.addresses {
             children::insert_address(tx, id, address)?;
         }
     }
     if !new.urls.is_empty() {
-        tx.execute("DELETE FROM contact_urls WHERE contact_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM contact_urls WHERE contact_id = ?1",
+            params![id],
+        )?;
         for url in &new.urls {
             children::insert_url(tx, id, url)?;
         }
     }
     if !new.groups.is_empty() {
-        tx.execute("DELETE FROM contact_group_members WHERE contact_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM contact_group_members WHERE contact_id = ?1",
+            params![id],
+        )?;
         for name in &new.groups {
             let group = groups::ensure_group(tx, name)?;
             tx.execute(

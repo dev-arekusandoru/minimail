@@ -11,7 +11,7 @@ use gpui_kit::component::{Selectable as _, Sizable as _};
 impl MailApp {
     /// The bar of the active tab, when its find is open (and no session hides the tabs).
     pub(super) fn find_bar(&self, look: &Look<'_>) -> Option<AnyElement> {
-        let thread = self.tabs.active()?.thread;
+        let thread = self.tabs.active()?.thread_id()?;
         let ft = self.finds.get(&thread)?;
         let t = &look.t;
         let total = ft.matches.len();
@@ -43,7 +43,9 @@ impl MailApp {
                     .px_0()
                     .selected(on)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
+                    .on_click(move |_, window, cx| {
+                        window.dispatch_action(action.boxed_clone(), cx)
+                    }),
                 tip,
                 key,
             )
@@ -78,14 +80,63 @@ impl MailApp {
                         .flex_none()
                         .min_w(px(72.))
                         .px_1()
-                        .child(look.mono(count, if problem { t.danger } else { t.muted_foreground })),
+                        .child(look.mono(
+                            count,
+                            if problem {
+                                t.danger
+                            } else {
+                                t.muted_foreground
+                            },
+                        )),
                 )
-                .child(button("find-case", IconName::CaseSensitive, "Match case", "alt-c", options.case_sensitive, Box::new(ToggleFindCase)))
-                .child(button("find-word", IconName::WholeWord, "Whole word", "alt-w", options.whole_word, Box::new(ToggleFindWord)))
-                .child(button("find-regex", IconName::Regex, "Regular expression", "alt-r", options.regex, Box::new(ToggleFindRegex)))
-                .child(button("find-prev", IconName::ChevronUp, "Previous match", "shift-enter", false, Box::new(FindPrev)))
-                .child(button("find-next", IconName::ChevronDown, "Next match", "enter", false, Box::new(FindNext)))
-                .child(button("find-close", IconName::Close, "Close", "escape", false, Box::new(CloseFind)))
+                .child(button(
+                    "find-case",
+                    IconName::CaseSensitive,
+                    "Match case",
+                    "alt-c",
+                    options.case_sensitive,
+                    Box::new(ToggleFindCase),
+                ))
+                .child(button(
+                    "find-word",
+                    IconName::WholeWord,
+                    "Whole word",
+                    "alt-w",
+                    options.whole_word,
+                    Box::new(ToggleFindWord),
+                ))
+                .child(button(
+                    "find-regex",
+                    IconName::Regex,
+                    "Regular expression",
+                    "alt-r",
+                    options.regex,
+                    Box::new(ToggleFindRegex),
+                ))
+                .child(button(
+                    "find-prev",
+                    IconName::ChevronUp,
+                    "Previous match",
+                    "shift-enter",
+                    false,
+                    Box::new(FindPrev),
+                ))
+                .child(button(
+                    "find-next",
+                    IconName::ChevronDown,
+                    "Next match",
+                    "enter",
+                    false,
+                    Box::new(FindNext),
+                ))
+                .child(button(
+                    "find-close",
+                    IconName::Close,
+                    "Close",
+                    "escape",
+                    false,
+                    Box::new(CloseFind),
+                ))
                 .into_any_element(),
         )
     }

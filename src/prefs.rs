@@ -88,7 +88,10 @@ impl MemoryPrefs {
 
 impl PrefStore for MemoryPrefs {
     fn get_raw(&self, scope: &Scope, key: &str) -> Option<String> {
-        self.rows.borrow().get(&(scope.as_key(), key.to_string())).cloned()
+        self.rows
+            .borrow()
+            .get(&(scope.as_key(), key.to_string()))
+            .cloned()
     }
 
     fn set_raw(&self, scope: &Scope, key: &str, json: &str) {
@@ -98,7 +101,9 @@ impl PrefStore for MemoryPrefs {
     }
 
     fn delete(&self, scope: &Scope, key: &str) {
-        self.rows.borrow_mut().remove(&(scope.as_key(), key.to_string()));
+        self.rows
+            .borrow_mut()
+            .remove(&(scope.as_key(), key.to_string()));
     }
 
     fn clear(&self) {
@@ -116,19 +121,28 @@ pub struct Setting<T> {
 
 impl<T> Setting<T> {
     pub const fn new(key: &'static str, default: T) -> Self {
-        Self { key, default, default_fn: None }
+        Self {
+            key,
+            default,
+            default_fn: None,
+        }
     }
 
     /// Define a const setting whose effective default is computed without GPUI.
     pub const fn with_default_fn(key: &'static str, default: T, default_fn: fn() -> T) -> Self {
-        Self { key, default, default_fn: Some(default_fn) }
+        Self {
+            key,
+            default,
+            default_fn: Some(default_fn),
+        }
     }
 
     pub fn default_value(&self) -> T
     where
         T: Clone,
     {
-        self.default_fn.map_or_else(|| self.default.clone(), |default| default())
+        self.default_fn
+            .map_or_else(|| self.default.clone(), |default| default())
     }
 }
 

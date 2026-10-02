@@ -81,10 +81,7 @@ impl ChoiceDialog {
     }
 
     pub fn options(&self) -> Vec<String> {
-        self.options
-            .iter()
-            .map(|o| o.label.to_string())
-            .collect()
+        self.options.iter().map(|o| o.label.to_string()).collect()
     }
 
     fn choose(&mut self, ix: usize, cx: &mut Context<Self>) {

@@ -8,18 +8,28 @@ impl MailApp {
     /// Open `id` in its thread's tab: the preview tab unless the thread already has one.
     /// `enter` (the `enter` key or a double-click) on the message the preview already shows
     /// pins it instead.
-    pub(super) fn open_message(&mut self, id: MessageId, enter: bool) {
+    pub(super) fn open_message(&mut self, id: MessageId, enter: bool, cx: &mut Context<Self>) {
         if self.in_session() {
             return;
         }
-        let Some(thread) = self.thread_of(id) else { return };
-        let pin = enter && self.tabs.tab_for(thread).is_some_and(|t| !t.pinned && t.msg == id);
+        let Some(thread) = self.thread_of(id) else {
+            return;
+        };
+        let pin = enter
+            && self
+                .tabs
+                .tab_for(thread)
+                .is_some_and(|t| !t.pinned && t.msg() == Some(id));
         if let Some(replaced) = self.tabs.open(thread, id) {
             self.forget_thread(replaced);
         }
         if pin {
             self.tabs.pin(thread);
         }
+        // An inline reply under the conversation the reader just left moves to a tab of its
+        // own rather than disappearing with it.
+        self.park_inline_composer(cx);
+        cx.notify();
     }
 
     /// Open `id` and make its tab permanent (replying to it).
@@ -27,7 +37,9 @@ impl MailApp {
         if self.in_session() {
             return;
         }
-        let Some(thread) = self.thread_of(id) else { return };
+        let Some(thread) = self.thread_of(id) else {
+            return;
+        };
         if let Some(replaced) = self.tabs.open_pinned(thread, id) {
             self.forget_thread(replaced);
         }
@@ -57,29 +69,40 @@ impl MailApp {
 
     /// The list cursor follows the active tab's message when the list has it. Selection is
     /// untouched.
-    fn follow_active_tab(&mut self) {
+    pub(super) fn follow_active_tab(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.tabs.opened() {
             self.focus_message(id, false);
             self.scroll_to_cursor();
         }
+        self.park_inline_composer(cx);
     }
 
     /// Click on tab `ix`: show it; a double-click pins it.
-    pub(super) fn click_tab(&mut self, ix: usize, clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn click_tab(
+        &mut self,
+        ix: usize,
+        clicks: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.tabs.activate(ix) {
             if clicks >= 2 {
                 self.tabs.pin_active();
             }
-            self.follow_active_tab();
+            self.follow_active_tab(cx);
         }
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
     pub(super) fn close_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(thread) = self.tabs.close(ix) {
-            self.forget_thread(thread);
-            self.follow_active_tab();
+        if let Some(closed) = self.tabs.close(ix) {
+            // Closing a draft tab keeps the draft; closing a thread tab forgets the reader
+            // state that thread owned.
+            if let Some(thread) = closed.thread() {
+                self.forget_thread(thread);
+            }
+            self.follow_active_tab(cx);
         }
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -101,7 +124,7 @@ impl MailApp {
             return;
         }
         if self.tabs.cycle(delta) {
-            self.follow_active_tab();
+            self.follow_active_tab(cx);
             // The tab we left may have owned the focused find input.
             window.focus(&self.focus_handle, cx);
             cx.notify();
@@ -120,8 +143,11 @@ impl MailApp {
         if !self.tabs.has_preview() || self.in_session() || self.session_end.is_some() {
             return;
         }
-        let shown: HashSet<u32> =
-            self.visible_ids().into_iter().filter_map(|id| self.thread_of(id)).collect();
+        let shown: HashSet<u32> = self
+            .visible_ids()
+            .into_iter()
+            .filter_map(|id| self.thread_of(id))
+            .collect();
         for thread in self.tabs.retain_previews(|t| shown.contains(&t)) {
             self.forget_thread(thread);
         }

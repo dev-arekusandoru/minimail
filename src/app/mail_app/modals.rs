@@ -34,6 +34,8 @@ impl MailApp {
         self.palette = None;
         self.folder_picker = None;
         self.snooze = None;
+        self.drafts_picker = None;
+        self._drafts_sub = None;
         self.rules_panel = None;
         self.dialog = None;
         self.help = None;
@@ -41,7 +43,12 @@ impl MailApp {
         cx.notify();
     }
 
-    pub(super) fn open_palette(&mut self, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_palette(
+        &mut self,
+        prefill: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &palette,
@@ -67,117 +74,6 @@ impl MailApp {
         let mut query = self.implicit_query();
         query.overlay(&Query::parse(raw));
         self.apply_query(query, cx);
-    }
-
-    pub(super) fn open_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(msg) = self.cursor_id().and_then(|id| self.mailbox.get(id)).cloned() else {
-            return;
-        };
-        self.open_compose_for(&msg, None, window, cx);
-    }
-
-    /// Reply to message `id` (the reply buttons on each message of the reader).
-    pub(super) fn reply_to(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal_open() {
-            return;
-        }
-        if let Some(msg) = self.mailbox.get(id).cloned() {
-            self.open_compose_for(&msg, None, window, cx);
-        }
-    }
-
-    /// Reply all to message `id`: sender + To + Cc, minus our own address.
-    pub(super) fn reply_all_to(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
-        self.compose_kind_for(DraftKind::ReplyAll, id, window, cx);
-    }
-
-    /// Forward message `id` with the forwarded-message block prefilled and To empty.
-    pub(super) fn forward(&mut self, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
-        self.compose_kind_for(DraftKind::Forward, id, window, cx);
-    }
-
-    /// The keyboard/palette path: the same, on the cursor message.
-    pub(super) fn open_compose_kind(&mut self, kind: DraftKind, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.cursor_id() else {
-            return;
-        };
-        match kind {
-            DraftKind::Reply => self.reply_to(id, window, cx),
-            DraftKind::ReplyAll => self.reply_all_to(id, window, cx),
-            DraftKind::Forward => self.forward(id, window, cx),
-        }
-    }
-
-    fn compose_kind_for(&mut self, kind: DraftKind, id: MessageId, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal_open() {
-            return;
-        }
-        if let Some(msg) = self.mailbox.get(id).cloned() {
-            self.open_compose_kind_for(kind, &msg, None, window, cx);
-        }
-    }
-
-    pub(super) fn open_compose_for(
-        &mut self,
-        msg: &Message,
-        body: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_compose_kind_for(DraftKind::Reply, msg, body, window, cx);
-    }
-
-    fn open_compose_kind_for(
-        &mut self,
-        kind: DraftKind,
-        msg: &Message,
-        body: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.mailbox.account(&msg.account).is_some_and(|a| a.provider == crate::model::ProviderKind::Gmail) {
-            self.show_toast("Sending from Gmail isn't supported yet".into(), window, cx);
-            return;
-        }
-        self.pin_message(msg.id);
-        let own = self.mailbox.account(&msg.account).map(|a| a.email.clone()).unwrap_or_default();
-        let compose = cx.new(|cx| {
-            let mut c = ComposeReply::new(kind, msg, &own, window, cx);
-            if let Some(body) = body {
-                c.set_body(&body, window, cx);
-            }
-            c
-        });
-        self._modal_sub = Some(cx.subscribe_in(
-            &compose,
-            window,
-            |this, _, event: &ComposeEvent, window, cx| {
-                match event {
-                    ComposeEvent::Send { kind: DraftKind::Forward, .. } => {
-                        // Mock data: a forward leaves the message's triage and tags untouched.
-                        this.close_modals(window, cx);
-                        this.show_toast("Forward sent".into(), window, cx);
-                    }
-                    ComposeEvent::Send { in_reply_to, body, .. } => {
-                        let now = this.now();
-                        let expects_reply = crate::judge::expects_reply(&StubJudge, body);
-                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), expects_reply, now);
-                        this.close_modals(window, cx);
-                        this.open_post_send_dialog(*in_reply_to, window, cx);
-                        this.show_toast(
-                            "Reply queued · u to undo send".into(),
-                            window,
-                            cx,
-                        );
-                    }
-                    ComposeEvent::Cancel => this.close_modals(window, cx),
-                }
-                cx.notify();
-            },
-        ));
-        window.focus(&compose.focus_handle(cx), cx);
-        self.compose = Some(compose);
-        cx.notify();
     }
 
     pub(super) fn open_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -214,9 +110,8 @@ impl MailApp {
             .into_iter()
             .map(|(l, t)| (l.to_string(), t))
             .collect();
-        let picker = cx.new(|cx| {
-            SnoozePicker::new(presets, now, crate::model::parse_snooze, window, cx)
-        });
+        let picker =
+            cx.new(|cx| SnoozePicker::new(presets, now, crate::model::parse_snooze, window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &picker,
             window,
@@ -255,7 +150,14 @@ impl MailApp {
     }
 
     /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache.
-    fn set_account_style(&mut self, id: &str, icon: &str, color: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn set_account_style(
+        &mut self,
+        id: &str,
+        icon: &str,
+        color: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.mailbox.set_account_style(id, icon, color) {
             return;
         }
@@ -283,7 +185,10 @@ impl MailApp {
                 let gmail = a.provider == crate::model::ProviderKind::Gmail;
                 let (status, (sync, sync_problem)) = if gmail {
                     let facts = crate::sync_status::SyncFacts {
-                        last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&a.id).ok().flatten()),
+                        last_synced: self
+                            .cache
+                            .as_ref()
+                            .and_then(|c| c.synced_at(&a.id).ok().flatten()),
                         syncing: self.older_in_flight.contains(&a.id),
                         signed_in: self.providers.contains_key(&a.id),
                         error: self.account_errors.get(&a.id).map(String::as_str),
@@ -291,7 +196,10 @@ impl MailApp {
                     let status = crate::sync_status::status(&facts);
                     (status.clone(), crate::sync_status::describe(&status, now))
                 } else {
-                    (crate::sync_status::SyncStatus::Synced(None), (String::new(), false))
+                    (
+                        crate::sync_status::SyncStatus::Synced(None),
+                        (String::new(), false),
+                    )
                 };
                 AccountRow {
                     id: a.id.clone(),
@@ -316,9 +224,17 @@ impl MailApp {
     }
 
     /// Open Settings in its own native window, reusing and activating the existing window.
-    pub(super) fn open_settings(&mut self, accounts: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_settings(
+        &mut self,
+        accounts: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(handle) = self.settings_window {
-            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
                 return;
             }
             self.settings_window = None;
@@ -415,12 +331,18 @@ impl MailApp {
                     this.tab_avatars = true;
                     this.block_remote_images = false;
                     this.preview_lines = crate::preview::DEFAULT_LINES;
-                    this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
+                    this.mailbox
+                        .set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
                     this.panes.set_orientation(PaneLayout::SideBySide);
-                    let light = crate::theme::names_for(cx, true).first().cloned().unwrap_or_default();
+                    let light = crate::theme::names_for(cx, true)
+                        .first()
+                        .cloned()
+                        .unwrap_or_default();
                     let dark = crate::app_settings::DEFAULT_DARK_THEME;
-                    let system_is_dark =
-                        matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+                    let system_is_dark = matches!(
+                        cx.window_appearance(),
+                        WindowAppearance::Dark | WindowAppearance::VibrantDark
+                    );
                     let name = crate::theme::active_theme_name(
                         crate::theme::ThemeMode::System,
                         &light,
@@ -428,7 +350,9 @@ impl MailApp {
                         system_is_dark,
                     );
                     crate::theme::apply(cx, name);
-                    panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
+                    panel_weak
+                        .update(cx, |panel, cx| panel.reset_fields(cx))
+                        .ok();
                     cx.notify();
                 }
                 SettingsEvent::Changed(policy, summaries) => {
@@ -488,7 +412,12 @@ impl MailApp {
                     }
                     this.save_setting(
                         &crate::app_settings::PANE_LAYOUT,
-                        if *orientation == PaneLayout::Stacked { "stacked" } else { "side_by_side" }.to_owned(),
+                        if *orientation == PaneLayout::Stacked {
+                            "stacked"
+                        } else {
+                            "side_by_side"
+                        }
+                        .to_owned(),
                     );
                 }
                 SettingsEvent::FollowUp(timeout) => {
@@ -511,9 +440,13 @@ impl MailApp {
                     this.persist_account(id, window, cx);
                     cx.notify();
                 }
-                SettingsEvent::AccountStyle { id, icon, color } => this.set_account_style(id, icon, color, window, cx),
+                SettingsEvent::AccountStyle { id, icon, color } => {
+                    this.set_account_style(id, icon, color, window, cx)
+                }
                 SettingsEvent::SyncAction { id, action } => match action {
-                    crate::sync_status::SyncAction::SignInAgain => this.sign_in_again(id, window, cx),
+                    crate::sync_status::SyncAction::SignInAgain => {
+                        this.sign_in_again(id, window, cx)
+                    }
                     crate::sync_status::SyncAction::Retry => this.retry_sync(id, cx),
                 },
                 SettingsEvent::Close => this.close_settings(window, cx),
@@ -577,7 +510,10 @@ impl MailApp {
     }
 
     pub(super) fn mute_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(thread) = self.cursor_id().and_then(|id| self.mailbox.get(id)).map(|m| m.thread_id)
+        let Some(thread) = self
+            .cursor_id()
+            .and_then(|id| self.mailbox.get(id))
+            .map(|m| m.thread_id)
         else {
             return;
         };
@@ -595,7 +531,12 @@ impl MailApp {
     }
 
     /// `a` allows the sender outright; `b` asks what to do with their Inbox mail first.
-    pub(super) fn screen_sender(&mut self, allow: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn screen_sender(
+        &mut self,
+        allow: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if allow && !crate::known_senders::KNOWN_SENDERS_ENABLED {
             return;
         }
@@ -669,12 +610,15 @@ impl SenderScope {
     fn title(&self, verb: &str) -> String {
         let n = self.ids.len();
         let noun = if n == 1 { "message" } else { "messages" };
-        format!("{verb} all {n} {noun} from {} in {}?", self.name, self.place)
+        format!(
+            "{verb} all {n} {noun} from {} in {}?",
+            self.name, self.place
+        )
     }
 }
 
 /// Title, message, options and default option of a choice dialog.
-struct DialogSpec {
+pub(super) struct DialogSpec {
     title: String,
     message: String,
     options: Vec<DialogOption>,
@@ -682,7 +626,7 @@ struct DialogSpec {
 }
 
 impl DialogSpec {
-    fn new(
+    pub(super) fn new(
         title: impl Into<String>,
         message: impl Into<String>,
         options: Vec<DialogOption>,
@@ -754,7 +698,7 @@ impl MailApp {
 
     /// Open a choice dialog; `on_choose` runs with the dialog already closed, so it may
     /// open the next step (a folder picker, say).
-    fn open_dialog(
+    pub(super) fn open_dialog(
         &mut self,
         spec: DialogSpec,
         on_choose: impl Fn(&mut MailApp, usize, &mut Window, &mut Context<MailApp>) + 'static,
@@ -809,7 +753,9 @@ impl MailApp {
                 .find(|m| m.from_email == *email)
                 .map(|m| m.id),
         };
-        first.and_then(|id| self.mailbox.get(id)).map(|m| m.account.clone())
+        first
+            .and_then(|id| self.mailbox.get(id))
+            .map(|m| m.account.clone())
     }
 
     /// Folder picker for the account of the messages `action` files.
@@ -871,7 +817,9 @@ impl MailApp {
             FileAction::Ids(ids) => match &pick {
                 Pick::File(id) => self.mailbox.set_state(ids, TriageState::Filed(*id)),
                 Pick::Create(name) => {
-                    self.mailbox.create_folder_and_file(account, name, None, ids).1
+                    self.mailbox
+                        .create_folder_and_file(account, name, None, ids)
+                        .1
                 }
             },
             FileAction::Sender(email, from) => self.mailbox.grouped(|mb| {
@@ -906,7 +854,7 @@ impl MailApp {
     }
 
     /// Post-send: the original and the reply land wherever the dialog says.
-    fn open_post_send_dialog(
+    pub(super) fn open_post_send_dialog(
         &mut self,
         original: MessageId,
         window: &mut Window,
@@ -919,12 +867,7 @@ impl MailApp {
             DialogOption::new("4", "Keep in Inbox", "Change nothing"),
         ];
         self.open_dialog(
-            DialogSpec::new(
-                "Reply sent",
-                "File the original and the reply:",
-                options,
-                0,
-            ),
+            DialogSpec::new("Reply sent", "File the original and the reply:", options, 0),
             move |this, ix, window, cx| match ix {
                 0 => this.file_after_reply(original, TriageState::Archived, window, cx),
                 1 => this.open_folder_picker(FileAction::AfterReply(original), window, cx),
@@ -1010,7 +953,11 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let verb = if unsubscribe { "Unsubscribed from" } else { "Blocked" };
+        let verb = if unsubscribe {
+            "Unsubscribed from"
+        } else {
+            "Blocked"
+        };
         let already = if unsubscribe {
             self.mailbox
                 .unsubscribed()
@@ -1109,7 +1056,9 @@ impl MailApp {
             _ => "Move",
         };
         let title = scope.title(verb);
-        let SenderScope { name, email, from, .. } = scope;
+        let SenderScope {
+            name, email, from, ..
+        } = scope;
         self.confirm(
             title,
             move |this, window, cx| this.mark_sender(&email, &name, from, state, window, cx),

@@ -10,18 +10,19 @@ impl SettingsPanel {
             self.follow_up.input.clone(),
             Some("days"),
         );
-        let preview = number_field(weak, SettingsPanel::preview_row, self.preview.input.clone(), None);
+        let preview = number_field(
+            weak,
+            SettingsPanel::preview_row,
+            self.preview.input.clone(),
+            None,
+        );
         SettingPage::new("Inbox").resettable(true).group(
             SettingGroup::new()
                 .item(row(
                     "Group by thread",
                     "Show one inbox row per conversation instead of per message.",
                     &["inbox", "threads"],
-                    Undo::of_panel(
-                        weak,
-                        |this| this.group,
-                        SettingsPanel::reset_grouping,
-                    ),
+                    Undo::of_panel(weak, |this| this.group, SettingsPanel::reset_grouping),
                     switch(weak, |this| this.group, SettingsPanel::set_grouping),
                 ))
                 .item(row(

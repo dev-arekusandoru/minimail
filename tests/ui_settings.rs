@@ -19,7 +19,10 @@ const AI: usize = 3;
 const SENDERS: usize = 4;
 
 fn app(cx: &mut TestAppContext) -> Harness<'_> {
-    harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]))
+    harness_with(
+        cx,
+        mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]),
+    )
 }
 
 /// An in-memory address book, shared by two apps to stand in for a restart. Never the real
@@ -82,9 +85,17 @@ fn opening_settings_again_focuses_the_same_window(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.settings_open()));
 
     h.keys("cmd-,");
-    assert_eq!(h.settings_window(), Some(first), "the same window is focused, not a second one");
+    assert_eq!(
+        h.settings_window(),
+        Some(first),
+        "the same window is focused, not a second one"
+    );
     assert!(h.read(|a| a.settings_open()));
-    assert_eq!(h.settings_page(), ACCOUNTS, "and it still shows the accounts page");
+    assert_eq!(
+        h.settings_page(),
+        ACCOUNTS,
+        "and it still shows the accounts page"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -98,8 +109,14 @@ fn a_changed_setting_survives_a_restart_through_the_shared_store(cx: &mut TestAp
 
     // A second app over the same database is what a restart amounts to here.
     let mut restarted = harness_with_prefs(cx, Mailbox::load_default_with(store.clone()), store);
-    assert!(restarted.read(|a| a.summaries_enabled), "the stored preference comes back");
-    assert!(restarted.read(|a| a.tab_avatars), "settings left alone keep their defaults");
+    assert!(
+        restarted.read(|a| a.summaries_enabled),
+        "the stored preference comes back"
+    );
+    assert!(
+        restarted.read(|a| a.tab_avatars),
+        "settings left alone keep their defaults"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -115,7 +132,11 @@ fn reset_all_restores_the_defaults_and_drops_the_stored_values(cx: &mut TestAppC
 
     h.settings_click("settings-reset-all");
     h.settings_click("ok");
-    assert_eq!(h.read(|a| a.group_threads), grouped, "Reset all puts the default back");
+    assert_eq!(
+        h.read(|a| a.group_threads),
+        grouped,
+        "Reset all puts the default back"
+    );
     assert!(!mail_classifier::app_settings::GROUP_THREADS.is_modified(store.as_ref(), &scope));
     assert!(!mail_classifier::app_settings::TAB_AVATARS.is_modified(store.as_ref(), &scope));
 }
@@ -128,16 +149,27 @@ fn the_arrows_walk_the_sidebar(cx: &mut TestAppContext) {
 
     h.settings_keys("down");
     assert_eq!(h.settings_page(), APPEARANCE, "down moves to the next page");
-    assert!(!h.settings_has(("account-card", 0usize)), "the accounts page is gone");
+    assert!(
+        !h.settings_has(("account-card", 0usize)),
+        "the accounts page is gone"
+    );
     h.settings_keys("down");
     assert_eq!(h.settings_page(), INBOX);
     h.settings_keys("down");
     assert_eq!(h.settings_page(), AI);
 
     h.settings_keys("up up up");
-    assert_eq!(h.settings_page(), ACCOUNTS, "up walks back to the first page");
+    assert_eq!(
+        h.settings_page(),
+        ACCOUNTS,
+        "up walks back to the first page"
+    );
     h.settings_keys("up");
-    assert_eq!(h.settings_page(), SENDERS, "and wraps around to the last one");
+    assert_eq!(
+        h.settings_page(),
+        SENDERS,
+        "and wraps around to the last one"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -147,15 +179,24 @@ fn cmd_f_filters_the_pages_and_escape_clears_it_before_closing(cx: &mut TestAppC
 
     h.settings_keys("cmd-f");
     h.settings_type("senders");
-    assert!(!h.settings_has("0-4"), "the pages that do not match leave the sidebar");
-    assert!(h.settings_has("0-0"), "and the one that does is the only one left");
+    assert!(
+        !h.settings_has("0-4"),
+        "the pages that do not match leave the sidebar"
+    );
+    assert!(
+        h.settings_has("0-0"),
+        "and the one that does is the only one left"
+    );
 
     // Esc clears the query and puts every page back; the next Esc closes the window.
     h.settings_keys("escape");
     assert!(h.read(|a| a.settings_open()), "Esc clears the search");
     assert!(h.settings_has("0-4"), "and the sidebar is whole again");
     h.settings_keys("escape");
-    assert!(!h.read(|a| a.settings_open()), "Esc on an empty search closes the window");
+    assert!(
+        !h.read(|a| a.settings_open()),
+        "Esc on an empty search closes the window"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -165,7 +206,10 @@ fn right_steps_out_of_the_sidebar_into_the_search_field(cx: &mut TestAppContext)
     // `→` steps out of the sidebar into the body, which starts at the search field.
     h.settings_keys("right");
     h.settings_type("blocked");
-    assert!(!h.settings_has("0-4"), "the typed query reached the search field");
+    assert!(
+        !h.settings_has("0-4"),
+        "the typed query reached the search field"
+    );
     assert!(h.settings_has("0-0"), "and left the one matching page");
 }
 
@@ -175,8 +219,14 @@ fn slash_reaches_the_search_field_from_the_sidebar(cx: &mut TestAppContext) {
     h.open_settings();
     h.settings_keys("/");
     h.settings_type("blocked");
-    assert!(!h.settings_has("0-4"), "`/` focused the field and the query filtered the pages");
+    assert!(
+        !h.settings_has("0-4"),
+        "`/` focused the field and the query filtered the pages"
+    );
     assert!(h.settings_has("0-0"));
     h.settings_keys("escape");
-    assert!(h.read(|a| a.settings_open()), "Esc clears the query it typed");
+    assert!(
+        h.read(|a| a.settings_open()),
+        "Esc clears the query it typed"
+    );
 }

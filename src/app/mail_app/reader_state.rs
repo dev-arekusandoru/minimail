@@ -72,7 +72,8 @@ impl MailApp {
 
     /// Whether `id` is expanded in its thread's reader.
     pub fn reader_expanded(&self, id: MessageId) -> bool {
-        self.thread_of(id).is_some_and(|t| self.reader.is_expanded(t, id))
+        self.thread_of(id)
+            .is_some_and(|t| self.reader.is_expanded(t, id))
     }
 
     /// Whether `id` is shown in Reader mode.
@@ -82,11 +83,13 @@ impl MailApp {
 
     /// Whether `id`'s recipient rows are open.
     pub fn reader_recipients_open(&self, id: MessageId) -> bool {
-        self.thread_of(id).is_some_and(|t| self.reader.recipients_open(t, id))
+        self.thread_of(id)
+            .is_some_and(|t| self.reader.recipients_open(t, id))
     }
 
     /// Whether `id`'s quoted history is open.
     pub fn reader_quoted_open(&self, id: MessageId) -> bool {
-        self.thread_of(id).is_some_and(|t| self.reader.quoted_open(t, id))
+        self.thread_of(id)
+            .is_some_and(|t| self.reader.quoted_open(t, id))
     }
 }

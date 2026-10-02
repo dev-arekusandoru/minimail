@@ -25,21 +25,31 @@ fn migrating_a_v1_database_keeps_contacts_and_adds_settings() {
     let _ = std::fs::remove_file(&path);
     {
         let store = ContactStore::open(&path).expect("open");
-        store.create(NewContact::new("Ada").with(EmailAddress::primary("ada@x.example"))).unwrap();
+        store
+            .create(NewContact::new("Ada").with(EmailAddress::primary("ada@x.example")))
+            .unwrap();
     }
     {
         // Rewind the file to schema v1.
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;").unwrap();
+        conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;")
+            .unwrap();
     }
     let store = ContactStore::open(&path).expect("reopen migrates");
     assert_eq!(store.schema_version().unwrap(), 2);
-    assert!(store.get_by_email("ada@x.example").unwrap().is_some(), "contact survives");
+    assert!(
+        store.get_by_email("ada@x.example").unwrap().is_some(),
+        "contact survives"
+    );
     PAGE.set(&store, &Scope::Global, 5);
     assert_eq!(PAGE.get(&store, &Scope::Global), 5);
     drop(store);
     let store = ContactStore::open(&path).unwrap();
-    assert_eq!(PAGE.get(&store, &Scope::Global), 5, "persisted across reopen");
+    assert_eq!(
+        PAGE.get(&store, &Scope::Global),
+        5,
+        "persisted across reopen"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -9,7 +9,8 @@ use gpui_kit::{
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::app::mail_app::panes::{
-    MAX_SIDEBAR_W, MIN_LIST_H, MIN_LIST_W, MIN_READER_W, MIN_SIDEBAR_W, Orientation, SIDEBAR_W, available_width,
+    MAX_SIDEBAR_W, MIN_LIST_H, MIN_LIST_W, MIN_READER_W, MIN_SIDEBAR_W, Orientation, SIDEBAR_W,
+    available_width,
 };
 use mail_classifier::model::{Mailbox, MessageId};
 
@@ -66,17 +67,24 @@ impl Harness<'_> {
     }
     fn click(&mut self, id: impl Into<ElementId>) {
         let id = id.into();
-        self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).expect("window alive");
+        self.cx
+            .update_window(self.window, |_, window, cx| window.click(id, cx))
+            .expect("window alive");
         self.cx.run_until_parked();
     }
     fn double_click(&mut self, id: impl Into<ElementId>) {
         let id = id.into();
-        self.cx.update_window(self.window, |_, window, cx| window.double_click(id, cx)).expect("window alive");
+        self.cx
+            .update_window(self.window, |_, window, cx| window.double_click(id, cx))
+            .expect("window alive");
         self.cx.run_until_parked();
     }
     fn bounds(&mut self, id: impl Into<ElementId>) -> Bounds<gpui_kit::Pixels> {
         let id = id.into();
-        let bounds = self.cx.update_window(self.window, |_, window, _| window.find(id).bounds()).expect("window alive");
+        let bounds = self
+            .cx
+            .update_window(self.window, |_, window, _| window.find(id).bounds())
+            .expect("window alive");
         self.cx.run_until_parked();
         bounds
     }
@@ -93,7 +101,9 @@ impl Harness<'_> {
             px(f32::from(bounds.origin.y) + f32::from(bounds.size.height) / 2.),
         );
         let to = point(px(f32::from(from.x) + dx), px(f32::from(from.y) + dy));
-        self.cx.update_window(self.window, |_, window, cx| window.drag(from, to, cx)).expect("window alive");
+        self.cx
+            .update_window(self.window, |_, window, cx| window.drag(from, to, cx))
+            .expect("window alive");
         self.cx.run_until_parked();
     }
     fn ids(&mut self) -> Vec<MessageId> {
@@ -106,11 +116,19 @@ fn divider_drag_resizes_the_list_pane(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     let before = h.list_size();
     h.drag_divider(120., 0.);
-    assert!(h.list_size() > before + 60., "drag right should widen the list: {} -> {}", before, h.list_size());
+    assert!(
+        h.list_size() > before + 60.,
+        "drag right should widen the list: {} -> {}",
+        before,
+        h.list_size()
+    );
 
     h.drag_divider(-240., 0.);
     let shrunk = h.list_size();
-    assert!(shrunk < before, "drag left should narrow the list: {shrunk}");
+    assert!(
+        shrunk < before,
+        "drag left should narrow the list: {shrunk}"
+    );
 
     let divider = h.bounds("pane-divider");
     assert!(divider.size.width > px(0.) && divider.size.height > divider.size.width);
@@ -120,14 +138,24 @@ fn divider_drag_resizes_the_list_pane(cx: &mut TestAppContext) {
 fn drag_is_clamped_to_usable_panes(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     h.drag_divider(-2000., 0.);
-    assert!((h.list_size() - MIN_LIST_W).abs() < 1., "the list pane never collapses: {}", h.list_size());
+    assert!(
+        (h.list_size() - MIN_LIST_W).abs() < 1.,
+        "the list pane never collapses: {}",
+        h.list_size()
+    );
 
     let max = available_width(1400., SIDEBAR_W) - MIN_READER_W;
     h.drag_divider(4000., 0.);
     let stretched = h.list_size();
-    assert!(stretched > MIN_LIST_W && stretched <= max + 1., "{stretched} must stay under {max}");
+    assert!(
+        stretched > MIN_LIST_W && stretched <= max + 1.,
+        "{stretched} must stay under {max}"
+    );
     h.drag_divider(-4000., 0.);
-    assert!((h.list_size() - MIN_LIST_W).abs() < 1., "and back down to the minimum");
+    assert!(
+        (h.list_size() - MIN_LIST_W).abs() < 1.,
+        "and back down to the minimum"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -137,7 +165,11 @@ fn double_click_on_the_divider_resets_the_size(cx: &mut TestAppContext) {
     h.drag_divider(180., 0.);
     assert!((h.list_size() - default).abs() > 50.);
     h.double_click("pane-divider");
-    assert!((h.list_size() - default).abs() < 1., "{} vs {default}", h.list_size());
+    assert!(
+        (h.list_size() - default).abs() < 1.,
+        "{} vs {default}",
+        h.list_size()
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -145,7 +177,11 @@ fn keyboard_grows_and_shrinks_the_list_pane(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     let start = h.list_size();
     h.keys("alt-right");
-    assert!((h.list_size() - (start + 40.)).abs() < 1., "{}", h.list_size());
+    assert!(
+        (h.list_size() - (start + 40.)).abs() < 1.,
+        "{}",
+        h.list_size()
+    );
     h.keys("alt-right alt-right");
     assert!((h.list_size() - (start + 120.)).abs() < 1.);
     h.keys("alt-left");
@@ -164,7 +200,11 @@ fn keyboard_shrink_stops_at_the_minimum(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_narrow_window_keeps_the_list_usable(cx: &mut TestAppContext) {
     let mut h = harness(cx, 900., 700.);
-    assert!(h.list_size() >= MIN_LIST_W - 1., "the list keeps a usable width: {}", h.list_size());
+    assert!(
+        h.list_size() >= MIN_LIST_W - 1.,
+        "the list keeps a usable width: {}",
+        h.list_size()
+    );
     h.drag_divider(2000., 0.);
     assert!(h.list_size() >= MIN_LIST_W - 1.);
 }
@@ -183,12 +223,18 @@ fn toolbar_button_toggles_the_pane_layout(cx: &mut TestAppContext) {
 fn key_toggles_the_orientation_and_the_divider_follows(cx: &mut TestAppContext) {
     let mut h = harness(cx, 1400., 900.);
     let vertical = h.bounds("pane-divider");
-    assert!(vertical.size.height > vertical.size.width, "side by side the divider stands up");
+    assert!(
+        vertical.size.height > vertical.size.width,
+        "side by side the divider stands up"
+    );
 
     h.keys("alt-l");
     assert_eq!(h.orientation(), Orientation::Stacked);
     let horizontal = h.bounds("pane-divider");
-    assert!(horizontal.size.width > horizontal.size.height, "stacked the divider lies down");
+    assert!(
+        horizontal.size.width > horizontal.size.height,
+        "stacked the divider lies down"
+    );
 
     h.keys("alt-l");
     assert_eq!(h.orientation(), Orientation::SideBySide);
@@ -207,11 +253,17 @@ fn each_orientation_remembers_its_own_size(cx: &mut TestAppContext) {
     let stacked = h.list_size();
     h.drag_divider(0., -140.);
     let stacked_dragged = h.list_size();
-    assert!(stacked_dragged < stacked, "stacked the divider moves the height");
+    assert!(
+        stacked_dragged < stacked,
+        "stacked the divider moves the height"
+    );
     assert!(stacked_dragged >= MIN_LIST_H - 1.);
 
     h.keys("alt-l");
-    assert!((h.list_size() - side_by_side).abs() < 1., "going back restores the side-by-side size");
+    assert!(
+        (h.list_size() - side_by_side).abs() < 1.,
+        "going back restores the side-by-side size"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -220,7 +272,10 @@ fn rows_span_the_pane_in_both_orientations(cx: &mut TestAppContext) {
     let id = h.ids()[0];
     let side_by_side = f32::from(h.bounds(("row", id as usize)).size.width);
     let list = h.list_size();
-    assert!((side_by_side - list).abs() < 2., "row fills the list pane: {side_by_side} vs {list}");
+    assert!(
+        (side_by_side - list).abs() < 2.,
+        "row fills the list pane: {side_by_side} vs {list}"
+    );
 
     h.keys("alt-l");
     let stacked = f32::from(h.bounds(("row", id as usize)).size.width);
@@ -237,7 +292,11 @@ fn sidebar_drag_resizes_within_limits(cx: &mut TestAppContext) {
     assert!((h.sidebar_width() - SIDEBAR_W).abs() < 1.);
 
     h.drag_handle("sidebar-divider", 60., 0.);
-    assert!((h.sidebar_width() - (SIDEBAR_W + 60.)).abs() < 8., "drag right widens: {}", h.sidebar_width());
+    assert!(
+        (h.sidebar_width() - (SIDEBAR_W + 60.)).abs() < 8.,
+        "drag right widens: {}",
+        h.sidebar_width()
+    );
     h.drag_handle("sidebar-divider", 2000., 0.);
     assert!((h.sidebar_width() - MAX_SIDEBAR_W).abs() < 1.);
     h.drag_handle("sidebar-divider", -2000., 0.);
@@ -250,7 +309,11 @@ fn double_click_on_the_sidebar_edge_resets_its_width(cx: &mut TestAppContext) {
     h.drag_handle("sidebar-divider", 100., 0.);
     assert!(h.sidebar_width() > SIDEBAR_W + 50.);
     h.double_click("sidebar-divider");
-    assert!((h.sidebar_width() - SIDEBAR_W).abs() < 1., "{}", h.sidebar_width());
+    assert!(
+        (h.sidebar_width() - SIDEBAR_W).abs() < 1.,
+        "{}",
+        h.sidebar_width()
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -265,12 +328,23 @@ fn cmd_b_collapses_and_restores_the_sidebar_at_its_width(cx: &mut TestAppContext
     h.keys("cmd-b");
     assert!(!h.read(|a| a.sidebar_visible()));
     let hidden = h.bounds(("row", row as usize)).origin.x;
-    assert!(hidden < before, "the list moves left into the freed room: {hidden} vs {before}");
+    assert!(
+        hidden < before,
+        "the list moves left into the freed room: {hidden} vs {before}"
+    );
 
     h.keys("cmd-b");
     assert!(h.read(|a| a.sidebar_visible()));
-    assert!((h.sidebar_width() - width).abs() < 1., "width kept: {} vs {width}", h.sidebar_width());
-    assert!((h.list_size() - list).abs() < 2., "list kept: {} vs {list}", h.list_size());
+    assert!(
+        (h.sidebar_width() - width).abs() < 1.,
+        "width kept: {} vs {width}",
+        h.sidebar_width()
+    );
+    assert!(
+        (h.list_size() - list).abs() < 2.,
+        "list kept: {} vs {list}",
+        h.list_size()
+    );
 }
 
 #[gpui_kit::gpui::test]

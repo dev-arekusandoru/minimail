@@ -2,11 +2,11 @@
 
 use std::rc::Rc;
 
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     Action, AnyWindowHandle, AppContext, Bounds, ElementId, Entity, Focusable, Pixels, Point,
     ScrollDelta, TestAppContext, WindowBounds, WindowOptions, base::Root, point, px, size,
 };
-use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
 use mail_classifier::app::row::{message_row_height, thread_row_height};
@@ -129,7 +129,11 @@ fn grouping_shows_one_row_per_thread_and_off_restores_messages(cx: &mut TestAppC
     assert_eq!(rows[0], Row::Single(4));
     assert!(matches!(&rows[1], Row::Header { ids, expanded: false, .. } if ids == &[3, 2, 1]));
     let edge = h.bounds(("row-select", 1usize));
-    assert_eq!(edge.size.width, px(10.), "thread header exposes the same left-edge hit area");
+    assert_eq!(
+        edge.size.width,
+        px(10.),
+        "thread header exposes the same left-edge hit area"
+    );
     assert_eq!(h.read(|a| a.visible_ids()), vec![4, 3, 2, 1]);
     h.keys("j");
     assert_eq!(h.cursor(), Some(3), "header stands for its newest message");
@@ -164,7 +168,6 @@ fn actions_apply_to_the_whole_thread_and_undo_restores(cx: &mut TestAppContext) 
     for id in 1..=4 {
         assert_eq!(h.state_of(id), Inbox);
     }
-
 }
 
 #[gpui_kit::gpui::test]
@@ -205,7 +208,11 @@ fn next_and_previous_in_thread_work_flat_and_grouped(cx: &mut TestAppContext) {
     h.read(|a| assert!(a.group_threads));
     h.keys("[");
     assert_eq!(h.opened(), Some(2));
-    assert_eq!(h.cursor(), Some(2), "thread expands so the message row is focused");
+    assert_eq!(
+        h.cursor(),
+        Some(2),
+        "thread expands so the message row is focused"
+    );
     h.keys("]");
     assert_eq!(h.opened(), Some(3));
 }
@@ -219,7 +226,15 @@ fn reader_tops(h: &mut Harness<'_>, ids: &[MessageId], focused: MessageId) -> Ve
                 h.bounds("reader-body").top()
             } else {
                 let expanded = h.read(move |a| a.reader_expanded(id));
-                h.bounds((if expanded { "reader-thread-body" } else { "reader-thread-msg" }, id as usize)).top()
+                h.bounds((
+                    if expanded {
+                        "reader-thread-body"
+                    } else {
+                        "reader-thread-msg"
+                    },
+                    id as usize,
+                ))
+                .top()
             }
         })
         .collect()
@@ -239,28 +254,52 @@ fn reader_renders_the_thread_chronologically_and_stepping_does_not_reorder(
     h.keys("j enter");
     assert_eq!(h.opened(), Some(5));
     let tops = reader_tops(&mut h, &ids, 5);
-    assert!(tops.windows(2).all(|w| w[0] < w[1]), "oldest first, focused one in place: {tops:?}");
+    assert!(
+        tops.windows(2).all(|w| w[0] < w[1]),
+        "oldest first, focused one in place: {tops:?}"
+    );
     for id in ids.iter().copied() {
-        assert!(!h.read(move |a| a.reader_expanded(id)), "only the opened body is expanded");
+        assert!(
+            !h.read(move |a| a.reader_expanded(id)),
+            "only the opened body is expanded"
+        );
     }
     let body = h.bounds("reader-body");
-    assert!(body.top() >= px(0.) && body.bottom() <= px(800.), "focused message is visible: {body:?}");
+    assert!(
+        body.top() >= px(0.) && body.bottom() <= px(800.),
+        "focused message is visible: {body:?}"
+    );
 
     // `]` expands the next message in place and collapses nothing; order is fixed.
     h.keys("]");
     assert_eq!(h.opened(), Some(6));
     let tops = reader_tops(&mut h, &ids, 6);
-    assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after ]: {tops:?}");
-    assert!(h.read(|a| a.reader_expanded(5)), "the message left behind stays expanded");
+    assert!(
+        tops.windows(2).all(|w| w[0] < w[1]),
+        "order unchanged after ]: {tops:?}"
+    );
+    assert!(
+        h.read(|a| a.reader_expanded(5)),
+        "the message left behind stays expanded"
+    );
     h.bounds(("reader-thread-body", 5usize));
-    assert!(h.read(|a| a.reader_expanded(6)), "the target is expanded too");
+    assert!(
+        h.read(|a| a.reader_expanded(6)),
+        "the target is expanded too"
+    );
 
     h.keys("[ [");
     assert_eq!(h.opened(), Some(4));
     let tops = reader_tops(&mut h, &ids, 4);
-    assert!(tops.windows(2).all(|w| w[0] < w[1]), "order unchanged after [: {tops:?}");
+    assert!(
+        tops.windows(2).all(|w| w[0] < w[1]),
+        "order unchanged after [: {tops:?}"
+    );
     for id in [5u32, 6] {
-        assert!(h.read(move |a| a.reader_expanded(id)), "{id} stays expanded after stepping away");
+        assert!(
+            h.read(move |a| a.reader_expanded(id)),
+            "{id} stays expanded after stepping away"
+        );
         h.bounds(("reader-thread-body", id as usize));
     }
     for id in [1u32, 2, 3] {
@@ -270,19 +309,28 @@ fn reader_renders_the_thread_chronologically_and_stepping_does_not_reorder(
 }
 
 #[gpui_kit::gpui::test]
-fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
-    cx: &mut TestAppContext,
-) {
+fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
     h.keys("ctrl-g");
     let message = h.row_height(("row", 4usize));
     let header = h.row_height(("thread-row", 1usize));
-    assert!(header < message, "collapsed header ({header}) must be shorter than a message row ({message})");
+    assert!(
+        header < message,
+        "collapsed header ({header}) must be shorter than a message row ({message})"
+    );
 
     // Expanding leaves the header alone and gives the children full message-row height.
     h.keys("j right");
-    assert_eq!(h.row_height(("thread-row", 1usize)), header, "expanding does not resize the header");
-    assert_eq!(h.row_height(("row", 2usize)), message, "a child message row keeps message height");
+    assert_eq!(
+        h.row_height(("thread-row", 1usize)),
+        header,
+        "expanding does not resize the header"
+    );
+    assert_eq!(
+        h.row_height(("row", 2usize)),
+        message,
+        "a child message row keeps message height"
+    );
     h.keys("left");
 
     // The header follows the preview setting, and stays shorter than a message row.
@@ -292,10 +340,22 @@ fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
     assert_eq!(h.read(|a| a.preview_lines), 0, "cycled to Off");
     let bare_message = h.row_height(("row", 4usize));
     let bare_header = h.row_height(("thread-row", 1usize));
-    assert!(bare_message < message, "message rows shrink with the preview setting");
-    assert!(bare_header < header, "headers shrink with the preview setting too");
-    assert!(bare_header < bare_message, "and are still not padded to message height");
-    assert!(bare_header < px(40.), "a header with no preview is one compact line: {bare_header}");
+    assert!(
+        bare_message < message,
+        "message rows shrink with the preview setting"
+    );
+    assert!(
+        bare_header < header,
+        "headers shrink with the preview setting too"
+    );
+    assert!(
+        bare_header < bare_message,
+        "and are still not padded to message height"
+    );
+    assert!(
+        bare_header < px(40.),
+        "a header with no preview is one compact line: {bare_header}"
+    );
 
     // Back to the default: measured heights match what the row functions promise.
     h.dispatch(CyclePreviewLines);
@@ -304,7 +364,10 @@ fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
     assert_eq!(h.read(|a| a.preview_lines), 2);
     let message_again = h.row_height(("row", 4usize));
     let header_again = h.row_height(("thread-row", 1usize));
-    assert_eq!(message_again, message, "no stale heights after cycling previews");
+    assert_eq!(
+        message_again, message,
+        "no stale heights after cycling previews"
+    );
     assert_eq!(header_again, header);
     assert_eq!(message_again, px(message_row_height(2)));
     assert_eq!(header_again, px(thread_row_height(2)));
@@ -313,7 +376,16 @@ fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
 /// Forty single-message threads, so the list is far taller than the window.
 fn long_list() -> Mailbox {
     let msgs: Vec<String> = (1..=40u32)
-        .map(|i| msg(i, i, &format!("s{i}@x.com"), &format!("Subject {i}"), 1 + i % 28, "Inbox"))
+        .map(|i| {
+            msg(
+                i,
+                i,
+                &format!("s{i}@x.com"),
+                &format!("Subject {i}"),
+                1 + i % 28,
+                "Inbox",
+            )
+        })
         .collect();
     mailbox(&msgs)
 }
@@ -323,7 +395,10 @@ fn keyboard_and_wheel_scroll_the_variable_height_list(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, long_list());
     let newest = h.read(|a| a.visible_ids()[0]) as usize;
     let top_row = h.bounds(("row", newest));
-    assert!(top_row.bottom() < px(800.), "the first row starts inside the window: {top_row:?}");
+    assert!(
+        top_row.bottom() < px(800.),
+        "the first row starts inside the window: {top_row:?}"
+    );
 
     for _ in 0..30 {
         h.keys("j");
@@ -336,12 +411,18 @@ fn keyboard_and_wheel_scroll_the_variable_height_list(cx: &mut TestAppContext) {
     );
 
     let before = h.bounds(("row", cursor));
-    h.cx
-        .update_window(h.window, |_, window, cx| {
-            window.scroll(("row", cursor), ScrollDelta::Pixels(point(px(0.), px(-800.))), cx);
-        })
-        .expect("window open");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.scroll(
+            ("row", cursor),
+            ScrollDelta::Pixels(point(px(0.), px(-800.))),
+            cx,
+        );
+    })
+    .expect("window open");
     h.cx.run_until_parked();
     let after = h.bounds(("row", cursor));
-    assert!(after.top() < before.top(), "the wheel scrolled the list: {before:?} -> {after:?}");
+    assert!(
+        after.top() < before.top(),
+        "the wheel scrolled the list: {before:?} -> {after:?}"
+    );
 }

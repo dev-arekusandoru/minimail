@@ -129,7 +129,13 @@ impl ContactStore {
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(
-            params![text, query.favorites_only as i64, group, limit, query.offset as i64],
+            params![
+                text,
+                query.favorites_only as i64,
+                group,
+                limit,
+                query.offset as i64
+            ],
             contact_from_row,
         )?;
         let mut contacts: Vec<Contact> = Vec::new();
@@ -177,7 +183,12 @@ impl ContactStore {
                 "SELECT c.id, c.source FROM contact_emails e
                  JOIN contacts c ON c.id = e.contact_id WHERE e.address = ?1",
                 params![address],
-                |r| Ok((r.get::<_, i64>(0)?, ContactSource::parse(&r.get::<_, String>(1)?))),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        ContactSource::parse(&r.get::<_, String>(1)?),
+                    ))
+                },
             )
             .optional()?;
         let Some((id, source)) = owner else {
@@ -187,7 +198,10 @@ impl ContactStore {
         if source == ContactSource::Screener {
             return self.delete(id);
         }
-        self.conn.execute("DELETE FROM contact_emails WHERE address = ?1", params![address])?;
+        self.conn.execute(
+            "DELETE FROM contact_emails WHERE address = ?1",
+            params![address],
+        )?;
         Ok(true)
     }
 

@@ -26,7 +26,11 @@ pub fn step_lines(lines: u8, step: i8) -> u8 {
 
 /// Next option, wrapping from 5 back to Off (used by toggles and the palette).
 pub fn cycle_lines(lines: u8) -> u8 {
-    if lines >= OPTIONS[OPTIONS.len() - 1] { 0 } else { lines + 1 }
+    if lines >= OPTIONS[OPTIONS.len() - 1] {
+        0
+    } else {
+        lines + 1
+    }
 }
 
 fn is_signature_delimiter(line: &str) -> bool {

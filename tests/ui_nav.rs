@@ -12,8 +12,9 @@ use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 
-use mail_classifier::model::{Location, Mailbox, MessageId, OUTBOX_DELAY, TriageState};
 use mail_classifier::app::filter_popover::Step;
+use mail_classifier::model::{Location, Mailbox, MessageId, TriageState};
+use mail_classifier::outgoing::HOLD_SECONDS;
 use mail_classifier::tz::Utc;
 use mail_classifier::search::Field;
 
@@ -44,7 +45,13 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, ticker, Rc::new(Utc), window, cx));
+                let view = cx.new(|cx| {
+                    let mut app = MailApp::new_with_clock(mailbox, ticker, Rc::new(Utc), window, cx);
+                    // The real worker over in-memory stores, as the app runs in production:
+                    // the send path a test drives here is the one the user gets.
+                    app.attach_composer_in_memory(window, cx);
+                    app
+                });
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },
@@ -52,7 +59,12 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
         .expect("open window");
         (window.downcast::<Root>().expect("root").into(), content)
     });
-    let mut h = Harness { cx, window, app, clock };
+    let mut h = Harness {
+        cx,
+        window,
+        app,
+        clock,
+    };
     h.keys("");
     h
 }
@@ -93,12 +105,16 @@ impl Harness<'_> {
     }
     fn click(&mut self, id: impl Into<ElementId>) {
         let id = id.into();
-        self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).expect("window alive");
+        self.cx
+            .update_window(self.window, |_, window, cx| window.click(id, cx))
+            .expect("window alive");
         self.cx.run_until_parked();
     }
     fn type_text(&mut self, text: &str) {
         let window = self.window;
-        self.cx.update_window(window, |_, window, cx| window.input(text, cx)).unwrap();
+        self.cx
+            .update_window(window, |_, window, cx| window.input(text, cx))
+            .unwrap();
         self.cx.run_until_parked();
     }
     fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
@@ -113,10 +129,12 @@ impl Harness<'_> {
     }
     /// Rows of the open filter picker, top to bottom.
     fn picker_rows(&mut self) -> Vec<String> {
-        self.app.read_with(self.cx, |a, cx| a.filter_popover_rows(cx))
+        self.app
+            .read_with(self.cx, |a, cx| a.filter_popover_rows(cx))
     }
     fn picker_step(&mut self) -> Option<Step> {
-        self.app.read_with(self.cx, |a, cx| a.filter_popover_step(cx))
+        self.app
+            .read_with(self.cx, |a, cx| a.filter_popover_step(cx))
     }
     fn pills(&mut self) -> Vec<String> {
         self.read(|a| a.pill_texts())
@@ -137,10 +155,48 @@ impl Harness<'_> {
     fn pill_row(&mut self) -> bool {
         self.has("list-pills")
     }
-    fn advance(&mut self, secs: Timestamp) {
-        self.clock.advance(secs);
+    /// One beat of the app: the composer heartbeat runs from its own retained timer, so the
+    /// test clock is moved past one of those beats before the app is ticked.
+    fn tick(&mut self) {
+        self.cx
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(50));
         self.app.update(self.cx, |a, cx| a.tick(cx));
         self.cx.run_until_parked();
+    }
+    fn advance(&mut self, secs: Timestamp) {
+        self.clock.advance(secs);
+        self.tick();
+    }
+    /// Wait until `done` holds, ticking in between. Bounded: the composer worker is a real
+    /// thread, so a durable draft lands after the keystroke that asked for it, and one that
+    /// never lands fails the test instead of hanging it.
+    fn await_state(&mut self, what: &str, done: impl Fn(&MailApp) -> bool) {
+        for _ in 0..400 {
+            if self.read(&done) {
+                return;
+            }
+            self.tick();
+            if self.read(&done) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("{what}");
+    }
+    /// Run the heartbeat until the composer has nothing queued and nothing in flight, so a
+    /// test asserts on a settled draft rather than on a race with the worker.
+    fn settle(&mut self) {
+        self.await_state("the composer never settled", |a| {
+            !a.composer
+                .drafts
+                .iter()
+                .any(|d| d.in_flight || d.queued.is_some() || d.operation.is_some())
+        });
+    }
+    /// Whether a send hold is counting down for any draft.
+    fn hold_pending(&mut self) -> bool {
+        self.read(|a| a.hold_in_flight().is_some())
     }
     fn outgoing(&mut self) -> Vec<MessageId> {
         self.read(|a| {
@@ -161,7 +217,10 @@ impl Harness<'_> {
 fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert_eq!(h.location(), Some(Location::AllInboxes));
-    assert!(h.query().starts_with("in:inbox"), "the list starts on every inbox");
+    assert!(
+        h.query().starts_with("in:inbox"),
+        "the list starts on every inbox"
+    );
 
     // Two filter pills are set before the click.
     h.keys("2");
@@ -170,11 +229,18 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     h.keys("enter");
     h.keys("r e m");
     h.keys("enter");
-    assert_eq!(h.pills(), vec!["in:inbox", "tag:needs-reply", "and", "tag:reminder"]);
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "tag:needs-reply", "and", "tag:reminder"]
+    );
 
     h.click("2-3");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
-    assert_eq!(h.query(), "in:archived account:work", "clicking a location clears the filters");
+    assert_eq!(
+        h.query(),
+        "in:archived account:work",
+        "clicking a location clears the filters"
+    );
     assert!(h.pills().is_empty(), "no pills left, so no in: pill either");
     assert_eq!(h.visible(), vec![4], "only work's archived message");
     assert_eq!(h.state_of(4), TriageState::Archived);
@@ -192,7 +258,11 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert!(h.has("2-5"), "Projects is a work folder");
     assert!(h.has("2-5-0"), "Northwind nests under Projects");
     h.click("2-6");
-    assert_eq!(h.location(), Some(Location::Folder(6)), "a folder of the work account");
+    assert_eq!(
+        h.location(),
+        Some(Location::Folder(6)),
+        "a folder of the work account"
+    );
     assert_eq!(h.read(|a| a.location_label()), "Recruiting");
 
     h.click(0usize);
@@ -200,7 +270,9 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
 }
 
 #[gpui_kit::gpui::test]
-fn the_in_pill_is_hidden_while_alone_and_shown_once_anything_else_is_applied(cx: &mut TestAppContext) {
+fn the_in_pill_is_hidden_while_alone_and_shown_once_anything_else_is_applied(
+    cx: &mut TestAppContext,
+) {
     let mut h = harness(cx);
     assert!(h.pill_row());
     assert!(h.pills().is_empty(), "browsing a folder needs no pill");
@@ -208,10 +280,21 @@ fn the_in_pill_is_hidden_while_alone_and_shown_once_anything_else_is_applied(cx:
     assert!(!h.has("btn-clear-filters"), "nothing to clear");
 
     h.keys("2");
-    assert_eq!(h.pills(), vec!["in:inbox", "tag:needs-reply"], "the folder pill appears with the first filter");
-    assert!(h.has("pill-in-inbox"), "the location becomes removable once it filters");
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "tag:needs-reply"],
+        "the folder pill appears with the first filter"
+    );
+    assert!(
+        h.has("pill-in-inbox"),
+        "the location becomes removable once it filters"
+    );
     assert!(h.has("btn-clear-filters"), "there is something to clear");
-    assert_eq!(h.header(), "All Inboxes · 0", "no mail carries that tag here");
+    assert_eq!(
+        h.header(),
+        "All Inboxes · 0",
+        "no mail carries that tag here"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -220,11 +303,18 @@ fn removing_the_in_pill_from_a_filtered_folder_goes_global(cx: &mut TestAppConte
     h.click("2-0");
     assert_eq!(h.location(), Some(Location::Inbox("work".into())));
     h.keys("2");
-    assert_eq!(h.pills(), vec!["in:inbox", "account:Work", "tag:needs-reply"]);
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "account:Work", "tag:needs-reply"]
+    );
     assert_eq!(h.visible(), Vec::<MessageId>::new());
 
     h.click("pill-remove-in-inbox");
-    assert_eq!(h.pills(), vec!["account:Work", "tag:needs-reply"], "the folder pill is gone");
+    assert_eq!(
+        h.pills(),
+        vec!["account:Work", "tag:needs-reply"],
+        "the folder pill is gone"
+    );
     assert_eq!(h.location(), None, "nothing anchors the list any more");
     assert_eq!(h.read(|a| a.location_label()), "All mail");
     assert_eq!(h.query(), "account:work tag:needs-reply");
@@ -244,7 +334,11 @@ fn the_number_keys_toggle_quick_filter_pills_everywhere(cx: &mut TestAppContext)
         "keys add pills, they do not replace"
     );
     h.keys("2");
-    assert_eq!(h.pills(), vec!["in:inbox", "tag:follow-up"], "the same key removes its pill again");
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "tag:follow-up"],
+        "the same key removes its pill again"
+    );
     h.keys("3");
     assert!(h.pills().is_empty(), "back to the bare folder");
 
@@ -259,7 +353,11 @@ fn the_number_keys_toggle_quick_filter_pills_everywhere(cx: &mut TestAppContext)
     // Quick filters are not Inbox-only: they work in the archive too.
     h.click("2-3");
     h.keys("1");
-    assert_eq!(h.query(), "in:archived account:work", "key 1 drops every filter but the folder");
+    assert_eq!(
+        h.query(),
+        "in:archived account:work",
+        "key 1 drops every filter but the folder"
+    );
     h.keys("6");
     assert_eq!(h.pills(), vec!["in:archived", "account:Work", "tag:spam"]);
 }
@@ -271,12 +369,19 @@ fn and_or_toggles_between_the_values_of_one_group(cx: &mut TestAppContext) {
         h.click("btn-add-filter");
         h.keys("f r o m");
         h.keys("enter");
-        assert_eq!(h.picker_step(), Some(Step::Value(Field::From)), "people take free text");
+        assert_eq!(
+            h.picker_step(),
+            Some(Step::Value(Field::From)),
+            "people take free text"
+        );
         h.keys(who);
         h.keys("enter");
     }
     assert_eq!(h.pills(), vec!["in:inbox", "from:ann", "and", "from:bob"]);
-    assert!(h.has("group-op-from-1"), "the second value of the group offers a toggle");
+    assert!(
+        h.has("group-op-from-1"),
+        "the second value of the group offers a toggle"
+    );
     assert!(h.visible().is_empty(), "no message is from both");
 
     h.click("group-op-from-1");
@@ -298,14 +403,29 @@ fn the_picker_adds_pills_and_clear_takes_them_away(cx: &mut TestAppContext) {
     h.keys("a c c o u n t");
     h.keys("enter");
     let rows = h.picker_rows();
-    assert_eq!(rows, vec!["Personal".to_string(), "Work".to_string()], "accounts come from the mailbox");
+    assert_eq!(
+        rows,
+        vec!["Personal".to_string(), "Work".to_string()],
+        "accounts come from the mailbox"
+    );
     h.keys("w o r k");
     h.keys("enter");
     assert_eq!(h.query(), "in:inbox account:work");
-    assert_eq!(h.pills(), vec!["in:inbox", "account:Work"], "an account pill reads by name");
-    assert_eq!(h.header(), "All Inboxes · 1", "still All Inboxes, narrowed to one account");
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "account:Work"],
+        "an account pill reads by name"
+    );
+    assert_eq!(
+        h.header(),
+        "All Inboxes · 1",
+        "still All Inboxes, narrowed to one account"
+    );
     assert_eq!(h.visible(), vec![2], "only work's inbox message");
-    assert!(!h.read(|a| a.filter_popover_open()), "the picker closes once a pill is added");
+    assert!(
+        !h.read(|a| a.filter_popover_open()),
+        "the picker closes once a pill is added"
+    );
 
     h.click("btn-add-filter");
     h.keys("i s");
@@ -313,10 +433,17 @@ fn the_picker_adds_pills_and_clear_takes_them_away(cx: &mut TestAppContext) {
     h.keys("a r c");
     h.keys("enter");
     assert_eq!(h.query(), "in:inbox account:work is:archived");
-    assert!(h.visible().is_empty(), "nothing is both archived and in work's inbox");
+    assert!(
+        h.visible().is_empty(),
+        "nothing is both archived and in work's inbox"
+    );
 
     h.click("pill-remove-in-inbox");
-    assert_eq!(h.query(), "account:work is:archived", "without the folder the search is global");
+    assert_eq!(
+        h.query(),
+        "account:work is:archived",
+        "without the folder the search is global"
+    );
     assert_eq!(h.visible(), vec![4], "work's archived message");
 
     h.click("btn-clear-filters");
@@ -334,15 +461,30 @@ fn clicking_a_pill_value_edits_it_and_saving_replaces_it(cx: &mut TestAppContext
 
     h.click("pill-value-tag-follow-up");
     assert!(h.read(|a| a.filter_popover_open()));
-    assert_eq!(h.picker_step(), Some(Step::Value(Field::Tag)), "it opens on the value");
+    assert_eq!(
+        h.picker_step(),
+        Some(Step::Value(Field::Tag)),
+        "it opens on the value"
+    );
     assert!(h.has("pill-tag-follow-up"), "the pill stays in the header");
 
     h.keys("u r g e n t");
     h.keys("enter");
-    assert!(!h.read(|a| a.filter_popover_open()), "applying closes the editor");
-    assert_eq!(h.query(), "in:inbox tag:needs-reply tag:urgent", "the pill was replaced, not added");
+    assert!(
+        !h.read(|a| a.filter_popover_open()),
+        "applying closes the editor"
+    );
+    assert_eq!(
+        h.query(),
+        "in:inbox tag:needs-reply tag:urgent",
+        "the pill was replaced, not added"
+    );
     h.keys("2");
-    assert_eq!(h.query(), "in:inbox tag:urgent", "the list keys work again after editing");
+    assert_eq!(
+        h.query(),
+        "in:inbox tag:urgent",
+        "the list keys work again after editing"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -366,7 +508,11 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Some(Location::Archive("personal".into())));
     h.click(0usize);
     h.keys("g i");
-    assert_eq!(h.location(), Some(Location::AllInboxes), "`g i` stays on All Inboxes");
+    assert_eq!(
+        h.location(),
+        Some(Location::AllInboxes),
+        "`g i` stays on All Inboxes"
+    );
 
     // From an account's location the jumps stay in that account.
     h.click("2-0");
@@ -376,27 +522,52 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Some(Location::Inbox("work".into())));
 }
 
+/// A confirmed send is what puts an outgoing message in Sent, and it lands exactly once:
+/// the draft's own message id is what the provider acknowledges, so the next sync adopts
+/// that message rather than adding a second copy.
 #[gpui_kit::gpui::test]
-fn sent_shows_the_outgoing_message_after_a_flushed_reply(cx: &mut TestAppContext) {
+fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.click("1-0");
     assert!(h.outgoing().is_empty());
 
     h.keys("r");
-    assert!(h.read(|a| a.compose_open()));
+    // A draft is durable before it is shown, so the composer opens on the worker's answer.
+    h.await_state("the reply opens", |a| a.compose_open());
     h.type_text("Sure, let me know.");
+    h.settle();
     h.keys("cmd-enter");
-    assert!(!h.read(|a| a.compose_open()), "sending closes the composer");
+    h.await_state("the hold comes before anything leaves", |a| {
+        a.hold_in_flight().is_some()
+    });
+    h.advance(HOLD_SECONDS + 1);
+    h.await_state("the confirmed send is in the mailbox", |a| {
+        a.mailbox.messages().iter().any(|m| m.outgoing)
+    });
+    assert_eq!(
+        h.outgoing().len(),
+        1,
+        "a confirmed send is in the mailbox exactly once"
+    );
+    assert!(!h.hold_pending(), "the hold is over");
+    // A reply leaves the filing choice behind, and that dialog owns the keyboard.
+    assert!(
+        h.read(|a| a.modal_open()),
+        "the reply offers to file the original"
+    );
     h.keys("escape");
-    assert!(h.outgoing().is_empty(), "the reply waits in the outbox");
-
-    h.advance(OUTBOX_DELAY + 1);
-    let sent = h.outgoing();
-    assert_eq!(sent.len(), 1, "tick flushes the outbox into a sent message");
+    h.tick();
+    assert!(!h.read(|a| a.modal_open()));
 
     h.keys("g t");
     assert_eq!(h.location(), Some(Location::Sent("personal".into())));
-    assert_eq!(h.visible(), sent, "the Sent location lists the outgoing message");
+    assert_eq!(h.visible().len(), 1);
+
+    // A confirmed send is delivered, not queued: `u` has nothing to recall, and the
+    // message stays exactly where it is.
+    h.keys("u");
+    h.tick();
+    assert_eq!(h.outgoing().len(), 1, "delivered mail is never un-sent");
 }
 
 #[gpui_kit::gpui::test]
@@ -406,19 +577,39 @@ fn a_search_from_a_folder_keeps_the_folder_until_its_pill_is_removed(cx: &mut Te
     h.keys("/");
     h.type_text("bob");
     h.keys("enter");
-    assert_eq!(h.location(), Some(Location::Archive("work".into())), "the search runs inside the folder");
-    assert_eq!(h.pills(), vec!["in:archived", "account:Work", "bob"], "and shows it as removable pills");
+    assert_eq!(
+        h.location(),
+        Some(Location::Archive("work".into())),
+        "the search runs inside the folder"
+    );
+    assert_eq!(
+        h.pills(),
+        vec!["in:archived", "account:Work", "bob"],
+        "and shows it as removable pills"
+    );
     assert_eq!(h.visible(), vec![4]);
 
     h.click("pill-remove-in-archived");
-    assert_eq!(h.location(), None, "without its folder the search is global");
-    assert_eq!(h.visible(), vec![2, 4], "bob's mail in every folder of the account");
+    assert_eq!(
+        h.location(),
+        None,
+        "without its folder the search is global"
+    );
+    assert_eq!(
+        h.visible(),
+        vec![2, 4],
+        "bob's mail in every folder of the account"
+    );
     h.click("pill-remove-account-work");
     assert_eq!(h.query(), "\"bob\"");
     assert_eq!(h.read(|a| a.location_label()), "All mail");
 
     h.keys("escape");
-    assert_eq!(h.query(), "in:archived account:work", "escape returns to the folder being browsed");
+    assert_eq!(
+        h.query(),
+        "in:archived account:work",
+        "escape returns to the folder being browsed"
+    );
     assert!(h.pills().is_empty());
 }
 
@@ -441,7 +632,11 @@ fn date_pills_take_typed_dates_the_calendar_and_relative_values(cx: &mut TestApp
         .find(|id| h.has(id.clone()))
         .expect("the calendar shows September 2026");
     h.click(day);
-    assert_eq!(h.query(), "in:inbox after:2026-09-03", "the calendar sets an absolute date");
+    assert_eq!(
+        h.query(),
+        "in:inbox after:2026-09-03",
+        "the calendar sets an absolute date"
+    );
     assert_eq!(h.visible(), vec![1, 2]);
 
     // Relative values stay valid when typed.
@@ -459,10 +654,16 @@ fn date_pills_take_typed_dates_the_calendar_and_relative_values(cx: &mut TestApp
     h.keys("enter");
     h.type_text("soon");
     h.keys("enter");
-    assert!(h.read(|a| a.filter_popover_open()), "an invalid date is not applied");
+    assert!(
+        h.read(|a| a.filter_popover_open()),
+        "an invalid date is not applied"
+    );
     assert_eq!(h.pills().len(), 3);
     h.keys("escape");
-    assert!(!h.read(|a| a.filter_popover_open()), "escape cancels the picker");
+    assert!(
+        !h.read(|a| a.filter_popover_open()),
+        "escape cancels the picker"
+    );
     assert_eq!(h.pills().len(), 3, "and leaves the filters alone");
 }
 
@@ -471,7 +672,11 @@ fn the_header_counts_what_the_list_shows_without_muted_threads(cx: &mut TestAppC
     let mut h = harness(cx);
     assert_eq!(h.header(), "All Inboxes · 2");
     h.keys("m");
-    assert_eq!(h.header(), "All Inboxes · 1", "a muted thread leaves the count");
+    assert_eq!(
+        h.header(),
+        "All Inboxes · 1",
+        "a muted thread leaves the count"
+    );
     h.click("1-0");
     assert_eq!(h.header(), "Personal · Inbox · 0");
 }
@@ -484,10 +689,21 @@ fn filter_changes_are_view_state_not_undo_steps(cx: &mut TestAppContext) {
     h.keys("4");
     assert_eq!(h.pills(), vec!["in:inbox", "tag:urgent"]);
     h.keys("u");
-    assert_eq!(h.state_of(1), TriageState::Inbox, "undo reverts the archive, the last mail change");
-    assert_eq!(h.pills(), vec!["in:inbox", "tag:urgent"], "the filter stays as it is");
+    assert_eq!(
+        h.state_of(1),
+        TriageState::Inbox,
+        "undo reverts the archive, the last mail change"
+    );
+    assert_eq!(
+        h.pills(),
+        vec!["in:inbox", "tag:urgent"],
+        "the filter stays as it is"
+    );
 
     h.keys("escape");
-    assert!(h.pills().is_empty(), "escape drops every filter but the folder");
+    assert!(
+        h.pills().is_empty(),
+        "escape drops every filter but the folder"
+    );
     assert_eq!(h.visible(), vec![1, 2]);
 }

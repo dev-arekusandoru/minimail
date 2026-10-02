@@ -49,16 +49,32 @@ fn dragging_across_the_reader_selects_header_and_body_and_cmd_c_copies_it(cx: &m
     let (head, body) = cx
         .update_window(window, |_, w, cx| {
             w.render_frame(cx);
-            (w.find(("reader-msg-head", 1usize)).bounds(), w.find("reader-body").bounds())
+            (
+                w.find(("reader-msg-head", 1usize)).bounds(),
+                w.find("reader-body").bounds(),
+            )
         })
         .expect("window alive");
     // From the sender row (the avatar's right edge, on the name) to the body's far corner.
     let from = point(head.origin.x + px(52.), head.origin.y + px(8.));
-    let to = point(body.origin.x + body.size.width - px(1.), body.origin.y + body.size.height - px(1.));
-    cx.update_window(window, |_, w, cx| w.drag(from, to, cx)).expect("window alive");
+    let to = point(
+        body.origin.x + body.size.width - px(1.),
+        body.origin.y + body.size.height - px(1.),
+    );
+    cx.update_window(window, |_, w, cx| w.drag(from, to, cx))
+        .expect("window alive");
     cx.run_until_parked();
     cx.simulate_keystrokes(window, "cmd-c");
-    let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
-    assert!(copied.contains("Ana Lima") && copied.contains("ana@atrium.studio"), "clipboard was {copied:?}");
-    assert!(copied.contains("Moving the review to ten."), "clipboard was {copied:?}");
+    let copied = cx
+        .read_from_clipboard()
+        .and_then(|c| c.text())
+        .unwrap_or_default();
+    assert!(
+        copied.contains("Ana Lima") && copied.contains("ana@atrium.studio"),
+        "clipboard was {copied:?}"
+    );
+    assert!(
+        copied.contains("Moving the review to ten."),
+        "clipboard was {copied:?}"
+    );
 }

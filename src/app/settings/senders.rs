@@ -7,7 +7,11 @@ impl SettingsPanel {
         let filter = self.filter_input.clone();
         blocked = blocked.item(
             SettingItem::render(move |_, _, _| {
-                Input::new(&filter).id("blocked-filter").cleanable(true).small().w_full()
+                Input::new(&filter)
+                    .id("blocked-filter")
+                    .cleanable(true)
+                    .small()
+                    .w_full()
             })
             .keywords(["filter", "search blocked senders"]),
         );

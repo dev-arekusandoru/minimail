@@ -10,8 +10,10 @@ mod harness;
 use harness::{Harness, harness};
 
 fn has_account_icon(h: &mut Harness<'_>, message: usize) -> bool {
-    h.cx.update_window(h.window, |_, window, _| window.try_find(("row-account-icon", message)).is_some())
-        .expect("window alive")
+    h.cx.update_window(h.window, |_, window, _| {
+        window.try_find(("row-account-icon", message)).is_some()
+    })
+    .expect("window alive")
 }
 
 fn visible_ids(h: &mut Harness<'_>) -> Vec<usize> {
@@ -22,7 +24,10 @@ fn visible_ids(h: &mut Harness<'_>) -> Vec<usize> {
 fn rows_show_the_account_icon_only_in_all_inboxes(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = visible_ids(&mut h);
-    assert!(ids.iter().any(|&id| has_account_icon(&mut h, id)), "rendered unified rows carry one");
+    assert!(
+        ids.iter().any(|&id| has_account_icon(&mut h, id)),
+        "rendered unified rows carry one"
+    );
 
     // The sidebar's first account inbox: the account is implied, so no icon.
     h.click("1-0");
@@ -33,15 +38,25 @@ fn rows_show_the_account_icon_only_in_all_inboxes(cx: &mut TestAppContext) {
 }
 
 fn has_row(h: &mut Harness<'_>, message: usize) -> bool {
-    h.cx.update_window(h.window, |_, window, _| window.try_find(("row", message)).is_some())
-        .expect("window alive")
+    h.cx.update_window(h.window, |_, window, _| {
+        window.try_find(("row", message)).is_some()
+    })
+    .expect("window alive")
 }
 
 #[gpui_kit::gpui::test]
-fn picking_an_icon_and_color_in_the_style_popover_stores_them_on_the_account(cx: &mut TestAppContext) {
+fn picking_an_icon_and_color_in_the_style_popover_stores_them_on_the_account(
+    cx: &mut TestAppContext,
+) {
     let mut h = harness(cx);
     let style = |h: &mut Harness<'_>| {
-        h.read(|a| a.mailbox.accounts().iter().map(|a| (a.icon.clone(), a.color.clone())).collect::<Vec<_>>())
+        h.read(|a| {
+            a.mailbox
+                .accounts()
+                .iter()
+                .map(|a| (a.icon.clone(), a.color.clone()))
+                .collect::<Vec<_>>()
+        })
     };
     let before = style(&mut h);
     assert_eq!(before[0].0.as_deref(), Some("mail"));
@@ -62,11 +77,19 @@ fn picking_an_icon_and_color_in_the_style_popover_stores_them_on_the_account(cx:
 }
 
 fn sidebar_names(h: &mut Harness<'_>) -> Vec<String> {
-    h.read(|a| a.mailbox.accounts().iter().map(|a| mail_classifier::account_style::display_name(a).to_owned()).collect())
+    h.read(|a| {
+        a.mailbox
+            .accounts()
+            .iter()
+            .map(|a| mail_classifier::account_style::display_name(a).to_owned())
+            .collect()
+    })
 }
 
 #[gpui_kit::gpui::test]
-fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &mut TestAppContext) {
+fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(
+    cx: &mut TestAppContext,
+) {
     let mut h = harness(cx);
     assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
 
@@ -74,16 +97,26 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
     let focus_nickname = |h: &mut Harness<'_>| {
         let window = h.settings_window().expect("the settings window is open");
         h.cx.update_window(window, |_, window, cx| {
-            window.within(("account-card", 0usize)).click(("account-rename", 0usize), cx)
+            window
+                .within(("account-card", 0usize))
+                .click(("account-rename", 0usize), cx)
         })
         .expect("settings window alive");
         h.cx.run_until_parked();
     };
     focus_nickname(&mut h);
     h.settings_type("  Home  ");
-    assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()).as_deref(), Some("Home"));
+    assert_eq!(
+        h.read(|a| a.mailbox.accounts()[0].nickname.clone())
+            .as_deref(),
+        Some("Home")
+    );
     assert_eq!(sidebar_names(&mut h), vec!["Home", "Work"]);
-    assert_eq!(h.read(|a| a.mailbox.accounts()[1].nickname.clone()), None, "other accounts untouched");
+    assert_eq!(
+        h.read(|a| a.mailbox.accounts()[1].nickname.clone()),
+        None,
+        "other accounts untouched"
+    );
 
     // Clearing the text unsets it.
     h.settings_keys("cmd-a backspace");
@@ -93,11 +126,19 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
 
 #[gpui_kit::gpui::test]
 fn an_app_without_accounts_shows_the_add_gmail_onboarding(cx: &mut TestAppContext) {
-    let store = std::rc::Rc::new(mail_classifier::contacts::ContactStore::open_in_memory().expect("store"));
-    let empty = mail_classifier::model::Mailbox::from_parts(Vec::new(), Vec::new(), Vec::new(), store);
+    let store =
+        std::rc::Rc::new(mail_classifier::contacts::ContactStore::open_in_memory().expect("store"));
+    let empty =
+        mail_classifier::model::Mailbox::from_parts(Vec::new(), Vec::new(), Vec::new(), store);
     let mut h = harness::harness_with(cx, empty);
-    assert!(h.has("onboarding-add-gmail"), "no accounts: the list area offers to add one");
+    assert!(
+        h.has("onboarding-add-gmail"),
+        "no accounts: the list area offers to add one"
+    );
 
     let mut h = harness(h.cx);
-    assert!(!h.has("onboarding-add-gmail"), "with accounts the onboarding is gone");
+    assert!(
+        !h.has("onboarding-add-gmail"),
+        "with accounts the onboarding is gone"
+    );
 }

@@ -70,44 +70,7 @@ impl Mailbox {
                 }
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
                 Change::FolderPush(id) => self.folders.retain(|f| f.id != id),
-                Change::Materialised(id) => {
-                    if let Some(&i) = self.index.get(&id) {
-                        self.messages.remove(i);
-                    }
-                    self.index.clear();
-                    for (i, m) in self.messages.iter().enumerate() {
-                        self.index.insert(m.id, i);
-                    }
-                    self.newest_first.retain(|mid| *mid != id);
-                    self.meta.remove(&id);
-                    self.sent_ids.retain(|_, sent| *sent != id);
-                }
-                Change::PostSend(seq, was, before) => {
-                    match was {
-                        Some(state) => {
-                            self.post_send.insert(seq, state);
-                        }
-                        None => {
-                            self.post_send.remove(&seq);
-                        }
-                    }
-                    // The reply was sent after the filing: give it back the state it
-                    // would have had, so the filing undoes as a whole.
-                    if let Some(&id) = self.sent_ids.get(&seq)
-                        && let Some(&i) = self.index.get(&id)
-                    {
-                        self.messages[i].state = before;
-                    }
-                }
                 Change::Pending(p) => self.pending = p,
-                Change::Queued(seq) => {
-                    self.outbox.retain(|o| o.seq != seq);
-                    self.post_send.remove(&seq);
-                    self.sent_ids.remove(&seq);
-                }
-                Change::SentPush => {
-                    self.sent.pop();
-                }
             }
         }
     }

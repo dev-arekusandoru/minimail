@@ -3,7 +3,10 @@ use mail_classifier::preview::*;
 
 #[test]
 fn collapses_whitespace_and_blank_lines() {
-    assert_eq!(snippet("  Hello   there \n\n\n  second\tline  \n"), "Hello there second line");
+    assert_eq!(
+        snippet("  Hello   there \n\n\n  second\tline  \n"),
+        "Hello there second line"
+    );
 }
 
 #[test]

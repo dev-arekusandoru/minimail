@@ -100,7 +100,12 @@ mod tests {
     const NOW: Timestamp = 1_000_000;
 
     fn facts(last_synced: Option<Timestamp>) -> SyncFacts<'static> {
-        SyncFacts { last_synced, syncing: false, signed_in: true, error: None }
+        SyncFacts {
+            last_synced,
+            syncing: false,
+            signed_in: true,
+            error: None,
+        }
     }
 
     fn text(facts: &SyncFacts) -> (String, bool) {
@@ -109,37 +114,65 @@ mod tests {
 
     #[test]
     fn a_completed_check_reads_as_its_age() {
-        assert_eq!(text(&facts(Some(NOW - 30))), ("Synced just now".into(), false));
-        assert_eq!(text(&facts(Some(NOW - 2 * MINUTE - 5))).0, "Synced 2 min ago");
+        assert_eq!(
+            text(&facts(Some(NOW - 30))),
+            ("Synced just now".into(), false)
+        );
+        assert_eq!(
+            text(&facts(Some(NOW - 2 * MINUTE - 5))).0,
+            "Synced 2 min ago"
+        );
         assert_eq!(text(&facts(Some(NOW - 3 * HOUR))).0, "Synced 3 h ago");
         assert_eq!(text(&facts(Some(NOW - DAY - HOUR))).0, "Synced yesterday");
         assert_eq!(text(&facts(Some(NOW - 5 * DAY))).0, "Synced 5 days ago");
-        assert_eq!(text(&facts(Some(NOW + 90))).0, "Synced just now", "clock skew is not negative");
+        assert_eq!(
+            text(&facts(Some(NOW + 90))).0,
+            "Synced just now",
+            "clock skew is not negative"
+        );
         assert_eq!(text(&facts(None)).0, "Not synced yet");
     }
 
     #[test]
     fn a_running_round_wins_over_the_last_time_but_not_over_a_dead_sign_in() {
-        let running = SyncFacts { syncing: true, ..facts(Some(NOW - 5 * DAY)) };
+        let running = SyncFacts {
+            syncing: true,
+            ..facts(Some(NOW - 5 * DAY))
+        };
         assert_eq!(text(&running), ("Syncing…".into(), false));
-        let signed_out = SyncFacts { signed_in: false, ..running };
+        let signed_out = SyncFacts {
+            signed_in: false,
+            ..running
+        };
         assert_eq!(text(&signed_out), ("Sign-in expired".into(), true));
     }
 
     #[test]
     fn auth_failures_ask_to_sign_in_and_other_failures_show_the_message() {
         let auth = ProviderError::Auth("token revoked".into()).to_string();
-        let rejected = SyncFacts { error: Some(&auth), ..facts(Some(NOW)) };
+        let rejected = SyncFacts {
+            error: Some(&auth),
+            ..facts(Some(NOW))
+        };
         assert_eq!(status(&rejected), SyncStatus::SignInAgain);
         let net = ProviderError::Network("offline".into()).to_string();
-        let failing = SyncFacts { error: Some(&net), ..facts(Some(NOW)) };
+        let failing = SyncFacts {
+            error: Some(&net),
+            ..facts(Some(NOW))
+        };
         assert_eq!(text(&failing), (format!("Sync failed: {net}"), true));
     }
 
     #[test]
     fn only_broken_statuses_offer_an_action() {
-        assert_eq!(SyncStatus::SignInAgain.action(), Some(SyncAction::SignInAgain));
-        assert_eq!(SyncStatus::Failed("x".into()).action(), Some(SyncAction::Retry));
+        assert_eq!(
+            SyncStatus::SignInAgain.action(),
+            Some(SyncAction::SignInAgain)
+        );
+        assert_eq!(
+            SyncStatus::Failed("x".into()).action(),
+            Some(SyncAction::Retry)
+        );
         assert_eq!(SyncStatus::Syncing.action(), None);
         assert_eq!(SyncStatus::Synced(Some(5)).action(), None);
         assert_eq!(SyncStatus::Synced(None).action(), None);

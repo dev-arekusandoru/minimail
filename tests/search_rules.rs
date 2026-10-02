@@ -1,7 +1,7 @@
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
+use mail_classifier::model::parse_rfc3339;
 use mail_classifier::model::{Mailbox, Message, TriageState};
 use mail_classifier::rules::{Rule, RuleBook};
-use mail_classifier::model::parse_rfc3339;
 use mail_classifier::search::{Combinator, Field, Pill, Query};
 use mail_classifier::tz::{FixedZone, Now, Utc};
 use std::rc::Rc;
@@ -371,7 +371,13 @@ fn relative_months_clamp_to_month_length() {
 
 #[test]
 fn malformed_relative_dates_stay_text() {
-    for bad in ["after:d", "after:7x", "after:-3d", "before:99999d", "on:1.5d"] {
+    for bad in [
+        "after:d",
+        "after:7x",
+        "after:-3d",
+        "before:99999d",
+        "on:1.5d",
+    ] {
         let q = Query::parse(bad);
         assert!(q.groups().is_empty(), "{bad}");
         assert_eq!(q.text().len(), 1, "{bad}");
@@ -473,7 +479,12 @@ fn in_folder_name_matches_filed_mail_of_that_account() {
 
 fn rt(s: &str) -> Query {
     let q = Query::parse(s);
-    assert_eq!(Query::parse(&q.to_string()), q, "round trip of {s:?} via {:?}", q.to_string());
+    assert_eq!(
+        Query::parse(&q.to_string()),
+        q,
+        "round trip of {s:?} via {:?}",
+        q.to_string()
+    );
     assert_eq!(q.describe(), q.to_string());
     q
 }
@@ -542,10 +553,26 @@ fn editing_api_toggles_and_orders_pills() {
     assert_eq!(
         q.pills(),
         vec![
-            Pill { field: Field::From, value: "alice".into(), combinator: None },
-            Pill { field: Field::From, value: "bob".into(), combinator: Some(Combinator::Or) },
-            Pill { field: Field::Is, value: "inbox".into(), combinator: None },
-            Pill { field: Field::After, value: "7d".into(), combinator: None },
+            Pill {
+                field: Field::From,
+                value: "alice".into(),
+                combinator: None
+            },
+            Pill {
+                field: Field::From,
+                value: "bob".into(),
+                combinator: Some(Combinator::Or)
+            },
+            Pill {
+                field: Field::Is,
+                value: "inbox".into(),
+                combinator: None
+            },
+            Pill {
+                field: Field::After,
+                value: "7d".into(),
+                combinator: None
+            },
         ]
     );
     assert_eq!(q.to_string(), "from:alice,bob is:inbox after:7d");
@@ -576,11 +603,24 @@ fn editing_preserves_free_text() {
 fn replace_keeps_the_position_and_rejects_invalid_or_absent_values() {
     let mut q = Query::parse("tag:needs-reply tag:urgent from:ann");
     assert!(q.replace(Field::Tag, "needs-reply", "spam"));
-    assert_eq!(q.to_string(), "tag:spam tag:urgent from:ann", "the edited pill stays where it was");
-    assert!(!q.replace(Field::Tag, "spam", "bogus"), "an invalid value changes nothing");
-    assert!(!q.replace(Field::Tag, "reminder", "spam"), "an absent value changes nothing");
+    assert_eq!(
+        q.to_string(),
+        "tag:spam tag:urgent from:ann",
+        "the edited pill stays where it was"
+    );
+    assert!(
+        !q.replace(Field::Tag, "spam", "bogus"),
+        "an invalid value changes nothing"
+    );
+    assert!(
+        !q.replace(Field::Tag, "reminder", "spam"),
+        "an absent value changes nothing"
+    );
     assert_eq!(q.to_string(), "tag:spam tag:urgent from:ann");
-    assert!(q.replace(Field::Tag, "spam", "urgent"), "replacing with a value already there merges");
+    assert!(
+        q.replace(Field::Tag, "spam", "urgent"),
+        "replacing with a value already there merges"
+    );
     assert_eq!(q.values(Field::Tag), ["urgent"]);
     assert_eq!(Query::parse(&q.to_string()), q);
 }
@@ -589,7 +629,10 @@ fn replace_keeps_the_position_and_rejects_invalid_or_absent_values() {
 fn free_text_terms_add_remove_and_replace_like_pills() {
     let mut q = Query::parse("in:inbox");
     assert!(q.add_text("Budget"));
-    assert!(!q.add_text("budget"), "terms are case-insensitive and unique");
+    assert!(
+        !q.add_text("budget"),
+        "terms are case-insensitive and unique"
+    );
     assert!(!q.add_text("   "), "blank is no term");
     assert!(q.replace_text("budget", "invoice"));
     assert_eq!(q.text(), ["invoice"]);
@@ -602,22 +645,45 @@ fn free_text_terms_add_remove_and_replace_like_pills() {
 fn overlay_replaces_the_fields_it_names_and_appends_text() {
     let mut q = Query::parse("in:inbox account:work tag:urgent");
     q.overlay(&Query::parse("in:archived from:ann,bob lunch"));
-    assert_eq!(q.to_string(), "account:work tag:urgent in:archived from:ann,bob \"lunch\"");
-    assert_eq!(q.combinator(Field::From), Some(Combinator::Or), "the overlaid group keeps its combinator");
+    assert_eq!(
+        q.to_string(),
+        "account:work tag:urgent in:archived from:ann,bob \"lunch\""
+    );
+    assert_eq!(
+        q.combinator(Field::From),
+        Some(Combinator::Or),
+        "the overlaid group keeps its combinator"
+    );
 }
 
 #[test]
 fn quick_filters_keep_the_old_chip_order() {
     use mail_classifier::filters::{QuickFilter, quick_filter};
-    assert_eq!(quick_filter(0), Some(QuickFilter::Clear), "key 1 was the All chip");
-    assert_eq!(quick_filter(1), Some(QuickFilter::Toggle(Field::Tag, "needs-reply")));
-    assert_eq!(quick_filter(2), Some(QuickFilter::Toggle(Field::Tag, "follow-up")));
-    assert_eq!(quick_filter(3), Some(QuickFilter::Toggle(Field::Tag, "urgent")));
+    assert_eq!(
+        quick_filter(0),
+        Some(QuickFilter::Clear),
+        "key 1 was the All chip"
+    );
+    assert_eq!(
+        quick_filter(1),
+        Some(QuickFilter::Toggle(Field::Tag, "needs-reply"))
+    );
+    assert_eq!(
+        quick_filter(2),
+        Some(QuickFilter::Toggle(Field::Tag, "follow-up"))
+    );
+    assert_eq!(
+        quick_filter(3),
+        Some(QuickFilter::Toggle(Field::Tag, "urgent"))
+    );
     assert_eq!(
         quick_filter(4).is_some(),
         mail_classifier::known_senders::KNOWN_SENDERS_ENABLED,
         "key 5 (new senders) only while known senders are on"
     );
-    assert_eq!(quick_filter(5), Some(QuickFilter::Toggle(Field::Tag, "spam")));
+    assert_eq!(
+        quick_filter(5),
+        Some(QuickFilter::Toggle(Field::Tag, "spam"))
+    );
     assert_eq!(quick_filter(6), None);
 }

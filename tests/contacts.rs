@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use mail_classifier::clock::FakeClock;
 use mail_classifier::contacts::{
-    ContactQuery, ContactSource, ContactStore, ContactUrl, EmailAddress, Error, Label,
-    NewContact, PhoneNumber, PostalAddress, seed_if_empty,
+    ContactQuery, ContactSource, ContactStore, ContactUrl, EmailAddress, Error, Label, NewContact,
+    PhoneNumber, PostalAddress, seed_if_empty,
 };
 
 const T0: i64 = 1_790_812_800;
@@ -44,7 +44,10 @@ fn create_read_update_delete() {
 
     let created = store.create(new).expect("create");
     assert_eq!(created.display_name, "Ada Nkemelu");
-    assert_eq!(created.emails[0].address, "ada@typefoundry.example", "stored lowercased");
+    assert_eq!(
+        created.emails[0].address, "ada@typefoundry.example",
+        "stored lowercased"
+    );
     assert!(created.emails[0].primary);
     assert_eq!(created.groups, ["Work"]);
     assert_eq!(created.created_at, T0);
@@ -63,7 +66,11 @@ fn create_read_update_delete() {
     assert_eq!(updated.display_name, "Ada N. Nkemelu");
     assert_eq!(updated.job_title.as_deref(), Some("Creative Director"));
     assert_eq!(updated.created_at, T0, "created_at survives an update");
-    assert_eq!(updated.emails.len(), 1, "an empty list leaves children alone");
+    assert_eq!(
+        updated.emails.len(),
+        1,
+        "an empty list leaves children alone"
+    );
     assert_eq!(updated.groups, ["Work"]);
 
     assert!(store.delete(created.id).expect("delete"));
@@ -75,13 +82,27 @@ fn create_read_update_delete() {
 fn emails_are_unique_case_insensitively() {
     let store = store();
     let ada = store.create(ada()).expect("create");
-    let err = store.add_email(ada.id, EmailAddress::new("ADA@typefoundry.example")).unwrap_err();
-    assert!(matches!(&err, Error::DuplicateEmail(a) if a == "ada@typefoundry.example"), "{err}");
+    let err = store
+        .add_email(ada.id, EmailAddress::new("ADA@typefoundry.example"))
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::DuplicateEmail(a) if a == "ada@typefoundry.example"),
+        "{err}"
+    );
 
     let other = store.create(NewContact::new("Ines")).expect("create");
-    let err = store.add_email(other.id, EmailAddress::new("ada@typefoundry.example")).unwrap_err();
+    let err = store
+        .add_email(other.id, EmailAddress::new("ada@typefoundry.example"))
+        .unwrap_err();
     assert!(matches!(err, Error::DuplicateEmail(_)), "{err}");
-    assert_eq!(store.get_by_email("ada@TYPEFOUNDRY.example").unwrap().unwrap().id, ada.id);
+    assert_eq!(
+        store
+            .get_by_email("ada@TYPEFOUNDRY.example")
+            .unwrap()
+            .unwrap()
+            .id,
+        ada.id
+    );
     assert!(store.get_by_email("nobody@example.com").unwrap().is_none());
     assert!(matches!(
         store.create(NewContact::new("Broken").with(EmailAddress::new("not-an-email"))),
@@ -93,7 +114,9 @@ fn emails_are_unique_case_insensitively() {
 fn one_primary_email_per_contact() {
     let store = store();
     let ada = store.create(ada()).expect("create");
-    store.add_email(ada.id, EmailAddress::new("ada@home.example")).expect("add");
+    store
+        .add_email(ada.id, EmailAddress::new("ada@home.example"))
+        .expect("add");
     let ada = store.get(ada.id).unwrap().unwrap();
     assert_eq!(ada.emails.len(), 2);
     assert_eq!(
@@ -103,17 +126,36 @@ fn one_primary_email_per_contact() {
     );
 
     store
-        .add_email(ada.id, EmailAddress { address: "ada@studio.example".into(), label: Label::Work, primary: true })
+        .add_email(
+            ada.id,
+            EmailAddress {
+                address: "ada@studio.example".into(),
+                label: Label::Work,
+                primary: true,
+            },
+        )
         .expect("add primary");
     let ada = store.get(ada.id).unwrap().unwrap();
     assert_eq!(ada.primary_email(), Some("ada@studio.example"));
     assert_eq!(ada.emails.iter().filter(|e| e.primary).count(), 1);
 
-    assert!(store.remove_email(ada.id, "ada@studio.example").expect("remove"));
-    assert!(!store.remove_email(ada.id, "ada@studio.example").expect("remove twice"));
+    assert!(
+        store
+            .remove_email(ada.id, "ada@studio.example")
+            .expect("remove")
+    );
+    assert!(
+        !store
+            .remove_email(ada.id, "ada@studio.example")
+            .expect("remove twice")
+    );
     let ada = store.get(ada.id).unwrap().unwrap();
     assert_eq!(ada.emails.len(), 2);
-    assert_eq!(ada.emails.iter().filter(|e| e.primary).count(), 1, "the survivor is promoted");
+    assert_eq!(
+        ada.emails.iter().filter(|e| e.primary).count(),
+        1,
+        "the survivor is promoted"
+    );
 }
 
 #[test]
@@ -121,7 +163,9 @@ fn delete_cascades_to_children_and_groups() {
     let store = store();
     let ada = store.create(ada()).expect("create");
     let id = ada.id;
-    store.add_phone(id, PhoneNumber::new("+44 20 7946 0102")).expect("phone");
+    store
+        .add_phone(id, PhoneNumber::new("+44 20 7946 0102"))
+        .expect("phone");
     store
         .add_address(
             id,
@@ -135,7 +179,15 @@ fn delete_cascades_to_children_and_groups() {
             },
         )
         .expect("address");
-    store.add_url(id, ContactUrl { url: "https://typefoundry.example/ada".into(), label: Label::Work }).expect("url");
+    store
+        .add_url(
+            id,
+            ContactUrl {
+                url: "https://typefoundry.example/ada".into(),
+                label: Label::Work,
+            },
+        )
+        .expect("url");
     store.add_field(id, "pronouns", "they/them").expect("field");
     let group = store.create_group("Work").expect("group");
     store.assign_group(id, group.id).expect("assign");
@@ -145,13 +197,22 @@ fn delete_cascades_to_children_and_groups() {
     assert!(store.delete(id).expect("delete"));
     assert_eq!(store.fields(id).unwrap(), []);
     assert!(store.get(id).unwrap().is_none());
-    assert_eq!(store.groups().unwrap().len(), 1, "the group itself survives");
+    assert_eq!(
+        store.groups().unwrap().len(),
+        1,
+        "the group itself survives"
+    );
     assert_eq!(
         store.search(&ContactQuery::new()).unwrap().len(),
         0,
         "no orphan rows are left behind"
     );
-    assert!(store.get_by_email("ada@typefoundry.example").unwrap().is_none());
+    assert!(
+        store
+            .get_by_email("ada@typefoundry.example")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -171,22 +232,31 @@ fn favorite_and_touch_move_timestamps() {
     assert_eq!(ada.last_contacted_at, Some(T0));
 
     assert!(matches!(store.touch(9999), Err(Error::NotFound(_))));
-    assert!(matches!(store.set_favorite(9999, true), Err(Error::NotFound(_))));
-    assert!(matches!(store.set_favorite(9999, true), Err(Error::NotFound(_))));
+    assert!(matches!(
+        store.set_favorite(9999, true),
+        Err(Error::NotFound(_))
+    ));
+    assert!(matches!(
+        store.set_favorite(9999, true),
+        Err(Error::NotFound(_))
+    ));
 }
 
 #[test]
 fn search_filters_and_paginates() {
     let store = store();
-    let ada = store.create(ada().organization("Type Foundry")).expect("create");
-    store.create(
-        NewContact::new("Dana Whitfield")
-            .with(EmailAddress::primary("dana@whitfield.dev"))
-            .organization("Whitfield")
-            .favorite(true)
-            .group("Work"),
-    )
-    .expect("create");
+    let ada = store
+        .create(ada().organization("Type Foundry"))
+        .expect("create");
+    store
+        .create(
+            NewContact::new("Dana Whitfield")
+                .with(EmailAddress::primary("dana@whitfield.dev"))
+                .organization("Whitfield")
+                .favorite(true)
+                .group("Work"),
+        )
+        .expect("create");
     store
         .create(
             NewContact::new("Mum")
@@ -195,20 +265,60 @@ fn search_filters_and_paginates() {
         )
         .expect("create");
 
-    assert_eq!(names(&store.search(&ContactQuery::new()).unwrap()), ["Ada Nkemelu", "Dana Whitfield", "Mum"]);
-    assert_eq!(names(&store.search(&ContactQuery::new().text("ada")).unwrap()), ["Ada Nkemelu"]);
-    assert_eq!(names(&store.search(&ContactQuery::new().text("dANA@whit")).unwrap()), ["Dana Whitfield"]);
-    assert_eq!(names(&store.search(&ContactQuery::new().text("Whitfield")).unwrap()), ["Dana Whitfield"], "organization prefix");
-    assert_eq!(names(&store.search(&ContactQuery::new().favorites(true)).unwrap()), ["Dana Whitfield"]);
-    assert_eq!(names(&store.search(&ContactQuery::new().group("family")).unwrap()), ["Mum"], "group name is case-insensitive");
-    assert!(store.search(&ContactQuery::new().text("a%")).unwrap().is_empty(), "wildcards are literal");
+    assert_eq!(
+        names(&store.search(&ContactQuery::new()).unwrap()),
+        ["Ada Nkemelu", "Dana Whitfield", "Mum"]
+    );
+    assert_eq!(
+        names(&store.search(&ContactQuery::new().text("ada")).unwrap()),
+        ["Ada Nkemelu"]
+    );
+    assert_eq!(
+        names(
+            &store
+                .search(&ContactQuery::new().text("dANA@whit"))
+                .unwrap()
+        ),
+        ["Dana Whitfield"]
+    );
+    assert_eq!(
+        names(
+            &store
+                .search(&ContactQuery::new().text("Whitfield"))
+                .unwrap()
+        ),
+        ["Dana Whitfield"],
+        "organization prefix"
+    );
+    assert_eq!(
+        names(&store.search(&ContactQuery::new().favorites(true)).unwrap()),
+        ["Dana Whitfield"]
+    );
+    assert_eq!(
+        names(&store.search(&ContactQuery::new().group("family")).unwrap()),
+        ["Mum"],
+        "group name is case-insensitive"
+    );
+    assert!(
+        store
+            .search(&ContactQuery::new().text("a%"))
+            .unwrap()
+            .is_empty(),
+        "wildcards are literal"
+    );
 
     let page1 = store.search(&ContactQuery::new().page(2, 0)).unwrap();
     let page2 = store.search(&ContactQuery::new().page(2, 2)).unwrap();
     assert_eq!(names(&page1), ["Ada Nkemelu", "Dana Whitfield"]);
     assert_eq!(names(&page2), ["Mum"]);
     assert_eq!(page1[0].id, ada.id);
-    assert!(page1[0].emails.iter().any(|e| e.address == "ada@typefoundry.example"), "children load with search results");
+    assert!(
+        page1[0]
+            .emails
+            .iter()
+            .any(|e| e.address == "ada@typefoundry.example"),
+        "children load with search results"
+    );
     assert_eq!(page1[1].groups, ["Work"]);
 }
 
@@ -217,18 +327,34 @@ fn groups_are_created_renamed_and_membership_toggled() {
     let store = store();
     let ada = store.create(ada()).expect("create");
     let work = store.create_group("Work").expect("create");
-    assert!(matches!(store.create_group("work"), Err(Error::DuplicateGroup(_))));
+    assert!(matches!(
+        store.create_group("work"),
+        Err(Error::DuplicateGroup(_))
+    ));
     assert_eq!(store.groups().unwrap().len(), 1);
     assert_eq!(store.group_id("WORK").unwrap(), Some(work.id));
 
     assert!(store.assign_group(ada.id, work.id).expect("assign"));
     assert!(!store.assign_group(ada.id, work.id).expect("assign twice"));
-    assert!(matches!(store.assign_group(9999, work.id), Err(Error::NotFound(_))));
+    assert!(matches!(
+        store.assign_group(9999, work.id),
+        Err(Error::NotFound(_))
+    ));
     assert_eq!(store.get(ada.id).unwrap().unwrap().groups, ["Work"]);
 
-    assert_eq!(store.rename_group(work.id, "Studio").expect("rename").name, "Studio");
-    assert_eq!(store.get(ada.id).unwrap().unwrap().groups, ["Studio"], "members keep the group");
-    assert!(matches!(store.rename_group(9999, "Ghost"), Err(Error::NotFound(_))));
+    assert_eq!(
+        store.rename_group(work.id, "Studio").expect("rename").name,
+        "Studio"
+    );
+    assert_eq!(
+        store.get(ada.id).unwrap().unwrap().groups,
+        ["Studio"],
+        "members keep the group"
+    );
+    assert!(matches!(
+        store.rename_group(9999, "Ghost"),
+        Err(Error::NotFound(_))
+    ));
 
     assert!(store.remove_group(ada.id, work.id).expect("remove"));
     assert!(!store.remove_group(ada.id, work.id).expect("remove twice"));
@@ -242,7 +368,11 @@ fn groups_are_created_renamed_and_membership_toggled() {
 fn upsert_from_email_creates_minimal_contact() {
     let store = store();
     let (contact, created) = store
-        .upsert_from_email("New@Sender.example", Some("New Sender"), ContactSource::Manual)
+        .upsert_from_email(
+            "New@Sender.example",
+            Some("New Sender"),
+            ContactSource::Manual,
+        )
         .expect("upsert");
     assert!(created);
     assert_eq!(contact.display_name, "New Sender");
@@ -260,13 +390,20 @@ fn upsert_from_email_creates_minimal_contact() {
         .upsert_from_email("bare@sender.example", None, ContactSource::Manual)
         .expect("upsert without a name");
     assert!(created);
-    assert_eq!(nameless.display_name, "bare", "falls back to the local part");
+    assert_eq!(
+        nameless.display_name, "bare",
+        "falls back to the local part"
+    );
 }
 
 #[test]
 fn forget_address_removes_a_manual_contact_address() {
     let store = store();
-    let seeded = store.create(NewContact::from_email("ada@typefoundry.example", "Ada").source(ContactSource::Seed)).expect("create");
+    let seeded = store
+        .create(
+            NewContact::from_email("ada@typefoundry.example", "Ada").source(ContactSource::Seed),
+        )
+        .expect("create");
     let contact = store
         .upsert_from_email("new@sender.example", Some("New"), ContactSource::Manual)
         .expect("upsert")
@@ -279,10 +416,21 @@ fn forget_address_removes_a_manual_contact_address() {
         "manual contacts remain after an address is forgotten"
     );
 
-    assert!(store.forget_address("ada@typefoundry.example").expect("forget"));
-    assert!(store.get(seeded.id).unwrap().is_some(), "an existing contact only loses the address");
+    assert!(
+        store
+            .forget_address("ada@typefoundry.example")
+            .expect("forget")
+    );
+    assert!(
+        store.get(seeded.id).unwrap().is_some(),
+        "an existing contact only loses the address"
+    );
     assert!(store.get(seeded.id).unwrap().unwrap().emails.is_empty());
-    assert!(!store.forget_address("gone@example.com").expect("forget twice"));
+    assert!(
+        !store
+            .forget_address("gone@example.com")
+            .expect("forget twice")
+    );
 }
 
 /// A private database file, removed when the test ends.
@@ -322,9 +470,15 @@ fn a_fresh_file_is_migrated_and_keeps_its_data_across_reopen() {
     drop(store);
 
     let store = ContactStore::open(db.path()).expect("reopen");
-    assert_eq!(store.journal_mode().expect("journal mode").to_lowercase(), "wal");
+    assert_eq!(
+        store.journal_mode().expect("journal mode").to_lowercase(),
+        "wal"
+    );
     assert!(store.foreign_keys_enabled().expect("foreign keys"));
-    assert_eq!(store.get(ada.id).unwrap().unwrap().display_name, "Ada Nkemelu");
+    assert_eq!(
+        store.get(ada.id).unwrap().unwrap().display_name,
+        "Ada Nkemelu"
+    );
     assert!(store.is_known("ada@typefoundry.example").expect("known"));
 }
 
@@ -337,29 +491,36 @@ fn upgrading_schema_one_preserves_contacts_and_schema_two_settings() {
 
     // Recreate the version-one file from before scoped settings were added.
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;")
+        .unwrap();
     drop(conn);
 
     let store = ContactStore::open(db.path()).expect("upgrade version one");
-    assert_eq!(store.get(ada.id).unwrap().unwrap().display_name, "Ada Nkemelu");
+    assert_eq!(
+        store.get(ada.id).unwrap().unwrap().display_name,
+        "Ada Nkemelu"
+    );
     drop(store);
 
     let conn = rusqlite::Connection::open(db.path()).unwrap();
     conn.execute(
         "INSERT INTO settings (scope, key, value) VALUES (?1, ?2, ?3)",
         ["global", "theme", "\"dark\""],
-    ).expect("settings migration applied");
+    )
+    .expect("settings migration applied");
     drop(conn);
 
     let store = ContactStore::open(db.path()).expect("reopen version two");
     assert!(store.is_known("ada@typefoundry.example").unwrap());
     drop(store);
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    let theme: String = conn.query_row(
-        "SELECT value FROM settings WHERE scope = 'global' AND key = 'theme'",
-        [],
-        |row| row.get(0),
-    ).unwrap();
+    let theme: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE scope = 'global' AND key = 'theme'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(theme, "\"dark\"");
 }
 
@@ -373,15 +534,22 @@ fn unknown_future_schema_is_rejected_without_changing_data() {
     conn.pragma_update(None, "user_version", 999).unwrap();
     drop(conn);
 
-    assert!(matches!(ContactStore::open(db.path()), Err(Error::Invalid(_))));
+    assert!(matches!(
+        ContactStore::open(db.path()),
+        Err(Error::Invalid(_))
+    ));
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    let name: String = conn.query_row(
-        "SELECT display_name FROM contacts WHERE id = ?1",
-        [ada.id],
-        |row| row.get(0),
-    ).unwrap();
+    let name: String = conn
+        .query_row(
+            "SELECT display_name FROM contacts WHERE id = ?1",
+            [ada.id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(name, "Ada Nkemelu");
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(version, 999);
 }
 
@@ -391,15 +559,24 @@ fn seeding_is_idempotent() {
     let store = ContactStore::open(db.path()).expect("open");
 
     let added = seed_if_empty(&store).expect("seed");
-    assert!(added > 20, "the fixture seeds a full address book, got {added}");
+    assert!(
+        added > 20,
+        "the fixture seeds a full address book, got {added}"
+    );
     let seeded = store.known_addresses().expect("addresses");
     assert!(seeded.contains("dana@whitfield.dev"));
     assert!(seeded.contains("mum@whitfield.home"));
 
     assert_eq!(seed_if_empty(&store).expect("seed again"), 0);
-    assert_eq!(store.known_addresses().expect("addresses").len(), seeded.len());
+    assert_eq!(
+        store.known_addresses().expect("addresses").len(),
+        seeded.len()
+    );
 
-    let dana = store.get_by_email("dana@whitfield.dev").expect("lookup").expect("seeded contact");
+    let dana = store
+        .get_by_email("dana@whitfield.dev")
+        .expect("lookup")
+        .expect("seeded contact");
     assert_eq!(dana.display_name, "Dana Whitfield");
     assert_eq!(dana.organization.as_deref(), Some("Whitfield"));
     assert_eq!(dana.department.as_deref(), Some("Product"));
@@ -407,11 +584,26 @@ fn seeding_is_idempotent() {
     assert_eq!(dana.emails[0].label, Label::Work);
     assert!(dana.favorite);
     assert_eq!(dana.groups, ["Work"]);
-    assert_eq!(store.search(&ContactQuery::new().group("Family")).unwrap().len(), 1);
-    assert_eq!(store.search(&ContactQuery::new().favorites(true)).unwrap().len(), 4);
+    assert_eq!(
+        store
+            .search(&ContactQuery::new().group("Family"))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .search(&ContactQuery::new().favorites(true))
+            .unwrap()
+            .len(),
+        4
+    );
 
     drop(store);
     let reopened = ContactStore::open(db.path()).expect("reopen");
     assert_eq!(seed_if_empty(&reopened).expect("seed after reopen"), 0);
-    assert_eq!(reopened.known_addresses().expect("addresses").len(), seeded.len());
+    assert_eq!(
+        reopened.known_addresses().expect("addresses").len(),
+        seeded.len()
+    );
 }

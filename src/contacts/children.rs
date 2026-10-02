@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, params, params_from_iter};
 
+use super::ContactStore;
 use super::error::{Result, invalid};
 use super::model::{ContactUrl, EmailAddress, Field, Label, PhoneNumber, PostalAddress};
 use super::write::insert_email;
-use super::ContactStore;
 
 /// Everything that hangs off a contact, loaded in bulk.
 #[derive(Debug, Default)]
@@ -22,7 +22,9 @@ pub(crate) struct Children {
 
 /// `?,?,?` for an `IN (...)` list of `ids.len()` parameters.
 fn placeholders(ids: &[i64]) -> String {
-    std::iter::repeat_n("?", ids.len()).collect::<Vec<_>>().join(",")
+    std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Load all children of `ids` with one query per table, so listing contacts
@@ -43,11 +45,14 @@ pub(crate) fn load_children(conn: &Connection, ids: &[i64]) -> Result<HashMap<i6
          WHERE contact_id IN ({marks}) ORDER BY contact_id, is_primary DESC, id"
     ))?;
     let rows = stmt.query_map(sql, |r| {
-        Ok((r.get::<_, i64>(0)?, EmailAddress {
-            address: r.get(1)?,
-            label: Label::parse(&r.get::<_, String>(2)?),
-            primary: r.get::<_, i64>(3)? != 0,
-        }))
+        Ok((
+            r.get::<_, i64>(0)?,
+            EmailAddress {
+                address: r.get(1)?,
+                label: Label::parse(&r.get::<_, String>(2)?),
+                primary: r.get::<_, i64>(3)? != 0,
+            },
+        ))
     })?;
     for row in rows {
         let (id, email) = row?;
@@ -59,11 +64,14 @@ pub(crate) fn load_children(conn: &Connection, ids: &[i64]) -> Result<HashMap<i6
          WHERE contact_id IN ({marks}) ORDER BY contact_id, is_primary DESC, id"
     ))?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        Ok((r.get::<_, i64>(0)?, PhoneNumber {
-            number: r.get(1)?,
-            label: Label::parse(&r.get::<_, String>(2)?),
-            primary: r.get::<_, i64>(3)? != 0,
-        }))
+        Ok((
+            r.get::<_, i64>(0)?,
+            PhoneNumber {
+                number: r.get(1)?,
+                label: Label::parse(&r.get::<_, String>(2)?),
+                primary: r.get::<_, i64>(3)? != 0,
+            },
+        ))
     })?;
     for row in rows {
         let (id, phone) = row?;
@@ -75,14 +83,17 @@ pub(crate) fn load_children(conn: &Connection, ids: &[i64]) -> Result<HashMap<i6
          WHERE contact_id IN ({marks}) ORDER BY contact_id, id"
     ))?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        Ok((r.get::<_, i64>(0)?, PostalAddress {
-            street: r.get(1)?,
-            city: r.get(2)?,
-            region: r.get(3)?,
-            postal_code: r.get(4)?,
-            country: r.get(5)?,
-            label: Label::parse(&r.get::<_, String>(6)?),
-        }))
+        Ok((
+            r.get::<_, i64>(0)?,
+            PostalAddress {
+                street: r.get(1)?,
+                city: r.get(2)?,
+                region: r.get(3)?,
+                postal_code: r.get(4)?,
+                country: r.get(5)?,
+                label: Label::parse(&r.get::<_, String>(6)?),
+            },
+        ))
     })?;
     for row in rows {
         let (id, address) = row?;
@@ -94,10 +105,13 @@ pub(crate) fn load_children(conn: &Connection, ids: &[i64]) -> Result<HashMap<i6
          ORDER BY contact_id, id"
     ))?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        Ok((r.get::<_, i64>(0)?, ContactUrl {
-            url: r.get(1)?,
-            label: Label::parse(&r.get::<_, String>(2)?),
-        }))
+        Ok((
+            r.get::<_, i64>(0)?,
+            ContactUrl {
+                url: r.get(1)?,
+                label: Label::parse(&r.get::<_, String>(2)?),
+            },
+        ))
     })?;
     for row in rows {
         let (id, url) = row?;
@@ -122,7 +136,13 @@ pub(crate) fn load_children(conn: &Connection, ids: &[i64]) -> Result<HashMap<i6
          ORDER BY contact_id, key"
     ))?;
     let rows = stmt.query_map(params_from_iter(ids.iter()), |r| {
-        Ok((r.get::<_, i64>(0)?, Field { key: r.get(1)?, value: r.get(2)? }))
+        Ok((
+            r.get::<_, i64>(0)?,
+            Field {
+                key: r.get(1)?,
+                value: r.get(2)?,
+            },
+        ))
     })?;
     for row in rows {
         let (id, field) = row?;
@@ -210,13 +230,17 @@ impl ContactStore {
 
     /// Custom fields of a contact, ordered by key.
     pub fn fields(&self, contact_id: i64) -> Result<Vec<Field>> {
-        let mut stmt =
-            self.conn
-                .prepare("SELECT key, value FROM contact_fields WHERE contact_id = ?1 ORDER BY key")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM contact_fields WHERE contact_id = ?1 ORDER BY key")?;
         let rows = stmt.query_map(params![contact_id], |r| {
-            Ok(Field { key: r.get(0)?, value: r.get(1)? })
+            Ok(Field {
+                key: r.get(0)?,
+                value: r.get(1)?,
+            })
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 }
 

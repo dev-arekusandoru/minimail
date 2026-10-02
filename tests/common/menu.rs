@@ -22,7 +22,9 @@ fn rows(window: &Window) -> Vec<Row> {
         .filter_map(|row| {
             let path = row.path();
             let at = path.iter().rposition(|id| *id == popup)?;
-            let ElementId::Integer(ix) = path.last()? else { return None };
+            let ElementId::Integer(ix) = path.last()? else {
+                return None;
+            };
             // popup-menu > items > MenuItemElement > <ix>: a row, not something inside one.
             if at == 0 || path.len() != at + 4 {
                 return None;
@@ -38,8 +40,10 @@ fn rows(window: &Window) -> Vec<Row> {
 
 /// Labels of the rows of every open popup menu.
 pub fn row_labels(cx: &mut TestAppContext, window: AnyWindowHandle) -> Vec<String> {
-    cx.update_window(window, |_, window, _| rows(window).into_iter().map(|r| r.label).collect())
-        .expect("window alive")
+    cx.update_window(window, |_, window, _| {
+        rows(window).into_iter().map(|r| r.label).collect()
+    })
+    .expect("window alive")
 }
 
 /// Whether an open popup menu has a row labelled `label`.
@@ -54,7 +58,10 @@ pub fn click_row(cx: &mut TestAppContext, window: AnyWindowHandle, label: &str) 
             .into_iter()
             .find(|r| r.label == label)
             .unwrap_or_else(|| panic!("no menu row labelled {label:?}"));
-        window.within(row.menu).within("popup-menu").click(row.ix, cx);
+        window
+            .within(row.menu)
+            .within("popup-menu")
+            .click(row.ix, cx);
     })
     .expect("window alive");
     cx.run_until_parked();
@@ -67,7 +74,10 @@ pub fn hover_row(cx: &mut TestAppContext, window: AnyWindowHandle, label: &str) 
             .into_iter()
             .find(|r| r.label == label)
             .unwrap_or_else(|| panic!("no menu row labelled {label:?}"));
-        window.within(row.menu).within("popup-menu").hover(row.ix, cx);
+        window
+            .within(row.menu)
+            .within("popup-menu")
+            .hover(row.ix, cx);
     })
     .expect("window alive");
     cx.run_until_parked();

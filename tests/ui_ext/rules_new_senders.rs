@@ -1,7 +1,7 @@
+use crate::harness::{Harness, harness_with, mailbox, msg};
 use gpui_kit::TestAppContext;
 use mail_classifier::model::Mailbox;
 use mail_classifier::model::TriageState::*;
-use crate::harness::{Harness, harness_with, mailbox, msg};
 
 // ---------------------------------------------------------------- Rule suggestions
 
@@ -27,13 +27,19 @@ pub fn repeat_sender_archive(h: &mut Harness<'_>) {
 pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
     h.keys("shift-e 1");
-    assert_eq!(h.read(|a| a.pending_rule()), None, "no suggestion after the first action");
+    assert_eq!(
+        h.read(|a| a.pending_rule()),
+        None,
+        "no suggestion after the first action"
+    );
     assert_eq!(h.count(Archived), 3);
 
     repeat_sender_archive(&mut h);
     assert_eq!(h.read(|a| a.pending_rule()), None);
     h.keys("shift-e 1");
-    let rule = h.read(|a| a.pending_rule()).expect("suggested on the 2nd identical action");
+    let rule = h
+        .read(|a| a.pending_rule())
+        .expect("suggested on the 2nd identical action");
     assert_eq!(rule.sender, "sam@news.io");
     assert_eq!(rule.state, Archived);
 
@@ -45,7 +51,11 @@ pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestA
     h.keys("shift-y");
     assert_eq!(h.read(|a| a.pending_rule()), None);
     assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), Some(Archived));
-    assert_eq!(h.state_of(id), Archived, "accepted rule is applied to the sender's inbox mail");
+    assert_eq!(
+        h.state_of(id),
+        Archived,
+        "accepted rule is applied to the sender's inbox mail"
+    );
     h.assert_invariant("accept rule");
 }
 
@@ -63,7 +73,11 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
     for _ in 0..3 {
         repeat_sender_archive(&mut h);
         h.keys("shift-e 1");
-        assert_eq!(h.read(|a| a.pending_rule()), None, "dismissed rules stay dismissed");
+        assert_eq!(
+            h.read(|a| a.pending_rule()),
+            None,
+            "dismissed rules stay dismissed"
+        );
     }
     assert!(h.read(|a| a.rules.rules().is_empty()));
 }
@@ -79,7 +93,10 @@ pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     h.keys("shift-r");
     assert!(h.read(|a| a.rules_open()));
     h.keys("backspace");
-    assert!(h.read(|a| a.rules.rules().is_empty()), "backspace revokes the selected rule");
+    assert!(
+        h.read(|a| a.rules.rules().is_empty()),
+        "backspace revokes the selected rule"
+    );
     assert_eq!(h.read(|a| a.rules.rule_for("sam@news.io")), None);
     h.keys("escape");
     assert!(!h.read(|a| a.rules_open()));

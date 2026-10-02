@@ -62,7 +62,12 @@ impl SettingsPanel {
             "Thread summaries",
             "Write a short summary above each conversation.",
             &["summaries", "opt in to generated summaries"],
-            switch_undo(weak, |this| this.summaries, false, SettingsPanel::set_summaries),
+            switch_undo(
+                weak,
+                |this| this.summaries,
+                false,
+                SettingsPanel::set_summaries,
+            ),
             switch(weak, |this| this.summaries, SettingsPanel::set_summaries),
         ));
         let mut tagging = SettingGroup::new().title("Tagging");
@@ -120,7 +125,9 @@ impl SettingsPanel {
                 ));
             }
         }
-        SettingPage::new("AI").resettable(true).groups([summaries, tagging])
+        SettingPage::new("AI")
+            .resettable(true)
+            .groups([summaries, tagging])
     }
 }
 
@@ -146,7 +153,10 @@ fn mode_entries(question: QuestionKey) -> Vec<(String, String)> {
         .iter()
         .enumerate()
         .map(|(index, (_, label))| {
-            (format!("ai-mode-{}-{index}", question.label()), (*label).to_owned())
+            (
+                format!("ai-mode-{}-{index}", question.label()),
+                (*label).to_owned(),
+            )
         })
         .collect()
 }

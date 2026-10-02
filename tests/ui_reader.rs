@@ -2,8 +2,8 @@
 //! Reader mode and the footer hint mode. Mailboxes are built inline so nothing depends on the
 //! shipped fixtures.
 
-use gpui_kit::{AppContext, TestAppContext};
 use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, TestAppContext};
 use mail_classifier::hints::{HintContext, HintMode};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{Mailbox, MessageId};
@@ -97,7 +97,10 @@ fn filing_from_a_non_opened_message_menu_files_that_message(cx: &mut TestAppCont
     h.click_row("File…");
     assert!(h.read(|a| a.folder_picker_open()));
     h.keys("enter");
-    assert!(matches!(h.state_of(other), Filed(_)), "the menu's message was filed");
+    assert!(
+        matches!(h.state_of(other), Filed(_)),
+        "the menu's message was filed"
+    );
     assert_eq!(h.state_of(opened), Inbox);
 }
 
@@ -109,10 +112,19 @@ fn reply_on_a_thread_message_opens_compose_for_it(cx: &mut TestAppContext) {
     let opened = h.opened();
     let other = if opened == 1 { 2 } else { 1 };
     h.keys("shift-o");
-    assert!(h.exists(("btn-reply", opened as usize)), "the opened message has its own Reply");
+    assert!(
+        h.exists(("btn-reply", opened as usize)),
+        "the opened message has its own Reply"
+    );
     h.click(("btn-reply", other as usize));
-    assert!(h.read(|a| a.compose_open()));
-    assert_eq!(h.opened(), other, "the reply is to the message whose button was pressed");
+    // The draft is durable before it is shown, so the composer opens on the worker's
+    // answer rather than inside the click.
+    h.await_composer("the reply opens", |a| a.compose_open());
+    assert_eq!(
+        h.opened(),
+        other,
+        "the reply is to the message whose button was pressed"
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -121,19 +133,35 @@ fn shift_o_expands_then_collapses_the_other_thread_messages(cx: &mut TestAppCont
     h.keys("enter");
     let opened = h.opened();
     let other = if opened == 1 { 2 } else { 1 };
-    assert!(!h.read(|a| a.reader_expanded(other)), "earlier messages start collapsed");
+    assert!(
+        !h.read(|a| a.reader_expanded(other)),
+        "earlier messages start collapsed"
+    );
 
     h.keys("shift-o");
-    assert!(h.read(|a| a.reader_expanded(other)), "shift-o expands the rest of the thread");
+    assert!(
+        h.read(|a| a.reader_expanded(other)),
+        "shift-o expands the rest of the thread"
+    );
 
     h.keys("shift-o");
-    assert!(!h.read(|a| a.reader_expanded(other)), "a second shift-o collapses them again");
-    assert_eq!(h.opened(), opened, "expansion never changes which message is open");
+    assert!(
+        !h.read(|a| a.reader_expanded(other)),
+        "a second shift-o collapses them again"
+    );
+    assert_eq!(
+        h.opened(),
+        opened,
+        "expansion never changes which message is open"
+    );
 }
 
 #[gpui_kit::gpui::test]
 fn shift_o_on_a_single_message_thread_does_nothing(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox_of(&[msg(1, 1, "alice@example.com", "Solo", 1, "Inbox")]));
+    let mut h = harness_with(
+        cx,
+        mailbox_of(&[msg(1, 1, "alice@example.com", "Solo", 1, "Inbox")]),
+    );
     h.keys("enter");
     h.keys("shift-o");
     assert!(!h.read(|a| a.reader_expanded(1)));
@@ -156,7 +184,10 @@ fn clicking_a_thread_message_row_toggles_just_that_message(cx: &mut TestAppConte
 
     h.click(("reader-thread-msg", others[0] as usize));
     assert!(h.read(|a| a.reader_expanded(others[0])));
-    assert!(!h.read(|a| a.reader_expanded(others[1])), "siblings stay collapsed");
+    assert!(
+        !h.read(|a| a.reader_expanded(others[1])),
+        "siblings stay collapsed"
+    );
 
     h.click(("reader-thread-msg", others[0] as usize));
     assert!(!h.read(|a| a.reader_expanded(others[0])));
@@ -176,14 +207,23 @@ fn v_toggles_reader_mode_only_for_an_html_message(cx: &mut TestAppContext) {
     h.keys("enter");
     assert_eq!(h.opened(), 2);
     h.keys("v");
-    assert!(!h.read(|a| a.reader_plain(2)), "a text-only message has no Reader mode");
+    assert!(
+        !h.read(|a| a.reader_plain(2)),
+        "a text-only message has no Reader mode"
+    );
 
     h.goto(1);
     h.keys("enter");
     assert_eq!(h.opened(), 1);
-    assert!(!h.read(|a| a.reader_plain(1)), "HTML is shown as designed until asked otherwise");
+    assert!(
+        !h.read(|a| a.reader_plain(1)),
+        "HTML is shown as designed until asked otherwise"
+    );
     h.keys("v");
-    assert!(h.read(|a| a.reader_plain(1)), "v switches the HTML message to Reader mode");
+    assert!(
+        h.read(|a| a.reader_plain(1)),
+        "v switches the HTML message to Reader mode"
+    );
     h.keys("v");
     assert!(!h.read(|a| a.reader_plain(1)), "v switches back");
 }
@@ -227,20 +267,40 @@ fn reader_hints_follow_the_open_message_and_pending_suggestions(cx: &mut TestApp
     mb.add_suggestions(vec![Suggestion {
         message: 1,
         key: QuestionKey::NeedsReply,
-        answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
+        answer: Answer {
+            probabilities: vec![0.1, 0.9],
+            value: AnswerValue::Bool(true),
+            confidence: 0.9,
+        },
     }]);
     let mut h = harness_with(cx, mb);
     let c = h.hint();
-    assert_eq!((c.mode, c.suggestions), (HintMode::List, true), "the list sees the cursor's suggestions");
+    assert_eq!(
+        (c.mode, c.suggestions),
+        (HintMode::List, true),
+        "the list sees the cursor's suggestions"
+    );
 
     h.keys("enter");
     let c = h.hint();
-    assert_eq!((c.mode, c.suggestions), (HintMode::Reader, true), "pending suggestions add accept/reject");
+    assert_eq!(
+        (c.mode, c.suggestions),
+        (HintMode::Reader, true),
+        "pending suggestions add accept/reject"
+    );
 
     h.keys("n");
     let c = h.hint();
-    assert_eq!((c.mode, c.suggestions), (HintMode::Reader, false), "rejecting clears the suggestion hints");
+    assert_eq!(
+        (c.mode, c.suggestions),
+        (HintMode::Reader, false),
+        "rejecting clears the suggestion hints"
+    );
 
     h.keys("x");
-    assert_eq!(h.hint().mode, HintMode::Selection(1), "a selection takes the footer over from the reader");
+    assert_eq!(
+        h.hint().mode,
+        HintMode::Selection(1),
+        "a selection takes the footer over from the reader"
+    );
 }

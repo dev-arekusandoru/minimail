@@ -6,8 +6,38 @@ impl MailApp {
         self.palette.is_some()
     }
 
+    /// Whether a draft is being composed anywhere: inline under a thread or in a tab.
     pub fn compose_open(&self) -> bool {
-        self.compose.is_some()
+        self.inline_composer.is_some() || self.tabs.has_drafts()
+    }
+
+    /// Whether the active tab is a draft.
+    pub fn compose_in_tab(&self) -> bool {
+        self.tabs.active_draft().is_some()
+    }
+
+    /// Whether a reply is open inline under the conversation it answers.
+    pub fn inline_compose_open(&self) -> bool {
+        self.inline_composer.is_some()
+    }
+
+    /// The drafts that currently have a tab. An inline reply has none, so this is not the
+    /// count of open drafts: [`MailApp::composer`] holds every one of them.
+    pub fn open_drafts(&self) -> Vec<DraftId> {
+        self.tabs.draft_ids()
+    }
+
+    /// Whether the Drafts list is open.
+    pub fn drafts_picker_open(&self) -> bool {
+        self.drafts_picker.is_some()
+    }
+
+    /// The rows of the open Drafts list, top to bottom.
+    pub fn drafts_rows(&self, cx: &App) -> Vec<String> {
+        self.drafts_picker
+            .as_ref()
+            .map(|p| p.read(cx).rows())
+            .unwrap_or_default()
     }
 
     pub fn help_open(&self) -> bool {
@@ -34,7 +64,11 @@ impl MailApp {
 
     /// The theme preferences in force: mode plus the light and dark theme names.
     pub fn theme_preferences(&self) -> (crate::theme::ThemeMode, String, String) {
-        (self.theme_mode, self.light_theme.clone(), self.dark_theme.clone())
+        (
+            self.theme_mode,
+            self.light_theme.clone(),
+            self.dark_theme.clone(),
+        )
     }
 
     pub fn rules_open(&self) -> bool {
@@ -73,15 +107,17 @@ impl MailApp {
     }
 
     pub fn new_senders_open(&self) -> bool {
-        crate::known_senders::KNOWN_SENDERS_ENABLED
-            && self.triage.query.has(Field::Is, "new")
+        crate::known_senders::KNOWN_SENDERS_ENABLED && self.triage.query.has(Field::Is, "new")
     }
 
     /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.
     /// A query that is not anchored to one place (global search, several `in:` values)
     /// reads as `"All mail"`.
     pub fn location_label(&self) -> String {
-        self.location().map_or_else(|| "All mail".to_owned(), |loc| sidebar::location_label(&loc, &self.mailbox))
+        self.location().map_or_else(
+            || "All mail".to_owned(),
+            |loc| sidebar::location_label(&loc, &self.mailbox),
+        )
     }
 
     /// A popup menu is open.
@@ -168,7 +204,9 @@ impl MailApp {
     }
 
     pub(super) fn session_current(&self) -> Option<MessageId> {
-        self.session.as_ref().and_then(|s| s.ids.get(s.index).copied())
+        self.session
+            .as_ref()
+            .and_then(|s| s.ids.get(s.index).copied())
     }
 
     /// Message the actions target: the menu's message, else the one under the cursor (or the
@@ -227,9 +265,10 @@ impl MailApp {
             || self.folder_picker.is_some()
     }
 
-    /// Any modal (the composer or a dialog-hosted view) is open.
+    /// Any modal view is open. A draft in a tab is not a modal: it lives in the same strip
+    /// as the threads, so list keys keep working around it.
     pub fn modal_open(&self) -> bool {
-        self.compose.is_some() || self.dialog_hosted()
+        self.dialog_hosted()
     }
 
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state

@@ -137,7 +137,10 @@ pub fn participants<'a>(
 
 /// Every message of a thread (any state), oldest first; ties broken by id.
 pub fn thread_order(messages: &[Message], thread_id: u32) -> Vec<MessageId> {
-    let mut msgs: Vec<&Message> = messages.iter().filter(|m| m.thread_id == thread_id).collect();
+    let mut msgs: Vec<&Message> = messages
+        .iter()
+        .filter(|m| m.thread_id == thread_id)
+        .collect();
     msgs.sort_by(|a, b| a.received.cmp(&b.received).then(a.id.cmp(&b.id)));
     msgs.into_iter().map(|m| m.id).collect()
 }

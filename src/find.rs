@@ -56,16 +56,27 @@ fn compile(query: &str, options: Options) -> Result<Option<Regex>, InvalidPatter
     if query.is_empty() {
         return Ok(None);
     }
-    let mut pattern = if options.regex { query.to_owned() } else { regex::escape(query) };
+    let mut pattern = if options.regex {
+        query.to_owned()
+    } else {
+        regex::escape(query)
+    };
     if options.whole_word {
         // A literal only needs a boundary on a side that starts or ends with a word character
         // (`c++` ends in punctuation, where `\b` would demand a word character after it).
         let (start, end) = if options.regex {
             (true, true)
         } else {
-            (query.chars().next().is_some_and(is_word), query.chars().next_back().is_some_and(is_word))
+            (
+                query.chars().next().is_some_and(is_word),
+                query.chars().next_back().is_some_and(is_word),
+            )
         };
-        pattern = format!("{}(?:{pattern}){}", if start { r"\b" } else { "" }, if end { r"\b" } else { "" });
+        pattern = format!(
+            "{}(?:{pattern}){}",
+            if start { r"\b" } else { "" },
+            if end { r"\b" } else { "" }
+        );
     }
     RegexBuilder::new(&pattern)
         .case_insensitive(!options.case_sensitive)
@@ -76,14 +87,22 @@ fn compile(query: &str, options: Options) -> Result<Option<Regex>, InvalidPatter
 
 /// Every non-empty, non-overlapping match in `sources`, in source order then text order.
 /// An empty query has no matches; an invalid regex is an error.
-pub fn find(sources: &[Source], query: &str, options: Options) -> Result<Vec<Match>, InvalidPattern> {
+pub fn find(
+    sources: &[Source],
+    query: &str,
+    options: Options,
+) -> Result<Vec<Match>, InvalidPattern> {
     let Some(re) = compile(query, options)? else {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
     for s in sources {
         for m in re.find_iter(&s.text).filter(|m| !m.is_empty()) {
-            out.push(Match { msg: s.msg, segment: s.segment, range: m.range() });
+            out.push(Match {
+                msg: s.msg,
+                segment: s.segment,
+                range: m.range(),
+            });
         }
     }
     Ok(out)
@@ -100,15 +119,29 @@ pub fn display_subject(m: &Message) -> String {
 pub fn thread_sources(messages: &[Message], thread: u32, opened: MessageId) -> Vec<Source> {
     let mut out = Vec::new();
     if let Some(m) = messages.iter().find(|m| m.id == opened) {
-        out.push(Source { msg: m.id, segment: Segment::Subject, text: display_subject(m) });
+        out.push(Source {
+            msg: m.id,
+            segment: Segment::Subject,
+            text: display_subject(m),
+        });
     }
     for id in thread_order(messages, thread) {
-        let Some(m) = messages.iter().find(|m| m.id == id) else { continue };
+        let Some(m) = messages.iter().find(|m| m.id == id) else {
+            continue;
+        };
         let text = reading::reader_text(m);
         let split = reading::split_quoted(&text);
-        out.push(Source { msg: id, segment: Segment::Main, text: split.main.to_owned() });
+        out.push(Source {
+            msg: id,
+            segment: Segment::Main,
+            text: split.main.to_owned(),
+        });
         if let Some(quoted) = split.quoted {
-            out.push(Source { msg: id, segment: Segment::Quoted, text: quoted.to_owned() });
+            out.push(Source {
+                msg: id,
+                segment: Segment::Quoted,
+                text: quoted.to_owned(),
+            });
         }
     }
     out
@@ -127,7 +160,12 @@ pub fn find_in_thread(
 
 /// Highlight ranges inside one string: every match of (`msg`, `segment`), flagged when it is
 /// the `current`-th match overall.
-pub fn highlights(matches: &[Match], current: usize, msg: MessageId, segment: Segment) -> Vec<(Range<usize>, bool)> {
+pub fn highlights(
+    matches: &[Match],
+    current: usize,
+    msg: MessageId,
+    segment: Segment,
+) -> Vec<(Range<usize>, bool)> {
     matches
         .iter()
         .enumerate()
@@ -179,7 +217,10 @@ impl Find {
     pub fn seek(&mut self, matches: &[Match], order: &[MessageId], from: MessageId) {
         let index = |id: MessageId| order.iter().position(|&m| m == id);
         let start = index(from).unwrap_or(0);
-        self.current = matches.iter().position(|m| index(m.msg).is_some_and(|i| i >= start)).unwrap_or(0);
+        self.current = matches
+            .iter()
+            .position(|m| index(m.msg).is_some_and(|i| i >= start))
+            .unwrap_or(0);
         self.landed = false;
     }
 

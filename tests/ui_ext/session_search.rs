@@ -1,8 +1,8 @@
-use gpui_kit::{TestAppContext};
-use mail_classifier::model::{Mailbox, MessageId};
-use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness_with, mailbox, msg};
 use crate::snooze::snooze_box;
+use gpui_kit::TestAppContext;
+use mail_classifier::model::TriageState::*;
+use mail_classifier::model::{Mailbox, MessageId};
 
 // ---------------------------------------------------------------- Triage session
 
@@ -18,7 +18,11 @@ pub fn triage_session_auto_advances_and_ends_with_summary(cx: &mut TestAppContex
     );
     h.keys("t");
     assert_eq!(h.read(|a| a.session_progress()), Some((1, 3)));
-    assert_eq!(h.read(|a| a.opened()), Some(1), "session shows the current message");
+    assert_eq!(
+        h.read(|a| a.opened()),
+        Some(1),
+        "session shows the current message"
+    );
 
     h.keys("e");
     assert_eq!(h.state_of(1), Archived);
@@ -31,7 +35,11 @@ pub fn triage_session_auto_advances_and_ends_with_summary(cx: &mut TestAppContex
     assert_eq!(h.state_of(3), Inbox);
 
     assert_eq!(h.read(|a| a.session_progress()), None, "session is over");
-    assert_eq!(h.read(|a| a.session_end()), Some((3, 65)), "3 handled · 1m 5s");
+    assert_eq!(
+        h.read(|a| a.session_end()),
+        Some((3, 65)),
+        "3 handled · 1m 5s"
+    );
 
     h.keys("escape");
     assert_eq!(h.read(|a| a.session_end()), None);
@@ -47,11 +55,23 @@ pub fn triage_session_escape_ends_early(cx: &mut TestAppContext) {
     assert_eq!(h.read(|a| a.session_progress()), None);
     assert_eq!(h.state_of(1), Archived);
     assert_eq!(h.state_of(2), Inbox);
-    assert_eq!(h.read(|a| a.session_end()), Some((1, 0)), "escape after handling shows the end card");
+    assert_eq!(
+        h.read(|a| a.session_end()),
+        Some((1, 0)),
+        "escape after handling shows the end card"
+    );
     h.keys("escape");
-    assert_eq!(h.read(|a| a.session_end()), None, "a second escape dismisses the card");
+    assert_eq!(
+        h.read(|a| a.session_end()),
+        None,
+        "a second escape dismisses the card"
+    );
     h.keys("t escape");
-    assert_eq!(h.read(|a| a.session_end()), None, "nothing handled: no card");
+    assert_eq!(
+        h.read(|a| a.session_end()),
+        None,
+        "nothing handled: no card"
+    );
 }
 
 // ---------------------------------------------------------------- Search
@@ -73,17 +93,32 @@ pub fn search(h: &mut Harness<'_>, q: &str) -> Vec<MessageId> {
     h.type_text(q.trim_start_matches('/'));
     h.keys("enter");
     assert!(
-        h.read(|a| a.search_header()).is_some_and(|s| s.starts_with("search:")),
+        h.read(|a| a.search_header())
+            .is_some_and(|s| s.starts_with("search:")),
         "the query is applied on top of the folder being browsed"
     );
     if h.read(|a| a.location()).is_some() {
-        assert!(h.has("pill-remove-in-inbox"), "the folder is a removable pill now: q={} pills={:?} header={:?}", h.query(), h.pills(), h.header());
+        assert!(
+            h.has("pill-remove-in-inbox"),
+            "the folder is a removable pill now: q={} pills={:?} header={:?}",
+            h.query(),
+            h.pills(),
+            h.header()
+        );
         h.click("pill-remove-in-inbox");
-        assert_eq!(h.read(|a| a.location()), None, "removing the folder goes global");
+        assert_eq!(
+            h.read(|a| a.location()),
+            None,
+            "removing the folder goes global"
+        );
     }
     let ids = h.visible();
     h.keys("escape");
-    assert_eq!(h.read(|a| a.search_header()), None, "escape clears the search");
+    assert_eq!(
+        h.read(|a| a.search_header()),
+        None,
+        "escape clears the search"
+    );
     ids
 }
 
@@ -96,14 +131,22 @@ pub fn search_operators(cx: &mut TestAppContext) {
         v
     };
     assert_eq!(sorted(&mut h, "from:dana"), vec![1, 2]);
-    assert_eq!(sorted(&mut h, "from:OMAR@x.io"), vec![3, 4], "case-insensitive");
+    assert_eq!(
+        sorted(&mut h, "from:OMAR@x.io"),
+        vec![3, 4],
+        "case-insensitive"
+    );
     assert_eq!(sorted(&mut h, "subject:invoice"), vec![1, 3]);
     assert_eq!(sorted(&mut h, "is:snoozed"), vec![3]);
     assert_eq!(sorted(&mut h, "is:archived"), vec![4]);
     assert_eq!(sorted(&mut h, "before:2026-09-11"), vec![2, 4]);
     assert_eq!(sorted(&mut h, "after:2026-09-11"), vec![1, 3]);
     assert_eq!(sorted(&mut h, "lunch"), vec![1]);
-    assert_eq!(sorted(&mut h, "from:omar subject:invoice"), vec![3], "terms are ANDed");
+    assert_eq!(
+        sorted(&mut h, "from:omar subject:invoice"),
+        vec![3],
+        "terms are ANDed"
+    );
     assert_eq!(sorted(&mut h, "zzzznomatch"), Vec::<u32>::new());
     // The mailbox is untouched by searching.
     assert_eq!(h.total(), 4);
@@ -125,7 +168,11 @@ pub fn mute_hides_thread_and_unsubscribe_hides_sender(cx: &mut TestAppContext) {
         ]),
     );
     h.keys("m");
-    assert_eq!(h.read(|a| a.mailbox.hidden_count()), 2, "whole thread is muted");
+    assert_eq!(
+        h.read(|a| a.mailbox.hidden_count()),
+        2,
+        "whole thread is muted"
+    );
     assert!(h.read(|a| a.mailbox.is_muted(1)));
     assert_eq!(h.visible(), vec![3, 4, 5]);
     h.assert_invariant("mute");
@@ -135,10 +182,20 @@ pub fn mute_hides_thread_and_unsubscribe_hides_sender(cx: &mut TestAppContext) {
 
     h.goto(3);
     h.keys("shift-u");
-    assert!(h.read(|a| a.dialog_open()), "unsubscribe asks about the sender's mail");
+    assert!(
+        h.read(|a| a.dialog_open()),
+        "unsubscribe asks about the sender's mail"
+    );
     h.keys("4");
-    assert_eq!(h.read(|a| a.mailbox.unsubscribed().to_vec()), vec!["c@a.io".to_string()]);
-    assert_eq!(h.read(|a| a.mailbox.hidden_count()), 2, "all of the sender's mail is hidden");
+    assert_eq!(
+        h.read(|a| a.mailbox.unsubscribed().to_vec()),
+        vec!["c@a.io".to_string()]
+    );
+    assert_eq!(
+        h.read(|a| a.mailbox.hidden_count()),
+        2,
+        "all of the sender's mail is hidden"
+    );
     assert_eq!(h.visible(), vec![1, 2, 5]);
     assert_eq!(h.total(), 5, "nothing is deleted");
     h.assert_invariant("unsubscribe");

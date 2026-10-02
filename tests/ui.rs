@@ -5,7 +5,7 @@ use gpui_kit::{
     base::Root, px, size,
 };
 use mail_classifier::app::{MailApp, actions::bind_keys};
-use mail_classifier::model::{Location, MessageId, Tag, TriageState, TriageState::*};
+use mail_classifier::model::{Location, MessageId, TriageState, TriageState::*};
 
 struct Harness<'a> {
     cx: &'a mut TestAppContext,
@@ -169,7 +169,11 @@ fn g_prefix_switches_locations(cx: &mut TestAppContext) {
     h.keys("g d");
     assert_eq!(h.view(), Some(Location::Trash("personal".into())));
     h.keys("g i");
-    assert_eq!(h.view(), Some(Location::Inbox("personal".into())), "`g i` keeps the account");
+    assert_eq!(
+        h.view(),
+        Some(Location::Inbox("personal".into())),
+        "`g i` keeps the account"
+    );
     h.keys("g i");
     assert_eq!(h.view(), Some(Location::Inbox("personal".into())));
     h.keys("j j g a");
@@ -190,7 +194,10 @@ fn palette_filters_and_runs_command(cx: &mut TestAppContext) {
     assert_eq!(h.counts(), start, "typing must not trigger bindings");
     assert!(h.read(|a| a.palette_open()));
     h.keys("enter");
-    assert!(!h.read(|a| a.palette_open()), "palette closes after running");
+    assert!(
+        !h.read(|a| a.palette_open()),
+        "palette closes after running"
+    );
     assert_eq!(h.state_of(target), Archived);
     assert_eq!(h.count(Archived), start[2] + 1);
 
@@ -225,14 +232,21 @@ fn palette_matches_by_subsequence_and_by_key_string(cx: &mut TestAppContext) {
     h.keys("cmd-k");
     // `gtsn` is not a substring of anything; it is a subsequence of "Go to snoozed".
     h.keys("g t s n");
-    assert!(h.palette_rows().contains(&"Go to snoozed".to_owned()), "{:?}", h.palette_rows());
+    assert!(
+        h.palette_rows().contains(&"Go to snoozed".to_owned()),
+        "{:?}",
+        h.palette_rows()
+    );
     h.keys("escape escape");
     assert!(!h.read(|a| a.palette_open()));
 
     // Typing a command's key (`g a`) finds it, and it leads the list.
     h.keys("cmd-k");
     h.keys("g space a");
-    assert_eq!(h.palette_rows().first().map(String::as_str), Some("Go to archive"));
+    assert_eq!(
+        h.palette_rows().first().map(String::as_str),
+        Some("Go to archive")
+    );
     h.keys("enter");
     assert_eq!(h.view(), Some(Location::Archive("personal".into())));
 }
@@ -247,7 +261,10 @@ fn palette_escape_clears_the_query_then_closes(cx: &mut TestAppContext) {
     h.keys("u n d o");
     assert_eq!(h.palette_rows(), vec!["Undo".to_owned()]);
     h.keys("escape");
-    assert!(h.read(|a| a.palette_open()), "the first escape only clears the query");
+    assert!(
+        h.read(|a| a.palette_open()),
+        "the first escape only clears the query"
+    );
     assert_eq!(h.palette_rows(), all);
     h.keys("escape");
     assert!(!h.read(|a| a.palette_open()));
@@ -257,72 +274,19 @@ fn palette_escape_clears_the_query_then_closes(cx: &mut TestAppContext) {
 fn palette_search_row_replaces_the_command_list(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.keys("/");
-    assert!(h.read(|a| a.palette_open()), "`/` opens the palette prefilled with `/`");
+    assert!(
+        h.read(|a| a.palette_open()),
+        "`/` opens the palette prefilled with `/`"
+    );
     assert!(h.palette_rows().is_empty(), "search mode lists no commands");
     h.keys("f r o m : a");
     assert!(h.palette_rows().is_empty());
     h.keys("enter");
     assert!(!h.read(|a| a.palette_open()));
-    assert!(h.read(|a| a.search_header()).is_some_and(|s| s.starts_with("search:")));
-}
-
-#[gpui_kit::gpui::test]
-fn reply_send_tracks_awaiting_reply_without_moving_message(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    let id = h.cursor().unwrap();
-    let start = h.counts();
-    assert_eq!(h.read(|a| a.mailbox.sent().len()), 0);
-
-    h.keys("r");
-    assert!(h.read(|a| a.compose_open()));
-    h.keys("t h a n k s space j e space ?");
-    assert_eq!(h.counts(), start);
-    h.keys("cmd-enter");
-    assert!(!h.read(|a| a.compose_open()));
-    let (n, sent, reply) = h.read(|a| {
-        (
-            a.mailbox.outbox().len(),
-            a.mailbox.sent().len(),
-            a.mailbox.outbox().last().map(|o| (o.reply.in_reply_to, o.reply.body.clone())),
-        )
-    });
-    assert_eq!((n, sent), (1, 0), "sends wait in the outbox first");
-    let (to, body) = reply.unwrap();
-    assert_eq!(to, id);
-    assert!(body.contains("thanks je"), "body was {body:?}");
-    assert_eq!(h.state_of(id), Inbox);
-    assert!(h.read(|a| a.mailbox.tags(id).contains(&Tag::AwaitingReply)));
-    assert!(!h.read(|a| a.mailbox.tags(id).contains(&Tag::NeedsReply)));
-
-    // Sending opens the post-send dialog; cancel it to keep the message where it is.
-    assert!(h.read(|a| a.dialog_open()));
-    h.keys("escape");
-    assert_eq!(h.state_of(id), Inbox);
-
-    h.keys("u");
-    assert!(h.read(|a| a.compose_open()));
-    assert_eq!(h.read(|a| a.mailbox.outbox().len()), 0);
-    assert_eq!(h.state_of(id), Inbox);
-    h.keys("escape");
-}
-
-
-#[gpui_kit::gpui::test]
-fn reply_escape_cancels(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    let id = h.cursor().unwrap();
-    let start = h.counts();
-    h.keys("r");
-    assert!(h.read(|a| a.compose_open()));
-    h.keys("h i");
-    h.keys("escape");
-    assert!(!h.read(|a| a.compose_open()));
-    assert_eq!(h.read(|a| a.mailbox.sent().len()), 0);
-    assert_eq!(h.state_of(id), Inbox);
-    assert_eq!(h.counts(), start);
-    // Keyboard control returns to the list.
-    h.keys("j");
-    assert_eq!(h.index(), 1);
+    assert!(
+        h.read(|a| a.search_header())
+            .is_some_and(|s| s.starts_with("search:"))
+    );
 }
 
 #[gpui_kit::gpui::test]
@@ -390,7 +354,12 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
         h.read(|a| {
             let id = a.triage.cursor(&a.mailbox, &a.local_now()).unwrap();
             let email = a.mailbox.get(id).unwrap().from_email.clone();
-            let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
+            let n = a
+                .mailbox
+                .messages()
+                .iter()
+                .filter(|m| m.from_email == email)
+                .count();
             (email, n)
         })
     };
@@ -423,17 +392,42 @@ fn counts_always_sum_to_total(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let total = h.total();
     let seq = [
-        "e", "j j", "s escape", "shift-j", "i", "g s", "j", "e", "g a", "u", "g d", "k", "i",
-        "g i", "x", "j", "x", "s escape", "u u", "r", "t e s t", "cmd-enter", "z", "j",
-        "enter", "shift-i", "u", "cmd-k", "a r c h i v e", "enter", "?", "?",
+        "e",
+        "j j",
+        "s escape",
+        "shift-j",
+        "i",
+        "g s",
+        "j",
+        "e",
+        "g a",
+        "u",
+        "g d",
+        "k",
+        "i",
+        "g i",
+        "x",
+        "j",
+        "x",
+        "s escape",
+        "u u",
+        "r",
+        "t e s t",
+        "cmd-enter",
+        "z",
+        "j",
+        "enter",
+        "shift-i",
+        "u",
+        "cmd-k",
+        "a r c h i v e",
+        "enter",
+        "?",
+        "?",
     ];
     for step in seq {
         h.keys(step);
-        assert_eq!(
-            h.accounted(),
-            total,
-            "invariant broken after {step:?}"
-        );
+        assert_eq!(h.accounted(), total, "invariant broken after {step:?}");
     }
 }
 
@@ -443,15 +437,20 @@ fn help_overlay_fits_window_and_scrolls_at_any_size(cx: &mut TestAppContext) {
     h.keys("?");
     for (w, ht) in [(1200., 800.), (420., 300.), (700., 500.), (1600., 1000.)] {
         h.cx.simulate_window_resize(h.window, size(px(w), px(ht)));
-        h.cx
-            .update_window(h.window, |_, window, cx| window.draw(cx).clear(cx))
+        h.cx.update_window(h.window, |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
         h.keys("");
         let (b, max) = h.read(|a| a.help_metrics());
         let (x0, y0) = (f32::from(b.origin.x), f32::from(b.origin.y));
         let (x1, y1) = (x0 + f32::from(b.size.width), y0 + f32::from(b.size.height));
-        assert!(b.size.width > px(0.) && b.size.height > px(0.), "help body not laid out at {w}x{ht}");
-        assert!(x0 >= 0. && y0 >= 0. && x1 <= w && y1 <= ht, "help body {b:?} outside {w}x{ht}");
+        assert!(
+            b.size.width > px(0.) && b.size.height > px(0.),
+            "help body not laid out at {w}x{ht}"
+        );
+        assert!(
+            x0 >= 0. && y0 >= 0. && x1 <= w && y1 <= ht,
+            "help body {b:?} outside {w}x{ht}"
+        );
         if ht <= 300. {
             assert!(max > 0., "help must scroll in a {w}x{ht} window");
         }
@@ -460,40 +459,4 @@ fn help_overlay_fits_window_and_scrolls_at_any_size(cx: &mut TestAppContext) {
     assert!(h.read(|a| a.help_open()));
     h.keys("escape");
     assert!(!h.read(|a| a.help_open()));
-}
-
-#[gpui_kit::gpui::test]
-fn reply_all_and_forward_keys_open_prefilled_composer(cx: &mut TestAppContext) {
-    use mail_classifier::draft::DraftKind;
-    let mut h = harness(cx);
-    let id = h.cursor().unwrap();
-    let (from, subject) = h.read(|a| {
-        let m = a.mailbox.get(id).unwrap();
-        (m.from_email.clone(), m.subject.clone())
-    });
-    let fields = |h: &mut Harness| {
-        let app = h.app.clone();
-        h.cx.read_entity(&app, |a, cx| {
-            let c = a.compose.as_ref().expect("composer open").read(cx);
-            (c.kind(), c.to(cx), c.subject().to_owned(), c.body(cx))
-        })
-    };
-
-    h.keys("shift-a");
-    let (kind, to, subj, _) = fields(&mut h);
-    assert_eq!(kind, DraftKind::ReplyAll);
-    assert!(to.contains(&from));
-    assert!(!to.contains("you@example.com"));
-    assert!(subj.starts_with("Re: ") && subj.ends_with(&subject.trim_start_matches("Re: ").to_owned()));
-    h.keys("escape");
-    assert!(!h.read(|a| a.compose_open()));
-
-    h.keys("w");
-    let (kind, to, subj, body) = fields(&mut h);
-    assert_eq!(kind, DraftKind::Forward);
-    assert!(to.is_empty());
-    assert!(subj.starts_with("Fwd: ") || subj.to_lowercase().starts_with("fw"));
-    assert!(body.contains("Forwarded message") && body.contains(&from));
-    h.keys("escape");
-    assert!(!h.read(|a| a.compose_open()));
 }

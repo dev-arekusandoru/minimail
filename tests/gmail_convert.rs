@@ -1,16 +1,20 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use mail_classifier::provider::{Changes, RemoteFlags, RemoteState, Scope, Window};
 use mail_classifier::provider::gmail::convert::{
-    batch_body, is_rate_limited, label_ops, list_ids, list_query, merge_history, message,
-    parse_batch, state_from_labels, body,
+    batch_body, body, is_rate_limited, label_ops, list_ids, list_query, merge_history, message,
+    parse_batch, state_from_labels,
 };
 use mail_classifier::provider::gmail::quota::Quota;
+use mail_classifier::provider::{Changes, RemoteFlags, RemoteState, Scope, Window};
 use serde_json::{Value, json};
 
-fn strings(list: &[&str]) -> Vec<String> { list.iter().map(|s| (*s).to_owned()).collect() }
-fn set(list: &[&str]) -> HashSet<String> { list.iter().map(|s| (*s).to_owned()).collect() }
+fn strings(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| (*s).to_owned()).collect()
+}
+fn set(list: &[&str]) -> HashSet<String> {
+    list.iter().map(|s| (*s).to_owned()).collect()
+}
 
 #[test]
 fn list_ids_reads_message_objects() {
@@ -37,36 +41,64 @@ fn quota_reserves_burst_refills_and_drains() {
     assert_eq!(q.reserve(25, start), Duration::ZERO);
     assert_eq!(q.reserve(1, start), Duration::from_millis(100));
     assert_eq!(q.reserve(5, start), Duration::from_millis(600));
-    assert_eq!(q.reserve(5, start + Duration::from_secs(1)), Duration::from_millis(100));
+    assert_eq!(
+        q.reserve(5, start + Duration::from_secs(1)),
+        Duration::from_millis(100)
+    );
     q.drain(start + Duration::from_secs(1));
-    assert_eq!(q.reserve(1, start + Duration::from_secs(1)), Duration::from_millis(100));
+    assert_eq!(
+        q.reserve(1, start + Duration::from_secs(1)),
+        Duration::from_millis(100)
+    );
 }
 
 #[test]
 fn label_operations_preserve_other_labels() {
-    assert_eq!(label_ops(&RemoteState::Folder("L1".into()), &RemoteState::Inbox), (strings(&["INBOX"]), strings(&["L1"])));
-    assert_eq!(label_ops(&RemoteState::Inbox, &RemoteState::Archived), (vec![], strings(&["INBOX"])));
-    assert_eq!(label_ops(&RemoteState::Archived, &RemoteState::Folder("L9".into())), (strings(&["L9"]), strings(&["INBOX"])));
+    assert_eq!(
+        label_ops(&RemoteState::Folder("L1".into()), &RemoteState::Inbox),
+        (strings(&["INBOX"]), strings(&["L1"]))
+    );
+    assert_eq!(
+        label_ops(&RemoteState::Inbox, &RemoteState::Archived),
+        (vec![], strings(&["INBOX"]))
+    );
+    assert_eq!(
+        label_ops(&RemoteState::Archived, &RemoteState::Folder("L9".into())),
+        (strings(&["L9"]), strings(&["INBOX"]))
+    );
 }
 
 #[test]
 fn states_follow_trash_inbox_then_first_user_label() {
-    assert_eq!(state_from_labels(&strings(&["TRASH", "INBOX"]), &set(&[])), RemoteState::Trash);
-    assert_eq!(state_from_labels(&strings(&["Label_7", "IMPORTANT"]), &set(&["Label_7"])), RemoteState::Folder("Label_7".into()));
-    assert_eq!(state_from_labels(&strings(&["IMPORTANT", "UNREAD"]), &set(&[])), RemoteState::Archived);
+    assert_eq!(
+        state_from_labels(&strings(&["TRASH", "INBOX"]), &set(&[])),
+        RemoteState::Trash
+    );
+    assert_eq!(
+        state_from_labels(&strings(&["Label_7", "IMPORTANT"]), &set(&["Label_7"])),
+        RemoteState::Folder("Label_7".into())
+    );
+    assert_eq!(
+        state_from_labels(&strings(&["IMPORTANT", "UNREAD"]), &set(&[])),
+        RemoteState::Archived
+    );
 }
 
 fn sample_message(labels: &[&str]) -> Value {
     json!({"id":"18ab","threadId":"18ab","internalDate":"1790000000000","snippet":"Hello &amp; &#39; &#x27;",
-        "labelIds":labels,"payload":{"headers":[
-            {"name":"From","value":"\"Ann Lee\" <ann@x.io>"},{"name":"To","value":"me@x.io"},
-            {"name":"Cc","value":"bob@x.io"},{"name":"Bcc","value":"carol@x.io"},{"name":"Subject","value":"Quarterly numbers"}
-        ]}})
+    "labelIds":labels,"payload":{"headers":[
+        {"name":"From","value":"\"Ann Lee\" <ann@x.io>"},{"name":"To","value":"me@x.io"},
+        {"name":"Cc","value":"bob@x.io"},{"name":"Bcc","value":"carol@x.io"},{"name":"Subject","value":"Quarterly numbers"}
+    ]}})
 }
 
 #[test]
 fn metadata_message_parses_headers_flags_timestamp_and_entities() {
-    let msg = message(&sample_message(&["INBOX", "UNREAD", "Label_7"]), &set(&["Label_7"])).expect("message");
+    let msg = message(
+        &sample_message(&["INBOX", "UNREAD", "Label_7"]),
+        &set(&["Label_7"]),
+    )
+    .expect("message");
     assert_eq!(msg.id, "18ab");
     assert_eq!(msg.thread, "18ab");
     assert_eq!(msg.from_name, "Ann Lee");
@@ -99,12 +131,20 @@ fn body_conversion_decodes_multipart_content_and_attachments() {
 
 #[test]
 fn message_filters_spam_drafts_and_chats() {
-    for label in ["SPAM", "DRAFT", "CHAT"] { assert!(message(&sample_message(&[label]), &set(&[])).is_none()); }
+    for label in ["SPAM", "DRAFT", "CHAT"] {
+        assert!(message(&sample_message(&[label]), &set(&[])).is_none());
+    }
 }
 
 #[test]
 fn batch_body_has_multipart_http_parts() {
-    let body = batch_body("boundary", &[("item-0".into(), "/gmail/v1/messages/a?format=metadata".into())]);
+    let body = batch_body(
+        "boundary",
+        &[(
+            "item-0".into(),
+            "/gmail/v1/messages/a?format=metadata".into(),
+        )],
+    );
     assert!(body.starts_with("--boundary\r\nContent-Type: application/http\r\nContent-ID: <item-0>\r\n\r\nGET /gmail/v1/messages/a?format=metadata HTTP/1.1\r\n"));
     assert!(body.ends_with("--boundary--\r\n"));
 }
@@ -114,8 +154,14 @@ fn parse_batch_handles_crlf_and_out_of_order_parts() {
     let body = "--xyz\r\nContent-Type: application/http\r\nContent-ID: <response-item-1>\r\n\r\nHTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"error\":{}}\r\n--xyz\r\nContent-Type: application/http\r\nContent-ID: <response-item-0>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\":\"a\"}\r\n--xyz--\r\n";
     let parts = parse_batch("multipart/mixed; boundary=xyz", body);
     assert_eq!(parts.len(), 2);
-    assert_eq!((parts[0].id.as_str(), parts[0].status), ("response-item-1", 404));
-    assert_eq!((parts[1].id.as_str(), parts[1].status), ("response-item-0", 200));
+    assert_eq!(
+        (parts[0].id.as_str(), parts[0].status),
+        ("response-item-1", 404)
+    );
+    assert_eq!(
+        (parts[1].id.as_str(), parts[1].status),
+        ("response-item-0", 200)
+    );
     assert_eq!(parts[1].json["id"], "a");
 }
 
@@ -123,33 +169,58 @@ fn parse_batch_handles_crlf_and_out_of_order_parts() {
 fn merge_history_last_flags_win_and_removed_wins() {
     let mut out = Changes::default();
     let folders = set(&["L1"]);
-    merge_history(&json!({"historyId":"10","history":[
-        {"messagesAdded":[{"message":{"id":"a","labelIds":["INBOX"]}}]},
-        {"labelsAdded":[{"message":{"id":"a","labelIds":["UNREAD","L1"]}}]},
-        {"labelsRemoved":[{"message":{"id":"a","labelIds":["INBOX"]}}]},
-        {"messagesDeleted":[{"message":{"id":"a"}}]},
-        {"messagesAdded":[{"message":{"id":"b","labelIds":["INBOX"]}}]},
-        {"labelsAdded":[{"message":{"id":"b","labelIds":["SPAM"]}}]}
-    ]}), &folders, &mut out);
+    merge_history(
+        &json!({"historyId":"10","history":[
+            {"messagesAdded":[{"message":{"id":"a","labelIds":["INBOX"]}}]},
+            {"labelsAdded":[{"message":{"id":"a","labelIds":["UNREAD","L1"]}}]},
+            {"labelsRemoved":[{"message":{"id":"a","labelIds":["INBOX"]}}]},
+            {"messagesDeleted":[{"message":{"id":"a"}}]},
+            {"messagesAdded":[{"message":{"id":"b","labelIds":["INBOX"]}}]},
+            {"labelsAdded":[{"message":{"id":"b","labelIds":["SPAM"]}}]}
+        ]}),
+        &folders,
+        &mut out,
+    );
     assert_eq!(out.cursor, "10");
     assert!(out.added.is_empty());
     assert!(out.updated.is_empty());
     assert_eq!(out.removed, strings(&["a", "b"]));
 
     let mut flags = Changes::default();
-    merge_history(&json!({"history":[
-        {"labelsAdded":[{"message":{"id":"c","labelIds":["INBOX"]}}]},
-        {"labelsRemoved":[{"message":{"id":"c","labelIds":["UNREAD"]}}]}
-    ]}), &folders, &mut flags);
-    assert_eq!(flags.updated, vec![("c".into(), RemoteFlags { state: RemoteState::Archived, unread: true })]);
+    merge_history(
+        &json!({"history":[
+            {"labelsAdded":[{"message":{"id":"c","labelIds":["INBOX"]}}]},
+            {"labelsRemoved":[{"message":{"id":"c","labelIds":["UNREAD"]}}]}
+        ]}),
+        &folders,
+        &mut flags,
+    );
+    assert_eq!(
+        flags.updated,
+        vec![(
+            "c".into(),
+            RemoteFlags {
+                state: RemoteState::Archived,
+                unread: true
+            }
+        )]
+    );
 }
 
 #[test]
 fn list_query_encodes_every_scope_and_window() {
     let since = Window::Since(1_700_000_000);
     let before = Window::Before(1_700_000_000);
-    assert!(list_query(&Scope::Inbox, since).q.ends_with("in:inbox after:1699999999"));
-    assert!(list_query(&Scope::Archive, before).q.ends_with("-in:inbox -in:trash has:nouserlabels before:1700000000"));
+    assert!(
+        list_query(&Scope::Inbox, since)
+            .q
+            .ends_with("in:inbox after:1699999999")
+    );
+    assert!(
+        list_query(&Scope::Archive, before)
+            .q
+            .ends_with("-in:inbox -in:trash has:nouserlabels before:1700000000")
+    );
     let trash = list_query(&Scope::Trash, since);
     assert!(trash.q.ends_with("in:trash after:1699999999"));
     assert!(trash.include_trash);

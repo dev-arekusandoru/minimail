@@ -1,14 +1,19 @@
 //! Headless keystroke tests for the v2 features, driving the real `MailApp` with a `FakeClock`.
 
-use std::rc::Rc;
-use gpui_kit::{AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds, WindowOptions, px, size};
 use gpui_kit::base::Root;
 use gpui_kit::test::TestWindowExt;
-use mail_classifier::app::actions::{bind_keys};
+use gpui_kit::{
+    AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds,
+    WindowOptions, px, size,
+};
 use mail_classifier::app::MailApp;
+use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
+use mail_classifier::outgoing::{DraftId, DraftKind, HOLD_SECONDS};
 use mail_classifier::tz::Utc;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 #[path = "../common/menu.rs"]
 mod menu;
@@ -65,6 +70,9 @@ fn harness_inner(
                     if let Some(store) = prefs {
                         app.load_preferences(store, window, cx);
                     }
+                    // The real worker, over stores that keep nothing: the composer paths a
+                    // test drives are the ones the app runs, with no draft left on disk.
+                    app.attach_composer_in_memory(window, cx);
                     app
                 });
                 window.focus(&view.focus_handle(cx), cx);
@@ -74,7 +82,12 @@ fn harness_inner(
         .expect("open window");
         (window.downcast::<Root>().expect("root").into(), content)
     });
-    let mut h = Harness { cx, window, app, clock };
+    let mut h = Harness {
+        cx,
+        window,
+        app,
+        clock,
+    };
     h.keys("");
     h
 }
@@ -104,13 +117,22 @@ pub fn mailbox(msgs: &[String]) -> Mailbox {
     Mailbox::from_json(&json(msgs)).expect("valid mailbox json")
 }
 
+/// Give the composer worker — a real OS thread — a moment of real time to finish.
+///
+/// The app reads the worker's event queue on its own beat, and the test clock is not that
+/// thread's clock, so waiting has to be in wall-clock time. It is bounded so a worker that
+/// never answers fails the test instead of hanging the suite.
+fn settle_worker() {
+    std::thread::sleep(std::time::Duration::from_millis(20));
+}
+
 impl Harness<'_> {
     pub fn keys(&mut self, keys: &str) {
         let was_open = self.read(|a| a.modal_open());
         if !keys.is_empty() {
             self.cx.simulate_keystrokes(self.window, keys);
         }
-        self.settle(was_open);
+        self.settle_modal(was_open);
     }
     /// Type literal text into the focused input.
     pub fn type_text(&mut self, text: &str) {
@@ -123,22 +145,26 @@ impl Harness<'_> {
     pub fn click(&mut self, id: impl Into<gpui_kit::ElementId>) {
         let id = id.into();
         let was_open = self.read(|a| a.modal_open());
-        self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).unwrap();
-        self.settle(was_open);
+        self.cx
+            .update_window(self.window, |_, window, cx| window.click(id, cx))
+            .unwrap();
+        self.settle_modal(was_open);
     }
     /// Click the row of the open popup menu labelled `label`.
     pub fn click_row(&mut self, label: &str) {
         let was_open = self.read(|a| a.modal_open());
         menu::click_row(self.cx, self.window, label);
-        self.settle(was_open);
+        self.settle_modal(was_open);
     }
     /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
     /// next click aims at them.
-    fn settle(&mut self, was_open: bool) {
+    fn settle_modal(&mut self, was_open: bool) {
         self.cx.run_until_parked();
         if !was_open && self.read(|a| a.modal_open()) {
             std::thread::sleep(std::time::Duration::from_millis(300));
-            self.cx.update_window(self.window, |_, window, cx| window.draw(cx).clear(cx)).unwrap();
+            self.cx
+                .update_window(self.window, |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
         }
     }
     pub fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
@@ -150,11 +176,18 @@ impl Harness<'_> {
         self.tick();
     }
     pub fn tick(&mut self) {
+        self.cx
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(50));
         self.app.update(self.cx, |a, cx| a.tick(cx));
         self.cx.run_until_parked();
     }
     pub fn count(&mut self, s: TriageState) -> usize {
         self.read(|a| a.mailbox.count(s))
+    }
+    /// Every state's message count, so a test can assert that nothing moved.
+    pub fn counts(&mut self) -> [usize; 5] {
+        TriageState::ALL.map(|s| self.count(s))
     }
     pub fn cursor(&mut self) -> Option<MessageId> {
         self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
@@ -199,12 +232,230 @@ impl Harness<'_> {
         }
         panic!("could not reach message {id}");
     }
-    pub fn send_reply(&mut self, body: &str) {
+
+    /// Open a durable inline reply before typing its body.
+    pub fn compose_reply(&mut self, body: &str) {
         self.keys("r");
-        assert!(self.read(|a| a.compose_open()));
+        self.await_composer("the reply opens inline", |a| a.inline_compose_open());
         self.type_text(body);
-        self.keys("cmd-enter");
-        assert!(!self.read(|a| a.compose_open()));
+    }
+
+    /// Keep ticking until `done` says the composer has caught up.
+    ///
+    /// The worker answers on its own thread, so a beat can find nothing new to do until it
+    /// has finished: each round advances the test clock and then waits in real time. What a
+    /// test means is "the draft exists now", so that is what is waited on.
+    pub fn await_composer(&mut self, what: &str, done: impl Fn(&MailApp) -> bool) {
+        for _ in 0..80 {
+            if self.read(&done) {
+                return;
+            }
+            self.tick();
+            if self.read(&done) {
+                return;
+            }
+            settle_worker();
+        }
+        panic!("{what}");
+    }
+
+    /// How many drafts are counting a hold down at once. Each keeps its own toast, bar and
+    /// Undo, so two sends at once are two independent recalls.
+    pub fn hold_count(&mut self) -> usize {
+        self.read(|a| a.composer.holds.len())
+    }
+
+    /// The draft `u` would recall: the hold that has been counting down longest.
+    pub fn held_draft(&mut self) -> Option<DraftId> {
+        self.read(|a| a.hold_in_flight())
+    }
+
+    /// The plain text of every message a confirmed send put in the mailbox, in order.
+    pub fn sent_bodies(&mut self) -> Vec<String> {
+        self.read(|a| {
+            a.mailbox
+                .messages()
+                .iter()
+                .filter(|m| m.outgoing)
+                .map(|m| m.body.clone())
+                .collect()
+        })
+    }
+
+    /// Bring an existing draft to the front of the tab strip, the way a tab click does.
+    pub fn show_draft(&mut self, id: DraftId) {
+        self.app.update(self.cx, |a, _| {
+            a.tabs.open_draft_pinned(id);
+        });
+        self.tick();
+    }
+
+    /// Tick until `n` drafts are counting down, so a test asserts on the hold rather than on
+    /// the worker's round trip.
+    pub fn await_holds(&mut self, n: usize) {
+        self.await_composer(&format!("{n} holds never started"), |a| {
+            a.composer.holds.len() == n
+        });
+    }
+
+    /// Press the composer's Send control for the draft it is showing. That control is the
+    /// user-facing path into the hold, and it works whichever surface currently has the
+    /// draft, focused or not.
+    pub fn send_draft(&mut self) {
+        self.click("compose-send");
+        self.tick();
+    }
+
+    /// Hand the worker real files, exactly what the picker does once the user has chosen
+    /// them. The draft is busy from this call until the worker answers.
+    pub fn attach(&mut self, files: Vec<PathBuf>) {
+        let id = self.read(|a| {
+            a.tabs
+                .active_draft()
+                .or(a.inline_composer)
+                .expect("a draft is open")
+        });
+        self.app
+            .update(self.cx, |a, cx| a.attach_files_at(id, files, cx));
+        self.tick();
+    }
+
+    /// Close a draft's tab, the way the tab strip's close control does. The draft itself
+    /// is kept: only the surface goes.
+    pub fn close_draft_tab(&mut self, id: DraftId) {
+        self.app.update(self.cx, |a, _| {
+            if let Some(ix) = a.tabs.index_of_draft(id) {
+                a.tabs.close(ix);
+            }
+        });
+        self.tick();
+    }
+
+    /// Run the countdown out and let the provider confirm, ticking until the delivery is in
+    /// the mailbox. Nothing sleeps: the fake clock and the worker's own answer drive it.
+    pub fn deliver_held(&mut self) {
+        self.advance(HOLD_SECONDS + 1);
+        for _ in 0..20 {
+            self.tick();
+            if !self.sent_bodies().is_empty() {
+                return;
+            }
+            self.advance(1);
+        }
+        panic!("the confirmed send never reached the mailbox");
+    }
+
+    /// Every draft the composer holds open, inline ones included.
+    pub fn open_drafts(&mut self) -> usize {
+        self.read(|a| a.composer.drafts.len())
+    }
+
+    /// The state line of the draft the composer is showing.
+    pub fn draft_status(&mut self) -> String {
+        self.read(|a| {
+            let id = a.tabs.active_draft().or(a.inline_composer)?;
+            let open = a.composer.get(id)?;
+            Some(open.status_line())
+        })
+        .unwrap_or_default()
+    }
+
+    /// Whether a send hold is counting down for any draft.
+    pub fn hold_pending(&mut self) -> bool {
+        self.read(|a| a.hold_in_flight().is_some())
+    }
+
+    /// The durable record of the draft the composer is showing, as
+    /// `(kind, to, subject, body)`. The composer's own view state is never consulted: a test
+    /// reads what the draft store actually holds.
+    pub fn draft_fields(&mut self) -> (DraftKind, String, String, String) {
+        self.read(|a| {
+            let id = a
+                .tabs
+                .active_draft()
+                .or(a.inline_composer)
+                .expect("a draft is open");
+            let r = a.composer.record(id).expect("the draft record");
+            (
+                r.kind,
+                r.to.clone(),
+                r.subject.clone(),
+                r.body.source.clone(),
+            )
+        })
+    }
+
+    /// The attachments the draft's record holds, by file name.
+    pub fn draft_attachments(&mut self) -> Vec<String> {
+        self.read(|a| {
+            let Some(id) = a.tabs.active_draft().or(a.inline_composer) else {
+                return Vec::new();
+            };
+            a.composer
+                .record(id)
+                .map(|r| r.attachments.iter().map(|a| a.file_name.clone()).collect())
+                .unwrap_or_default()
+        })
+    }
+
+    /// Open a durable draft tab and focus its body for tests that edit the body.
+    pub fn new_draft(&mut self) {
+        // A draft this call opened, not whichever draft was already on screen: the tab of
+        // the previous one is still there and its composer still exists.
+        let before = self.read(|a| a.composer.drafts.len());
+        self.keys("cmd-n");
+        self.await_composer("cmd-n opens a draft tab", |a| {
+            a.composer.drafts.len() > before
+                && a.tabs
+                    .active_draft()
+                    .is_some_and(|id| a.composers.contains_key(&id))
+        });
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                self.app.update(cx, |a, cx| {
+                    let id = a.tabs.active_draft().expect("draft tab");
+                    a.composers
+                        .get(&id)
+                        .expect("composer")
+                        .update(cx, |composer, cx| composer.focus_body(window, cx));
+                });
+            })
+            .expect("window alive");
+        self.settle();
+    }
+
+    pub fn settle(&mut self) {
+        self.await_composer("the composer never settled", |a| a.composer_idle());
+    }
+
+    /// Whether the Drafts list is open.
+    pub fn drafts_picker_open(&mut self) -> bool {
+        self.read(|a| a.drafts_picker_open())
+    }
+
+    /// The rows of the open Drafts list, top to bottom.
+    pub fn drafts_rows(&mut self) -> Vec<String> {
+        self.app.read_with(self.cx, |a, cx| a.drafts_rows(cx))
+    }
+
+    /// Move the draft the composer is showing into the tab strip, through the real control.
+    pub fn expand_active_draft(&mut self) {
+        self.click("compose-expand");
+        self.tick();
+    }
+
+    /// Move the draft the composer is showing back under its thread.
+    pub fn collapse_active_draft(&mut self) {
+        self.click("compose-collapse");
+        self.tick();
+    }
+
+    /// Discard the draft the composer is showing, answering the confirmation.
+    pub fn discard_active_draft(&mut self) {
+        self.click("compose-discard");
+        self.tick();
+        self.keys("1");
+        self.settle();
     }
 }
 
@@ -214,7 +465,8 @@ impl Harness<'_> {
     }
     /// Rows of the open filter picker, top to bottom.
     pub fn picker_rows(&mut self) -> Vec<String> {
-        self.app.read_with(self.cx, |a, cx| a.filter_popover_rows(cx))
+        self.app
+            .read_with(self.cx, |a, cx| a.filter_popover_rows(cx))
     }
     /// The pills the list header shows.
     pub fn pills(&mut self) -> Vec<String> {
@@ -257,7 +509,9 @@ impl Harness<'_> {
         let window = self.open_settings();
         if page != 0 {
             self.cx
-                .update_window(window, |_, window, cx| window.click(format!("0-{page}"), cx))
+                .update_window(window, |_, window, cx| {
+                    window.click(format!("0-{page}"), cx)
+                })
                 .expect("settings window alive");
             self.cx.run_until_parked();
         }
@@ -339,14 +593,18 @@ impl Harness<'_> {
         self.settings_click_in(group, item, "btn");
         let window = self.settings_handle();
         self.cx
-            .update_window(window, |_, window, cx| window.within("popup-menu").click(option, cx))
+            .update_window(window, |_, window, cx| {
+                window.within("popup-menu").click(option, cx)
+            })
             .expect("settings window alive");
         self.cx.run_until_parked();
     }
 
     /// The settings page the sidebar is on.
     pub fn settings_page(&mut self) -> usize {
-        let panel = self.read(|a| a.settings_panel()).expect("the settings window is open");
+        let panel = self
+            .read(|a| a.settings_panel())
+            .expect("the settings window is open");
         panel.read_with(self.cx, |panel, _| panel.page())
     }
 }

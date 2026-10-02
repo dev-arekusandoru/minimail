@@ -30,7 +30,11 @@ pub struct FieldChoice {
 }
 
 const fn field(field: Field, label: &'static str, input: ValueInput) -> FieldChoice {
-    FieldChoice { field, label, input }
+    FieldChoice {
+        field,
+        label,
+        input,
+    }
 }
 
 /// The picker's first step, in display order.
@@ -77,7 +81,10 @@ pub struct Choice {
 }
 
 fn choice(value: &str, label: &str) -> Choice {
-    Choice { value: value.to_owned(), label: label.to_owned() }
+    Choice {
+        value: value.to_owned(),
+        label: label.to_owned(),
+    }
 }
 
 fn tag_label(value: &str) -> &'static str {
@@ -107,7 +114,9 @@ fn is_label(value: &str) -> &'static str {
 
 fn title_case(word: &str) -> String {
     let mut chars = word.chars();
-    chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+    chars
+        .next()
+        .map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
 }
 
 /// Every value the picker lists for a `Pick` field, in display order. Empty for fields that
@@ -120,7 +129,10 @@ pub fn value_choices(field: Field, mailbox: &Mailbox) -> Vec<Choice> {
             .filter(|v| KNOWN_SENDERS_ENABLED || **v != "new")
             .map(|v| choice(v, is_label(v)))
             .collect(),
-        Field::Kind => Kind::ALL.iter().map(|k| choice(k.label(), &title_case(k.label()))).collect(),
+        Field::Kind => Kind::ALL
+            .iter()
+            .map(|k| choice(k.label(), &title_case(k.label())))
+            .collect(),
         Field::Account => mailbox
             .accounts()
             .iter()
@@ -157,7 +169,8 @@ pub fn rank_choices(choices: Vec<Choice>, query: &str) -> Vec<Choice> {
     let mut found: Vec<(fuzzy::Rank, Choice)> = choices
         .into_iter()
         .filter_map(|c| {
-            let rank = fuzzy::rank(&c.label, &c.value, query).or_else(|| fuzzy::rank(&c.value, "", query))?;
+            let rank = fuzzy::rank(&c.label, &c.value, query)
+                .or_else(|| fuzzy::rank(&c.value, "", query))?;
             Some((rank, c))
         })
         .collect();
@@ -172,7 +185,10 @@ pub fn value_label(field: Field, value: &str, mailbox: &Mailbox) -> String {
             .accounts()
             .iter()
             .find(|a| a.id.to_lowercase() == value)
-            .map_or_else(|| value.to_owned(), |a| crate::account_style::display_name(a).to_owned()),
+            .map_or_else(
+                || value.to_owned(),
+                |a| crate::account_style::display_name(a).to_owned(),
+            ),
         _ => value.to_owned(),
     }
 }

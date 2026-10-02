@@ -97,8 +97,6 @@ pub fn recipient_line(msg: &Message, me: &str) -> String {
     segments.join(" · ")
 }
 
-/// `Sep 30, 2026 · 20:46` for an RFC 3339 timestamp, on the user's own clock. Falls back
-/// to the raw string when it doesn't parse.
 pub fn received_label(received: &str, now: &Now) -> String {
     let parsed = parse_rfc3339(received).map(|ts| {
         let (year, month, day) = now.civil(ts);
@@ -163,7 +161,10 @@ pub fn split_quoted(body: &str) -> Quoted<'_> {
             main: body[..lines[i].0].trim_end(),
             quoted: Some(&body[lines[i].0..]),
         },
-        None => Quoted { main: body.trim_end(), quoted: None },
+        None => Quoted {
+            main: body.trim_end(),
+            quoted: None,
+        },
     }
 }
 
@@ -179,11 +180,18 @@ const RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
 
 enum Kind {
     Text,
-    Start { name: String, attrs: Vec<(String, String)> },
-    End { name: String },
+    Start {
+        name: String,
+        attrs: Vec<(String, String)>,
+    },
+    End {
+        name: String,
+    },
     Comment,
     /// Content of script/style/textarea/title, never parsed as markup.
-    RawText { name: &'static str },
+    RawText {
+        name: &'static str,
+    },
 }
 
 struct Tok<'a> {
@@ -210,7 +218,11 @@ fn find_ci(hay: &str, from: usize, needle: &str) -> Option<usize> {
 
 impl<'a> Scanner<'a> {
     fn new(s: &'a str) -> Self {
-        Scanner { s, pos: 0, raw_text: None }
+        Scanner {
+            s,
+            pos: 0,
+            raw_text: None,
+        }
     }
 
     /// Parse a tag whose `<` sits at `self.pos`. Returns the token; an
@@ -280,12 +292,18 @@ impl<'a> Scanner<'a> {
         self.pos = end;
         let raw = &s[begin..end];
         if end_tag {
-            return Tok { raw, kind: Kind::End { name } };
+            return Tok {
+                raw,
+                kind: Kind::End { name },
+            };
         }
         if let Some(&raw_name) = RAW_TEXT.iter().find(|r| **r == name) {
             self.raw_text = Some(raw_name);
         }
-        Tok { raw, kind: Kind::Start { name, attrs } }
+        Tok {
+            raw,
+            kind: Kind::Start { name, attrs },
+        }
     }
 }
 
@@ -303,7 +321,10 @@ impl<'a> Iterator for Scanner<'a> {
             if end > self.pos {
                 let raw = &s[self.pos..end];
                 self.pos = end;
-                return Some(Tok { raw, kind: Kind::RawText { name } });
+                return Some(Tok {
+                    raw,
+                    kind: Kind::RawText { name },
+                });
             }
         }
         let b = s.as_bytes();
@@ -323,14 +344,22 @@ impl<'a> Iterator for Scanner<'a> {
                     s[at..].find('>').map_or(s.len(), |e| at + e + 1)
                 };
                 self.pos = end;
-                return Some(Tok { raw: &s[at..end], kind: Kind::Comment });
+                return Some(Tok {
+                    raw: &s[at..end],
+                    kind: Kind::Comment,
+                });
             }
         }
         // Text up to the next '<' (a lone '<' is literal text).
         let first = s[at..].chars().next().map_or(1, char::len_utf8);
-        let end = s[at + first..].find('<').map_or(s.len(), |e| at + first + e);
+        let end = s[at + first..]
+            .find('<')
+            .map_or(s.len(), |e| at + first + e);
         self.pos = end;
-        Some(Tok { raw: &s[at..end], kind: Kind::Text })
+        Some(Tok {
+            raw: &s[at..end],
+            kind: Kind::Text,
+        })
     }
 }
 
@@ -348,7 +377,10 @@ fn escape_text(s: &str) -> String {
 }
 
 fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+    attrs
+        .iter()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.as_str())
 }
 
 /// Replace every `<img>` whose `src` is not a `data:` URL with its (escaped)
@@ -375,7 +407,10 @@ pub fn safe_html(html: &str) -> SafeHtml {
             _ => out.push_str(tok.raw),
         }
     }
-    SafeHtml { html: out, blocked_images: blocked }
+    SafeHtml {
+        html: out,
+        blocked_images: blocked,
+    }
 }
 
 fn named_entity(name: &str) -> Option<&'static str> {
@@ -420,21 +455,28 @@ fn decode_entities(s: &str) -> Cow<'_, str> {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let decoded = rest[1..].find(';').filter(|&len| len <= 10).and_then(|len| {
-            let body = &rest[1..1 + len];
-            let text = match body.strip_prefix('#') {
-                Some(num) => {
-                    let code = match num.strip_prefix(['x', 'X']) {
-                        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-                        None => num.parse().ok()?,
-                    };
-                    let c = if code == 0 { '\u{fffd}' } else { char::from_u32(code)? };
-                    c.to_string()
-                }
-                None => named_entity(body)?.to_owned(),
-            };
-            Some((text, len + 2))
-        });
+        let decoded = rest[1..]
+            .find(';')
+            .filter(|&len| len <= 10)
+            .and_then(|len| {
+                let body = &rest[1..1 + len];
+                let text = match body.strip_prefix('#') {
+                    Some(num) => {
+                        let code = match num.strip_prefix(['x', 'X']) {
+                            Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                            None => num.parse().ok()?,
+                        };
+                        let c = if code == 0 {
+                            '\u{fffd}'
+                        } else {
+                            char::from_u32(code)?
+                        };
+                        c.to_string()
+                    }
+                    None => named_entity(body)?.to_owned(),
+                };
+                Some((text, len + 2))
+            });
         match decoded {
             Some((text, used)) => {
                 out.push_str(&text);
@@ -461,7 +503,12 @@ struct TextOut {
 
 impl TextOut {
     fn new() -> Self {
-        TextOut { out: String::new(), want: 0, space: false, line_start: true }
+        TextOut {
+            out: String::new(),
+            want: 0,
+            space: false,
+            line_start: true,
+        }
     }
 
     fn request(&mut self, newlines: usize) {
@@ -544,7 +591,19 @@ impl TextOut {
 /// decoded and runs of blank lines collapse to one.
 pub fn html_to_text(html: &str) -> String {
     const PARAGRAPH: [&str; 13] = [
-        "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table", "ul", "ol", "pre", "dl",
+        "p",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "table",
+        "ul",
+        "ol",
+        "pre",
+        "dl",
     ];
     const LINE: [&str; 18] = [
         "div", "tr", "hr", "section", "article", "header", "footer", "nav", "aside", "main",
@@ -569,8 +628,16 @@ pub fn html_to_text(html: &str) -> String {
                 if in_head
                     && !matches!(
                         name.as_str(),
-                        "head" | "html" | "meta" | "link" | "title" | "style" | "script" | "base"
-                            | "noscript" | "template"
+                        "head"
+                            | "html"
+                            | "meta"
+                            | "link"
+                            | "title"
+                            | "style"
+                            | "script"
+                            | "base"
+                            | "noscript"
+                            | "template"
                     )
                 {
                     // Anything else implies the head ended, even without `</head>`.
@@ -665,7 +732,13 @@ pub fn format_size(bytes: u64) -> String {
     }
     let mut value = bytes as f64;
     let mut unit = 0;
-    let round = |v: f64| if v < 10.0 { (v * 10.0).round() / 10.0 } else { v.round() };
+    let round = |v: f64| {
+        if v < 10.0 {
+            (v * 10.0).round() / 10.0
+        } else {
+            v.round()
+        }
+    };
     while unit < UNITS.len() - 1 && round(value) >= 1024.0 {
         value /= 1024.0;
         unit += 1;
@@ -683,7 +756,11 @@ pub fn format_size(bytes: u64) -> String {
 pub fn initials(name: &str, email: &str) -> String {
     fn words(s: &str, separators: &[char]) -> Vec<char> {
         s.split(|c: char| c.is_whitespace() || separators.contains(&c))
-            .filter_map(|w| w.trim_start_matches(|c: char| !c.is_alphanumeric()).chars().next())
+            .filter_map(|w| {
+                w.trim_start_matches(|c: char| !c.is_alphanumeric())
+                    .chars()
+                    .next()
+            })
             .collect()
     }
     let name = name.trim();
@@ -701,7 +778,11 @@ pub fn initials(name: &str, email: &str) -> String {
         [only] => vec![*only],
         [first, .., last] => vec![*first, *last],
     };
-    picked.iter().flat_map(|c| c.to_uppercase()).take(2).collect()
+    picked
+        .iter()
+        .flat_map(|c| c.to_uppercase())
+        .take(2)
+        .collect()
 }
 
 // ------------------------------------------------------------------ threads
@@ -765,7 +846,9 @@ impl ReaderView {
     }
 
     pub fn is_expanded(&self, thread: u32, id: MessageId) -> bool {
-        self.threads.get(&thread).is_some_and(|v| v.expanded.contains(&id))
+        self.threads
+            .get(&thread)
+            .is_some_and(|v| v.expanded.contains(&id))
     }
 
     pub fn toggle_expanded(&mut self, thread: u32, id: MessageId) {
@@ -793,7 +876,9 @@ impl ReaderView {
     }
 
     pub fn recipients_open(&self, thread: u32, id: MessageId) -> bool {
-        self.threads.get(&thread).is_some_and(|v| v.recipients.contains(&id))
+        self.threads
+            .get(&thread)
+            .is_some_and(|v| v.recipients.contains(&id))
     }
 
     pub fn toggle_recipients(&mut self, thread: u32, id: MessageId) {
@@ -806,7 +891,9 @@ impl ReaderView {
     }
 
     pub fn quoted_open(&self, thread: u32, id: MessageId) -> bool {
-        self.threads.get(&thread).is_some_and(|v| v.quoted.contains(&id))
+        self.threads
+            .get(&thread)
+            .is_some_and(|v| v.quoted.contains(&id))
     }
 
     pub fn toggle_quoted(&mut self, thread: u32, id: MessageId) {
@@ -815,7 +902,9 @@ impl ReaderView {
 
     /// Reader mode (plain text instead of HTML) is on for this message.
     pub fn plain(&self, thread: u32, id: MessageId) -> bool {
-        self.threads.get(&thread).is_some_and(|v| v.plain.contains(&id))
+        self.threads
+            .get(&thread)
+            .is_some_and(|v| v.plain.contains(&id))
     }
 
     pub fn toggle_plain(&mut self, thread: u32, id: MessageId) {

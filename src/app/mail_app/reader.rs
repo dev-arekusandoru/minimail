@@ -1,6 +1,6 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
 //! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
-use gpui_kit::component::{scroll::ScrollableElement as _, ActiveTheme as _};
+use gpui_kit::component::{ActiveTheme as _, scroll::ScrollableElement as _};
 
 use super::*;
 
@@ -15,7 +15,7 @@ mod tabbar;
 #[path = "reader_thread.rs"]
 mod thread;
 
-use parts::{rail_row, Look, Role};
+use parts::{Look, Role, rail_row};
 
 /// Rail dot centers: inside a full surface (first line of its header) and in a collapsed line.
 const DOT_FULL: f32 = 27.;
@@ -29,6 +29,10 @@ pub(super) struct ReaderPane {
     revealed: Option<MessageId>,
     /// Where the current find match is in being scrolled into view.
     pub(super) find_reveal: FindReveal,
+    /// Scroll to the inline composer on the next render. It is the last child of the
+    /// thread, so a reply opened from a message further up would otherwise land below the
+    /// fold with its Send and Close buttons out of sight.
+    pub(super) reveal_composer: bool,
 }
 
 /// Bringing the current find match into view takes two frames: scroll its message to the top
@@ -44,8 +48,12 @@ pub(super) enum FindReveal {
 }
 
 impl MailApp {
-    /// The reader: the tab bar (outside a triage session) above the opened thread.
+    /// The reader: the tab bar (outside a triage session) above whichever tab is active —
+    /// a thread, or the draft that tab is composing.
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
+        if let Some(pane) = self.render_draft_tab(cx) {
+            return pane;
+        }
         let pane = self.render_reader_pane(cx);
         if self.in_session() || self.session_end.is_some() || self.tabs.is_empty() {
             return pane;
@@ -60,15 +68,69 @@ impl MailApp {
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full())
             .child(self.tab_bar(&Look::new(cx), cx))
-            .children(if self.find_open() { self.find_bar(&Look::new(cx)) } else { None })
+            .children(if self.find_open() {
+                self.find_bar(&Look::new(cx))
+            } else {
+                None
+            })
             .child(pane)
             .into_any_element()
+    }
+
+    /// The active tab is a draft: the composer fills the reader pane, under the same tab
+    /// bar the threads use. There is no thread behind it, so no find bar either.
+    pub(super) fn render_draft_tab(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let draft = self.tabs.active_draft()?;
+        let composer = self.composers.get(&draft)?.clone();
+        let stacked = self.panes.orientation() == PaneLayout::Stacked;
+        Some(
+            div()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .when(!stacked, |d| d.h_full())
+                .when(stacked, |d| d.w_full())
+                .child(self.tab_bar(&Look::new(cx), cx))
+                .child(composer)
+                .into_any_element(),
+        )
+    }
+
+    /// The reply composer shown inline under the conversation it answers. It is the same
+    /// entity the tab would show, so expanding moves it rather than copying it.
+    pub(super) fn inline_composer_element(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let draft = self.inline_composer_for_thread()?;
+        let composer = self.composers.get(&draft)?.clone();
+        Some(
+            div()
+                .flex_none()
+                .mt_3()
+                .pt_3()
+                .border_t(px(1.))
+                .border_color(cx.theme().border)
+                .h(px(420.))
+                .rounded_md()
+                .overflow_hidden()
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(composer)
+                .into_any_element(),
+        )
     }
 
     fn render_reader_pane(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.theme();
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
-        let pane = div().flex_1().min_w_0().min_h_0().flex().flex_col().px_5().py_4()
+        let pane = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .px_5()
+            .py_4()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full());
         if let Some((handled, secs)) = self.session_end {
@@ -103,7 +165,10 @@ impl MailApp {
         // surface wherever it falls; it is never moved.
         let (title, rows): (Option<AnyElement>, Vec<AnyElement>) = if others.is_empty() {
             // A lone message has no thread, so no rail: the surface takes the full width.
-            (None, vec![self.message_surface(msg, Role::Opened, &look, cx)])
+            (
+                None,
+                vec![self.message_surface(msg, Role::Opened, &look, cx)],
+            )
         } else {
             let count = order.len();
             let rows = order
@@ -119,8 +184,7 @@ impl MailApp {
                         let dot = if expanded { DOT_FULL } else { DOT_COLLAPSED };
                         (dot, self.thread_message(m, expanded, &newest, &look, cx))
                     };
-                    rail_row(t, Some((dot, color)), i == 0, i + 1 == count, el)
-                        .into_any_element()
+                    rail_row(t, Some((dot, color)), i == 0, i + 1 == count, el).into_any_element()
                 })
                 .collect();
             (Some(self.thread_title(msg, &others, &look, cx)), rows)
@@ -140,10 +204,18 @@ impl MailApp {
             if pane.find_reveal == FindReveal::Message {
                 let target = self.find_current(msg.thread_id).map_or(0, |m| {
                     let at = order.iter().position(|&id| id == m.msg).unwrap_or(0);
-                    if m.segment == crate::find::Segment::Subject { 0 } else { lead + at }
+                    if m.segment == crate::find::Segment::Subject {
+                        0
+                    } else {
+                        lead + at
+                    }
                 });
                 pane.scroll.scroll_to_top_of_item(target);
                 pane.find_reveal = FindReveal::Line;
+            }
+            if std::mem::take(&mut pane.reveal_composer) {
+                // The composer is the last child, so the bottom is where it starts.
+                pane.scroll.scroll_to_bottom();
             }
             pane.scroll.clone()
         };
@@ -157,18 +229,24 @@ impl MailApp {
                 div()
                     .id("reader-scroll")
                     // A click anywhere in the thread makes the tab permanent.
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        this.pin_active_tab(cx);
-                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.pin_active_tab(cx);
+                        }),
+                    )
                     .track_scroll(&scroll)
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .when_some(summary, |d, s| d.child(column(SummaryCard::new(&s).into_any_element()).pb_3()))
+                    .when_some(summary, |d, s| {
+                        d.child(column(SummaryCard::new(&s).into_any_element()).pb_3())
+                    })
                     .when_some(title, |d, el| d.child(column(el).pb_3()))
                     .children(rows.into_iter().map(column))
+                    .when_some(self.inline_composer_element(cx), |d, el| d.child(el))
                     .vertical_scrollbar(&scroll),
             )
             .into_any_element()

@@ -72,9 +72,13 @@ const ESC_CANCEL: Ranked = h("escape", "cancel", 0);
 
 /// Triage verbs in display order, with their drop ranks (archive > delete > snooze > reply; summarize drops first).
 fn verbs(reply: bool) -> impl Iterator<Item = Ranked> {
-    [h("e", "archive", 4), h("s", "snooze", 6), h("d", "delete", 5)]
-        .into_iter()
-        .chain(reply.then(|| h("r", "reply", 7)))
+    [
+        h("e", "archive", 4),
+        h("s", "snooze", 6),
+        h("d", "delete", 5),
+    ]
+    .into_iter()
+    .chain(reply.then(|| h("r", "reply", 7)))
 }
 
 fn contextual(ctx: &HintContext, out: &mut Vec<Ranked>) {
@@ -196,7 +200,13 @@ pub fn hint_width(hint: &Hint) -> f32 {
     let strokes: Vec<&str> = hint.key.split_whitespace().collect();
     let key_chars: usize = strokes
         .iter()
-        .map(|k| if k.chars().count() > 1 && *k != "?" { k.chars().count().min(6) } else { 1 })
+        .map(|k| {
+            if k.chars().count() > 1 && *k != "?" {
+                k.chars().count().min(6)
+            } else {
+                1
+            }
+        })
         .sum();
     let then = THEN_W * strokes.len().saturating_sub(1) as f32;
     key_chars as f32 * CHAR_W
@@ -260,25 +270,47 @@ mod tests {
         }
         assert_eq!(plain.last(), Some(&"?"));
 
-        let new = keys(&HintContext { new_sender: true, ..list() });
+        let new = keys(&HintContext {
+            new_sender: true,
+            ..list()
+        });
         assert_eq!(&new[..2], ["a", "b"]);
-        let away = keys(&HintContext { outside_inbox: true, ..list() });
+        let away = keys(&HintContext {
+            outside_inbox: true,
+            ..list()
+        });
         assert_eq!(away[0], "i");
-        let multi = keys(&HintContext { multi_message: true, ..list() });
-        assert!(multi.contains(&"r") && !multi.contains(&"z"), "summarize is the first verb dropped");
+        let multi = keys(&HintContext {
+            multi_message: true,
+            ..list()
+        });
+        assert!(
+            multi.contains(&"r") && !multi.contains(&"z"),
+            "summarize is the first verb dropped"
+        );
     }
 
     #[test]
     fn priority_truncation_keeps_contextual_and_help() {
-        let k = keys(&HintContext { suggestions: true, ..HintContext::new(HintMode::Reader) });
+        let k = keys(&HintContext {
+            suggestions: true,
+            ..HintContext::new(HintMode::Reader)
+        });
         assert_eq!(k, ["y", "n", "e", "d", "?"]);
-        let k = keys(&HintContext { new_sender: true, ..list() });
+        let k = keys(&HintContext {
+            new_sender: true,
+            ..list()
+        });
         assert_eq!(k, ["a", "b", "e", "d", "?"]);
     }
 
     #[test]
     fn empty_list_has_no_triage_keys() {
-        let k = keys(&HintContext { empty: true, new_sender: true, ..list() });
+        let k = keys(&HintContext {
+            empty: true,
+            new_sender: true,
+            ..list()
+        });
         assert_eq!(k, ["g", "?"]);
     }
 
@@ -290,7 +322,10 @@ mod tests {
         let narrow = fit_hints(&ctx, 200., 0.);
         assert!(narrow.len() < wide.len());
         assert_eq!(narrow.last().map(|h| h.key), Some("?"));
-        assert!(narrow.iter().any(|h| h.key == "e"), "archive outranks reply");
+        assert!(
+            narrow.iter().any(|h| h.key == "e"),
+            "archive outranks reply"
+        );
         let tiny = fit_hints(&ctx, 1., 0.);
         assert_eq!(tiny.iter().map(|h| h.key).collect::<Vec<_>>(), ["?"]);
     }

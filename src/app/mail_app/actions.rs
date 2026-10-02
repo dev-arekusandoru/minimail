@@ -41,7 +41,6 @@ impl MailApp {
             window.close_dialog(cx);
         }
         self.palette = None;
-        self.compose = None;
         self.help = None;
         self.snooze = None;
         self.rules_panel = None;
@@ -61,7 +60,9 @@ impl MailApp {
         {
             return;
         }
-        let Some(s) = self.session.as_mut() else { return };
+        let Some(s) = self.session.as_mut() else {
+            return;
+        };
         s.handled += 1;
         s.index += 1;
         if s.index >= s.ids.len() {
@@ -120,7 +121,9 @@ impl MailApp {
     }
 
     pub(super) fn accept_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(rule) = self.pending_rule.take() else { return };
+        let Some(rule) = self.pending_rule.take() else {
+            return;
+        };
         self.rules.accept(rule.clone());
         let ids: Vec<MessageId> = self
             .mailbox
@@ -166,11 +169,7 @@ impl MailApp {
     }
 
     /// `g s` / `g t` / `g a` / `g d`: the current account's location.
-    fn go_account_location(
-        &mut self,
-        location: fn(AccountId) -> Location,
-        cx: &mut Context<Self>,
-    ) {
+    fn go_account_location(&mut self, location: fn(AccountId) -> Location, cx: &mut Context<Self>) {
         if let Some(account) = self.nav_account() {
             self.show_location(location(account), cx);
         }
@@ -250,7 +249,11 @@ impl MailApp {
             self.show_toast("Enable summaries in settings (cmd-,)".into(), window, cx);
             return;
         }
-        let Some(msg) = self.cursor_id().and_then(|id| self.mailbox.get(id)).cloned() else {
+        let Some(msg) = self
+            .cursor_id()
+            .and_then(|id| self.mailbox.get(id))
+            .cloned()
+        else {
             return;
         };
         let mut thread: Vec<&Message> = self
@@ -263,7 +266,7 @@ impl MailApp {
         match StubSummarizer.summarize(&thread) {
             Ok(s) => {
                 self.summary = Some((msg.thread_id, s));
-                self.open_message(msg.id, false);
+                self.open_message(msg.id, false, cx);
             }
             Err(e) => self.show_toast(format!("Summary failed: {e:?}"), window, cx),
         }
@@ -271,12 +274,10 @@ impl MailApp {
     }
 
     pub(super) fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(reply) = self.mailbox.recall_last(self.now()) {
-            if let Some(msg) = self.mailbox.get(reply.in_reply_to).cloned() {
-                self.close_modals(window, cx);
-                self.open_compose_for(&msg, Some(reply.body), window, cx);
-            }
-            self.show_toast("Send recalled · editing draft".into(), window, cx);
+        // A held send is the only thing `u` recalls: delivered mail is never un-sent, and
+        // the outbox it was queued in is gone with the composer cutover.
+        if let Some(id) = self.hold_in_flight() {
+            self.undo_send_hold(id, cx);
         } else if self.mailbox.undo() {
             self.show_toast("Undone".into(), window, cx);
         }

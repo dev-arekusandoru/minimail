@@ -2,7 +2,7 @@ use mail_classifier::model::{Attachment, Message, TriageState};
 use mail_classifier::tz::{FixedZone, Now, Utc};
 use std::rc::Rc;
 use mail_classifier::reading::{
-    Recipient, ReaderView, format_size, html_to_text, initials, parse_recipients, reader_text,
+    ReaderView, Recipient, format_size, html_to_text, initials, parse_recipients, reader_text,
     received_label, recipient_line, safe_html, split_quoted, thread_others, thread_position,
 };
 
@@ -36,8 +36,10 @@ fn parse_recipients_is_tolerant() {
     let got = parse_recipients(
         r#""Chen, Alice" <alice@x.io>, ,, bob@x.io , 'Carol' <carol@x.io>, Dave <dave@x.io"#,
     );
-    let pairs: Vec<(Option<&str>, &str)> =
-        got.iter().map(|r| (r.name.as_deref(), r.email.as_str())).collect();
+    let pairs: Vec<(Option<&str>, &str)> = got
+        .iter()
+        .map(|r| (r.name.as_deref(), r.email.as_str()))
+        .collect();
     assert_eq!(
         pairs,
         vec![
@@ -51,7 +53,10 @@ fn parse_recipients_is_tolerant() {
     assert!(parse_recipients(" , ,").is_empty());
     assert_eq!(
         parse_recipients("<solo@x.io>"),
-        vec![Recipient { name: None, email: "solo@x.io".into() }]
+        vec![Recipient {
+            name: None,
+            email: "solo@x.io".into()
+        }]
     );
 }
 
@@ -62,10 +67,16 @@ fn recipient_line_groups_by_field_and_names_you() {
     // `me` matches case-insensitively, whatever the display name says.
     m.to = "Somebody <ME@Example.com>, Ben Ito <ben@x.io>".into();
     m.cc = "Dev Rao <dev@x.io>".into();
-    assert_eq!(recipient_line(&m, "me@example.com"), "to You, Ben Ito · cc Dev Rao");
+    assert_eq!(
+        recipient_line(&m, "me@example.com"),
+        "to You, Ben Ito · cc Dev Rao"
+    );
     m.cc = String::new();
     m.bcc = "hid@x.io".into();
-    assert_eq!(recipient_line(&m, "me@example.com"), "to You, Ben Ito · bcc hid@x.io");
+    assert_eq!(
+        recipient_line(&m, "me@example.com"),
+        "to You, Ben Ito · bcc hid@x.io"
+    );
     // An empty `me` never matches an empty address.
     m.to = "bob@x.io".into();
     m.bcc = String::new();
@@ -121,7 +132,8 @@ fn split_quoted_handles_wrapped_attribution() {
 
 #[test]
 fn split_quoted_at_original_message_line() {
-    let body = "Approved.\n\n-----Original Message-----\nFrom: Bob\nSent: Monday\n\nPlease approve.";
+    let body =
+        "Approved.\n\n-----Original Message-----\nFrom: Bob\nSent: Monday\n\nPlease approve.";
     let q = split_quoted(body);
     assert_eq!(q.main, "Approved.");
     assert_eq!(
@@ -228,7 +240,13 @@ fn safe_html_blocks_images_hidden_behind_unclosed_markup() {
 #[test]
 fn safe_html_without_images_is_identity() {
     let html = "<table><tr><td>Total</td><td>$5</td></tr></table>é<br>";
-    assert_eq!(safe_html(html), mail_classifier::reading::SafeHtml { html: html.into(), blocked_images: 0 });
+    assert_eq!(
+        safe_html(html),
+        mail_classifier::reading::SafeHtml {
+            html: html.into(),
+            blocked_images: 0
+        }
+    );
 }
 
 #[test]
@@ -243,7 +261,9 @@ fn html_to_text_lists_paragraphs_and_breaks() {
 #[test]
 fn html_to_text_decodes_entities() {
     assert_eq!(
-        html_to_text("<p>Fish &amp; chips &lt;3 &quot;quoted&quot; &#8364;5 &#x41; &mdash; done&nbsp;&nbsp;ok &bogus; &#xZZ;</p>"),
+        html_to_text(
+            "<p>Fish &amp; chips &lt;3 &quot;quoted&quot; &#8364;5 &#x41; &mdash; done&nbsp;&nbsp;ok &bogus; &#xZZ;</p>"
+        ),
         "Fish & chips <3 \"quoted\" €5 A — done ok &bogus; &#xZZ;"
     );
 }
@@ -259,14 +279,20 @@ fn html_to_text_drops_script_style_and_head() {
 #[test]
 fn html_to_text_tolerates_broken_markup() {
     // Unclosed head still ends when body content starts.
-    assert_eq!(html_to_text("<head><title>T</title><p>Body text"), "Body text");
+    assert_eq!(
+        html_to_text("<head><title>T</title><p>Body text"),
+        "Body text"
+    );
     // Uppercase tags, unclosed tags, lone '<', trailing unterminated tag.
     assert_eq!(
         html_to_text("<DIV>one<P>two &lt; three<br/>four<B>five</DIV><span"),
         "one\n\ntwo < three\nfourfive"
     );
     assert_eq!(html_to_text("a < b and c"), "a < b and c");
-    assert_eq!(html_to_text(r#"<a title="x > y" href=z>label</a>"#), "label");
+    assert_eq!(
+        html_to_text(r#"<a title="x > y" href=z>label</a>"#),
+        "label"
+    );
 }
 
 #[test]
@@ -350,7 +376,10 @@ fn thread_position_is_chronological_by_received_then_id() {
 
 #[test]
 fn thread_position_counts_an_opened_message_outside_the_slice() {
-    let messages = vec![msg(2, 1, "2026-09-01T10:00:00Z"), msg(4, 1, "2026-09-03T10:00:00Z")];
+    let messages = vec![
+        msg(2, 1, "2026-09-01T10:00:00Z"),
+        msg(4, 1, "2026-09-03T10:00:00Z"),
+    ];
     let outsider = msg(3, 1, "2026-09-02T10:00:00Z");
     assert_eq!(thread_position(&messages, &outsider), (2, 3));
 }
@@ -399,14 +428,27 @@ fn reader_view_keeps_each_threads_state_and_forgets_on_request() {
     v.toggle_plain(1, 10);
 
     // Another thread sees nothing of it, and toggling there leaves thread 1 alone.
-    assert!(!v.is_expanded(2, 10) && !v.recipients_open(2, 10) && !v.quoted_open(2, 10) && !v.plain(2, 10));
+    assert!(
+        !v.is_expanded(2, 10)
+            && !v.recipients_open(2, 10)
+            && !v.quoted_open(2, 10)
+            && !v.plain(2, 10)
+    );
     v.toggle_expanded(2, 20);
     assert!(v.is_expanded(2, 20) && v.is_expanded(1, 10));
     assert!(v.recipients_open(1, 10) && v.quoted_open(1, 10) && v.plain(1, 10));
 
     v.forget(1);
-    assert!(!v.is_expanded(1, 10) && !v.recipients_open(1, 10) && !v.quoted_open(1, 10) && !v.plain(1, 10));
-    assert!(v.is_expanded(2, 20), "forgetting one thread keeps the others");
+    assert!(
+        !v.is_expanded(1, 10)
+            && !v.recipients_open(1, 10)
+            && !v.quoted_open(1, 10)
+            && !v.plain(1, 10)
+    );
+    assert!(
+        v.is_expanded(2, 20),
+        "forgetting one thread keeps the others"
+    );
 }
 
 #[test]
@@ -440,7 +482,10 @@ fn attachment_round_trips_through_message_json() {
     let mut m = msg(1, 1, "2026-09-01T10:00:00Z");
     m.cc = "c@x.io".into();
     m.html = Some("<p>x</p>".into());
-    m.attachments = vec![Attachment { name: "a.pdf".into(), size: 2048 }];
+    m.attachments = vec![Attachment {
+        name: "a.pdf".into(),
+        size: 2048,
+    }];
     let json = serde_json::to_string(&m).unwrap();
     assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), m);
 

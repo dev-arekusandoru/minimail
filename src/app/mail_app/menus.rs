@@ -38,13 +38,17 @@ impl MailApp {
         trigger
             .selected(self.menu_is(kind))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                let Some(view) = app.upgrade() else { return menu };
+                let Some(view) = app.upgrade() else {
+                    return menu;
+                };
                 let (items, target) = view.read(cx).menu_items(kind);
                 let owner = app.clone();
                 let run: MenuRun = Rc::new(move |action, window, cx| {
                     let target = target.clone();
                     owner
-                        .update(cx, |this, cx| this.run_menu_action(action, target, window, cx))
+                        .update(cx, |this, cx| {
+                            this.run_menu_action(action, target, window, cx)
+                        })
                         .ok();
                 });
                 populate(menu, &items, &run, window, cx)
@@ -97,8 +101,12 @@ impl MailApp {
         let mut items = triage_items(&[msg.state]);
         if !self.mailbox.pending(id).is_empty() {
             items.push(MenuItem::separator());
-            items.push(MenuItem::action("Accept AI suggestions", || Box::new(AcceptSuggestions)));
-            items.push(MenuItem::action("Reject AI suggestions", || Box::new(RejectSuggestions)));
+            items.push(MenuItem::action("Accept AI suggestions", || {
+                Box::new(AcceptSuggestions)
+            }));
+            items.push(MenuItem::action("Reject AI suggestions", || {
+                Box::new(RejectSuggestions)
+            }));
         }
         items.push(MenuItem::separator());
         items.push(MenuItem::action("File…", || Box::new(File)));
@@ -107,11 +115,14 @@ impl MailApp {
             items.push(MenuItem::action("Toggle select", || Box::new(ToggleSelect)));
         }
         items.push(MenuItem::separator());
-        items.push(MenuItem::action("Summarize thread", || Box::new(SummarizeThread)));
-        items.push(MenuItem::action("Mute thread", || Box::new(MuteThread)));
-        items.push(MenuItem::action(format!("Unsubscribe {}", sender_domain(msg)), || {
-            Box::new(Unsubscribe)
+        items.push(MenuItem::action("Summarize thread", || {
+            Box::new(SummarizeThread)
         }));
+        items.push(MenuItem::action("Mute thread", || Box::new(MuteThread)));
+        items.push(MenuItem::action(
+            format!("Unsubscribe {}", sender_domain(msg)),
+            || Box::new(Unsubscribe),
+        ));
         items.push(MenuItem::separator());
         items.push(MenuItem::submenu(
             "Sender actions",
@@ -155,7 +166,11 @@ impl MailApp {
         if ids.iter().all(|id| selected.contains(id)) {
             selected.retain(|id| !ids.contains(id));
         } else {
-            let fresh: Vec<MessageId> = ids.iter().copied().filter(|id| !selected.contains(id)).collect();
+            let fresh: Vec<MessageId> = ids
+                .iter()
+                .copied()
+                .filter(|id| !selected.contains(id))
+                .collect();
             selected.extend(fresh);
         }
         self.triage.set_selection(selected);

@@ -12,7 +12,12 @@ fn msg(id: u32, thread: u32, name: &str, day: u32) -> String {
 }
 
 fn mailbox() -> Mailbox {
-    let m = [msg(1, 10, "ann", 1), msg(2, 10, "bob", 2), msg(3, 20, "cy", 3), msg(4, 10, "ann", 4)];
+    let m = [
+        msg(1, 10, "ann", 1),
+        msg(2, 10, "bob", 2),
+        msg(3, 20, "cy", 3),
+        msg(4, 10, "ann", 4),
+    ];
     Mailbox::from_json(&format!("[{}]", m.join(","))).unwrap()
 }
 
@@ -22,7 +27,10 @@ fn groups_are_ordered_by_newest_message_and_keep_input_order() {
     let ids: Vec<MessageId> = vec![4, 3, 2, 1];
     let groups = group(&ids, |id| mb.get(id));
     assert_eq!(groups.len(), 2);
-    assert_eq!((groups[0].thread_id, groups[0].ids.clone()), (10, vec![4, 2, 1]));
+    assert_eq!(
+        (groups[0].thread_id, groups[0].ids.clone()),
+        (10, vec![4, 2, 1])
+    );
     assert_eq!((groups[1].thread_id, groups[1].ids.clone()), (20, vec![3]));
     assert_eq!(groups[0].latest(), 4);
 }
@@ -40,8 +48,20 @@ fn rows_collapse_expand_and_single_messages_stay_plain() {
 
     let open = rows(&groups, &HashSet::from([10]));
     assert_eq!(open.len(), 5);
-    assert_eq!(open[1], Row::Child { thread_id: 10, id: 4 });
-    assert_eq!(open[3], Row::Child { thread_id: 10, id: 1 });
+    assert_eq!(
+        open[1],
+        Row::Child {
+            thread_id: 10,
+            id: 4
+        }
+    );
+    assert_eq!(
+        open[3],
+        Row::Child {
+            thread_id: 10,
+            id: 1
+        }
+    );
 }
 
 #[test]
@@ -57,7 +77,10 @@ fn a_panel_only_groups_the_ids_it_is_given() {
 #[test]
 fn participants_are_distinct_oldest_first() {
     let mb = mailbox();
-    assert_eq!(participants(&[4, 2, 1], |id| mb.get(id)), vec!["ann", "bob"]);
+    assert_eq!(
+        participants(&[4, 2, 1], |id| mb.get(id)),
+        vec!["ann", "bob"]
+    );
 }
 
 #[test]

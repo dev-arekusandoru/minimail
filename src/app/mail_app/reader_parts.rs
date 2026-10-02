@@ -1,13 +1,13 @@
 //! Small shared pieces of the reader: mono metadata text, keycaps, badges, key-labelled buttons
 //! and the thread rail.
-use gpui_kit::base::SelectableText;
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::text::TextView;
 use super::super::*;
 use crate::app::ui::{mono_font, shortcut};
 use crate::theme::ThemeColor;
+use gpui_kit::base::SelectableText;
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{kbd::Kbd, tag::Tag, Sizable as _};
+use gpui_kit::component::text::TextView;
+use gpui_kit::component::{Sizable as _, kbd::Kbd, tag::Tag};
 
 /// Which surface of the reader a message is drawn as.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -28,7 +28,11 @@ pub(super) struct Look<'a> {
 
 impl<'a> Look<'a> {
     pub fn new(cx: &'a App) -> Self {
-        Self { t: &cx.theme().colors, mono: mono_font(cx), dark: cx.theme().is_dark() }
+        Self {
+            t: &cx.theme().colors,
+            mono: mono_font(cx),
+            dark: cx.theme().is_dark(),
+        }
     }
 
     /// The sender's monogram at `size` px: the one avatar the reader has, shared by the message
@@ -38,7 +42,12 @@ impl<'a> Look<'a> {
     /// scales with the circle and the text is one unbroken, centred line.
     pub fn monogram(&self, name: &str, email: &str, size: f32) -> Div {
         let initials = crate::reading::initials(name, email);
-        let font = size * if initials.chars().count() > 1 { 0.4 } else { 0.5 };
+        let font = size
+            * if initials.chars().count() > 1 {
+                0.4
+            } else {
+                0.5
+            };
         let (bg, fg, border) = identity_color(&initials, self.dark);
         div()
             .flex_shrink_0()
@@ -61,12 +70,21 @@ impl<'a> Look<'a> {
 
     /// One line of mono metadata text.
     pub fn mono(&self, text: impl Into<SharedString>, color: Hsla) -> Div {
-        div().font_family(self.mono.clone()).text_size(px(11.)).text_color(color).child(text.into())
+        div()
+            .font_family(self.mono.clone())
+            .text_size(px(11.))
+            .text_color(color)
+            .child(text.into())
     }
 
     /// [`Self::mono`] whose text takes part in the window's text selection. `id` must be stable
     /// and unique among the selectable texts on screen.
-    pub fn mono_selectable(&self, id: impl Into<ElementId>, text: impl Into<SharedString>, color: Hsla) -> Div {
+    pub fn mono_selectable(
+        &self,
+        id: impl Into<ElementId>,
+        text: impl Into<SharedString>,
+        color: Hsla,
+    ) -> Div {
         div()
             .font_family(self.mono.clone())
             .text_size(px(11.))
@@ -137,12 +155,22 @@ impl<'a> Look<'a> {
 /// person always gets the same background, ring and text, in both themes.
 fn identity_color(initials: &str, dark: bool) -> (Hsla, Hsla, Hsla) {
     const HUES: u64 = 12;
-    let hash = initials.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    let hash = initials
+        .bytes()
+        .fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
     let hue = (hash % HUES) as f32 / HUES as f32;
     if dark {
-        (hsla(hue, 0.35, 0.28, 1.), hsla(hue, 0.55, 0.80, 1.), hsla(hue, 0.40, 0.34, 1.))
+        (
+            hsla(hue, 0.35, 0.28, 1.),
+            hsla(hue, 0.55, 0.80, 1.),
+            hsla(hue, 0.40, 0.34, 1.),
+        )
     } else {
-        (hsla(hue, 0.45, 0.94, 1.), hsla(hue, 0.55, 0.38, 1.), hsla(hue, 0.40, 0.86, 1.))
+        (
+            hsla(hue, 0.45, 0.94, 1.),
+            hsla(hue, 0.55, 0.38, 1.),
+            hsla(hue, 0.40, 0.86, 1.),
+        )
     }
 }
 
@@ -184,12 +212,20 @@ pub(super) fn rail_row(
     content: AnyElement,
 ) -> Div {
     let center = dot.map_or(0., |(c, _)| c);
-    let line = div().absolute().left(px(RAIL_W / 2. - 0.5)).w(px(1.)).bg(t.border);
-    let mut gutter = div().relative().flex_none().w(px(RAIL_W)).child(match (first, last) {
-        (true, _) => line.top(px(center)).bottom_0(),
-        (_, true) => line.top_0().h(px(center)),
-        _ => line.top_0().bottom_0(),
-    });
+    let line = div()
+        .absolute()
+        .left(px(RAIL_W / 2. - 0.5))
+        .w(px(1.))
+        .bg(t.border);
+    let mut gutter = div()
+        .relative()
+        .flex_none()
+        .w(px(RAIL_W))
+        .child(match (first, last) {
+            (true, _) => line.top(px(center)).bottom_0(),
+            (_, true) => line.top_0().h(px(center)),
+            _ => line.top_0().bottom_0(),
+        });
     if let Some((c, color)) = dot {
         gutter = gutter.child(
             div()
@@ -204,9 +240,11 @@ pub(super) fn rail_row(
                 .border_color(t.background),
         );
     }
-    div()
-        .relative()
-        .flex()
-        .child(gutter)
-        .child(div().flex_1().min_w_0().when(!last, |d| d.pb_3()).child(content))
+    div().relative().flex().child(gutter).child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .when(!last, |d| d.pb_3())
+            .child(content),
+    )
 }

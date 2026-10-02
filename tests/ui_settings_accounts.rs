@@ -13,8 +13,8 @@ use gpui_kit::{
 };
 use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
-use mail_classifier::judge::JudgePolicy;
 use mail_classifier::contacts::ContactStore;
+use mail_classifier::judge::JudgePolicy;
 use mail_classifier::model::{Account, Mailbox, ProviderKind};
 use mail_classifier::sync_status::SyncAction;
 
@@ -50,22 +50,27 @@ fn app(cx: &mut TestAppContext) -> Harness<'_> {
     harness_with(cx, with_gmail())
 }
 
-
 fn click(cx: &mut TestAppContext, window: AnyWindowHandle, id: impl Into<ElementId>) {
     let id = id.into();
-    cx.update_window(window, |_, window, cx| window.click(id, cx)).expect("window alive");
+    cx.update_window(window, |_, window, cx| window.click(id, cx))
+        .expect("window alive");
     cx.run_until_parked();
 }
 
 fn has(cx: &mut TestAppContext, window: AnyWindowHandle, id: impl Into<ElementId>) -> bool {
     let id = id.into();
-    cx.update_window(window, |_, window, _| window.try_find(id).is_some()).expect("window alive")
+    cx.update_window(window, |_, window, _| window.try_find(id).is_some())
+        .expect("window alive")
 }
 
 /// Every string the last completed frame of `window` draws.
 fn text(cx: &mut TestAppContext, window: AnyWindowHandle) -> String {
     cx.update_window(window, |_, window, _| {
-        snapshots(window).iter().filter_map(|row| row.label()).collect::<Vec<_>>().join(" ")
+        snapshots(window)
+            .iter()
+            .filter_map(|row| row.label())
+            .collect::<Vec<_>>()
+            .join(" ")
     })
     .expect("window alive")
 }
@@ -78,11 +83,17 @@ fn menu_rows(window: &Window) -> Vec<(ElementId, usize, String)> {
         .filter_map(|row| {
             let path = row.path();
             let at = path.iter().rposition(|id| *id == popup)?;
-            let ElementId::Integer(ix) = *path.last()? else { return None };
+            let ElementId::Integer(ix) = *path.last()? else {
+                return None;
+            };
             if at == 0 || path.len() != at + 4 {
                 return None;
             }
-            Some((path[at - 1].clone(), usize::try_from(ix).ok()?, row.label()?.to_owned()))
+            Some((
+                path[at - 1].clone(),
+                usize::try_from(ix).ok()?,
+                row.label()?.to_owned(),
+            ))
         })
         .collect()
 }
@@ -101,15 +112,18 @@ fn click_menu_row(cx: &mut TestAppContext, window: AnyWindowHandle, label: &str)
 }
 
 fn click_dialog_button(cx: &mut TestAppContext, window: AnyWindowHandle, button: &'static str) {
-    cx.update_window(window, |_, window, cx| window.within("dialog").click(button, cx))
-        .expect("window alive");
+    cx.update_window(window, |_, window, cx| {
+        window.within("dialog").click(button, cx)
+    })
+    .expect("window alive");
     cx.run_until_parked();
 }
 
 /// Complete a frame, so the element registry matches what is on screen.
 fn redraw(cx: &mut TestAppContext, window: AnyWindowHandle) {
     cx.run_until_parked();
-    cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx)).expect("window alive");
+    cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+        .expect("window alive");
 }
 
 /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
@@ -117,7 +131,8 @@ fn redraw(cx: &mut TestAppContext, window: AnyWindowHandle) {
 fn settle(cx: &mut TestAppContext, window: AnyWindowHandle) {
     cx.run_until_parked();
     std::thread::sleep(std::time::Duration::from_millis(300));
-    cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx)).expect("window alive");
+    cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+        .expect("window alive");
 }
 
 fn linked(h: &mut Harness<'_>) -> Vec<String> {
@@ -143,9 +158,16 @@ fn removing_an_account_asks_first_and_cancel_keeps_it(cx: &mut TestAppContext) {
 
     assert!(h.settings_has("dialog"), "removing asks first");
     let shown = text(&mut *h.cx, settings);
-    assert!(shown.contains("Remove"), "the dialog offers Remove: {shown}");
+    assert!(
+        shown.contains("Remove"),
+        "the dialog offers Remove: {shown}"
+    );
     assert!(shown.contains("Cancel"), "and Cancel: {shown}");
-    assert_eq!(linked(&mut h), before, "the account is still linked while it asks");
+    assert_eq!(
+        linked(&mut h),
+        before,
+        "the account is still linked while it asks"
+    );
 
     click_dialog_button(&mut *h.cx, settings, "cancel");
     redraw(&mut *h.cx, settings);
@@ -161,12 +183,26 @@ fn an_expired_sign_in_offers_signing_in_again_and_keeps_the_account(cx: &mut Tes
     h.open_settings();
     // No stored token for the linked account: the app calls that an expired sign-in, and the
     // card's one action is a sign-in for that same account.
-    assert!(h.settings_has(("account-sign-in", 0usize)), "an expired sign-in offers one");
-    assert!(!h.settings_has(("account-retry", 0usize)), "a sign-in is not a failed round");
+    assert!(
+        h.settings_has(("account-sign-in", 0usize)),
+        "an expired sign-in offers one"
+    );
+    assert!(
+        !h.settings_has(("account-retry", 0usize)),
+        "a sign-in is not a failed round"
+    );
 
     h.settings_click(("account-sign-in", 0usize));
-    assert_eq!(linked(&mut h), before, "signing in again neither adds nor drops an account");
-    assert_eq!(h.read(|a| a.mailbox.account(GMAIL_ID).unwrap().nickname.clone()), None, "the nickname stays unset");
+    assert_eq!(
+        linked(&mut h),
+        before,
+        "signing in again neither adds nor drops an account"
+    );
+    assert_eq!(
+        h.read(|a| a.mailbox.account(GMAIL_ID).unwrap().nickname.clone()),
+        None,
+        "the nickname stays unset"
+    );
     assert!(
         h.toast().contains("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID"),
         "that account's own Gmail sign-in ran, and asked for the OAuth client: {}",
@@ -177,7 +213,10 @@ fn an_expired_sign_in_offers_signing_in_again_and_keeps_the_account(cx: &mut Tes
 #[gpui_kit::gpui::test]
 fn the_add_button_starts_a_sign_in_only_with_an_oauth_client(cx: &mut TestAppContext) {
     let (window, seen) = panel(cx, Vec::new(), false);
-    assert!(has(cx, window, "account-add-gmail"), "the page offers to add a Gmail account");
+    assert!(
+        has(cx, window, "account-add-gmail"),
+        "the page offers to add a Gmail account"
+    );
     click(cx, window, "account-add-gmail");
     assert!(
         seen.borrow().is_empty(),
@@ -188,7 +227,9 @@ fn the_add_button_starts_a_sign_in_only_with_an_oauth_client(cx: &mut TestAppCon
     let (window, seen) = panel(cx, Vec::new(), true);
     click(cx, window, "account-add-gmail");
     assert!(
-        seen.borrow().iter().any(|e| matches!(e, SettingsEvent::AddGmail)),
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, SettingsEvent::AddGmail)),
         "with the OAuth client configured it starts one: {:?}",
         seen.borrow()
     );
@@ -237,7 +278,10 @@ fn panel(
                 },
             )
             .expect("panel window");
-            window.downcast::<gpui_kit::base::Root>().expect("root").into()
+            window
+                .downcast::<gpui_kit::base::Root>()
+                .expect("root")
+                .into()
         })
     };
     cx.run_until_parked();
@@ -265,19 +309,47 @@ fn the_footer_offers_the_one_action_its_status_allows(cx: &mut TestAppContext) {
     let (window, seen) = panel(
         cx,
         vec![
-            row("expired", "Sign-in expired", true, Some(SyncAction::SignInAgain)),
-            row("failed", "Sync failed: the server said no", true, Some(SyncAction::Retry)),
+            row(
+                "expired",
+                "Sign-in expired",
+                true,
+                Some(SyncAction::SignInAgain),
+            ),
+            row(
+                "failed",
+                "Sync failed: the server said no",
+                true,
+                Some(SyncAction::Retry),
+            ),
             row("healthy", "Synced 2 min ago", false, None),
         ],
         true,
     );
 
-    assert!(has(cx, window, ("account-sign-in", 0usize)), "an expired sign-in offers a sign-in");
-    assert!(has(cx, window, ("account-retry", 1usize)), "a failed round offers a retry");
-    assert!(!has(cx, window, ("account-retry", 0usize)), "and only that one");
-    assert!(!has(cx, window, ("account-sign-in", 1usize)), "one action, never two");
-    assert!(!has(cx, window, ("account-sign-in", 2usize)), "a healthy account offers nothing");
-    assert!(!has(cx, window, ("account-retry", 2usize)), "a healthy account offers nothing");
+    assert!(
+        has(cx, window, ("account-sign-in", 0usize)),
+        "an expired sign-in offers a sign-in"
+    );
+    assert!(
+        has(cx, window, ("account-retry", 1usize)),
+        "a failed round offers a retry"
+    );
+    assert!(
+        !has(cx, window, ("account-retry", 0usize)),
+        "and only that one"
+    );
+    assert!(
+        !has(cx, window, ("account-sign-in", 1usize)),
+        "one action, never two"
+    );
+    assert!(
+        !has(cx, window, ("account-sign-in", 2usize)),
+        "a healthy account offers nothing"
+    );
+    assert!(
+        !has(cx, window, ("account-retry", 2usize)),
+        "a healthy account offers nothing"
+    );
 
     click(cx, window, ("account-retry", 1usize));
     click(cx, window, ("account-sign-in", 0usize));
@@ -298,12 +370,17 @@ fn the_footer_offers_the_one_action_its_status_allows(cx: &mut TestAppContext) {
 fn the_rename_pencil_focuses_the_nickname_input(cx: &mut TestAppContext) {
     let (window, seen) = panel(cx, vec![row("work", "Synced just now", false, None)], true);
     // Typing before the pencil goes nowhere near the nickname.
-    cx.update_window(window, |_, window, cx| window.input("Home", cx)).expect("window alive");
+    cx.update_window(window, |_, window, cx| window.input("Home", cx))
+        .expect("window alive");
     cx.run_until_parked();
-    assert!(seen.borrow().is_empty(), "the title only takes text once it has focus");
+    assert!(
+        seen.borrow().is_empty(),
+        "the title only takes text once it has focus"
+    );
 
     click(cx, window, ("account-rename", 0usize));
-    cx.update_window(window, |_, window, cx| window.input("Home", cx)).expect("window alive");
+    cx.update_window(window, |_, window, cx| window.input("Home", cx))
+        .expect("window alive");
     cx.run_until_parked();
     assert!(
         seen.borrow()
