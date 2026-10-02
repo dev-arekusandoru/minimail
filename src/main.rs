@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 fn main() {
     let store = match mail_classifier::contacts::open_default() {
-        Ok(store) => std::rc::Rc::new(store),
+        Ok(store) => Rc::new(store),
         Err(e) => {
             eprintln!(
                 "cannot open contacts database {}: {e}",
@@ -22,7 +22,6 @@ fn main() {
         theme::init(cx);
         theme::watch_user_themes(cx);
         actions::bind_keys(cx);
-        let store = Rc::new(mail_classifier::contacts::open_default().expect("contacts database at $MAIL_CLASSIFIER_DB"));
         let scope = Scope::Global;
         let mode = app_settings::THEME_MODE.get(store.as_ref(), &scope);
         let light = app_settings::LIGHT_THEME.get(store.as_ref(), &scope);
