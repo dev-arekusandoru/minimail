@@ -14,6 +14,7 @@ pub mod hints;
 pub mod known_senders;
 pub mod contacts;
 pub mod judge;
+pub mod list_tabs;
 pub mod model;
 pub mod provider;
 pub mod sync;
