@@ -168,6 +168,8 @@ pub struct MailApp {
     sync_error: Option<String>,
     /// Latest round error per account, cleared by its next error-free round (Accounts settings).
     account_errors: HashMap<AccountId, String>,
+    /// Accounts the user asked to retry (Accounts settings); each runs a check on the next round.
+    retry_accounts: HashSet<AccountId>,
     /// Run a server change check on the next round (Fetch mail, sign-in).
     force_check: bool,
     /// Time of the next scheduled check.
@@ -272,6 +274,7 @@ impl MailApp {
             providers: HashMap::new(),
             sync_error: None,
             account_errors: HashMap::new(),
+            retry_accounts: HashSet::new(),
             force_check: true,
             check_at: 0,
             throttled_until: None,

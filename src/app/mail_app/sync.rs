@@ -35,6 +35,17 @@ fn run_job(job: AccountJob) -> (AccountId, sync::RoundResult) {
     (account.clone(), sync::run_round(&job.provider, job.round))
 }
 
+/// What a finished browser sign-in hands back: the token, the address it belongs to, and the
+/// account it is replacing, if the user was signing an existing one back in.
+struct SignIn {
+    client: ClientConfig,
+    cache: Rc<Cache>,
+    refresh: String,
+    email: String,
+    /// The account to re-attach the token to; `None` adds a new account.
+    existing: Option<AccountId>,
+}
+
 impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
     pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
@@ -126,10 +137,13 @@ impl MailApp {
         let mut jobs = Vec::new();
         for (account, provider) in &self.providers {
             let older = self.older_queue.get(account).cloned().unwrap_or_default();
+            // A retried account asks the server now, even when nothing else is due for it.
+            let check = check || self.retry_accounts.contains(account);
             let round = sync::plan_round(&self.mailbox, &cache, account, now, check, &older);
             if round.is_empty() && older.is_empty() {
                 continue;
             }
+            self.retry_accounts.remove(account);
             self.older_in_flight.insert(account.clone());
             jobs.push(AccountJob { account: account.clone(), provider: provider.clone(), round });
         }
@@ -374,7 +388,41 @@ impl MailApp {
         self.row_cursor = 0;
     }
 
+
     pub(super) fn add_gmail_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_gmail_sign_in(None, window, cx);
+    }
+
+    /// Sign `id` in again after its token stopped working: the account keeps its id, nickname,
+    /// icon, color and cached mail; only its provider is replaced.
+    pub(super) fn sign_in_again(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mailbox.account(id).is_none() {
+            return;
+        }
+        self.start_gmail_sign_in(Some(id.to_owned()), window, cx);
+    }
+
+    /// Run one more server round for `id` right away, dropping the error that made the card offer
+    /// Retry.
+    pub(super) fn retry_sync(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.providers.contains_key(id) {
+            return;
+        }
+        self.account_errors.remove(id);
+        self.retry_accounts.insert(id.to_owned());
+        self.wake_sync();
+        self.refresh_account_rows(cx);
+        cx.notify();
+    }
+
+    /// Open the browser sign-in, for a new account (`existing` is `None`) or for one whose
+    /// sign-in expired.
+    fn start_gmail_sign_in(
+        &mut self,
+        existing: Option<AccountId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(client) = ClientConfig::from_env() else {
             self.show_toast(
                 "Set MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET".into(),
@@ -402,7 +450,17 @@ impl MailApp {
             let result = task.await;
             this.update_in(cx, |this, window, cx| {
                 match result {
-                    Ok((tokens, email)) => this.finish_gmail_sign_in(client, cache, tokens.refresh, email, window, cx),
+                    Ok((tokens, email)) => this.finish_gmail_sign_in(
+                        SignIn {
+                            client,
+                            cache,
+                            refresh: tokens.refresh,
+                            email,
+                            existing,
+                        },
+                        window,
+                        cx,
+                    ),
                     Err(e) => this.show_toast(format!("Gmail sign-in failed: {e}"), window, cx),
                 }
             })
@@ -411,15 +469,13 @@ impl MailApp {
         .detach();
     }
 
-    fn finish_gmail_sign_in(
-        &mut self,
-        client: ClientConfig,
-        cache: Rc<Cache>,
-        refresh: String,
-        email: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Store the new token. A sign-in for an already linked account re-attaches it to that
+    /// account instead of creating a second one.
+    fn finish_gmail_sign_in(&mut self, sign: SignIn, window: &mut Window, cx: &mut Context<Self>) {
+        let SignIn { client, cache, refresh, email, existing } = sign;
+        if let Some(id) = existing {
+            return self.finish_gmail_reauth(&id, client, refresh, email, window, cx);
+        }
         if let Err(e) = KeyringStore.set(&email, &refresh) {
             self.show_toast(format!("Gmail sign-in failed: keychain: {e}"), window, cx);
             return;
@@ -448,6 +504,42 @@ impl MailApp {
         self.show_toast(format!("Gmail connected: {label}"), window, cx);
         self.refresh_account_rows(cx);
         self.classify_visible();
+        cx.notify();
+    }
+
+    /// A fresh token for an account that is already linked. The account keeps its id, nickname,
+    /// icon, color and downloaded mail; only its provider is replaced. A sign-in that came back
+    /// for a different address is refused, so no token is stored under the wrong account.
+    fn finish_gmail_reauth(
+        &mut self,
+        id: &str,
+        client: ClientConfig,
+        refresh: String,
+        email: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account) = self.mailbox.account(id) else { return };
+        let (address, label) = (account.email.clone(), crate::account_style::nickname_or(account, &account.email).to_owned());
+        if !address.eq_ignore_ascii_case(&email) {
+            self.show_toast(
+                format!("That sign-in is for {email}, not {label}. Add it as a separate account."),
+                window,
+                cx,
+            );
+            return;
+        }
+        if let Err(e) = KeyringStore.set(&address, &refresh) {
+            self.show_toast(format!("Gmail sign-in failed: keychain: {e}"), window, cx);
+            return;
+        }
+        self.register_provider(id, Box::new(GmailProvider::new(client, refresh)));
+        self.account_errors.remove(id);
+        self.force_check = true;
+        self.fetch_baseline = Some(self.mailbox.messages().len());
+        self.wake_sync();
+        self.show_toast(format!("Gmail connected: {label}"), window, cx);
+        self.refresh_account_rows(cx);
         cx.notify();
     }
 

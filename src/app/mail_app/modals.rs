@@ -281,16 +281,17 @@ impl MailApp {
             .iter()
             .map(|a| {
                 let gmail = a.provider == crate::model::ProviderKind::Gmail;
-                let (sync, sync_problem) = if gmail {
+                let (status, (sync, sync_problem)) = if gmail {
                     let facts = crate::sync_status::SyncFacts {
                         last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&a.id).ok().flatten()),
                         syncing: self.older_in_flight.contains(&a.id),
                         signed_in: self.providers.contains_key(&a.id),
                         error: self.account_errors.get(&a.id).map(String::as_str),
                     };
-                    crate::sync_status::describe(&crate::sync_status::status(&facts), now)
+                    let status = crate::sync_status::status(&facts);
+                    (status.clone(), crate::sync_status::describe(&status, now))
                 } else {
-                    (String::new(), false)
+                    (crate::sync_status::SyncStatus::Synced(None), (String::new(), false))
                 };
                 AccountRow {
                     id: a.id.clone(),
@@ -301,10 +302,17 @@ impl MailApp {
                     nickname: a.nickname.clone().unwrap_or_default(),
                     gmail,
                     sync,
+                    sync_action: status.action(),
                     sync_problem,
                 }
             })
             .collect()
+    }
+
+    /// The Settings window, when it is open. Settings is its own native window, so anything
+    /// driving it (a test, a focus request) needs this handle, not the mail window.
+    pub fn settings_window_handle(&self) -> Option<AnyWindowHandle> {
+        self.settings_window
     }
 
     /// Open Settings in its own native window, reusing and activating the existing window.
@@ -492,6 +500,10 @@ impl MailApp {
                     cx.notify();
                 }
                 SettingsEvent::AccountStyle { id, icon, color } => this.set_account_style(id, icon, color, window, cx),
+                SettingsEvent::SyncAction { id, action } => match action {
+                    crate::sync_status::SyncAction::SignInAgain => this.sign_in_again(id, window, cx),
+                    crate::sync_status::SyncAction::Retry => this.retry_sync(id, cx),
+                },
                 SettingsEvent::Close => this.close_settings(window, cx),
             },
         ));
