@@ -133,3 +133,4 @@ fn dragging_a_tab_in_the_strip_reorders_the_model(cx: &mut TestAppContext) {
     h.keys("cmd-w");
     assert_eq!(h.tabs(), vec![(2, true), (3, false)]);
 }
+
