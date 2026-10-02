@@ -150,10 +150,13 @@ The UI tests run headless. They drive the real views with simulated keystrokes a
 Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 `~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
 its directory) on first launch, migrated forward through `PRAGMA user_version`,
-and seeded once from `fixtures/contacts_seed.json`; afterwards the file is
-yours, so deleting it just re-seeds on the next start. Everything else
-the app tracks (rules, themes) still comes from the fixtures. Messages come from
-the fixtures until a Gmail account is linked (below).
+and seeded once from `fixtures/contacts_seed.json`. Schema 2 (the scoped settings
+table) is supported, including databases previously opened by the settings
+branch; existing contacts and settings are preserved. Unknown newer schemas
+are rejected with a diagnostic and exit status 1 before the UI starts.
+Afterwards the file is yours, so deleting it just re-seeds on the next start.
+Everything else the app tracks (rules, themes) still comes from the fixtures.
+Messages come from the fixtures until a Gmail account is linked (below).
 
 ### Gmail accounts
 

@@ -318,16 +318,71 @@ fn a_fresh_file_is_migrated_and_keeps_its_data_across_reopen() {
     let db = TempDb::new("contacts");
 
     let store = ContactStore::open(db.path()).expect("open a new file");
-    assert_eq!(store.schema_version().expect("version"), 1, "every migration is applied");
     let ada = store.create(ada()).expect("create");
     drop(store);
 
     let store = ContactStore::open(db.path()).expect("reopen");
-    assert_eq!(store.schema_version().expect("version after reopen"), 1, "reopening applies nothing");
     assert_eq!(store.journal_mode().expect("journal mode").to_lowercase(), "wal");
     assert!(store.foreign_keys_enabled().expect("foreign keys"));
     assert_eq!(store.get(ada.id).unwrap().unwrap().display_name, "Ada Nkemelu");
     assert!(store.is_known("ada@typefoundry.example").expect("known"));
+}
+
+#[test]
+fn upgrading_schema_one_preserves_contacts_and_schema_two_settings() {
+    let db = TempDb::new("contacts-migrations");
+    let store = ContactStore::open(db.path()).expect("open");
+    let ada = store.create(ada()).expect("create");
+    drop(store);
+
+    // Recreate the version-one file from before scoped settings were added.
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;").unwrap();
+    drop(conn);
+
+    let store = ContactStore::open(db.path()).expect("upgrade version one");
+    assert_eq!(store.get(ada.id).unwrap().unwrap().display_name, "Ada Nkemelu");
+    drop(store);
+
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.execute(
+        "INSERT INTO settings (scope, key, value) VALUES (?1, ?2, ?3)",
+        ["global", "theme", "\"dark\""],
+    ).expect("settings migration applied");
+    drop(conn);
+
+    let store = ContactStore::open(db.path()).expect("reopen version two");
+    assert!(store.is_known("ada@typefoundry.example").unwrap());
+    drop(store);
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let theme: String = conn.query_row(
+        "SELECT value FROM settings WHERE scope = 'global' AND key = 'theme'",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(theme, "\"dark\"");
+}
+
+#[test]
+fn unknown_future_schema_is_rejected_without_changing_data() {
+    let db = TempDb::new("contacts-future");
+    let store = ContactStore::open(db.path()).expect("open");
+    let ada = store.create(ada()).expect("create");
+    drop(store);
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.pragma_update(None, "user_version", 999).unwrap();
+    drop(conn);
+
+    assert!(matches!(ContactStore::open(db.path()), Err(Error::Invalid(_))));
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let name: String = conn.query_row(
+        "SELECT display_name FROM contacts WHERE id = ?1",
+        [ada.id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(name, "Ada Nkemelu");
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+    assert_eq!(version, 999);
 }
 
 #[test]

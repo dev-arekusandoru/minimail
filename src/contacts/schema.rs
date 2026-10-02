@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use super::error::{Error, Result};
 
 /// Applied in order; index + 1 is the `user_version` that migration sets.
-const MIGRATIONS: &[&str] = &[MIGRATION_1];
+const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2];
 
 /// Provider-shaped contacts: people, child tables for their addresses, and
 /// groups for labels.
@@ -106,6 +106,17 @@ CREATE TABLE store_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+"#;
+
+/// App settings: scoped key/value rows holding JSON. Keep this migration even
+/// in builds without the settings UI so databases shared across branches open.
+const MIGRATION_2: &str = r#"
+CREATE TABLE settings (
+    scope TEXT NOT NULL,
+    key   TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (scope, key)
+) WITHOUT ROWID;
 "#;
 
 /// Turn on the pragmas the store relies on and apply missing migrations.

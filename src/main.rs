@@ -5,7 +5,17 @@ use mail_classifier::sync::cache::{Cache, default_cache_path};
 use mail_classifier::theme;
 
 fn main() {
-    gpui_kit::application().with_assets(mail_classifier::app::icons::AppAssets).run(|cx| {
+    let store = match mail_classifier::contacts::open_default() {
+        Ok(store) => std::rc::Rc::new(store),
+        Err(e) => {
+            eprintln!(
+                "cannot open contacts database {}: {e}",
+                mail_classifier::contacts::default_db_path().display()
+            );
+            std::process::exit(1);
+        }
+    };
+    gpui_kit::application().with_assets(mail_classifier::app::icons::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         theme::init(cx);
         theme::watch_user_themes(cx);
@@ -13,11 +23,7 @@ fn main() {
         gpui_kit::open_window(
             gpui_kit::component::TitleBar::window_options(),
             cx,
-            |window, cx| {
-                let store = std::rc::Rc::new(
-                    mail_classifier::contacts::open_default()
-                        .expect("contacts database at $MAIL_CLASSIFIER_DB"),
-                );
+            move |window, cx| {
                 let cache = match Cache::open(&default_cache_path()) {
                     Ok(cache) => Some(std::rc::Rc::new(cache)),
                     Err(e) => {
