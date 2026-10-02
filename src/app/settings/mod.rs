@@ -1,20 +1,14 @@
 //! Settings window panel. Its entity owns transient page state and emits
 //! [`SettingsEvent`]s for changes applied live by the mail window.
 use gpui_kit::prelude::*;
-use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::Selectable as _;
-use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
-use gpui_kit::component::popover::Popover;
 use std::collections::HashMap;
 
-use crate::account_style;
-use crate::app::icons;
 use crate::app::mail_app::panes::Orientation;
-use crate::app::ui::{button, icon_button};
+use crate::app::ui::button;
 use crate::clock::{DAY, Timestamp};
 use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
@@ -34,6 +28,7 @@ mod senders;
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
 
+#[derive(Clone, Debug)]
 pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
     Grouping(bool),
@@ -53,6 +48,8 @@ pub enum SettingsEvent {
     AccountStyle { id: String, icon: &'static str, color: String },
     /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
     AccountNickname { id: String, nickname: String },
+    /// The user picked what the account's sync status allows.
+    SyncAction { id: String, action: crate::sync_status::SyncAction },
     Close,
     ResetAll,
 }
@@ -68,15 +65,17 @@ pub struct AccountRow {
     pub name: String,
     pub email: String,
     pub color: String,
-    /// Resolved icon key (see [`account_style::ICONS`]).
+    /// Resolved icon key, one of `account_style::ICONS`.
     pub icon: &'static str,
-    /// Raw nickname text; blank means unset (see [`account_style::normalize_nickname`]).
+    /// Raw nickname text; blank means unset (see `account_style::normalize_nickname`).
     pub nickname: String,
     /// Linked Gmail account (removable, has a sync status).
     pub gmail: bool,
     /// Sync status line (see [`crate::sync_status::describe`]) and whether it reports a problem.
     pub sync: String,
     pub sync_problem: bool,
+    /// The single action this status allows, or `None` while it is healthy.
+    pub sync_action: Option<crate::sync_status::SyncAction>,
 }
 
 /// Index of the Accounts page in [`SettingsPanel::pages`].
@@ -114,8 +113,6 @@ pub struct SettingsPanel {
     accounts: Vec<AccountRow>,
     /// Nickname input per account (with its subscription).
     controls: HashMap<String, AccountControls>,
-    /// Account whose Remove button has been clicked once (awaiting confirm).
-    confirm_remove: Option<String>,
     /// Gmail OAuth client credentials are present in the environment.
     gmail_configured: bool,
     /// Page selected when the panel opens.
@@ -146,7 +143,6 @@ impl SettingsPanel {
             blocked: Vec::new(),
             accounts: Vec::new(),
             controls: HashMap::new(),
-            confirm_remove: None,
             gmail_configured: false,
             start_page: 0,
             follow_up_days: (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
@@ -316,15 +312,9 @@ impl SettingsPanel {
         }
     }
 
-    /// Replace the account list (after a sign-in, removal or sync change); a pending remove
-    /// confirm survives only while its account is still listed.
+    /// Replace the account list (after a sign-in, removal or sync change).
     pub fn set_accounts(&mut self, accounts: Vec<AccountRow>, cx: &mut Context<Self>) {
         self.accounts = accounts;
-        if let Some(id) = &self.confirm_remove
-            && !self.accounts.iter().any(|a| &a.id == id)
-        {
-            self.confirm_remove = None;
-        }
         cx.notify();
     }
 
@@ -383,16 +373,6 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    /// First click on Remove arms the confirm; the second emits the removal.
-    fn remove_account(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.confirm_remove.as_deref() == Some(id) {
-            self.confirm_remove = None;
-            cx.emit(SettingsEvent::RemoveAccount(id.to_owned()));
-        } else {
-            self.confirm_remove = Some(id.to_owned());
-        }
-        cx.notify();
-    }
 
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
         vec![
@@ -438,134 +418,6 @@ fn note(id: &'static str, text: &'static str) -> SettingItem {
     SettingItem::render(move |_, _, cx| {
         div().id(id).text_sm().text_color(cx.theme().muted_foreground).child(text)
     })
-}
-
-/// One account as a card: a style tile (opens the icon and color picker), the nickname as an
-/// inline-editable title, the address, and a footer with the sync status and Remove.
-fn account_card(
-    index: usize,
-    account: &AccountRow,
-    nickname: Option<&Entity<InputState>>,
-    confirming: bool,
-    weak: &Weak,
-    cx: &App,
-) -> Stateful<Div> {
-    let t = cx.theme();
-    let color = theme::parse_color(&account.color).unwrap_or(t.primary);
-    let tile = Button::new(("account-style", index))
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(color.opacity(0.16))
-                .hover(color.opacity(0.28))
-                .active(color.opacity(0.36))
-                .foreground(color),
-        )
-        .icon(icons::account_icon(account.icon, &account.color, t, 26.))
-        .w(px(52.))
-        .h(px(52.))
-        .rounded(px(12.))
-        .accessibility_label("Account icon and color");
-    let picker = {
-        let (weak, id, icon, selected_color) = (weak.clone(), account.id.clone(), account.icon, account.color.clone());
-        Popover::new(("account-picker", index)).trigger(tile).content(move |_, _, cx| {
-            let t = cx.theme();
-            let icon_buttons = account_style::ICONS.iter().enumerate().map(|(i, (key, label))| {
-                let (weak, id, key) = (weak.clone(), id.clone(), *key);
-                let name = icons::account_icon_name(key).unwrap_or(IconName::Mail);
-                icon_button(("account-icon", index * account_style::ICONS.len() + i), name, label, "", cx)
-                    .selected(key == icon)
-                    .on_click(move |_, _, cx| {
-                        weak.update(cx, |this, cx| this.set_account_style(&id, Some(key), None, cx)).ok();
-                    })
-            });
-            let swatches = account_style::COLORS.iter().enumerate().filter_map(|(i, hex)| {
-                let fill = theme::parse_color(hex)?;
-                let (weak, id, hex) = (weak.clone(), id.clone(), *hex);
-                let chosen = hex.eq_ignore_ascii_case(&selected_color);
-                Some(
-                    Button::new(("account-color", index * account_style::COLORS.len() + i))
-                        .custom(ButtonCustomVariant::new(cx).color(fill).hover(fill).active(fill).foreground(t.background))
-                        .when(chosen, |b| b.icon(IconName::Check))
-                        .w(px(24.))
-                        .h(px(24.))
-                        .rounded(px(12.))
-                        .border_2()
-                        .border_color(if chosen { t.foreground } else { t.transparent })
-                        .accessibility_label(format!("Color {hex}"))
-                        .on_click(move |_, _, cx| {
-                            weak.update(cx, |this, cx| this.set_account_style(&id, None, Some(hex.to_owned()), cx)).ok();
-                        }),
-                )
-            });
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .w(px(232.))
-                .child(div().flex().flex_wrap().gap_1().children(icon_buttons))
-                .child(div().h(px(1.)).bg(t.border))
-                .child(div().flex().flex_wrap().gap_1().children(swatches))
-        })
-    };
-    let title = div().flex_1().min_w_0().text_base().font_weight(FontWeight::SEMIBOLD).children(
-        nickname.map(|input| Input::new(input).id(("account-nickname", index)).bordered(false).focus_bordered(true)),
-    );
-    let header = div()
-        .flex()
-        .items_center()
-        .gap_4()
-        .p_4()
-        .child(picker)
-        .child(
-            div().flex().flex_col().flex_1().min_w_0().gap_0p5().child(title).child(
-                div().px_3().text_xs().text_color(t.muted_foreground).child(account.email.clone()),
-            ),
-        );
-    let status_color = if account.sync_problem { t.danger } else { t.muted_foreground };
-    let remove = account.gmail.then(|| {
-        let (weak, id) = (weak.clone(), account.id.clone());
-        let (text, tip) = if confirming {
-            ("Confirm remove", "Removes the account and its cached mail from this app; Gmail is untouched")
-        } else {
-            ("Remove", "Remove this account from the app")
-        };
-        button(("account-remove", index), text, tip, "", cx)
-            .ghost()
-            .text_color(t.danger)
-            .on_click(move |_, _, cx| {
-                weak.update(cx, |this, cx| this.remove_account(&id, cx)).ok();
-            })
-    });
-    let footer = div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_2()
-        .px_4()
-        .py_2()
-        .border_t_1()
-        .border_color(t.border)
-        .child(
-            div()
-                .id(("account-sync", index))
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_xs()
-                .text_color(status_color)
-                .child(account.sync.clone()),
-        )
-        .children(remove.map(|b| div().flex_none().child(b)));
-    div()
-        .id(("account-card", index))
-        .flex()
-        .flex_col()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.border)
-        .bg(t.secondary)
-        .child(header)
-        .child(footer)
 }
 
 impl Focusable for SettingsPanel {
