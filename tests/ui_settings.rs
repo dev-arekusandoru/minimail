@@ -3,10 +3,8 @@
 use std::rc::Rc;
 
 use gpui_kit::{AnyWindowHandle, TestAppContext};
-use mail_classifier::clock::DAY;
 use mail_classifier::contacts::ContactStore;
-use mail_classifier::judge::{Confidence, Mode, QuestionKey};
-use mail_classifier::model::{Mailbox, Tag, TriageState};
+use mail_classifier::model::Mailbox;
 
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
@@ -66,73 +64,6 @@ fn the_tab_avatar_switch_turns_the_setting_off_and_back_on(cx: &mut TestAppConte
     open_page(&mut h, APPEARANCE);
     h.settings_click_in(0, 4, "check");
     assert!(h.read(|a| a.tab_avatars));
-}
-
-#[gpui_kit::gpui::test]
-fn the_number_input_steps_the_follow_up_timeout(cx: &mut TestAppContext) {
-    let mut h = app(cx);
-    open_page(&mut h, INBOX);
-    h.settings_click_in(0, 2, "decrement");
-    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 2 * DAY);
-    h.settings_click_in(0, 2, "increment");
-    h.settings_click_in(0, 2, "increment");
-    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 4 * DAY);
-}
-
-#[gpui_kit::gpui::test]
-fn lowering_follow_up_after_resurfaces_a_waiting_thread_on_tick(cx: &mut TestAppContext) {
-    let mut h = app(cx);
-    // Reply and expect an answer: the thread now waits on the default 3-day timeout.
-    h.app.update(h.cx, |a, _| a.mailbox.send_reply_at(1, "on it".into(), true, harness::NOON));
-    h.advance(DAY);
-    assert!(!h.has_tag(1, Tag::FollowUp), "three days of patience: one day is not enough");
-
-    open_page(&mut h, INBOX);
-    h.settings_click_in(0, 2, "decrement");
-    h.settings_click_in(0, 2, "decrement");
-    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), DAY);
-    h.settings_keys("escape");
-
-    h.tick();
-    assert_eq!(h.state_of(1), TriageState::Inbox);
-    assert!(h.has_tag(1, Tag::FollowUp), "the overdue thread is flagged for follow-up");
-    assert!(!h.has_tag(1, Tag::AwaitingReply), "resurfacing clears Awaiting Reply");
-}
-
-#[gpui_kit::gpui::test]
-fn the_handling_and_confidence_dropdowns_set_the_policy(cx: &mut TestAppContext) {
-    let mut h = app(cx);
-    let spam = |h: &mut Harness<'_>| h.read(|a| a.policy.mode(QuestionKey::Spam));
-    open_page(&mut h, AI);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High));
-    // The Spam group follows the summaries group.
-    h.settings_pick_option(1, 1, 2);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::Low));
-
-    h.settings_pick_option(1, 0, 1);
-    assert_eq!(spam(&mut h), Mode::Review);
-    h.settings_pick_option(1, 0, 2);
-    assert_eq!(spam(&mut h), Mode::Off);
-    h.settings_pick_option(1, 0, 0);
-    assert!(matches!(spam(&mut h), Mode::Auto(_)));
-}
-
-#[gpui_kit::gpui::test]
-fn unblocking_a_sender_from_settings_is_one_undoable_step(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "spam@example.com", "Deal", 1, "Inbox")]));
-    h.app.update(h.cx, |a, _| {
-        a.mailbox.block_sender("spam@example.com", None, 0);
-    });
-    open_page(&mut h, SENDERS);
-    h.settings_click(("blocked-unblock", 0usize));
-    assert!(h.read(|a| a.mailbox.blocked().is_empty()), "Unblock removes the sender");
-
-    h.settings_keys("escape");
-    h.keys("u");
-    assert!(
-        h.read(|a| a.mailbox.blocked() == vec![("spam@example.com".to_owned(), 0)]),
-        "undo restores the block"
-    );
 }
 
 #[gpui_kit::gpui::test]

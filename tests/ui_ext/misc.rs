@@ -59,10 +59,10 @@ pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
 pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
     reset_spam(&mut h);
-    // Settings -> AI -> the Spam group -> Handling dropdown -> Review.
+    // Settings -> AI -> Tagging -> the Spam row -> Review (the second segment).
     h.open_settings();
     h.settings_click("0-3");
-    h.settings_pick_option(1, 0, 1);
+    h.settings_click_in(1, 0, "ai-mode-Spam-1".to_owned());
     h.settings_keys("escape");
     assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
     h.keys("c");

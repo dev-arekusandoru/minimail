@@ -339,7 +339,8 @@ impl MailApp {
         let light_theme = self.light_theme.clone();
         let dark_theme = self.dark_theme.clone();
         let tab_avatars = self.tab_avatars;
-        let blocked = self.mailbox.blocked().into_iter().map(|(email, _)| email).collect();
+        let blocked = self.mailbox.blocked();
+        let now = self.now();
         let follow_up = self.mailbox.follow_up_timeout();
         let app = cx.weak_entity();
         let options = WindowOptions {
@@ -363,7 +364,7 @@ impl MailApp {
             let panel = cx.new(|cx| {
                 let panel = SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
-                    .mailbox_state(blocked, follow_up)
+                    .mailbox_state(blocked, now, follow_up)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured);
                 if accounts { panel.on_accounts_page() } else { panel }
@@ -489,8 +490,9 @@ impl MailApp {
                     cx.notify();
                 }
                 SettingsEvent::Unblock(email) => {
-                    this.mailbox.unblock_sender(email);
-                    cx.notify();
+                    if this.mailbox.unblock_sender(email) {
+                        this.show_toast(format!("Unblocked {email} · u to undo"), window, cx);
+                    }
                 }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
                 SettingsEvent::RemoveAccount(id) => this.remove_linked_account(id, window, cx),
@@ -510,6 +512,17 @@ impl MailApp {
         self.settings = Some(panel);
         self.settings_window = Some(handle);
         cx.notify();
+    }
+
+    /// Keep the open Settings window's blocked list in step with the mailbox: undo in the
+    /// main window restores a block behind the panel's back.
+    pub(super) fn sync_settings_blocked(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = &self.settings else {
+            return;
+        };
+        let now = self.now();
+        let blocked = self.mailbox.blocked();
+        panel.update(cx, |panel, cx| panel.set_blocked(blocked, now, cx));
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
