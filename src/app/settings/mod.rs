@@ -90,7 +90,6 @@ const ACCOUNTS_PAGE: usize = 0;
 
 const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
 const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
-const PANE_LAYOUTS: [(&str, &str); 2] = [("side", "Side by side"), ("stacked", "Stacked")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
@@ -132,6 +131,15 @@ pub struct SettingsPanel {
     blocked: Vec<String>,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
+    /// Number input behind the follow-up row.
+    follow_up_input: Entity<InputState>,
+    /// Text last read from [`Self::follow_up_input`].
+    follow_up_text: String,
+    /// Set when [`Self::follow_up_text`] changed outside the input (a reset or a reseed);
+    /// the next render writes it into the field.
+    follow_up_write_back: bool,
+    /// Keeps the follow-up input and the panel's day count in step.
+    _follow_up_sub: Subscription,
     accounts: Vec<AccountRow>,
     /// Nickname input per account (with its subscription).
     controls: HashMap<String, AccountControls>,
@@ -146,11 +154,33 @@ impl SettingsPanel {
         group: bool,
         preview_lines: u8,
         orientation: Orientation,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
         let search_anchor = cx.focus_handle().tab_stop(false);
+        let follow_up_days = default_follow_up_days();
+        let follow_up_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(follow_up_days.to_string())
+                .step(1.)
+                .min(f64::from(*FOLLOW_UP_DAYS.start()))
+                .max(f64::from(*FOLLOW_UP_DAYS.end()))
+        });
+        let follow_up_sub = cx.subscribe(&follow_up_input, |this, input, event: &InputEvent, cx| {
+            if !matches!(event, InputEvent::Change) {
+                return;
+            }
+            let text = input.read(cx).value().to_string();
+            if text != this.follow_up_text {
+                this.follow_up_text = text.clone();
+                // Half-typed values ("", "1.") are kept in the field but change nothing.
+                if let Ok(days) = text.parse::<f64>() {
+                    this.set_follow_up(days, cx);
+                }
+            }
+            cx.notify();
+        });
         Self {
             focus,
             search_anchor,
@@ -171,8 +201,11 @@ impl SettingsPanel {
             accounts: Vec::new(),
             controls: HashMap::new(),
             gmail_configured: false,
-            follow_up_days: (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
-                .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into()) as u8,
+            follow_up_days,
+            follow_up_input,
+            follow_up_text: follow_up_days.to_string(),
+            follow_up_write_back: false,
+            _follow_up_sub: follow_up_sub,
         }
     }
 
@@ -279,6 +312,8 @@ impl SettingsPanel {
             .div_euclid(DAY)
             .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into())
             as u8;
+        self.follow_up_text = self.follow_up_days.to_string();
+        self.follow_up_write_back = true;
         self
     }
 
@@ -332,10 +367,11 @@ impl SettingsPanel {
         self.preview_lines = preview::DEFAULT_LINES;
         self.orientation = Orientation::SideBySide;
         self.theme_mode = theme::ThemeMode::System;
-        self.light_theme.clear();
+        self.light_theme = crate::app_settings::DEFAULT_LIGHT_THEME.to_owned();
         self.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
-        self.follow_up_days =
-            (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY).clamp(1, 14) as u8;
+        self.follow_up_days = default_follow_up_days();
+        self.follow_up_text = self.follow_up_days.to_string();
+        self.follow_up_write_back = true;
         cx.notify();
     }
 
@@ -471,6 +507,26 @@ impl SettingsPanel {
     }
 
 
+    /// Whether the follow-up row differs from its default (the reset button's condition).
+    fn follow_up_is_modified(&self) -> bool {
+        self.follow_up_days != default_follow_up_days()
+    }
+
+    /// Restore the default follow-up timeout.
+    fn reset_follow_up(&mut self, cx: &mut Context<Self>) {
+        self.follow_up_days = default_follow_up_days();
+        self.follow_up_text = self.follow_up_days.to_string();
+        self.follow_up_write_back = true;
+        cx.emit(SettingsEvent::FollowUp(i64::from(self.follow_up_days) * DAY));
+        cx.notify();
+    }
+
+    /// The text the follow-up field must show, handed out once per change so later renders
+    /// leave the field alone while it is being typed in.
+    fn take_follow_up_write_back(&mut self) -> Option<String> {
+        std::mem::take(&mut self.follow_up_write_back).then(|| self.follow_up_text.clone())
+    }
+
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
         vec![
             self.accounts_page(weak),
@@ -480,11 +536,13 @@ impl SettingsPanel {
             self.blocked_page(weak),
         ]
     }
+}
 
-
-
-
-
+/// The default number of days to wait for a reply, clamped to the row's range.
+fn default_follow_up_days() -> u8 {
+    (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
+        .clamp(i64::from(*FOLLOW_UP_DAYS.start()), i64::from(*FOLLOW_UP_DAYS.end()))
+        as u8
 }
 
 /// A switch field backed by a panel bool and its setter.

@@ -1,40 +1,44 @@
 use super::*;
+use gpui_kit::component::input::NumberInput;
 
 impl SettingsPanel {
+    /// "Remind me if no reply after [N] days": a number input with a `days` suffix, so the
+    /// row reads as one sentence. Reset restores the default number of days.
+    fn follow_up_field(&self, weak: &Weak) -> SettingField<SharedString> {
+        let input = self.follow_up_input.clone();
+        let (write, dirty, undo) = (weak.clone(), weak.clone(), weak.clone());
+        SettingField::render(move |_, window, cx| {
+            // Only a change made outside the field (a reset) is written back; pushing the
+            // panel's text on every render would overwrite what the user is typing.
+            if let Some(text) = write.update(cx, |this, _| this.take_follow_up_write_back()).ok().flatten()
+            {
+                input.update(cx, |input, cx| input.set_value(SharedString::from(text), window, cx));
+            }
+            let muted = cx.theme().muted;
+            NumberInput::new(&input).suffix(div().text_sm().text_color(muted).child("days"))
+        })
+        .on_reset(
+            move |cx| {
+                dirty.read_with(cx, |this, _| this.follow_up_is_modified()).unwrap_or_default()
+            },
+            move |_window, cx| {
+                undo.update(cx, |this, cx| this.reset_follow_up(cx)).ok();
+            },
+        )
+    }
+
     pub(super) fn inbox_page(&self, weak: &Weak) -> SettingPage {
-        let preview_options = (0..=MAX_PREVIEW_LINES)
-            .map(|lines| (SharedString::from(lines.to_string()), SharedString::from(preview::lines_label(lines))))
-            .collect();
         let preview_field = {
-            let (get, set) = (weak.clone(), weak.clone());
-            SettingField::dropdown(
-                preview_options,
-                move |cx| {
-                    let lines = get.read_with(cx, |this, _| this.preview_lines).unwrap_or_default();
-                    SharedString::from(lines.to_string())
-                },
-                move |value: SharedString, cx| {
-                    if let Ok(lines) = value.parse::<u8>() {
-                        set.update(cx, |this, cx| this.set_preview_lines(lines, cx)).ok();
-                    }
-                },
-            )
-            .default_value(SharedString::from(crate::preview::DEFAULT_LINES.to_string()))
-        };
-        let follow_up_field = {
-            let (get, set) = (weak.clone(), weak.clone());
+            let (read, write) = (weak.clone(), weak.clone());
             SettingField::number_input(
-                NumberFieldOptions {
-                    min: f64::from(*FOLLOW_UP_DAYS.start()),
-                    max: f64::from(*FOLLOW_UP_DAYS.end()),
-                    step: 1.,
-                },
-                move |cx| get.read_with(cx, |this, _| f64::from(this.follow_up_days)).unwrap_or_default(),
-                move |days, cx| {
-                    set.update(cx, |this, cx| this.set_follow_up(days, cx)).ok();
+                NumberFieldOptions { min: 0., max: f64::from(MAX_PREVIEW_LINES), step: 1. },
+                move |cx| read.read_with(cx, |this, _| f64::from(this.preview_lines)).unwrap_or_default(),
+                move |lines: f64, cx| {
+                    let lines = lines.round().clamp(0., f64::from(MAX_PREVIEW_LINES)) as u8;
+                    write.update(cx, |this, cx| this.set_preview_lines(lines, cx)).ok();
                 },
             )
-            .default_value(3.)
+            .default_value(f64::from(preview::DEFAULT_LINES))
         };
         SettingPage::new("Inbox").resettable(false).group(
             SettingGroup::new()
@@ -48,12 +52,12 @@ impl SettingsPanel {
                 )
                 .item(
                     SettingItem::new("Preview lines", preview_field)
-                        .description("Snippet lines shown under each subject in the inbox.")
-                        .keywords(["message snippet", "inbox"]),
+                        .description("Snippet lines shown under each subject; 0 hides them.")
+                        .keywords(["message snippet", "inbox", "preview"]),
                 )
                 .item(
-                    SettingItem::new("Follow-up after", follow_up_field)
-                        .description("Days to wait for a reply before flagging (1–14).")
+                    SettingItem::new("Remind me if no reply after", self.follow_up_field(weak))
+                        .description("Days to wait for an answer before flagging the thread (1–14).")
                         .keywords(["follow up", "wait for a response", "flag", "days"]),
                 ),
         )

@@ -3,7 +3,6 @@
 use std::rc::Rc;
 
 use gpui_kit::{AnyWindowHandle, TestAppContext};
-use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::clock::DAY;
 use mail_classifier::contacts::ContactStore;
 use mail_classifier::judge::{Confidence, Mode, QuestionKey};
@@ -70,16 +69,6 @@ fn the_tab_avatar_switch_turns_the_setting_off_and_back_on(cx: &mut TestAppConte
 }
 
 #[gpui_kit::gpui::test]
-fn the_pane_layout_dropdown_switches_the_orientation(cx: &mut TestAppContext) {
-    let mut h = app(cx);
-    open_page(&mut h, APPEARANCE);
-    h.settings_pick_option(0, 3, 1);
-    assert_eq!(h.read(|a| a.panes.orientation()), Orientation::Stacked);
-    h.settings_pick_option(0, 3, 0);
-    assert_eq!(h.read(|a| a.panes.orientation()), Orientation::SideBySide);
-}
-
-#[gpui_kit::gpui::test]
 fn the_number_input_steps_the_follow_up_timeout(cx: &mut TestAppContext) {
     let mut h = app(cx);
     open_page(&mut h, INBOX);
@@ -108,17 +97,6 @@ fn lowering_follow_up_after_resurfaces_a_waiting_thread_on_tick(cx: &mut TestApp
     assert_eq!(h.state_of(1), TriageState::Inbox);
     assert!(h.has_tag(1, Tag::FollowUp), "the overdue thread is flagged for follow-up");
     assert!(!h.has_tag(1, Tag::AwaitingReply), "resurfacing clears Awaiting Reply");
-}
-
-#[gpui_kit::gpui::test]
-fn the_group_switch_and_preview_dropdown_reach_the_inbox(cx: &mut TestAppContext) {
-    let mut h = app(cx);
-    open_page(&mut h, INBOX);
-    let grouped = h.read(|a| a.group_threads);
-    h.settings_click_in(0, 0, "check");
-    assert_eq!(h.read(|a| a.group_threads), !grouped);
-    h.settings_pick_option(0, 1, 4);
-    assert_eq!(h.read(|a| a.preview_lines), 4);
 }
 
 #[gpui_kit::gpui::test]

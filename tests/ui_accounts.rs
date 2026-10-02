@@ -74,7 +74,7 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
     let focus_nickname = |h: &mut Harness<'_>| {
         let window = h.settings_window().expect("the settings window is open");
         h.cx.update_window(window, |_, window, cx| {
-            window.within("group-0").within("item-0").click(("account-nickname", 0usize), cx)
+            window.within(("account-card", 0usize)).click(("account-rename", 0usize), cx)
         })
         .expect("settings window alive");
         h.cx.run_until_parked();
