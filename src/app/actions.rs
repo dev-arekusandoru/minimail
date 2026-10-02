@@ -6,6 +6,7 @@ use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePrese
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
 use crate::model::Location;
+use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -79,7 +80,12 @@ gpui_kit::actions!(
         ShrinkListPane,
         ResetPanes,
         TogglePaneLayout,
-        ToggleSidebar
+        ToggleSidebar,
+        SettingsNextPage,
+        SettingsPrevPage,
+        SettingsEnterBody,
+        SettingsSearch,
+        SettingsDismiss
     ]
 );
 
@@ -222,6 +228,14 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("k", RulesPrev, Some(RULES_CONTEXT)),
         KeyBinding::new("backspace", RulesRevoke, Some(RULES_CONTEXT)),
         KeyBinding::new("d", RulesRevoke, Some(RULES_CONTEXT)),
+        // Settings window: the arrows walk its sidebar, `→` steps into the body like Tab does,
+        // ⌘F and `/` reach the search field, and Esc clears it before closing the window.
+        KeyBinding::new("down", SettingsNextPage, Some(SETTINGS_NAV)),
+        KeyBinding::new("up", SettingsPrevPage, Some(SETTINGS_NAV)),
+        KeyBinding::new("right", SettingsEnterBody, Some(SETTINGS_NAV)),
+        KeyBinding::new("/", SettingsSearch, Some(SETTINGS_NAV)),
+        KeyBinding::new("cmd-f", SettingsSearch, Some(SETTINGS_SCOPE)),
+        KeyBinding::new("escape", SettingsDismiss, Some(SETTINGS_SCOPE)),
         // Compose context.
         KeyBinding::new("cmd-enter", SendReply, Some(COMPOSE_CONTEXT)),
         KeyBinding::new("escape", CancelCompose, Some(COMPOSE_CONTEXT)),

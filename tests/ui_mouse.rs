@@ -410,7 +410,9 @@ fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContex
     let mut h = harness(cx);
     h.click("tb-settings");
     assert!(h.read(|a| a.settings_open()));
-    h.click("settings-close");
+    let settings = h.read(|a| a.settings_window()).expect("the settings window is open");
+    h.cx.update_window(settings, |_, window, cx| window.click("settings-close", cx)).expect("settings window alive");
+    h.cx.run_until_parked();
     assert!(!h.read(|a| a.settings_open()));
     h.click("btn-more");
     h.click_row("Shortcuts");

@@ -9,9 +9,6 @@ use mail_classifier::account_style::{COLORS, ICONS};
 mod harness;
 use harness::{Harness, harness};
 
-/// Sidebar page index of Accounts.
-const ACCOUNTS: usize = 5;
-
 fn has_account_icon(h: &mut Harness<'_>, message: usize) -> bool {
     h.cx.update_window(h.window, |_, window, _| window.try_find(("row-account-icon", message)).is_some())
         .expect("window alive")
@@ -49,14 +46,14 @@ fn picking_an_icon_and_color_in_the_style_popover_stores_them_on_the_account(cx:
     let before = style(&mut h);
     assert_eq!(before[0].0.as_deref(), Some("mail"));
 
-    h.keys("cmd-,");
-    h.click(format!("0-{ACCOUNTS}"));
+    // Settings has a window of its own, and opens on Accounts.
+    h.open_settings();
     // The picker only exists once the first account's tile has opened its popover.
-    h.click(("account-style", 0usize));
+    h.settings_click(("account-style", 0usize));
     h.cx.run_until_parked();
     let (icon, color) = (ICONS[3].0, COLORS[4]);
-    h.click(("account-icon", 3usize));
-    h.click(("account-color", 4usize));
+    h.settings_click(("account-icon", 3usize));
+    h.settings_click(("account-color", 4usize));
     h.cx.run_until_parked();
 
     let after = style(&mut h);
@@ -73,23 +70,23 @@ fn typing_a_nickname_in_settings_renames_the_account_and_blank_restores_it(cx: &
     let mut h = harness(cx);
     assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
 
-    h.keys("cmd-,");
-    h.click(format!("0-{ACCOUNTS}"));
+    h.open_settings();
     let focus_nickname = |h: &mut Harness<'_>| {
-        h.cx.update_window(h.window, |_, window, cx| {
+        let window = h.settings_window().expect("the settings window is open");
+        h.cx.update_window(window, |_, window, cx| {
             window.within("group-0").within("item-0").click(("account-nickname", 0usize), cx)
         })
-        .expect("window alive");
+        .expect("settings window alive");
         h.cx.run_until_parked();
     };
     focus_nickname(&mut h);
-    h.type_text("  Home  ");
+    h.settings_type("  Home  ");
     assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()).as_deref(), Some("Home"));
     assert_eq!(sidebar_names(&mut h), vec!["Home", "Work"]);
     assert_eq!(h.read(|a| a.mailbox.accounts()[1].nickname.clone()), None, "other accounts untouched");
 
     // Clearing the text unsets it.
-    h.keys("cmd-a backspace");
+    h.settings_keys("cmd-a backspace");
     assert_eq!(h.read(|a| a.mailbox.accounts()[0].nickname.clone()), None);
     assert_eq!(sidebar_names(&mut h), vec!["Personal", "Work"]);
 }

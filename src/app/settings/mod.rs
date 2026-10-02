@@ -10,6 +10,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::popover::Popover;
 use std::collections::HashMap;
+use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, SettingsPrevPage, SettingsSearch};
 
 use crate::account_style;
 use crate::app::icons;
@@ -33,6 +34,12 @@ mod senders;
 
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
+
+/// Binding predicate for the settings sidebar keys: the panel, but not while a text field
+/// has focus (a focused kit `Input` sets context `Input`).
+pub const SETTINGS_NAV: &str = "SettingsPanel && !Input && !PopupMenu";
+/// Same, for the keys that may fire from inside a field: ⌘F and Esc.
+pub const SETTINGS_SCOPE: &str = "SettingsPanel && !PopupMenu";
 
 pub enum SettingsEvent {
     Changed(JudgePolicy, bool),
@@ -97,7 +104,22 @@ struct AccountControls {
 }
 
 pub struct SettingsPanel {
+    /// The sidebar itself, focused when the window opens: ↑/↓ walk the pages from here and
+    /// `→` steps into the page content.
     focus: FocusHandle,
+    /// Stepping stone painted just in front of the kit sidebar. The kit owns its search
+    /// field, so ⌘F and `/` focus this and step once onto it.
+    search_anchor: FocusHandle,
+    /// The field ⌘F and `/` landed on, so Esc can tell a typed query from an empty one.
+    search_field: Option<FocusHandle>,
+    /// Whether the search field has taken text since it was focused.
+    query_typed: bool,
+    /// Page on screen. The kit keeps its own copy of the selection, so a keyboard page change
+    /// rebuilds it through [`Self::page_gen`].
+    page: usize,
+    /// Bumped with every page change and part of the kit `Settings` key, so the rebuilt
+    /// sidebar opens on [`Self::page`] with an empty query.
+    page_gen: u32,
     policy: JudgePolicy,
     summaries: bool,
     group: bool,
@@ -118,8 +140,6 @@ pub struct SettingsPanel {
     confirm_remove: Option<String>,
     /// Gmail OAuth client credentials are present in the environment.
     gmail_configured: bool,
-    /// Page selected when the panel opens.
-    start_page: usize,
 }
 
 impl SettingsPanel {
@@ -132,8 +152,15 @@ impl SettingsPanel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let focus = cx.focus_handle();
+        let search_anchor = cx.focus_handle().tab_stop(false);
         Self {
-            focus: cx.focus_handle(),
+            focus,
+            search_anchor,
+            search_field: None,
+            query_typed: false,
+            page: ACCOUNTS_PAGE,
+            page_gen: 0,
             policy,
             summaries,
             group,
@@ -148,7 +175,6 @@ impl SettingsPanel {
             controls: HashMap::new(),
             confirm_remove: None,
             gmail_configured: false,
-            start_page: 0,
             follow_up_days: (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
                 .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into()) as u8,
         }
@@ -173,10 +199,81 @@ impl SettingsPanel {
         self
     }
 
-    /// Open on the Accounts page instead of General.
+    /// The page on screen, as the sidebar has it.
+    pub fn page(&self) -> usize {
+        self.page
+    }
+
+    /// Open on the Accounts page.
     pub fn on_accounts_page(mut self) -> Self {
-        self.start_page = ACCOUNTS_PAGE;
+        self.page = ACCOUNTS_PAGE;
         self
+    }
+
+    /// Move the sidebar selection a page down (`step` = 1) or up (`step` = -1), but only
+    /// while the sidebar itself has focus. The kit owns its own selection and exposes no
+    /// setter, so the tree is rebuilt on the new page.
+    fn step_page(&mut self, step: isize, window: &Window, cx: &mut Context<Self>) {
+        if !self.nav_has_focus(window, cx) {
+            return;
+        }
+        let weak = cx.entity().downgrade();
+        let count = self.pages(&weak, cx).len() as isize;
+        let next = (self.page as isize + step).rem_euclid(count.max(1)) as usize;
+        if next != self.page {
+            self.page = next;
+            self.rebuild(cx);
+        }
+    }
+
+    /// Rebuild the kit's settings, which starts it on the current page with an empty query.
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        self.page_gen = self.page_gen.wrapping_add(1);
+        self.search_field = None;
+        self.query_typed = false;
+        cx.notify();
+    }
+
+    /// Whether the sidebar, and not a field or a control inside the page, has focus.
+    fn nav_has_focus(&self, window: &Window, cx: &App) -> bool {
+        window.focused(cx).is_some_and(|focused| focused == self.focus)
+    }
+
+    /// Step into the page content, the way Tab does.
+    fn enter_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus_next(cx);
+    }
+
+    /// Focus the search field the kit renders on top of its sidebar.
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.search_anchor, cx);
+        window.focus_next(cx);
+        self.search_field = window.focused(cx);
+        self.query_typed = false;
+    }
+
+    /// Whether the search field has focus, which is what makes Esc clear it rather than close.
+    fn search_focused(&self, window: &Window, cx: &App) -> bool {
+        self.search_field
+            .as_ref()
+            .is_some_and(|field| Some(field) == window.focused(cx).as_ref())
+    }
+
+    /// Note text going into the search field, which is what makes Esc clear it.
+    fn note_typing(&mut self, event: &gpui_kit::KeyDownEvent, window: &Window, cx: &App) {
+        if event.keystroke.key_char.is_some() && self.search_focused(window, cx) {
+            self.query_typed = true;
+        }
+    }
+
+    /// Esc: clear a search that has text in it, otherwise close the window.
+    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.query_typed && self.search_focused(window, cx) {
+            self.rebuild(cx);
+            window.focus(&self.focus, cx);
+        } else {
+            cx.emit(SettingsEvent::Close);
+        }
     }
 
     /// Seed the blocked-sender list and follow-up timeout (seconds).
@@ -604,9 +701,21 @@ impl Render for SettingsPanel {
                         })
                 })
             });
+        // The kit keys its own state by element id, so the page and query it starts with
+        // follow `page_gen`.
+        let settings = format!("settings-{}", self.page_gen);
+        let close = button("settings-close", "Close", "Close the settings window", "escape", cx)
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)));
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &SettingsNextPage, window, cx| this.step_page(1, window, cx)))
+            .on_action(cx.listener(|this, _: &SettingsPrevPage, window, cx| this.step_page(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &SettingsEnterBody, window, cx| this.enter_body(window, cx)))
+            .on_action(cx.listener(|this, _: &SettingsSearch, window, cx| this.focus_search(window, cx)))
+            .on_action(cx.listener(|this, _: &SettingsDismiss, window, cx| this.dismiss(window, cx)))
+            // Capture phase, so text swallowed by the search field is still seen.
+            .capture_key_down(cx.listener(|this, event, window, cx| this.note_typing(event, window, cx)))
             .flex()
             .flex_col()
             .size_full()
@@ -614,34 +723,31 @@ impl Render for SettingsPanel {
             .gap_2()
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().text_sm().text_color(t.primary).child("Settings"))
-                    .child(
-                        button("settings-close", "Close", "Close", "escape", cx)
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close))),
-                    ),
-            )
-            .child(
-                div()
                     .flex_1()
                     .min_h_0()
+                    .flex()
+                    .flex_col()
+                    // Stepping stone in front of the kit sidebar, so ⌘F and `/` reach its
+                    // search field without counting the stops above it.
+                    .child(div().size(px(0.)).flex_none().track_focus(&self.search_anchor))
                     .child(
-                        Settings::new("settings")
-                            .sidebar_width(px(190.))
-                            .default_selected_index(SelectIndex { page_ix: self.start_page, group_ix: None })
-                            .pages(pages),
+                        div().flex_1().min_h_0().child(
+                            Settings::new(settings)
+                                .sidebar_width(px(190.))
+                                .default_selected_index(SelectIndex { page_ix: self.page, group_ix: None })
+                                .pages(pages),
+                        ),
                     ),
             )
             .child(
                 div()
                     .flex()
-                    .justify_end()
+                    .justify_between()
                     .border_t_1()
                     .border_color(t.border)
                     .pt_2()
-                    .child(reset),
+                    .child(reset)
+                    .child(close),
             )
     }
 }
