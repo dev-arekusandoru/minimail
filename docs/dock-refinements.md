@@ -61,17 +61,35 @@ list group unchanged.
 
 - `cmd-w` closes the active tab of the *focused* pane. The dock already routes focus to the
   active panel, so "focused" is well defined.
+- A list tab is a whole view: location **plus** the filter query, so "Inbox" and
+  "Inbox + unread + from:alice" are two tabs. That is exactly what `Triage::query` already
+  holds, so a tab is that bundle and filters stop following the user across folders.
 - Sidebar click opens the location in the list strip's preview tab, replacing it — the same
-  rule that opens a message in the reader's preview. Cmd-click or double-click pins.
+  rule that opens a message in the reader's preview. Cmd-click or double-click pins. A click on
+  a location already open as a pinned tab activates that tab instead of opening a second one.
+- `ctrl-tab` / `ctrl-shift-tab` cycle the **focused** strip, one rule with `cmd-w` closing the
+  focused pane's tab. No new keys.
+- Switching list tabs moves the cursor, so the reader's preview tab follows that tab's cursor;
+  pinned reader tabs are untouched. (Per-tab reader state is explicitly not wanted.)
 - The sidebar highlight follows the active list tab, not the last click.
 - Switching a list tab does not touch the reader's tabs: two panes, two strips.
 - Counts and the status bar follow the active tab.
 - Dropping a message on a list tab files it under that tab's location — cheap and natural once
   the strip exists; extends S2.
+- A folder dropped on the list strip opens as a **new pinned tab**; if that location is already
+  open, its tab is activated instead of a second one opening. (Accepted limits of the drop
+  event: it reports the group, not a tab slot, so the tab lands at the end; and it cannot tell
+  payloads apart, so a folder dropped on the reader strip shows the preview and does nothing.)
 
 ## 3. The Triage tab, zoomed
 
 A triage session becomes its own list tab that zooms in to take the view.
+
+**Mechanism (decided).** The dock's zoom cannot keep the sidebar: `Zoomed` has one variant,
+`Group(NodeId)` (`dock_area.rs:57-60`), and a zoomed group is rendered as the whole dock body
+(`zoomed_view`, `:708-712`, `:1469`). So the sidebar comes **out of the dock** and becomes a
+resizable panel of ours, leaving the dock as the centre alone; zooming the list group then
+expands it over the centre — list and viewer area — while the sidebar stays outside.
 
 **The dock already has exactly this**, and the fit is good:
 
@@ -110,10 +128,22 @@ A triage session becomes its own list tab that zooms in to take the view.
 - The tab is temporary in the same sense a preview tab is: it is not part of what the user
   arranged, so it should not survive the session.
 
+**Settled**
+
+- Zoom in and out happens automatically around the session; the skin's zoom control is turned on
+  for the list group, and `alt-z` toggles zoom on the focused group (so it zooms any list tab in,
+  not only the Triage tab).
+- The Triage tab is temporary: it dies with the session, like a preview tab.
+- The list strip never has fewer than one tab: the last one cannot be closed, and a fresh window
+  starts with one (All Inboxes).
+- A list tab is labelled with the location label alone ("Inbox", "All Inboxes") — the same string
+  the sidebar row shows.
+- Preview list tabs look like preview reader tabs: italic, no close button.
+
 **Open**
 
 - Does zoom-in happen automatically on entering a session, or is the Triage tab just another
-  tab the user may zoom? (Recommendation: automatic — a session is a mode.)
+  tab the user may zoom? (Settled: automatic.)
 - Should the Triage tab be pinnable, i.e. can a session outlive its zoom?
 - Do we turn on the skin's zoom control (`PanelControl`) for the list group, or bind our own
   key and leave the chrome alone?
@@ -133,6 +163,14 @@ A triage session becomes its own list tab that zooms in to take the view.
 
 ## Order of work
 
+0. **Done.** The sidebar is out of the dock: an `h_resizable("mail-sidebar")` group of ours with
+   one shared width, `size_range(120..320)` for the drag and the clamp, `sidebar-divider` for the
+   double-click reset (nothing rendered at all while collapsed, band included), and the width
+   feeding the list's limits. `Dock` no longer knows the sidebar exists. `tests/ui_panes.rs`
+   passes unchanged.
 1. Bundle the list view state into `ListView` (no behaviour change).
-2. `ListTabs` + one `ListPanel` per tab + the sidebar/strip/keys wiring.
+2. `ListTabs` + one `ListPanel` per tab + the sidebar/strip/keys wiring. The pure model is in
+   `src/list_tabs.rs` (preview replaced in place, an open view activated rather than opened
+   twice, `open_pinned` promoting a preview, the last tab unclosable), tested in
+   `tests/list_tabs.rs`.
 3. The Triage tab: session as a tab, `zoomable` for the list panel, zoom in/out around it.
