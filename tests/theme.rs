@@ -15,7 +15,10 @@ fn built_in_themes_load_and_default_is_active(cx: &mut TestAppContext) {
     boot(cx);
     cx.update(|cx| {
         let names = theme::names(cx);
-        assert_eq!(names[0], DEFAULT_THEME, "the default theme leads the picker");
+        assert_eq!(
+            names[0], DEFAULT_THEME,
+            "the default theme leads the picker"
+        );
         assert!(names.iter().any(|n| n == "Tokyo Night"));
         assert_eq!(cx.theme().theme_name(), DEFAULT_THEME);
         assert!(cx.theme().is_dark());
@@ -52,6 +55,25 @@ fn unknown_theme_changes_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn registering_a_family_preserves_existing_variants_and_adds_missing_ones(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::component::theme::ThemeRegistry::global_mut(cx)
+            .load_themes_from_str(
+                r##"{"name":"Custom Ayu","themes":[{"name":"Ayu Light","mode":"light","colors":{"background":"#123456"}}]}"##,
+            )
+            .unwrap();
+        theme::init(cx);
+        assert!(theme::apply(cx, "Ayu Light"));
+        assert_eq!(theme::to_hex(cx.theme().background), "#123456");
+        assert!(!cx.theme().is_dark());
+        assert!(theme::apply(cx, "Ayu Dark"), "a retained light variant must not hide the dark variant");
+        assert!(cx.theme().is_dark());
+        assert_ne!(theme::to_hex(cx.theme().background), "#123456");
+    });
+}
+
+#[gpui_kit::gpui::test]
 fn domain_colors_stay_distinct_in_every_built_in_theme(cx: &mut TestAppContext) {
     boot(cx);
     cx.update(|cx| {
@@ -62,7 +84,11 @@ fn domain_colors_stay_distinct_in_every_built_in_theme(cx: &mut TestAppContext) 
             let all = TriageState::ALL;
             for (i, a) in all.iter().enumerate() {
                 for b in &all[i + 1..] {
-                    assert_ne!(theme::state_color(c, *a), theme::state_color(c, *b), "{name}: {a:?} vs {b:?}");
+                    assert_ne!(
+                        theme::state_color(c, *a),
+                        theme::state_color(c, *b),
+                        "{name}: {a:?} vs {b:?}"
+                    );
                 }
             }
 
@@ -99,5 +125,9 @@ fn hex_colors_round_trip_and_the_account_palette_survives() {
         let parsed = theme::parse_color(color).expect("palette color parses");
         assert_eq!(theme::to_hex(parsed), color);
     }
-    assert_eq!(theme::to_hex(theme::parse_color("#12345678").unwrap()), "#123456", "alpha is dropped");
+    assert_eq!(
+        theme::to_hex(theme::parse_color("#12345678").unwrap()),
+        "#123456",
+        "alpha is dropped"
+    );
 }

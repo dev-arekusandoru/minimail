@@ -11,7 +11,7 @@
 pub use gpui_kit::component::theme::ThemeColor;
 use gpui_kit::component::theme::{Theme as KitTheme, ThemeRegistry};
 use gpui_kit::{App, Hsla, SharedString, px, rgba};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::LazyLock};
 
 /// Name of the theme applied at startup.
 pub const DEFAULT_THEME: &str = "One Dark Pro";
@@ -20,7 +20,43 @@ pub const DEFAULT_THEME: &str = "One Dark Pro";
 const BUILTIN: &[&str] = &[
     include_str!("../themes/one-dark-pro.json"),
     include_str!("../themes/tokyo-night.json"),
+    include_str!("../themes/adventure.json"),
+    include_str!("../themes/alduin.json"),
+    include_str!("../themes/asciinema.json"),
+    include_str!("../themes/aurora.json"),
+    include_str!("../themes/ayu.json"),
+    include_str!("../themes/catppuccin.json"),
+    include_str!("../themes/everforest.json"),
+    include_str!("../themes/fahrenheit.json"),
+    include_str!("../themes/flexoki.json"),
+    include_str!("../themes/gruvbox.json"),
+    include_str!("../themes/harper.json"),
+    include_str!("../themes/hybrid.json"),
+    include_str!("../themes/jellybeans.json"),
+    include_str!("../themes/kibble.json"),
+    include_str!("../themes/macos-classic.json"),
+    include_str!("../themes/mellifluous.json"),
+    include_str!("../themes/molokai.json"),
+    include_str!("../themes/solarized.json"),
+    include_str!("../themes/spaceduck.json"),
+    include_str!("../themes/tokyonight.json"),
+    include_str!("../themes/twilight.json"),
 ];
+
+// Cache every variant's name: directory reloads can retain only part of a theme family.
+static BUILTIN_NAMES: LazyLock<Vec<Vec<String>>> = LazyLock::new(|| {
+    BUILTIN
+        .iter()
+        .map(|json| {
+            serde_json::from_str::<gpui_kit::component::theme::ThemeSet>(json)
+                .expect("built-in theme is valid")
+                .themes
+                .into_iter()
+                .map(|theme| theme.name.to_string())
+                .collect()
+        })
+        .collect()
+});
 
 /// Parse a `#rrggbb` or `#rrggbbaa` color, e.g. an [`crate::model::Account::color`].
 pub fn parse_color(value: &str) -> Option<Hsla> {
@@ -29,7 +65,14 @@ pub fn parse_color(value: &str) -> Option<Hsla> {
         return None;
     }
     let v = u32::from_str_radix(digits, 16).ok()?;
-    Some(rgba(if digits.len() == 6 { (v << 8) | 0xff } else { v }).into())
+    Some(
+        rgba(if digits.len() == 6 {
+            (v << 8) | 0xff
+        } else {
+            v
+        })
+        .into(),
+    )
 }
 
 /// The `#rrggbb` form of `color` (alpha dropped); the inverse of [`parse_color`].
@@ -54,20 +97,22 @@ fn register_builtin(cx: &mut App) {
     let registry = ThemeRegistry::global(cx);
     let missing: Vec<&str> = BUILTIN
         .iter()
-        .copied()
-        .filter(|json| {
-            let name = serde_json::from_str::<serde_json::Value>(json)
-                .ok()
-                .and_then(|v| v["themes"][0]["name"].as_str().map(str::to_owned));
-            name.is_some_and(|n| !registry.themes().contains_key(n.as_str()))
+        .zip(BUILTIN_NAMES.iter())
+        .filter(|(_, names)| {
+            names
+                .iter()
+                .any(|name| !registry.themes().contains_key(name.as_str()))
         })
+        .map(|(json, _)| *json)
         .collect();
     if missing.is_empty() {
         return;
     }
     let registry = ThemeRegistry::global_mut(cx);
     for json in missing {
-        registry.load_themes_from_str(json).expect("built-in theme is valid");
+        registry
+            .load_themes_from_str(json)
+            .expect("built-in theme is valid");
     }
 }
 
@@ -76,7 +121,8 @@ pub fn init(cx: &mut App) {
     register_builtin(cx);
     // The kit's registry drops every theme it did not read from its directory when that
     // directory reloads; put the built-ins back whenever they go missing.
-    cx.observe_global::<ThemeRegistry>(register_builtin).detach();
+    cx.observe_global::<ThemeRegistry>(register_builtin)
+        .detach();
     apply(cx, DEFAULT_THEME);
 }
 
@@ -93,8 +139,11 @@ pub fn watch_user_themes(cx: &mut App) {
 /// Names of all registered themes: the default first, then the kit's order (its own defaults,
 /// then light before dark, then by name).
 pub fn names(cx: &App) -> Vec<SharedString> {
-    let mut names: Vec<SharedString> =
-        ThemeRegistry::global(cx).sorted_themes().into_iter().map(|t| t.name.clone()).collect();
+    let mut names: Vec<SharedString> = ThemeRegistry::global(cx)
+        .sorted_themes()
+        .into_iter()
+        .map(|t| t.name.clone())
+        .collect();
     if let Some(i) = names.iter().position(|n| n == DEFAULT_THEME) {
         let default = names.remove(i);
         names.insert(0, default);
