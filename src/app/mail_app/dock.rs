@@ -177,31 +177,53 @@ impl Dock {
 
     /// Bring the dock in line with the app. An ordinary frame builds nothing: only a
     /// change of panel set, orientation or activation reaches the area.
+    ///
+    /// Returns the reader order the dock was left in when a tab was dragged in the strip: the
+    /// group reorders without touching the model, so the app is told and puts `Tabs` the same
+    /// way round.
     pub(super) fn sync(
         &mut self,
         threads: Option<&[u32]>,
         active: Option<u32>,
         window: &mut Window,
         cx: &mut Context<MailApp>,
-    ) {
+    ) -> Option<DraggedTabs> {
         self.clamp_sidebar(window, cx);
-        let ix = active.and_then(|thread| self.reader_ix(thread, cx));
         let wanted = Built { orientation: self.orientation, threads: threads.map(<[u32]>::to_vec) };
         if self.built.as_ref() != Some(&wanted) {
+            let ix = active.and_then(|thread| self.reader_ix(thread, cx));
             self.rebuild(threads, ix.unwrap_or(0), window, cx);
-            return;
+            return None;
         }
+        let dragged = threads.and_then(|threads| self.dragged_order(threads, cx));
+        if let Some(dragged) = &dragged {
+            let order = &dragged.order;
+            let mut panels: Vec<(usize, Entity<ReaderPanel>)> = std::mem::take(&mut self.readers)
+                .into_iter()
+                .map(|panel| {
+                    let rank = order.iter().position(|thread| Some(*thread) == panel.read(cx).thread);
+                    (rank.unwrap_or(usize::MAX), panel)
+                })
+                .collect();
+            panels.sort_by_key(|(rank, _)| *rank);
+            self.readers = panels.into_iter().map(|(_, panel)| panel).collect();
+            self.built = Some(Built { orientation: self.orientation, threads: Some(order.clone()) });
+        }
+        // The active tab may have moved with the panels — or the drag may have opened it — so
+        // read its slot again.
+        let active = dragged.as_ref().and_then(|dragged| dragged.active).or(active);
+        let ix = active.and_then(|thread| self.reader_ix(thread, cx));
         // The layout is still the one we installed, so a divider drag since then is
         // ours to remember — that is how each orientation keeps the size it was left at.
         self.remember(cx);
-        if ix == self.active {
-            return;
+        if ix != self.active {
+            self.active = ix;
+            if let Some(ix) = ix {
+                let id = PanelId::from(self.readers[ix].entity_id());
+                self.area.update(cx, |area, cx| area.select_panel(id, window, cx));
+            }
         }
-        self.active = ix;
-        if let Some(ix) = ix {
-            let id = PanelId::from(self.readers[ix].entity_id());
-            self.area.update(cx, |area, cx| area.select_panel(id, window, cx));
-        }
+        dragged
     }
 
     /// Rebuild now, whether or not the panel set changed: the orientation toggle and the
@@ -317,6 +339,34 @@ impl Dock {
         hit
     }
 
+    /// The reader group's tabs as the dock's own tree now holds them, when that order differs
+    /// from `threads` — a tab dragged in the strip. The model follows it, so the strip and
+    /// `Tabs` can never disagree about which tab is where, or which one is open.
+    fn dragged_order(&self, threads: &[u32], cx: &App) -> Option<DraggedTabs> {
+        let id_of = |panel: &Entity<ReaderPanel>| PanelId::from(panel.entity_id());
+        let blank = id_of(&self.blank);
+        let readers: Vec<PanelId> = self.readers.iter().map(id_of).collect();
+        let area = self.area.read(cx);
+        let tree = area.layout(DockPlacement::Center)?;
+        let thread_of = |id: &PanelId| {
+            let ix = readers.iter().position(|reader| reader == id)?;
+            self.readers.get(ix).and_then(|panel| panel.read(cx).thread)
+        };
+        let mut held = None;
+        tree.root().walk(&mut |pane| {
+            if let PaneRef::Tabs { panels, active_ix } = pane.kind()
+                && panels.contains(&blank)
+            {
+                held = Some((
+                    panels.iter().filter_map(&thread_of).collect::<Vec<u32>>(),
+                    panels.get(active_ix).and_then(thread_of),
+                ));
+            }
+        });
+        let (order, active) = held?;
+        (order != threads).then_some(DraggedTabs { order, active })
+    }
+
     /// Install the whole layout: the sidebar in the left dock, and the centre's two tab
     /// groups with the reader's carrying the tabs and whichever of them is active.
     fn rebuild(&mut self, threads: Option<&[u32]>, active: usize, window: &mut Window, cx: &mut Context<MailApp>) {
@@ -390,6 +440,14 @@ impl Dock {
     }
 }
 
+
+/// A tab dragged in the strip: the group's tabs in their new order, and the one it left open.
+pub(super) struct DraggedTabs {
+    /// Threads, left to right.
+    pub order: Vec<u32>,
+    /// The thread the group now shows, when the drag moved the open tab or opened a new one.
+    pub active: Option<u32>,
+}
 
 /// Repaint `cx`'s entity whenever the app changes. A panel is its own entity, so nothing
 /// re-renders it when `MailApp` is notified: the pre-dock layout got that for free by building

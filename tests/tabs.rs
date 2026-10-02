@@ -7,6 +7,41 @@ fn threads(t: &Tabs) -> Vec<(u32, bool)> {
 }
 
 #[test]
+fn reordering_to_an_order_takes_the_open_tab_along() {
+    let mut t = Tabs::default();
+    for th in 1..=3 {
+        t.open_pinned(th, th * 10);
+    }
+    t.activate(1);
+    assert!(t.reorder_to(&[3, 2, 1]));
+    assert_eq!(threads(&t), vec![(3, true), (2, true), (1, true)]);
+    assert_eq!(t.opened(), Some(20), "the tab that was open is still open");
+    assert_eq!(t.active_index(), Some(1));
+}
+
+#[test]
+fn reordering_to_the_order_it_already_has_changes_nothing() {
+    let mut t = Tabs::default();
+    for th in 1..=2 {
+        t.open_pinned(th, th * 10);
+    }
+    assert!(!t.reorder_to(&[1, 2]));
+    assert_eq!(t.active_index(), Some(1));
+}
+
+#[test]
+fn an_order_that_is_not_exactly_these_tabs_is_refused() {
+    // A tab dragged in the dock could otherwise drop or duplicate one on the way in.
+    let mut t = Tabs::default();
+    t.open_pinned(1, 10);
+    t.open(2, 20);
+    assert!(!t.reorder_to(&[2]), "short order");
+    assert!(!t.reorder_to(&[2, 1, 3]), "long order");
+    assert!(!t.reorder_to(&[2, 9]), "a tab that is not open");
+    assert_eq!(threads(&t), vec![(1, true), (2, false)]);
+}
+
+#[test]
 fn reordering_moves_the_tab_and_keeps_it_open() {
     let mut t = Tabs::default();
     for th in 1..=3 {

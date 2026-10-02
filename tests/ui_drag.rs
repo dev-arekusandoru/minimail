@@ -55,6 +55,21 @@ impl Harness<'_> {
         self.drag(("row", id as usize), point(px(IN_THE_READER.0), px(IN_THE_READER.1)));
     }
 
+    /// Double-click the tab of `thread`, which pins it.
+    fn pin_tab(&mut self, thread: u32) {
+        let id = ("reader-tab", thread as usize);
+        self.cx.update_window(self.window, |_, window, cx| window.double_click(id, cx)).expect("window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Drag tab slot `from` onto slot `to`, the way the kit's own dock test moves a tab.
+    fn drag_tab(&mut self, from: usize, to: usize) {
+        self.cx
+            .update_window(self.window, |_, window, cx| window.within("tab-bar").drag_to(from, to, cx))
+            .expect("window alive");
+        self.cx.run_until_parked();
+    }
+
     fn tabs(&mut self) -> Vec<(u32, bool)> {
         self.read(|a| a.tabs.tabs().iter().map(|t| (t.thread, t.pinned)).collect())
     }
@@ -98,3 +113,23 @@ fn a_plain_click_still_opens_instead_of_dragging(cx: &mut TestAppContext) {
 }
 
 
+
+
+
+#[gpui_kit::gpui::test]
+fn dragging_a_tab_in_the_strip_reorders_the_model(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    for (id, thread) in [(1, 1), (3, 2)] {
+        h.drag_row_to_reader(id);
+        h.pin_tab(thread);
+    }
+    h.drag_row_to_reader(4);
+    assert_eq!(h.tabs(), vec![(1, true), (2, true), (3, false)]);
+
+    h.drag_tab(0, 2);
+    assert_eq!(h.tabs(), vec![(2, true), (3, false), (1, true)], "the model followed the strip");
+
+    // The tab the drag left open is the one `cmd-w` closes, wherever it now sits.
+    h.keys("cmd-w");
+    assert_eq!(h.tabs(), vec![(2, true), (3, false)]);
+}

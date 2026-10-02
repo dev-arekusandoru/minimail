@@ -210,11 +210,18 @@ impl MailApp {
     }
 
     /// Keep the dock's panel set in step with the app's: the reader group's tabs, the
-    /// active one, and the orientation.
+    /// active one, and the orientation. A tab dragged in the strip is a dock edit the model
+    /// never saw, so the order it was left in goes back into `Tabs`.
     pub(super) fn sync_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let threads = self.panes.reader_threads(self);
         let active = active_thread(self);
-        self.panes.dock_mut().sync(threads.as_deref(), active, window, cx);
+        let dragged = self.panes.dock_mut().sync(threads.as_deref(), active, window, cx);
+        if let Some(dragged) = dragged {
+            self.tabs.reorder_to(&dragged.order);
+            if let Some(ix) = dragged.active.and_then(|thread| self.tabs.index_of(thread)) {
+                self.tabs.activate(ix);
+            }
+        }
     }
 
     /// The band over the sidebar's edge that turns a double-click back to its default
