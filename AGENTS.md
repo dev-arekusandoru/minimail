@@ -16,3 +16,29 @@ Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0
 - UI tests are headless keystroke tests (`cx.simulate_keystrokes`) in `tests/ui*.rs`. Test behavior, not wiring.
 - Classifier (`src/judge.rs`) mirrors TypeSafe Jev's API (bool/choice/score questions → probabilities + confidence). Keep new providers behind the `Judge` trait.
 - Mail backends implement `MailProvider` (`src/provider/mod.rs`): blocking calls, run via `cx.background_spawn`; providers never see local ids. Tests use fake providers, never the network. No other network calls or real providers unless explicitly asked.
+
+<!-- hippo:start -->
+## Project Memory (Hippo)
+
+At the start of every task, run:
+```bash
+hippo context --auto --budget 1500
+```
+Read the output before writing any code.
+
+On errors or unexpected behaviour:
+```bash
+hippo remember "<description of what went wrong>" --error
+```
+
+On task completion:
+```bash
+hippo outcome --good
+```
+
+When Hippo's Codex wrapper is installed, session-end capture runs automatically.
+If the wrapper is not installed, capture a brief summary manually:
+```bash
+hippo capture --stdin <<< '<decisions, errors, lessons — 2-5 bullets>'
+```
+<!-- hippo:end -->
