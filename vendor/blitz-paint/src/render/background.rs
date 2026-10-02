@@ -781,6 +781,8 @@ fn compute_layer_size(
     }
 }
 
+// `Intrinsic` is only constructed by the SVG layer path.
+#[cfg_attr(not(feature = "svg"), allow(dead_code))]
 enum BackgroundSizeComputeMode {
     Auto,
     Size(f32, f32),
