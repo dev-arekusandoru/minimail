@@ -117,7 +117,30 @@ list group unchanged.
 
 ## Open questions
 
-1. `cmd-w` on two strips: focused pane, or a separate key for list tabs?
-2. Does a triage session take over the active list tab, or always the preview tab?
+1. `cmd-w` on two strips: focused pane, or a separate key for list tabs? **Settled: close the
+   focused pane's tab.**
+2. Does a triage session take over the active list tab, or always the preview tab? **Settled: a
+   session gets its own `Triage` tab, and the dock's zoom lets it take over the view** (below).
 3. Should a sidebar click ever open a *pinned* tab directly (e.g. middle-click), or is the
    preview-then-pin flow enough?
+
+## The dock's zoom, for a Triage tab that takes over
+
+Requested: a session should get its own `Triage` tab, and the tab should be able to take over
+the view. The dock already models exactly that, and all of it is public API:
+
+- `DockArea::set_zoomed_in(NodeId, window, cx)` and `set_zoomed_out(window, cx)`
+  (`gpui-base-0.7.0/src/dock/dock_area.rs:631,640`) expand one group to fill the dock area.
+  A Triage tab can zoom its own group on entry and unzoom on exit.
+- `TabGroupContext::toggle_zoom` and `is_zoomed()` expose the same thing to a renderer, so the
+  tab could also carry a control. A panel opts in per panel through `Panel::zoom_control`
+  (`PanelControl`), which is what draws the affordance in the skin's tab bar.
+- Zoom implies lock: `TabGroup::is_locked() == constraints.is_locked() || zoomed`
+  (`tab_group.rs:443`), so a zoomed group is neither draggable nor droppable. That is the right
+  shape for a session — while it owns the view, no drop affordance is shown anywhere in it.
+- Zoom is per *group*, which is what "a tab takes over the view" means here: the list group
+  fills the dock, so the sidebar and reader step aside while the triage session runs.
+
+Fit: good. The one thing to design is what unzoom returns to — zoom does not remember a
+"previous" layout beyond the tree it already has, and `set_zoomed_out` restores the dock's own
+layout, so as long as the session only ever zooms its group we do not need state of our own.
