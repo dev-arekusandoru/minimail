@@ -151,7 +151,11 @@ impl MailApp {
         } else {
             None
         };
-        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, t)
+        let row_ids = [msg.id];
+        let label = (SharedString::from(sender.clone()), SharedString::from(msg.subject.clone()));
+        let container = div().id(("row", ix_id)).h(px(self.message_row_h()));
+        let container = self.draggable(container, &row_ids, self.thread_of(msg.id), label);
+        row::frame(container, visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
                 div()

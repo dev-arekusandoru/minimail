@@ -273,13 +273,10 @@ impl MailApp {
         let snippet = latest
             .map(|m| crate::preview::snippet(&crate::reading::reader_text(m)))
             .unwrap_or_default();
-        crate::app::row::frame(
-            div()
-                .id(("thread-row", thread as usize))
-                .h(px(self.thread_row_h())),
-            visual,
-            t,
-        )
+        let label = (SharedString::from(from.clone()), SharedString::from(subject.clone()));
+        let container = div().id(("thread-row", thread as usize)).h(px(self.thread_row_h()));
+        let container = self.draggable(container, ids, Some(thread), label);
+        crate::app::row::frame(container, visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
                 div()

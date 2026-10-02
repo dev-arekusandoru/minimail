@@ -44,7 +44,8 @@ pub(super) enum FindReveal {
 }
 
 impl MailApp {
-    /// The reader: the tab bar (outside a triage session) above the opened thread.
+    /// The reader body: the find bar (when open) above the opened thread. The tab bar is
+    /// the dock's now — one tab per open thread, drawn by each reader panel's title.
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
         let pane = self.render_reader_pane(cx);
         if self.in_session() || self.session_end.is_some() || self.tabs.is_empty() {
@@ -59,7 +60,6 @@ impl MailApp {
             .flex_col()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full())
-            .child(self.tab_bar(&Look::new(cx), cx))
             .children(if self.find_open() { self.find_bar(&Look::new(cx)) } else { None })
             .child(pane)
             .into_any_element()

@@ -38,6 +38,8 @@ use crate::threads::Row;
 
 mod accessors;
 mod actions;
+mod dock;
+mod drag;
 mod filters;
 mod grouping;
 mod help;
@@ -103,9 +105,8 @@ pub struct MailApp {
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
-    /// The sidebar, list and reader layout and its resizable group states.
+    /// The sidebar, list and reader, as one dock.
     pub panes: Panes,
-    _pane_subs: Vec<Subscription>,
     /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
     pub reader: ReaderView,
     /// Messages the next dispatched menu action applies to, instead of the cursor's. Set
@@ -202,7 +203,7 @@ impl MailApp {
     pub fn new_with_clock(
         mailbox: Mailbox,
         clock: Rc<dyn Clock>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         // Real-time heartbeat wakes snoozed mail and flushes the outbox.
@@ -215,9 +216,7 @@ impl MailApp {
             }
         })
         .detach();
-        let panes = Panes::new(cx);
-        // Rows size themselves from the list pane, so a drag repaints the app as it moves.
-        let pane_subs = panes.states().into_iter().map(|state| cx.observe(state, |_, _, cx| cx.notify())).collect();
+        let panes = Panes::new(&cx.weak_entity(), window, cx);
         let mut app = Self {
             mailbox,
             triage: Triage::new(Query::parse("in:inbox")),
@@ -236,7 +235,6 @@ impl MailApp {
             preview_lines: crate::preview::DEFAULT_LINES,
             list_w: 0.,
             panes,
-            _pane_subs: pane_subs,
             reader: ReaderView::default(),
             menu_target: None,
             policy: JudgePolicy::default(),

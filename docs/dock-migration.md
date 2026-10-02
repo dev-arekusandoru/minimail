@@ -141,9 +141,11 @@ moves nothing (same folder) must not push undo or toast.
 
 - Pure logic: `Tabs::reorder`, `MailDrag` construction from selection, drop-target →
   `TriageState` mapping (`tests/dnd.rs`, `tests/tabs.rs`).
-- UI: headless drags. The kit test support drives real drags
-  (`gpui-kit-0.7.0/tests/dock.rs`, `window.within(id).drag_to(..)`), plus
-  `cx.simulate_mouse_down/move/up` (`gpui-pre-0.3.7/src/app/test_context.rs:894-924`).
+- UI: headless drags. `TestWindowExt::drag(from, to, cx)` and `drag_to(from_id, to_id, cx)`
+  (`gpui-kit-0.7.0/src/test.rs:43-45`) drive a whole gesture; the pane tests already use
+  `window.drag(from, to, cx)` (`tests/ui_panes.rs:86-96`). A drag with no drop target has no
+  observable effect, so the drag source itself is proven end to end by the drop tests below
+  rather than by a test of its own.
 - `tests/ui_panes.rs`: keep the behaviour the dock expresses (sidebar clamp/reset/collapse,
   orientation memory via the two dumps, rows spanning the pane); rewrite or delete the ones it
   cannot (`drag_is_clamped_to_usable_panes`, `keyboard_shrink_stops_at_the_minimum`,

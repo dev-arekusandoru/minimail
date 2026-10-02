@@ -14,7 +14,6 @@ impl Render for MailApp {
         self.place_find_match(window, cx);
         self.refresh_find();
         let hint = self.hint_context();
-        let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
             // The opened message and the next couple of rows get their bodies.
@@ -25,14 +24,9 @@ impl Render for MailApp {
             self.show_toast(text, window, cx);
         }
         self.settle_fetch_toast(window, cx);
-        // Rows size themselves from the real pane: the list pane side by side, the whole
-        // region when the panes are stacked.
-        self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);
-        let list = (!in_session).then(|| self.render_list(cx));
-        let reader = match &self.compose {
-            Some(compose) => div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element(),
-            None => self.render_reader(cx),
-        };
+        // The dock's panel set follows the tab model, and the reader it shows follows the
+        // active tab; the list is the panel that sizes the rows.
+        self.sync_dock(window, cx);
         if self.find_placement_pending() {
             window.request_animation_frame();
         }
@@ -232,9 +226,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, w, cx| this.toggle_sidebar(w, cx)))
             .child(self.render_titlebar(window, cx))
-            .child(self.render_panes(list, reader, window, cx))
+            .child(self.render_panes(cx))
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
