@@ -1,11 +1,22 @@
 //! Settings window panel. Its entity owns transient page state and emits
 //! [`SettingsEvent`]s for changes applied live by the mail window.
 use gpui_kit::prelude::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::Selectable as _;
+use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInput};
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::label::Label;
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::TitleBar;
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariant, ButtonVariants as _};
 use std::collections::HashMap;
+use std::rc::Rc;
+use gpui_kit::base::AxisExt as _;
+use gpui_kit::base::{StyledExt as _, TestSupportExt as _, h_flex, v_flex};
 use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, SettingsPrevPage, SettingsSearch};
 
 use crate::app::mail_app::panes::Orientation;
@@ -15,7 +26,7 @@ use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
 use crate::{preview, theme};
 use gpui_kit::{
     component::setting::{
-        NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+        RenderOptions, SelectIndex, SettingGroup, SettingItem, SettingPage, Settings,
     },
     *,
 };
@@ -93,12 +104,81 @@ const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), 
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
+/// The range the preview-lines row accepts.
+const PREVIEW_LINES: std::ops::RangeInclusive<u8> = 0..=MAX_PREVIEW_LINES;
+
 type Weak = WeakEntity<SettingsPanel>;
 
 /// Per-account widgets of the Accounts page; the subscription reports their changes.
 struct AccountControls {
     nickname: Entity<InputState>,
     _sub: Subscription,
+}
+
+/// A row whose control is a number field: the input the user types in, the text last
+/// read from it, and the flag that pushes the panel's value back after a reset.
+struct NumberRow {
+    input: Entity<InputState>,
+    /// Text last read from `input`, so a render only rewrites what a reset changed.
+    text: String,
+    /// Set when `text` changed outside the input (a reset or a reseed).
+    write_back: bool,
+    /// Keeps the input and the panel's value in step.
+    _sub: Subscription,
+}
+
+impl NumberRow {
+    /// A number input seeded with `value` and bounded by `range`; every value it
+    /// reports goes to `set`, which stores it on the panel.
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<SettingsPanel>,
+        row: fn(&mut SettingsPanel) -> &mut NumberRow,
+        value: u8,
+        range: &std::ops::RangeInclusive<u8>,
+        set: fn(&mut SettingsPanel, u8, &mut Context<SettingsPanel>),
+    ) -> Self {
+        let text = value.to_string();
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(text.clone())
+                .step(1.)
+                .min(f64::from(*range.start()))
+                .max(f64::from(*range.end()))
+        });
+        let sub = cx.subscribe(&input, move |this, input, event: &InputEvent, cx| {
+            if !matches!(event, InputEvent::Change) {
+                return;
+            }
+            let typed = input.read(cx).value().to_string();
+            let changed = {
+                let field = row(this);
+                let changed = typed != field.text;
+                field.text = typed.clone();
+                changed
+            };
+            if changed {
+                // Half-typed values ("", "1.") are kept in the field but change nothing.
+                if let Ok(days) = typed.parse::<f64>() {
+                    set(this, days.round() as u8, cx);
+                }
+            }
+            cx.notify();
+        });
+        Self { input, text, write_back: false, _sub: sub }
+    }
+
+    /// Put `value` in the field at the next render, as a reset or a reseed does.
+    fn set(&mut self, value: u8) {
+        self.text = value.to_string();
+        self.write_back = true;
+    }
+
+    /// The text the field must show, handed out once per change so later renders
+    /// leave the field alone while it is being typed in.
+    fn take_write_back(&mut self) -> Option<SharedString> {
+        std::mem::take(&mut self.write_back).then(|| self.text.clone().into())
+    }
 }
 
 pub struct SettingsPanel {
@@ -139,15 +219,10 @@ pub struct SettingsPanel {
     now: Timestamp,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
-    /// Number input behind the follow-up row.
-    follow_up_input: Entity<InputState>,
-    /// Text last read from [`Self::follow_up_input`].
-    follow_up_text: String,
-    /// Set when [`Self::follow_up_text`] changed outside the input (a reset or a reseed);
-    /// the next render writes it into the field.
-    follow_up_write_back: bool,
-    /// Keeps the follow-up input and the panel's day count in step.
-    _follow_up_sub: Subscription,
+    /// The number field of the follow-up row.
+    follow_up: NumberRow,
+    /// The number field of the preview-lines row.
+    preview: NumberRow,
     accounts: Vec<AccountRow>,
     /// Nickname input per account (with its subscription).
     controls: HashMap<String, AccountControls>,
@@ -168,27 +243,22 @@ impl SettingsPanel {
         let focus = cx.focus_handle();
         let search_anchor = cx.focus_handle().tab_stop(false);
         let follow_up_days = default_follow_up_days();
-        let follow_up_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value(follow_up_days.to_string())
-                .step(1.)
-                .min(f64::from(*FOLLOW_UP_DAYS.start()))
-                .max(f64::from(*FOLLOW_UP_DAYS.end()))
-        });
-        let follow_up_sub = cx.subscribe(&follow_up_input, |this, input, event: &InputEvent, cx| {
-            if !matches!(event, InputEvent::Change) {
-                return;
-            }
-            let text = input.read(cx).value().to_string();
-            if text != this.follow_up_text {
-                this.follow_up_text = text.clone();
-                // Half-typed values ("", "1.") are kept in the field but change nothing.
-                if let Ok(days) = text.parse::<f64>() {
-                    this.set_follow_up(days, cx);
-                }
-            }
-            cx.notify();
-        });
+        let follow_up = NumberRow::new(
+            window,
+            cx,
+            SettingsPanel::follow_up_row,
+            follow_up_days,
+            &FOLLOW_UP_DAYS,
+            SettingsPanel::set_follow_up,
+        );
+        let preview = NumberRow::new(
+            window,
+            cx,
+            SettingsPanel::preview_row,
+            preview_lines,
+            &PREVIEW_LINES,
+            SettingsPanel::set_preview_lines,
+        );
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Filter by address"));
         let filter_sub = cx.subscribe(&filter_input, |this, input, event: &InputEvent, cx| {
@@ -222,10 +292,8 @@ impl SettingsPanel {
             controls: HashMap::new(),
             gmail_configured: false,
             follow_up_days,
-            follow_up_input,
-            follow_up_text: follow_up_days.to_string(),
-            follow_up_write_back: false,
-            _follow_up_sub: follow_up_sub,
+            follow_up,
+            preview,
         }
     }
 
@@ -288,9 +356,11 @@ impl SettingsPanel {
         window.focused(cx).is_some_and(|focused| focused == self.focus)
     }
 
-    /// Step into the page content, the way Tab does.
+    /// Step into the page content. The body starts at the kit's search field, which is
+    /// what Tab reaches from the sidebar too; stepping by `focus_next` would instead
+    /// land on whatever the window put before it, like the titlebar.
     fn enter_body(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus_next(cx);
+        self.focus_search(window, cx);
     }
 
     /// Focus the search field the kit renders on top of its sidebar.
@@ -339,8 +409,7 @@ impl SettingsPanel {
             .div_euclid(DAY)
             .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into())
             as u8;
-        self.follow_up_text = self.follow_up_days.to_string();
-        self.follow_up_write_back = true;
+        self.follow_up.set(self.follow_up_days);
         self
     }
 
@@ -358,8 +427,8 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    fn set_follow_up(&mut self, days: f64, cx: &mut Context<Self>) {
-        let days = days.round().clamp(f64::from(*FOLLOW_UP_DAYS.start()), f64::from(*FOLLOW_UP_DAYS.end())) as u8;
+    fn set_follow_up(&mut self, days: u8, cx: &mut Context<Self>) {
+        let days = days.clamp(*FOLLOW_UP_DAYS.start(), *FOLLOW_UP_DAYS.end());
         if days != self.follow_up_days {
             self.follow_up_days = days;
             cx.emit(SettingsEvent::FollowUp(i64::from(days) * DAY));
@@ -406,8 +475,8 @@ impl SettingsPanel {
         self.light_theme = crate::app_settings::DEFAULT_LIGHT_THEME.to_owned();
         self.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
         self.follow_up_days = default_follow_up_days();
-        self.follow_up_text = self.follow_up_days.to_string();
-        self.follow_up_write_back = true;
+        self.follow_up.set(self.follow_up_days);
+        self.preview.set(self.preview_lines);
         cx.notify();
     }
 
@@ -459,6 +528,11 @@ impl SettingsPanel {
             cx.emit(SettingsEvent::Grouping(on));
             cx.notify();
         }
+    }
+
+    /// Restore the per-thread inbox grouping.
+    fn reset_grouping(&mut self, cx: &mut Context<Self>) {
+        self.set_grouping(false, cx);
     }
 
     fn set_tab_avatars(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -564,25 +638,31 @@ impl SettingsPanel {
         cx.notify();
     }
 
+    /// The number field of the follow-up row.
+    fn follow_up_row(&mut self) -> &mut NumberRow {
+        &mut self.follow_up
+    }
 
-    /// Whether the follow-up row differs from its default (the reset button's condition).
+    /// The number field of the preview-lines row.
+    fn preview_row(&mut self) -> &mut NumberRow {
+        &mut self.preview
+    }
+
+    /// Whether the follow-up row differs from its default (its reset button's condition).
     fn follow_up_is_modified(&self) -> bool {
         self.follow_up_days != default_follow_up_days()
     }
 
     /// Restore the default follow-up timeout.
     fn reset_follow_up(&mut self, cx: &mut Context<Self>) {
-        self.follow_up_days = default_follow_up_days();
-        self.follow_up_text = self.follow_up_days.to_string();
-        self.follow_up_write_back = true;
-        cx.emit(SettingsEvent::FollowUp(i64::from(self.follow_up_days) * DAY));
-        cx.notify();
+        self.set_follow_up(default_follow_up_days(), cx);
+        self.follow_up.set(self.follow_up_days);
     }
 
-    /// The text the follow-up field must show, handed out once per change so later renders
-    /// leave the field alone while it is being typed in.
-    fn take_follow_up_write_back(&mut self) -> Option<String> {
-        std::mem::take(&mut self.follow_up_write_back).then(|| self.follow_up_text.clone())
+    /// Restore the default number of preview lines.
+    fn reset_preview_lines(&mut self, cx: &mut Context<Self>) {
+        self.set_preview_lines(preview::DEFAULT_LINES, cx);
+        self.preview.set(self.preview_lines);
     }
 
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
@@ -603,19 +683,287 @@ fn default_follow_up_days() -> u8 {
         as u8
 }
 
-/// A switch field backed by a panel bool and its setter.
+/// Reports whether one row differs from its default.
+type IsDirty = Rc<dyn Fn(&App) -> bool>;
+/// Puts one row's default back.
+type Restore = Rc<dyn Fn(&mut SettingsPanel, &mut Context<SettingsPanel>)>;
+/// Reads the value a select row shows.
+type Read = Rc<dyn Fn(&App) -> SharedString>;
+/// Stores what a select row picked.
+type Write = Rc<dyn Fn(SharedString, &mut App)>;
+/// Runs one row's restore from the app side, as the kit's reset handlers do.
+type DoRestore = Rc<dyn Fn(&mut Window, &mut App)>;
+/// Stores which segment of a segmented row was clicked.
+type Apply = Rc<dyn Fn(&mut SettingsPanel, usize, &mut Context<SettingsPanel>)>;
+/// Builds a row's control for one render pass.
+type Control = Rc<dyn Fn(&RenderOptions, &mut Window, &mut App) -> AnyElement>;
+
+/// What a row needs to be undone: `dirty` reports whether it differs from its default
+/// and `restore` puts the default back. The same pair drives the row's own ↺ and the
+/// page-level one.
+#[derive(Clone)]
+struct Undo {
+    dirty: IsDirty,
+    restore: DoRestore,
+}
+
+impl Undo {
+    fn new(is_dirty: impl Fn(&App) -> bool + 'static, reset: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        Self { dirty: Rc::new(is_dirty), restore: Rc::new(reset) }
+    }
+
+    /// The undo of a row whose dirty check and reset are methods of the panel, so both
+    /// may close over a question or a default.
+    fn of_panel(
+        weak: &Weak,
+        is_dirty: impl Fn(&SettingsPanel) -> bool + 'static,
+        reset: impl Fn(&mut SettingsPanel, &mut Context<SettingsPanel>) + 'static,
+    ) -> Self {
+        let (read, write) = (weak.clone(), weak.clone());
+        let reset: Restore = Rc::new(reset);
+        Self::new(
+            move |cx| read.read_with(cx, |this, _| is_dirty(this)).unwrap_or_default(),
+            move |_window, cx| {
+                let reset = reset.clone();
+                write.update(cx, move |this, cx| reset(this, cx)).ok();
+            },
+        )
+    }
+
+    /// The undo of a row that stores a value: a reset puts `default` back and emits the
+    /// row's event through `set`.
+    fn of_value<T: Clone + PartialEq + Into<SharedString> + 'static>(
+        weak: &Weak,
+        get: fn(&SettingsPanel) -> T,
+        set: fn(&mut SettingsPanel, T, &mut Context<SettingsPanel>),
+        default: T,
+    ) -> Self {
+        let (differs, restores) = (default.clone(), default);
+        Self::of_panel(
+            weak,
+            move |this| get(this) != differs,
+            move |this, cx| set(this, restores.clone(), cx),
+        )
+    }
+
+    /// The quiet ↺ that follows the row's title while the row differs from its default.
+    /// It restores this row alone, the way the page header's ↺ restores the page.
+    fn button(self, options: &RenderOptions, cx: &App) -> Option<AnyElement> {
+        if !(self.dirty)(cx) {
+            return None;
+        }
+        let restore = self.restore.clone();
+        Some(
+            Button::new(format!(
+                "row-undo-{}-{}-{}",
+                options.page_ix(),
+                options.group_ix(),
+                options.item_ix()
+            ))
+            .icon(IconName::Undo2)
+            .ghost()
+            .xsmall()
+            .tooltip("Reset to default")
+            .accessibility_label("Reset to default")
+            .on_click(move |_, window, cx| restore(window, cx))
+            .into_any_element(),
+        )
+    }
+}
+
+/// A panel row: the title with its own ↺, the description under it, and `control` on the
+/// right. The row's undo is registered with `on_reset`, so the page header's ↺ resets
+/// this row too, and its title and description are searchable keywords.
+fn row(
+    title: impl Into<SharedString>,
+    description: &'static str,
+    keywords: &[&'static str],
+    undo: Undo,
+    control: Control,
+) -> SettingItem {
+    let title = title.into();
+    let search: Vec<SharedString> = std::iter::once(title.clone())
+        .chain(std::iter::once(SharedString::from(description)))
+        .chain(keywords.iter().map(|keyword| SharedString::from(*keyword)))
+        .collect();
+    let page_reset = undo.clone();
+    SettingItem::render(move |options, window, cx| {
+        let control = (control)(options, window, cx);
+        let undo_button = undo.clone().button(options, cx);
+        let muted = cx.theme().muted_foreground;
+        // The kit's own row: the text (with the row's ↺) on the left, the control on
+        // the right, which is the layout every settings panel is read by.
+        div()
+            .w_full()
+            .h_flex()
+            .justify_between()
+            .items_center()
+            .gap_3()
+            .child(
+                v_flex()
+                    .flex_1()
+                    .max_w_3_5()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(Label::new(title.clone()).text_sm())
+                            .children(undo_button),
+                    )
+                    .child(div().text_sm().text_color(muted).child(description)),
+            )
+            .child(div().id("field").child(control))
+    })
+    .keywords(search)
+    .on_reset(move |cx| (page_reset.dirty)(cx), move |window, cx| (page_reset.restore)(window, cx))
+}
+
+/// A switch control: the panel bool and the setter a click uses.
 fn switch(
     weak: &Weak,
     get: fn(&SettingsPanel) -> bool,
     set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
-) -> SettingField<bool> {
-    let (reader, writer) = (weak.clone(), weak.clone());
-    SettingField::switch(
-        move |cx| reader.read_with(cx, |this, _| get(this)).unwrap_or_default(),
-        move |on, cx| {
-            writer.update(cx, |this, cx| set(this, on, cx)).ok();
-        },
+) -> Control {
+    let (read, write) = (weak.clone(), weak.clone());
+    Rc::new(move |_, _, cx| {
+        let on = read.read_with(cx, |this, _| get(this)).unwrap_or_default();
+        let write = write.clone();
+        Switch::new("check")
+            .checked(on)
+            .small()
+            .on_click(move |on: &bool, _, cx| {
+                write.update(cx, |this, cx| set(this, *on, cx)).ok();
+            })
+            .into_any_element()
+    })
+}
+
+/// The undo of a switch row, which a reset turns back to `default`.
+fn switch_undo(
+    weak: &Weak,
+    get: fn(&SettingsPanel) -> bool,
+    default: bool,
+    set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
+) -> Undo {
+    Undo::of_panel(
+        weak,
+        move |this| get(this) != default,
+        move |this, cx| set(this, default, cx),
     )
+}
+
+/// The buttons of a segmented row, in order.
+fn segments(entries: &[(&'static str, &'static str)]) -> Vec<(String, String)> {
+    entries.iter().map(|(id, label)| ((*id).to_owned(), (*label).to_owned())).collect()
+}
+
+/// A single-selection segmented control (one kit `ButtonGroup`): `entries` are the
+/// buttons in order, `selected` reports which one is active, and `apply` stores a click.
+fn segmented(
+    group: impl Into<ElementId> + Clone + 'static,
+    entries: Vec<(String, String)>,
+    weak: &Weak,
+    selected: impl Fn(&SettingsPanel) -> usize + 'static,
+    apply: impl Fn(&mut SettingsPanel, usize, &mut Context<SettingsPanel>) + 'static,
+) -> Control {
+    let (read, write) = (weak.clone(), weak.clone());
+    let apply: Apply = Rc::new(apply);
+    Rc::new(move |_, _, cx| {
+        let active = read.read_with(cx, |this, _| selected(this)).unwrap_or_default();
+        let mut control = ButtonGroup::new(group.clone()).compact().small();
+        for (index, (id, label)) in entries.iter().enumerate() {
+            control = control.child(Button::new(id.clone()).label(label.clone()).selected(index == active));
+        }
+        let write = write.clone();
+        let apply = apply.clone();
+        control
+            .on_click(move |clicks: &Vec<usize>, _, cx| {
+                if let Some(index) = clicks.first() {
+                    let apply = apply.clone();
+                    write.update(cx, move |this, cx| apply(this, *index, cx)).ok();
+                }
+            })
+            .into_any_element()
+    })
+}
+
+/// A number control: a Small kit `NumberInput` over the panel's `input`. Its width
+/// follows the kit's own number field; without one the digits collapse and the row
+/// shows nothing at all.
+fn number_field(
+    weak: &Weak,
+    row: fn(&mut SettingsPanel) -> &mut NumberRow,
+    input: Entity<InputState>,
+    suffix: Option<&'static str>,
+) -> Control {
+    let write_back = weak.clone();
+    Rc::new(move |options, window, cx| {
+        // Only a change made outside the field (a reset or a reseed) is written back;
+        // pushing the panel's text on every render would overwrite what is being typed.
+        let text = write_back.update(cx, |this, _| row(this).take_write_back()).ok().flatten();
+        if let Some(text) = text {
+            input.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
+        // `NumberInput` carries no id of its own, so the frame around it names the row's
+        // field and nothing else may reuse that name.
+        div()
+            .id(format!("number-{}-{}-{}", options.page_ix(), options.group_ix(), options.item_ix()))
+            .test_support()
+            .child(
+                NumberInput::new(&input)
+                    .small()
+                    .when_some(suffix, |this, suffix| {
+                        let faded = cx.theme().muted_foreground;
+                        this.suffix(div().text_sm().text_color(faded).child(suffix))
+                    })
+                    .map(|this| {
+                        if options.layout().is_horizontal() {
+                            this.w_32()
+                        } else {
+                            this.w_full()
+                        }
+                    }),
+            )
+            .into_any_element()
+    })
+}
+
+/// A select control: a Small outline kit button showing the current label and opening
+/// the kit's dropdown menu. This is the control the kit's own dropdown field uses, so
+/// our dropdown rows look like the kit's.
+fn select(
+    entries: Vec<(SharedString, SharedString)>,
+    read: Read,
+    write: Write,
+) -> Control {
+    Rc::new(move |options, _, cx| {
+        let value = read(cx);
+        let label = entries
+            .iter()
+            .find(|(entry, _)| *entry == value)
+            .map_or_else(|| value.clone(), |(_, label)| label.clone());
+        let menu_entries = entries.clone();
+        let write = write.clone();
+        Button::new("btn")
+            .when(options.layout().is_vertical(), |this| this.w_full())
+            .label(label)
+            .dropdown_caret(true)
+            .outline()
+            .small()
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                menu_entries.iter().fold(menu, |menu, (entry, label)| {
+                    let entry = entry.clone();
+                    menu.item(
+                        PopupMenuItem::new(label.clone())
+                            .checked(entry == value)
+                            .on_click({
+                                let write = write.clone();
+                                move |_, _, cx| write(entry.clone(), cx)
+                            }),
+                    )
+                })
+            })
+            .into_any_element()
+    })
 }
 
 fn options(pairs: &[(&'static str, &'static str)]) -> Vec<(SharedString, SharedString)> {
@@ -643,33 +991,45 @@ impl Render for SettingsPanel {
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
-        let reset = button("settings-reset-all", "Reset all settings…", "Reset preferences to their defaults", "", cx)
-            .on_click(move |_, window, cx| {
-                let weak = weak.clone();
-                window.open_alert_dialog(cx, move |alert, _, _| {
-                    let weak = weak.clone();
-                    alert
-                        .title("Reset all settings?")
-                        .description("This affects preferences only, not accounts or mail.")
-                        .confirm()
-                        .ok_text("Reset")
-                        .ok_variant(ButtonVariant::Danger)
-                        .cancel_text("Cancel")
-                        .on_ok(move |_, _, cx| {
-                            weak.update(cx, |this, cx| {
-                                this.reset_fields(cx);
-                                cx.emit(SettingsEvent::ResetAll);
-                            })
-                            .ok();
-                            true
-                        })
-                })
-            });
         // The kit keys its own state by element id, so the page and query it starts with
         // follow `page_gen`.
         let settings = format!("settings-{}", self.page_gen);
-        let close = button("settings-close", "Close", "Close the settings window", "escape", cx)
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Close)));
+        // The window draws the kit `TitleBar` itself (the window options come from
+        // `TitleBar::window_options`), so the bar carries the traffic lights, the drag
+        // region and the theme colors; the title sits left, the reset action right.
+        let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
+        // Wraps an interactive titlebar child so presses on it are not treated as a bar drag.
+        fn no_drag(child: impl IntoElement) -> Div {
+            div().flex_none().h_full().items_center().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(child)
+        }
+        let titlebar = TitleBar::new()
+            .child(div().flex_1().min_w_0().h_full().items_center().text_size(px(12.)).text_color(title_fg).child("Settings"))
+            // The reset action is a real control, so presses on it must not start a drag.
+            .child(no_drag(
+                button("settings-reset-all", "Reset all settings…", "Reset preferences to their defaults", "", cx)
+                    .ghost()
+                    .on_click(move |_, window, cx| {
+                        let weak = weak.clone();
+                        window.open_alert_dialog(cx, move |alert, _, _| {
+                            let weak = weak.clone();
+                            alert
+                                .title("Reset all settings?")
+                                .description("This affects preferences only, not accounts or mail.")
+                                .confirm()
+                                .ok_text("Reset")
+                                .ok_variant(ButtonVariant::Danger)
+                                .cancel_text("Cancel")
+                                .on_ok(move |_, _, cx| {
+                                    weak.update(cx, |this, cx| {
+                                        this.reset_fields(cx);
+                                        cx.emit(SettingsEvent::ResetAll);
+                                    })
+                                    .ok();
+                                    true
+                                })
+                        })
+                    }),
+            ));
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
@@ -683,8 +1043,7 @@ impl Render for SettingsPanel {
             .flex()
             .flex_col()
             .size_full()
-            .p_3()
-            .gap_2()
+            .child(titlebar)
             .child(
                 div()
                     .flex_1()
@@ -697,21 +1056,12 @@ impl Render for SettingsPanel {
                     .child(
                         div().flex_1().min_h_0().child(
                             Settings::new(settings)
+                                .small()
                                 .sidebar_width(px(190.))
                                 .default_selected_index(SelectIndex { page_ix: self.page, group_ix: None })
                                 .pages(pages),
                         ),
                     ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .border_t_1()
-                    .border_color(t.border)
-                    .pt_2()
-                    .child(reset)
-                    .child(close),
             )
     }
 }

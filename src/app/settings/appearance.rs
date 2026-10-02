@@ -1,6 +1,4 @@
 use super::*;
-use gpui_kit::component::Selectable as _;
-use gpui_kit::component::button::{Button, ButtonGroup};
 
 /// Segmented theme mode control: one entry per [`theme::ThemeMode`] variant.
 const THEME_MODES: [(&str, &str); 3] =
@@ -27,149 +25,152 @@ fn theme_mode(index: usize) -> theme::ThemeMode {
     }
 }
 
-/// A single-selection segmented control (one kit `ButtonGroup`): `entries` are the buttons
-/// in order, `selected` reports which one is active, and `apply` stores a click. Its reset
-/// button appears while `is_dirty` holds and runs `reset`.
-fn segmented(
-    id: &'static str,
-    entries: &'static [(&'static str, &'static str)],
-    weak: &Weak,
-    selected: fn(&SettingsPanel) -> usize,
-    apply: fn(&mut SettingsPanel, usize, &mut Context<SettingsPanel>),
-    is_dirty: fn(&SettingsPanel) -> bool,
-    reset: fn(&mut SettingsPanel, &mut Context<SettingsPanel>),
-) -> SettingField<SharedString> {
-    let (read, write, dirty, undo) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
-    SettingField::render(move |_, _window, cx| {
-        let active = read.read_with(cx, |this, _| selected(this)).unwrap_or_default();
-        let mut group = ButtonGroup::new(id).compact();
-        for (index, (button_id, label)) in entries.iter().enumerate() {
-            group = group.child(Button::new(*button_id).label(*label).selected(index == active));
-        }
-        let write = write.clone();
-        group.on_click(move |clicks, _, cx| {
-            if let Some(index) = clicks.first() {
-                write.update(cx, |this, cx| apply(this, *index, cx)).ok();
-            }
-        })
-    })
-    .on_reset(
-        move |cx| dirty.read_with(cx, |this, _| is_dirty(this)).unwrap_or_default(),
-        move |_window, cx| {
-            undo.update(cx, reset).ok();
-        },
-    )
-}
-
-/// A picker listing the registered themes of one appearance; reset restores the first one.
-fn theme_field(
-    weak: &Weak,
-    names: Vec<SharedString>,
-    get: fn(&SettingsPanel) -> String,
-    set: fn(&mut SettingsPanel, String, &mut Context<SettingsPanel>),
-) -> SettingField<SharedString> {
-    let options = names.iter().map(|name| (name.clone(), name.clone())).collect();
-    let default = names.first().cloned().unwrap_or_default();
-    let (read, write) = (weak.clone(), weak.clone());
-    SettingField::dropdown(
-        options,
-        move |cx| read.read_with(cx, |this, _| get(this).into()).unwrap_or_default(),
-        move |name: SharedString, cx| {
-            write.update(cx, |this, cx| set(this, name.to_string(), cx)).ok();
-        },
-    )
-    .default_value(default)
-}
-
 impl SettingsPanel {
     pub(super) fn appearance_page(&self, weak: &Weak, cx: &App) -> SettingPage {
         let light = self.theme_mode == theme::ThemeMode::Light;
         let dark = self.theme_mode == theme::ThemeMode::Dark;
         // System follows the OS, so both pickers stay reachable there.
         let system = self.theme_mode == theme::ThemeMode::System;
-        let mut group = SettingGroup::new().item(
-            SettingItem::new(
-                "Mode",
-                segmented(
-                    "mode-group",
-                    &THEME_MODES,
-                    weak,
-                    |this| theme_mode_index(this.theme_mode),
-                    |this, index, cx| this.set_theme_mode(theme_mode(index), cx),
-                    |this| this.theme_mode != theme::ThemeMode::System,
-                    |this, cx| this.set_theme_mode(theme::ThemeMode::System, cx),
-                ),
-            )
-            .description("Follow the system appearance or pick light or dark.")
-            .keywords(["appearance", "light dark system"]),
-        );
+        let mut group = SettingGroup::new().item(row(
+            "Mode",
+            "Follow the system appearance or pick light or dark.",
+            &["appearance", "light dark system"],
+            Undo::of_panel(
+                weak,
+                |this| this.theme_mode != theme::ThemeMode::System,
+                |this, cx| this.set_theme_mode(theme::ThemeMode::System, cx),
+            ),
+            segmented(
+                "mode-group",
+                segments(&THEME_MODES),
+                weak,
+                |this| theme_mode_index(this.theme_mode),
+                |this, index, cx| this.set_theme_mode(theme_mode(index), cx),
+            ),
+        ));
         if light || system {
-            group = group.item(
-                SettingItem::new(
-                    "Light theme",
-                    theme_field(
-                        weak,
-                        theme::names_for(cx, true),
-                        |this| this.light_theme.clone(),
-                        SettingsPanel::set_light_theme,
-                    ),
-                )
-                .description("Theme used while the app is light.")
-                .keywords(["theme", "light appearance"]),
-            );
+            group = group.item(row(
+                "Light theme",
+                "Theme used while the app is light.",
+                &["theme", "light appearance"],
+                theme_undo(
+                    weak,
+                    |this| this.light_theme.clone(),
+                    crate::app_settings::DEFAULT_LIGHT_THEME,
+                    SettingsPanel::set_light_theme,
+                ),
+                theme_picker(
+                    weak,
+                    theme::names_for(cx, true),
+                    |this| this.light_theme.clone(),
+                    SettingsPanel::set_light_theme,
+                ),
+            ));
         }
         if dark || system {
-            group = group.item(
-                SettingItem::new(
-                    "Dark theme",
-                    theme_field(
-                        weak,
-                        theme::names_for(cx, false),
-                        |this| this.dark_theme.clone(),
-                        SettingsPanel::set_dark_theme,
-                    ),
-                )
-                .description("Theme used while the app is dark.")
-                .keywords(["theme", "dark appearance"]),
-            );
+            group = group.item(row(
+                "Dark theme",
+                "Theme used while the app is dark.",
+                &["theme", "dark appearance"],
+                theme_undo(
+                    weak,
+                    |this| this.dark_theme.clone(),
+                    crate::app_settings::DEFAULT_DARK_THEME,
+                    SettingsPanel::set_dark_theme,
+                ),
+                theme_picker(
+                    weak,
+                    theme::names_for(cx, false),
+                    |this| this.dark_theme.clone(),
+                    SettingsPanel::set_dark_theme,
+                ),
+            ));
         }
         group = group
-            .item(
-                SettingItem::new(
-                    "Pane layout",
-                    segmented(
-                        "layout-group",
-                        &PANE_LAYOUTS,
-                        weak,
-                        |this| usize::from(this.orientation == Orientation::Stacked),
-                        |this, index, cx| {
-                            let orientation = if index == 0 {
-                                Orientation::SideBySide
-                            } else {
-                                Orientation::Stacked
-                            };
-                            this.set_orientation(orientation, cx);
-                        },
-                        |this| this.orientation != Orientation::SideBySide,
-                        |this, cx| this.set_orientation(Orientation::SideBySide, cx),
-                    ),
-                )
-                .description("Show the reader beside the list or below it.")
-                .keywords(["side by side", "stacked", "layout", "appearance"]),
-            )
-            .item(
-                SettingItem::new(
-                    "Sender avatar in tabs",
-                    switch(
-                        weak,
-                        |this| this.tab_avatars,
-                        SettingsPanel::set_tab_avatars,
-                    )
-                    .default_value(true),
-                )
-                .description("Use the sender's initial as each reader tab's icon.")
-                .keywords(["avatar", "monogram", "tab icon", "appearance"]),
-            );
-        SettingPage::new("Appearance").resettable(false).group(group)
+            .item(row(
+                "Pane layout",
+                "Show the reader beside the list or below it.",
+                &["side by side", "stacked", "layout", "appearance"],
+                Undo::of_panel(
+                    weak,
+                    |this| this.orientation != Orientation::SideBySide,
+                    |this, cx| this.set_orientation(Orientation::SideBySide, cx),
+                ),
+                segmented(
+                    "layout-group",
+                    segments(&PANE_LAYOUTS),
+                    weak,
+                    |this| usize::from(this.orientation == Orientation::Stacked),
+                    |this, index, cx| {
+                        let orientation = if index == 0 {
+                            Orientation::SideBySide
+                        } else {
+                            Orientation::Stacked
+                        };
+                        this.set_orientation(orientation, cx);
+                    },
+                ),
+            ))
+            .item(row(
+                "Sender avatar in tabs",
+                "Use the sender's initial as each reader tab's icon.",
+                &["avatar", "monogram", "tab icon", "appearance"],
+                switch_undo(
+                    weak,
+                    |this| this.tab_avatars,
+                    true,
+                    SettingsPanel::set_tab_avatars,
+                ),
+                switch(weak, |this| this.tab_avatars, SettingsPanel::set_tab_avatars),
+            ));
+        SettingPage::new("Appearance").resettable(true).group(group)
     }
+}
+
+/// The theme picker of one appearance: a dropdown over the registered theme names.
+fn theme_picker(
+    weak: &Weak,
+    names: Vec<SharedString>,
+    get: fn(&SettingsPanel) -> String,
+    set: fn(&mut SettingsPanel, String, &mut Context<SettingsPanel>),
+) -> Control {
+    select(theme_entries(&names), theme_reader(weak, get), theme_writer(weak, set))
+}
+
+/// The undo of a theme row: a reset puts back the app's default theme for it.
+fn theme_undo(
+    weak: &Weak,
+    get: fn(&SettingsPanel) -> String,
+    default: &str,
+    set: fn(&mut SettingsPanel, String, &mut Context<SettingsPanel>),
+) -> Undo {
+    Undo::of_value(weak, get, set, default.to_owned())
+}
+
+/// The name/value pairs a theme dropdown offers.
+fn theme_entries(names: &[SharedString]) -> Vec<(SharedString, SharedString)> {
+    names.iter().map(|name| (name.clone(), name.clone())).collect()
+}
+
+/// Reads the theme a dropdown row shows.
+fn theme_reader(
+    weak: &Weak,
+    get: fn(&SettingsPanel) -> String,
+) -> Read {
+    let weak = weak.clone();
+    Rc::new(move |cx| match weak.read_with(cx, |this, _| get(this)) {
+        Ok(name) => name.into(),
+        Err(_) => SharedString::default(),
+    })
+}
+
+/// Stores the theme a dropdown row picked.
+fn theme_writer(
+    weak: &Weak,
+    set: fn(&mut SettingsPanel, String, &mut Context<SettingsPanel>),
+) -> Write {
+    let weak = weak.clone();
+    Rc::new(move |name: SharedString, cx: &mut App| {
+        weak.update(cx, |this, cx| set(this, name.to_string(), cx)).ok();
+    })
 }

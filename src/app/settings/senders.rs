@@ -1,5 +1,4 @@
 use super::*;
-use gpui_kit::component::Sizable as _;
 
 impl SettingsPanel {
     pub(super) fn blocked_page(&self, weak: &Weak) -> SettingPage {
@@ -66,16 +65,13 @@ impl SettingsPanel {
                                 ),
                         )
                         .child(
-                            button(
-                                format!("blocked-unblock-{email}"),
-                                "Unblock",
-                                "Allow mail from this sender again",
-                                "",
-                                cx,
-                            )
-                            .on_click(move |_, _, cx| {
-                                weak.update(cx, |this, cx| this.unblock(&email, cx)).ok();
-                            }),
+                            Button::new(format!("blocked-unblock-{email}"))
+                                .label("Unblock")
+                                .small()
+                                .tooltip("Allow mail from this sender again")
+                                .on_click(move |_, _, cx| {
+                                    weak.update(cx, |this, cx| this.unblock(&email, cx)).ok();
+                                }),
                         )
                 })
                 .keywords(keywords.into_iter().chain([address.as_str()])),

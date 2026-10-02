@@ -6,12 +6,10 @@ use super::*;
 use crate::sync_status::SyncAction;
 use crate::account_style;
 use crate::app::icons;
-use crate::app::ui::icon_button;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonCustomVariant};
 use gpui_kit::base::component_traits::Disableable as _;
-use gpui_kit::component::Selectable as _;
-use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::PopupMenuItem;
 
 use gpui_kit::component::popover::Popover;
 
@@ -55,7 +53,10 @@ impl SettingsPanel {
                     ),
                 )
                 .child(div().flex_none().child(
-                    button("account-add-gmail", "Add Gmail…", "Sign in to a Gmail account", "", cx)
+                    Button::new("account-add-gmail")
+                        .label("Add Gmail…")
+                        .small()
+                        .tooltip("Sign in to a Gmail account")
                         .disabled(!configured)
                         .on_click(move |_, _, cx| {
                             weak.update(cx, |_, cx| cx.emit(SettingsEvent::AddGmail)).ok();
@@ -113,7 +114,11 @@ fn account_card(
             let icon_buttons = account_style::ICONS.iter().enumerate().map(|(i, (key, label))| {
                 let (weak, id, key) = (weak.clone(), id.clone(), *key);
                 let name = icons::account_icon_name(key).unwrap_or(IconName::Mail);
-                icon_button(("account-icon", index * account_style::ICONS.len() + i), name, label, "", cx)
+                Button::new(("account-icon", index * account_style::ICONS.len() + i))
+                    .icon(name)
+                    .small()
+                    .tooltip(*label)
+                    .accessibility_label(*label)
                     .selected(key == icon)
                     .on_click(move |_, _, cx| {
                         weak.update(cx, |this, cx| this.set_account_style(&id, Some(key), None, cx)).ok();
@@ -166,7 +171,7 @@ fn account_card(
             .text_base()
             .font_weight(FontWeight::SEMIBOLD)
             .children(nickname.map(|input| {
-                Input::new(input).id(("account-nickname", index)).bordered(false).focus_bordered(true)
+                Input::new(input).id(("account-nickname", index)).small().bordered(false).focus_bordered(true)
             })),
     );
     let header = div()
@@ -208,7 +213,7 @@ fn account_card(
                 .text_color(status_color)
                 .child(account.sync.clone()),
         )
-        .children(sync_action_button(index, account, weak, cx));
+        .children(sync_action_button(index, account, weak));
     div()
         .id(("account-card", index))
         .flex()
@@ -226,8 +231,12 @@ fn rename_button(index: usize, nickname: Option<&Entity<InputState>>, cx: &App) 
     let input = nickname?.clone();
     let faint = cx.theme().muted_foreground;
     Some(
-        icon_button(("account-rename", index), IconName::Pencil, "Rename", "", cx)
+        Button::new(("account-rename", index))
+            .icon(IconName::Pencil)
+            .small()
             .ghost()
+            .tooltip("Rename")
+            .accessibility_label("Rename")
             .text_color(faint)
             .on_click(move |_, window, cx| {
                 input.read(cx).focus_handle(cx).focus(window, cx);
@@ -247,8 +256,12 @@ fn overflow_menu(
     }
     let (weak, id, email) = (weak.clone(), account.id.clone(), account.email.clone());
     let faint = cx.theme().muted_foreground;
-    let trigger = icon_button(("account-overflow", index), IconName::Ellipsis, "Account actions", "", cx)
+    let trigger = Button::new(("account-overflow", index))
+        .icon(IconName::Ellipsis)
+        .small()
         .ghost()
+        .tooltip("Account actions")
+        .accessibility_label("Account actions")
         .text_color(faint);
     Some(
         div()
@@ -287,22 +300,20 @@ fn confirm_remove(weak: &Weak, id: &str, title: &str, window: &mut Window, cx: &
 }
 
 /// The one action `account`'s sync status allows, or nothing while it is healthy.
-fn sync_action_button(index: usize, account: &AccountRow, weak: &Weak, cx: &App) -> Option<Button> {
+fn sync_action_button(index: usize, account: &AccountRow, weak: &Weak) -> Option<Button> {
     let action = account.sync_action?;
     let weak = weak.clone();
     let (id, element) = (
         account.id.clone(),
         match action {
-            SyncAction::SignInAgain => button(
-                ("account-sign-in", index),
-                "Sign in again…",
-                "Sign in to this Gmail account again",
-                "",
-                cx,
-            ),
-            SyncAction::Retry => {
-                button(("account-retry", index), "Retry", "Run this account's sync again", "", cx)
-            }
+            SyncAction::SignInAgain => Button::new(("account-sign-in", index))
+                .label("Sign in again…")
+                .small()
+                .tooltip("Sign in to this Gmail account again"),
+            SyncAction::Retry => Button::new(("account-retry", index))
+                .label("Retry")
+                .small()
+                .tooltip("Run this account's sync again"),
         },
     );
     Some(element.on_click(move |_, _, cx| {

@@ -411,7 +411,7 @@ fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContex
     h.click("tb-settings");
     assert!(h.read(|a| a.settings_open()));
     let settings = h.read(|a| a.settings_window()).expect("the settings window is open");
-    h.cx.update_window(settings, |_, window, cx| window.click("settings-close", cx)).expect("settings window alive");
+    h.cx.simulate_keystrokes(settings, "escape");
     h.cx.run_until_parked();
     assert!(!h.read(|a| a.settings_open()));
     h.click("btn-more");

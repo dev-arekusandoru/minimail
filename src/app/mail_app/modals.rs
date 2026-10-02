@@ -346,8 +346,9 @@ impl MailApp {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(820.), px(650.)), cx)),
             window_min_size: Some(size(px(620.), px(460.))),
-            titlebar: Some(TitlebarOptions { title: Some("Settings".into()), ..Default::default() }),
-            ..Default::default()
+            // The panel draws the kit `TitleBar` itself, so the bar owns dragging, the
+            // double click and the window controls.
+            ..gpui_kit::component::TitleBar::window_options()
         };
         let Ok((handle, panel)) = gpui_kit::open_window(options, cx, move |settings_window, cx| {
             let app = app.clone();

@@ -1,6 +1,4 @@
 use super::*;
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Toggle, ToggleGroup};
 
 /// The questions the page offers; `Expects reply` stays hidden.
 const TAGGED: [QuestionKey; 4] = [
@@ -60,109 +58,95 @@ fn confidence_from_key(value: &str) -> Confidence {
 
 impl SettingsPanel {
     pub(super) fn classifier_page(&self, weak: &Weak) -> SettingPage {
-        let summaries = SettingGroup::new().item(
-            SettingItem::new(
-                "Thread summaries",
-                switch(weak, |this| this.summaries, SettingsPanel::set_summaries).default_value(false),
-            )
-            .description("Write a short summary above each conversation.")
-            .keywords(["summaries", "opt in to generated summaries"]),
-        );
+        let summaries = SettingGroup::new().item(row(
+            "Thread summaries",
+            "Write a short summary above each conversation.",
+            &["summaries", "opt in to generated summaries"],
+            switch_undo(weak, |this| this.summaries, false, SettingsPanel::set_summaries),
+            switch(weak, |this| this.summaries, SettingsPanel::set_summaries),
+        ));
         let mut tagging = SettingGroup::new().title("Tagging");
         for question in TAGGED {
-            tagging = tagging.item(
-                SettingItem::new(question.label(), Self::mode_field(weak, question))
-                    .description(tag_line(question))
-                    .keywords([question.label(), "classifier", "auto review off", "tagging"]),
-            );
+            tagging = tagging.item(row(
+                question.label(),
+                tag_line(question),
+                &["classifier", "auto review off", "tagging"],
+                Undo::of_panel(
+                    weak,
+                    move |this| this.policy.mode(question) != default_mode(question),
+                    move |this, cx| this.set_mode(question, default_mode(question), cx),
+                ),
+                segmented(
+                    format!("ai-mode-group-{}", question.label()),
+                    mode_entries(question),
+                    weak,
+                    move |this| mode_index(this.policy.mode(question)),
+                    move |this, index, cx| {
+                        this.set_classifier_mode(question, CLASSIFIER_MODES[index].0, cx)
+                    },
+                ),
+            ));
             if matches!(self.policy.mode(question), Mode::Auto(_)) {
-                tagging = tagging.item(
-                    SettingItem::new(
-                        format!("{} confidence", question.label()),
-                        Self::confidence_field(weak, question),
-                    )
-                    .description("Apply without review once the classifier is this sure.")
-                    .keywords([question.label(), "classifier confidence", "high medium low"]),
-                );
+                let default = default_confidence(question);
+                let (read, write) = (weak.clone(), weak.clone());
+                tagging = tagging.item(row(
+                    format!("{} confidence", question.label()),
+                    "Apply without review once the classifier is this sure.",
+                    &["classifier confidence", "high medium low"],
+                    Undo::of_panel(
+                        weak,
+                        move |this| this.policy.mode(question) != Mode::Auto(default),
+                        move |this, cx| this.set_confidence(question, default, cx),
+                    ),
+                    select(
+                        options(&CONFIDENCES),
+                        Rc::new({
+                            let read = read.clone();
+                            move |cx: &App| {
+                                read.read_with(cx, |this, _| {
+                                    confidence_of(this.policy.mode(question), default)
+                                })
+                                .unwrap_or_default()
+                            }
+                        }),
+                        Rc::new(move |value: SharedString, cx: &mut App| {
+                            write
+                                .update(cx, |this, cx| {
+                                    this.set_confidence(question, confidence_from_key(&value), cx)
+                                })
+                                .ok();
+                        }),
+                    ),
+                ));
             }
         }
-        SettingPage::new("AI").resettable(false).groups([summaries, tagging])
+        SettingPage::new("AI").resettable(true).groups([summaries, tagging])
     }
+}
 
-    /// Auto / Review / Off as one segmented control, with the reset marker shown
-    /// while the row differs from the shipped default.
-    fn mode_field(weak: &Weak, question: QuestionKey) -> SettingField<SharedString> {
-        let (get, click) = (weak.clone(), weak.clone());
-        let (dirty, reset) = (weak.clone(), weak.clone());
-        SettingField::render(move |_, _, cx| {
-            let selected = get
-                .read_with(cx, |this, _| this.policy.mode(question))
-                .map_or(0, mode_index);
-            ToggleGroup::new(format!("ai-mode-{}", question.label()))
-                .segmented()
-                .small()
-                .children(CLASSIFIER_MODES.iter().enumerate().map(|(index, (_, label))| {
-                    Toggle::new(format!("ai-mode-{}-{index}", question.label()))
-                        .label(*label)
-                        .checked(index == selected)
-                }))
-                .on_click({
-                    let click = click.clone();
-                    move |next: &Vec<bool>, _, cx| {
-                        // The group reports every segment's new state, so the pressed one is
-                        // the segment whose state differs from the row's current mode.
-                        let Ok(current) = click
-                            .read_with(cx, |this, _| this.policy.mode(question))
-                            .map(mode_index)
-                        else {
-                            return;
-                        };
-                        let Some(index) = (0..next.len()).find(|&i| next[i] != (i == current)) else {
-                            return;
-                        };
-                        click
-                            .update(cx, |this, cx| {
-                                this.set_classifier_mode(question, CLASSIFIER_MODES[index].0, cx)
-                            })
-                            .ok();
-                    }
-                })
+/// The confidence `question` ships with; what a reset puts back.
+fn default_confidence(question: QuestionKey) -> Confidence {
+    match default_mode(question) {
+        Mode::Auto(confidence) => confidence,
+        _ => Confidence::Medium,
+    }
+}
+
+/// The stored key of `mode`, falling back to `default` while the row shows nothing.
+fn confidence_of(mode: Mode, default: Confidence) -> SharedString {
+    match mode {
+        Mode::Auto(confidence) => confidence_key(confidence).into(),
+        _ => confidence_key(default).into(),
+    }
+}
+
+/// The Auto / Review / Off buttons of one question, each with an id no other row uses.
+fn mode_entries(question: QuestionKey) -> Vec<(String, String)> {
+    CLASSIFIER_MODES
+        .iter()
+        .enumerate()
+        .map(|(index, (_, label))| {
+            (format!("ai-mode-{}-{index}", question.label()), (*label).to_owned())
         })
-        .on_reset(
-            move |cx| {
-                dirty
-                    .read_with(cx, |this, _| this.policy.mode(question))
-                    .map_or(true, |mode| mode != default_mode(question))
-            },
-            move |_, cx| {
-                reset
-                    .update(cx, |this, cx| this.set_mode(question, default_mode(question), cx))
-                    .ok();
-            },
-        )
-    }
-
-    /// High / Medium / Low: the confidence Auto applies at without review.
-    fn confidence_field(weak: &Weak, question: QuestionKey) -> SettingField<SharedString> {
-        let (get, set) = (weak.clone(), weak.clone());
-        let default = match default_mode(question) {
-            Mode::Auto(confidence) => confidence,
-            _ => Confidence::Medium,
-        };
-        SettingField::dropdown(
-            options(&CONFIDENCES),
-            move |cx| {
-                get.read_with(cx, |this, _| match this.policy.mode(question) {
-                    Mode::Auto(confidence) => confidence,
-                    _ => Confidence::Medium,
-                })
-                .map_or(confidence_key(default).into(), |c| confidence_key(c).into())
-            },
-            move |value: SharedString, cx| {
-                let confidence = confidence_from_key(&value);
-                set.update(cx, |this, cx| this.set_confidence(question, confidence, cx)).ok();
-            },
-        )
-        .default_value(confidence_key(default))
-    }
+        .collect()
 }

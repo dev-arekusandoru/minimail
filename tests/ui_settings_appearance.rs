@@ -1,7 +1,8 @@
 //! Appearance and Inbox settings pages, driven through the real settings window.
 
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::{AppContext, AnyWindowHandle, TestAppContext};
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, AnyWindowHandle, Pixels, TestAppContext, point, px};
 use mail_classifier::app::mail_app::panes::Orientation;
 use mail_classifier::clock::DAY;
 use mail_classifier::model::{Tag, TriageState};
@@ -25,6 +26,26 @@ fn theme_name(h: &mut Harness<'_>, window: AnyWindowHandle) -> String {
     h.cx
         .update_window(window, |_, _, cx| cx.theme().theme_name().to_string())
         .unwrap()
+}
+
+/// How much room the follow-up row's number field has. A field with no width
+/// collapses to nothing, which is how the row lost its number in the first place.
+fn follow_up_width(h: &mut Harness<'_>) -> Pixels {
+    let window = h.settings_window().expect("the settings window is open");
+    for _ in 0..8 {
+        let found = h
+            .cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find("number-2-0-2").map(|field| field.bounds().size.width)
+            })
+            .expect("settings window alive");
+        h.cx.run_until_parked();
+        if let Some(width) = found {
+            return width;
+        }
+    }
+    panic!("the follow-up row's number field never reached the frame")
 }
 
 #[gpui_kit::gpui::test]
@@ -89,7 +110,7 @@ fn a_chosen_theme_survives_closing_the_settings_window(cx: &mut TestAppContext) 
     h.settings_click("mode-dark");
     h.settings_pick_option(0, 1, 1);
 
-    h.settings_click("settings-close");
+    h.settings_keys("escape");
     let window = h.settings_open_page(APPEARANCE);
     assert_eq!(h.read(|a| a.theme_preferences()).2, dark_names[1].to_string());
     assert_eq!(theme_name(&mut h, window), dark_names[1].to_string(), "still the chosen theme");
@@ -150,6 +171,59 @@ fn the_follow_up_row_sets_the_timeout(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn the_follow_up_row_shows_its_number_and_steps_it(cx: &mut TestAppContext) {
+    let mut h = app(cx);
+    h.settings_open_page(INBOX);
+    assert!(
+        follow_up_width(&mut h) >= px(64.),
+        "the row has room to show its number of days"
+    );
+
+    h.settings_click_in(0, 2, "increment");
+    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 4 * DAY);
+
+    // Typing in the field reaches the app the same way stepping does: click the digits,
+    // left of the ± buttons, and type over them.
+    let window = h.settings_window().expect("the settings window is open");
+    h.cx
+        .update_window(window, |_, window, cx| {
+            window.click_at("number-2-0-2", point(px(24.), px(12.)), cx)
+        })
+        .expect("settings window alive");
+    h.cx.run_until_parked();
+    h.settings_keys("cmd-a");
+    h.settings_type("7");
+    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 7 * DAY, "a typed value is applied");
+    assert!(
+        follow_up_width(&mut h) >= px(64.),
+        "the field still has room to show the typed number"
+    );
+}
+
+#[gpui_kit::gpui::test]
+fn a_changed_row_undoes_itself_and_the_page_reset_still_works(cx: &mut TestAppContext) {
+    let mut h = app(cx);
+    h.settings_open_page(INBOX);
+    assert!(!h.settings_has("row-undo-2-0-2"), "a row at its default has nothing to undo");
+
+    h.settings_click_in(0, 2, "increment");
+    assert!(h.settings_has("row-undo-2-0-2"), "the changed row offers its own undo");
+    assert!(h.settings_has("reset"), "the page offers a reset while a row differs");
+
+    h.settings_click("row-undo-2-0-2");
+    assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), 3 * DAY, "only that row went back");
+    assert!(!h.settings_has("row-undo-2-0-2"), "a restored row has nothing left to undo");
+
+    // Two rows off at once: the page reset puts both back.
+    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(0, 1, "increment");
+    assert!(h.read(|a| a.group_threads));
+    h.settings_click("reset");
+    assert!(!h.read(|a| a.group_threads), "the page reset took the switch back");
+    assert_eq!(h.read(|a| a.preview_lines), 2, "and the preview lines with it");
+}
+
+#[gpui_kit::gpui::test]
 fn the_group_switch_reaches_the_inbox(cx: &mut TestAppContext) {
     let mut h = app(cx);
     h.settings_open_page(INBOX);
@@ -169,7 +243,7 @@ fn lowering_the_follow_up_row_resurfaces_a_waiting_thread_on_tick(cx: &mut TestA
     h.settings_click_in(0, 2, "decrement");
     h.settings_click_in(0, 2, "decrement");
     assert_eq!(h.read(|a| a.mailbox.follow_up_timeout()), DAY);
-    h.settings_click("settings-close");
+    h.settings_keys("escape");
 
     h.tick();
     assert_eq!(h.state_of(1), TriageState::Inbox);
