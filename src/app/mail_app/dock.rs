@@ -1,5 +1,9 @@
-//! The three panes as dock panels: the sidebar in the left dock, the list and the reader
-//! as two tab groups in the centre.
+//! The centre panes as dock panels: the list and the reader as two tab groups in the
+//! centre split.
+//!
+//! The sidebar is deliberately not one of them. It is a resizable panel of ours beside
+//! the dock (see [`super::panes`]), so a tab group can be zoomed over the whole centre
+//! — which the dock's own zoom could never do while the sidebar lived in its left dock.
 //!
 //! Every panel here is a thin proxy. It holds a [`WeakEntity<MailApp>`] plus the identity
 //! it draws — a thread, or none — and calls straight back into the app's own render
@@ -16,22 +20,19 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::base::ElementExt as _;
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::dock::{
     BasePanel, DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, NodeId, PaneRef, Panel, PanelControl,
     PanelEvent, PanelId, PanelStyle, panel_handle,
 };
 
 use super::panes::{
-    MAX_SIDEBAR_W, MIN_LIST_H, MIN_LIST_W, MIN_READER_H, MIN_READER_W, MIN_SIDEBAR_W, Orientation, SIDEBAR_W,
-    available_height, available_width,
+    MIN_LIST_H, MIN_LIST_W, MIN_READER_H, MIN_READER_W, Orientation, SIDEBAR_W, available_height, available_width,
 };
 use super::*;
 
 pub(super) struct Dock {
     app: WeakEntity<MailApp>,
     area: Entity<DockArea>,
-    sidebar: Entity<SidebarPanel>,
     list: Entity<ListPanel>,
     /// The list slot as last painted. Shared with the list panel, which measures it, so
     /// the app can read the pane's real width without leasing a panel that is mid-render.
@@ -44,9 +45,6 @@ pub(super) struct Dock {
     readers: Vec<Entity<ReaderPanel>>,
     /// Which way the centre splits.
     orientation: Orientation,
-    /// Whether the sidebar is on screen. The dock owns the truth; this mirrors it for the
-    /// titlebar, which asks without a context.
-    sidebar_open: bool,
     /// The centre split's list slot, remembered per orientation so each keeps its own.
     sizes: [f32; 2],
     /// Width the list rows get before the slot has ever been painted.
@@ -72,18 +70,12 @@ impl Dock {
         let app_entity = cx.entity();
         let (area, skin) = DockSkin::dock_area("mail", None, window, cx);
         // `Auto`, not `TabBar`: under `Auto` a group of one panel draws a plain title
-        // only when that panel asks for one, so the sidebar and the list — both
-        // `title_bar() == false` — stay bare while a reader group of two or more draws
-        // the full tab bar.
+        // only when that panel asks for one, so the list — `title_bar() == false` —
+        // stays bare while a reader group of two or more draws the full tab bar.
         skin.set_panel_style(PanelStyle::Auto, cx);
         // Our own close button lives in the reader tab's title, where it already was.
         skin.set_close_button_visible(false, cx);
         skin.set_toggle_button_visible(false, cx);
-        let sidebar = cx.new(|cx| SidebarPanel {
-            app: app.clone(),
-            focus: cx.focus_handle(),
-            _app_sub: watch_app(&app_entity, cx),
-        });
         let measured = Rc::new(Cell::new((0., 0.)));
         let list = cx.new(|cx| ListPanel {
             app: app.clone(),
@@ -101,13 +93,11 @@ impl Dock {
         let mut dock = Self {
             app: app.clone(),
             area: area.clone(),
-            sidebar,
             list,
             measured,
             blank,
             readers: Vec::new(),
             orientation: Orientation::default(),
-            sidebar_open: true,
             sizes: default_sizes(window),
             list_w_default: Cell::new(available_width(
                 f32::from(window.viewport_size().width),
@@ -129,7 +119,7 @@ impl Dock {
         dock
     }
 
-    /// The dock's element, in the slot the three panes used to be built into.
+    /// The dock's element, in the slot the panes are built into.
     pub(super) fn view(&self) -> AnyElement {
         self.area.clone().into_any_element()
     }
@@ -142,38 +132,6 @@ impl Dock {
         self.orientation = orientation;
     }
 
-    pub(super) fn sidebar_open(&self) -> bool {
-        self.sidebar_open
-    }
-
-    pub(super) fn sidebar_width(&self, cx: &App) -> f32 {
-        f32::from(self.area.read(cx).dock_size(DockPlacement::Left).unwrap_or(px(SIDEBAR_W)))
-    }
-
-    /// Sidebar on or off. The dock keeps the size either way, so it comes back as it was.
-    pub(super) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut App) {
-        let open = Cell::new(self.sidebar_open);
-        self.area.update(cx, |area, cx| {
-            area.toggle_dock(DockPlacement::Left, window, cx);
-            open.set(area.is_dock_open(DockPlacement::Left));
-        });
-        self.sidebar_open = open.get();
-    }
-
-    /// The sidebar's own limits, which the dock has no size range for.
-    pub(super) fn clamp_sidebar(&mut self, window: &mut Window, cx: &mut App) {
-        let Some(size) = self.area.read(cx).dock_size(DockPlacement::Left) else { return };
-        let size = f32::from(size);
-        let clamped = size.clamp(MIN_SIDEBAR_W, MAX_SIDEBAR_W);
-        if clamped == size {
-            return;
-        }
-        self.area.update(cx, |area, cx| area.set_dock_size(DockPlacement::Left, px(clamped), window, cx));
-    }
-
-    pub(super) fn reset_sidebar(&mut self, window: &mut Window, cx: &mut App) {
-        self.area.update(cx, |area, cx| area.set_dock_size(DockPlacement::Left, px(SIDEBAR_W), window, cx));
-    }
 
     /// Bring the dock in line with the app. An ordinary frame builds nothing: only a
     /// change of panel set, orientation or activation reaches the area.
@@ -188,7 +146,6 @@ impl Dock {
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) -> Option<DraggedTabs> {
-        self.clamp_sidebar(window, cx);
         let wanted = Built { orientation: self.orientation, threads: threads.map(<[u32]>::to_vec) };
         if self.built.as_ref() != Some(&wanted) {
             let ix = active.and_then(|thread| self.reader_ix(thread, cx));
@@ -240,17 +197,19 @@ impl Dock {
         self.sync(threads, active, window, cx);
     }
 
-    /// Rebuild the centre around `size` for the list slot.
+    /// Rebuild the centre around `size` for the list slot. `sidebar` is the room the
+    /// sidebar takes off the width axis, which is what bounds the list.
     pub(super) fn place_list(
         &mut self,
         size: f32,
+        sidebar: f32,
         threads: Option<&[u32]>,
         active: Option<u32>,
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) {
         let orientation = self.orientation;
-        let (min, max) = self.limits(window, cx);
+        let (min, max) = self.limits(sidebar, window);
         self.sizes[orientation.ix()] = size.clamp(min, max);
         self.rebuild_now(threads, active, window, cx);
     }
@@ -259,13 +218,14 @@ impl Dock {
     /// share of the room.
     pub(super) fn forget_sizes(
         &mut self,
+        sidebar: f32,
         threads: Option<&[u32]>,
         active: Option<u32>,
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) {
-        self.sizes = self.defaults(window, cx);
-        self.list_w_default.set(available_width(f32::from(window.viewport_size().width), self.sidebar_width(cx)));
+        self.sizes = self.defaults(sidebar, window);
+        self.list_w_default.set(available_width(f32::from(window.viewport_size().width), sidebar));
         self.rebuild_now(threads, active, window, cx);
     }
 
@@ -284,12 +244,11 @@ impl Dock {
 
     /// `(smallest, largest)` the list pane may take along the stacking axis: the old
     /// per-panel ranges, which the dock's own slots do not carry.
-    fn limits(&self, window: &Window, cx: &App) -> (f32, f32) {
+    fn limits(&self, sidebar: f32, window: &Window) -> (f32, f32) {
         let viewport = window.viewport_size();
         let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
         match self.orientation {
             Orientation::SideBySide => {
-                let sidebar = if self.sidebar_open { self.sidebar_width(cx) } else { 0. };
                 (MIN_LIST_W, (available_width(vw, sidebar) - MIN_READER_W).max(MIN_LIST_W))
             }
             Orientation::Stacked => (MIN_LIST_H, (available_height(vh) - MIN_READER_H).max(MIN_LIST_H)),
@@ -397,18 +356,12 @@ impl Dock {
         // The stand-in shows only when there is no tab to show it instead.
         self.blank.update(cx, |panel, _| panel.standalone = self.readers.is_empty());
 
-        let sidebar = DockLayout::tabs().panel_view(panel_handle(self.sidebar.clone()), cx);
         let list = DockLayout::tabs().panel_view(panel_handle(self.list.clone()), cx);
         let reader = self.reader_layout(active, cx);
         let orientation = self.orientation;
         let size = Some(px(self.sizes[orientation.ix()]));
 
         self.area.update(cx, |area, cx| {
-            if !area.has_dock(DockPlacement::Left) {
-                area.set_dock(DockPlacement::Left, sidebar, window, cx);
-                area.set_dock_collapsible(DockPlacement::Left, true, window, cx);
-                area.set_dock_size(DockPlacement::Left, px(SIDEBAR_W), window, cx);
-            }
             let split = match orientation {
                 Orientation::SideBySide => DockLayout::h_split(),
                 Orientation::Stacked => DockLayout::v_split(),
@@ -432,9 +385,8 @@ impl Dock {
 
     /// The share each orientation starts its list at, before anything has measured it:
     /// the classic 42% side by side, 45% of the height when stacked.
-    fn defaults(&self, window: &Window, cx: &App) -> [f32; 2] {
+    fn defaults(&self, sidebar: f32, window: &Window) -> [f32; 2] {
         let viewport = window.viewport_size();
-        let sidebar = if self.sidebar_open { self.sidebar_width(cx) } else { 0. };
         let width = available_width(f32::from(viewport.width), sidebar);
         [crate::app::row::list_width(width), available_height(f32::from(viewport.height)) * 0.45]
     }
@@ -463,56 +415,6 @@ fn default_sizes(window: &Window) -> [f32; 2] {
         crate::app::row::list_width(available_width(f32::from(viewport.width), SIDEBAR_W)),
         available_height(f32::from(viewport.height)) * 0.45,
     ]
-}
-
-/// The sidebar: today's `render_sidebar`, in the dock's left region.
-pub(super) struct SidebarPanel {
-    app: WeakEntity<MailApp>,
-    focus: FocusHandle,
-    /// Repaints this panel whenever the app's state changes, which is what the panes got for
-    /// free while they were built inside `MailApp`'s own render.
-    _app_sub: Subscription,
-}
-
-impl BasePanel for SidebarPanel {
-    fn panel_name(&self) -> &'static str {
-        "mail.sidebar"
-    }
-    fn closable(&self, _: &App) -> bool {
-        false
-    }
-    fn zoomable(&self, _: &App) -> bool {
-        false
-    }
-}
-
-impl Panel for SidebarPanel {
-    fn title_bar(&self, _: &App) -> bool {
-        false
-    }
-    fn inner_padding(&self, _: &App) -> bool {
-        false
-    }
-    fn zoom_control(&self, _: &App) -> Option<PanelControl> {
-        None
-    }
-}
-
-impl EventEmitter<PanelEvent> for SidebarPanel {}
-
-impl Focusable for SidebarPanel {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
-
-impl Render for SidebarPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sidebar_bg = cx.theme().sidebar;
-        let Some(app) = self.app.upgrade() else { return div() };
-        let menu = app.update(cx, |app, cx| app.render_sidebar(cx));
-        div().size_full().min_w_0().min_h_0().flex().flex_col().bg(sidebar_bg).child(menu)
-    }
 }
 
 /// The message list: today's `render_list`, filling the dock's list slot.

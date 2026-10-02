@@ -1,9 +1,16 @@
 //! Pane layout: the sidebar, the inbox list and the reader.
 //!
-//! The three panes are dock panels now — the sidebar in the left dock, the list and the
-//! reader as two tab groups in the centre (see [`super::dock`]). What stays here is what
-//! the dock cannot hold for us: which way the centre splits, whether the sidebar is on
-//! screen, and the size each orientation remembers.
+//! The dock draws the centre — the list and the reader as two tab groups — and the
+//! sidebar is a resizable panel of ours beside it, in a group of its own. Keeping it out
+//! of the dock is what lets a tab group be zoomed over the whole centre later: the
+//! dock's zoom draws a group as the entire dock body, so a sidebar living in its left
+//! dock could never stay on screen through one.
+//!
+//! What lives here is what the dock cannot hold for us: whether the sidebar is on
+//! screen, how wide it is, and the size each orientation remembers for the list.
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
+
 use super::dock::Dock;
 use super::*;
 
@@ -78,16 +85,28 @@ impl Orientation {
     }
 }
 
-/// The pane layout: the dock that draws the three panes, the way its centre splits and
-/// whether the sidebar is on screen.
+/// The pane layout: the dock that draws the centre, the sidebar beside it in its own
+/// resizable group, and which way the centre splits.
 pub struct Panes {
     dock: Dock,
+    /// `Sidebar | centre`. The one place the sidebar's width lives, shared by both
+    /// orientations.
+    sidebar: Entity<ResizableState>,
+    /// Whether the sidebar is on screen. Collapsing renders nothing at all, divider
+    /// band included; the group's state is untouched, so the width comes back with it.
+    sidebar_visible: bool,
+    /// Repaints the app when the sidebar's group moves: its width is read out of that
+    /// state, and the rows beside it size from it.
+    _subs: Vec<Subscription>,
 }
 
 impl Panes {
     pub(super) fn new(app: &WeakEntity<MailApp>, window: &mut Window, cx: &mut Context<MailApp>) -> Self {
-        Self { dock: Dock::new(app, window, cx) }
+        let sidebar = cx.new(|_| ResizableState::default());
+        let sub = cx.observe(&sidebar, |_, _, cx| cx.notify());
+        Self { dock: Dock::new(app, window, cx), sidebar, sidebar_visible: true, _subs: vec![sub] }
     }
+
 
     pub fn orientation(&self) -> Orientation {
         self.dock.orientation()
@@ -108,7 +127,28 @@ impl Panes {
     }
 
     pub fn sidebar_visible(&self) -> bool {
-        self.dock.sidebar_open()
+        self.sidebar_visible
+    }
+
+    /// The sidebar group, for the one place that draws it.
+    fn sidebar_state(&self) -> &Entity<ResizableState> {
+        &self.sidebar
+    }
+
+    /// The sidebar as last laid out, or as it was when hidden: the group keeps its own
+    /// state, so a collapsed sidebar still knows the width it will come back with.
+    fn measured_sidebar(&self, cx: &App) -> f32 {
+        let state = self.sidebar.read(cx);
+        state
+            .sizes()
+            .first()
+            .filter(|_| state.container_size() > px(0.))
+            .map_or(SIDEBAR_W, |size| f32::from(*size))
+    }
+
+    /// The width the sidebar takes off the centre: nothing at all while it is collapsed.
+    fn sidebar_room(&self, cx: &App) -> f32 {
+        if self.sidebar_visible { self.measured_sidebar(cx) } else { 0. }
     }
 
     pub(super) fn dock_mut(&mut self) -> &mut Dock {
@@ -143,7 +183,7 @@ impl MailApp {
 
     /// Current sidebar width in pixels; a hidden sidebar keeps the width it will come back with.
     pub fn sidebar_width(&self, cx: &App) -> f32 {
-        self.panes.dock_ref().sidebar_width(cx)
+        self.panes.measured_sidebar(cx)
     }
 
     /// Width the list rows get: the list pane side by side, the whole pane region when stacked.
@@ -169,20 +209,23 @@ impl MailApp {
         }
         let threads = self.panes.reader_threads(self);
         let active = active_thread(self);
-        self.panes.dock_mut().place_list(size + delta, threads.as_deref(), active, window, cx);
+        let sidebar = self.panes.sidebar_room(cx);
+        self.panes.dock_mut().place_list(size + delta, sidebar, threads.as_deref(), active, window, cx);
     }
 
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let threads = self.panes.reader_threads(self);
         let active = active_thread(self);
-        self.panes.dock_mut().forget_sizes(threads.as_deref(), active, window, cx);
+        let sidebar = self.panes.sidebar_room(cx);
+        self.panes.dock_mut().forget_sizes(sidebar, threads.as_deref(), active, window, cx);
         self.show_toast("Pane sizes reset".into(), window, cx);
     }
 
-    /// Back to the default sidebar width.
+    /// Back to the default sidebar width. The panel's own size range does the clamping.
     pub(super) fn reset_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.panes.dock_mut().reset_sidebar(window, cx);
+        let sidebar = self.panes.sidebar_state().clone();
+        sidebar.update(cx, |state, cx| state.resize_panel(0, px(SIDEBAR_W), window, cx));
     }
 
     /// Stack the panes the other way round: list left, or list on top.
@@ -202,10 +245,10 @@ impl MailApp {
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
-    /// Hide or show the sidebar. The dock keeps its size either way, so the width comes
-    /// back with it.
-    pub(super) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.panes.dock_mut().toggle_sidebar(window, cx);
+    /// Hide or show the sidebar. Collapsed draws nothing at all, divider band included;
+    /// the group's state is left alone, so the width comes back with it.
+    pub(super) fn toggle_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.panes.sidebar_visible = !self.panes.sidebar_visible;
         cx.notify();
     }
 
@@ -225,7 +268,7 @@ impl MailApp {
     }
 
     /// The band over the sidebar's edge that turns a double-click back to its default
-    /// width. The dock's own resize handle underneath keeps the drag, the cursor and the
+    /// width. The resizable handle underneath keeps the drag, the cursor and the
     /// highlight.
     fn sidebar_divider_target(&self, sidebar_w: f32, cx: &Context<Self>) -> impl IntoElement {
         let half = DIVIDER_HIT / 2.;
@@ -244,16 +287,45 @@ impl MailApp {
             }))
     }
 
-    /// The dock, in the slot the panes used to be laid out by hand: under the titlebar and
-    /// above the hint bar.
+    /// The panes, in the slot they used to be laid out by hand: under the titlebar and
+    /// above the hint bar. The sidebar is a resizable panel beside the dock, and while it
+    /// is collapsed the dock gets the whole width and nothing at all is drawn for it —
+    /// divider band included.
     pub(super) fn render_panes(&self, cx: &Context<Self>) -> AnyElement {
-        let sidebar_w = self.panes.dock_ref().sidebar_width(cx);
+        let shown = self.panes.sidebar_visible();
+        let sidebar_w = self.panes.measured_sidebar(cx);
+        let dock = self.panes.dock_ref().view();
+        let body = if shown {
+            let bg = cx.theme().sidebar;
+            h_resizable("mail-sidebar")
+                .with_state(self.panes.sidebar_state())
+                .child(
+                    resizable_panel()
+                        .size(px(SIDEBAR_W))
+                        .size_range(px(MIN_SIDEBAR_W)..px(MAX_SIDEBAR_W))
+                        .flex_none()
+                        .child(
+                            div()
+                                .size_full()
+                                .min_w_0()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .bg(bg)
+                                .child(self.render_sidebar(cx)),
+                        ),
+                )
+                .child(resizable_panel().size_range(px(MIN_LIST_W)..Pixels::MAX).child(dock))
+                .into_any_element()
+        } else {
+            dock
+        };
         div()
             .relative()
             .flex_1()
             .min_h_0()
-            .child(self.panes.dock_ref().view())
-            .child(self.sidebar_divider_target(sidebar_w, cx))
+            .child(body)
+            .when(shown, |d| d.child(self.sidebar_divider_target(sidebar_w, cx)))
             .into_any_element()
     }
 }
