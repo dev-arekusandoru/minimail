@@ -44,7 +44,6 @@ impl MailApp {
         self.compose = None;
         self.help = None;
         self.snooze = None;
-        self.settings = None;
         self.rules_panel = None;
         self.dialog = None;
         self.folder_picker = None;

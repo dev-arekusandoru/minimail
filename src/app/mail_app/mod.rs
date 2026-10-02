@@ -26,7 +26,7 @@ use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, Summar
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
-use crate::judge::{JudgePolicy, Kind, Routed, StubJudge, classify};
+use crate::judge::{JudgePolicy, Kind, QuestionKey, Routed, StubJudge, classify};
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
@@ -86,6 +86,9 @@ pub struct MailApp {
     pub tabs: Tabs,
     /// Show the sender's monogram as each tab's icon (settings).
     pub tab_avatars: bool,
+    theme_mode: crate::theme::ThemeMode,
+    light_theme: String,
+    dark_theme: String,
     pub palette: Option<Entity<CommandPalette>>,
     pub compose: Option<Entity<ComposeReply>>,
     help: Option<Entity<HelpPanel>>,
@@ -122,6 +125,10 @@ pub struct MailApp {
     /// Folder picker (`f` and the dialogs' `File…`).
     folder_picker: Option<Entity<FolderPicker>>,
     settings: Option<Entity<SettingsPanel>>,
+    _theme_sub: Option<Subscription>,
+    /// Separate native Settings window, if currently open.
+    settings_window: Option<AnyWindowHandle>,
+    preferences: Option<Rc<crate::contacts::ContactStore>>,
     rules_panel: Option<Entity<RulesPanel>>,
     pending_rule: Option<Rule>,
     session: Option<Session>,
@@ -149,6 +156,7 @@ pub struct MailApp {
     /// Frames until a reopened find bar selects its text (see `place_find_match`).
     find_select: std::cell::Cell<u8>,
     _modal_sub: Option<Subscription>,
+    _settings_sub: Option<Subscription>,
     /// Which popup menu is open, if any (the kit owns the popup itself).
     open_menu: Option<MenuKind>,
     /// The `+ Filter` picker or a pill's value editor, when one is open.
@@ -212,6 +220,9 @@ impl MailApp {
             folder: Location::AllInboxes,
             tabs: Tabs::default(),
             tab_avatars: true,
+            theme_mode: crate::theme::ThemeMode::System,
+            light_theme: String::new(),
+            dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             palette: None,
             compose: None,
             help: None,
@@ -229,11 +240,14 @@ impl MailApp {
             group_threads: false,
             expanded: HashSet::new(),
             row_cursor: 0,
+            _theme_sub: None,
             row_anchor: None,
             snooze: None,
             dialog: None,
             folder_picker: None,
             settings: None,
+            settings_window: None,
+            preferences: None,
             rules_panel: None,
             pending_rule: None,
             session: None,
@@ -251,6 +265,7 @@ impl MailApp {
             find_gen: std::cell::Cell::new(0),
             find_select: std::cell::Cell::new(0),
             _modal_sub: None,
+            _settings_sub: None,
             open_menu: None,
             filter_popover: None,
             cache: None,
@@ -270,6 +285,64 @@ impl MailApp {
         };
         app.classify_visible();
         app
+    }
+    pub fn load_preferences(
+        &mut self,
+        store: Rc<crate::contacts::ContactStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::prefs::Scope;
+        let scope = Scope::Global;
+        self.tab_avatars = crate::app_settings::TAB_AVATARS.get(store.as_ref(), &scope);
+        self.group_threads = crate::app_settings::GROUP_THREADS.get(store.as_ref(), &scope);
+        self.preview_lines = crate::app_settings::PREVIEW_LINES.get(store.as_ref(), &scope).min(5);
+        self.summaries_enabled = crate::app_settings::SUMMARIES.get(store.as_ref(), &scope);
+        let days = crate::app_settings::FOLLOW_UP_DAYS.get(store.as_ref(), &scope).clamp(1, 14);
+        self.mailbox.set_follow_up_timeout(i64::from(days) * DAY);
+        self.theme_mode = crate::app_settings::THEME_MODE.get(store.as_ref(), &scope);
+        self.light_theme = crate::app_settings::LIGHT_THEME.get(store.as_ref(), &scope);
+        if self.light_theme.is_empty() {
+            self.light_theme = crate::theme::names_for(cx, true)
+                .first()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+        }
+        self.dark_theme = crate::app_settings::DARK_THEME.get(store.as_ref(), &scope);
+        if self.dark_theme.is_empty() {
+            self.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
+        }
+        let layout = crate::app_settings::PANE_LAYOUT.get(store.as_ref(), &scope);
+        self.panes.set_orientation(if layout == "stacked" { PaneLayout::Stacked } else { PaneLayout::SideBySide });
+        self.policy.set_mode(QuestionKey::Spam, crate::app_settings::MODE_SPAM.get(store.as_ref(), &scope));
+        self.policy.set_mode(
+            QuestionKey::NeedsReply,
+            crate::app_settings::MODE_NEEDS_REPLY.get(store.as_ref(), &scope),
+        );
+        self.policy.set_mode(QuestionKey::Urgency, crate::app_settings::MODE_URGENCY.get(store.as_ref(), &scope));
+        self.policy.set_mode(QuestionKey::Kind, crate::app_settings::MODE_KIND.get(store.as_ref(), &scope));
+        self.policy.set_mode(
+            QuestionKey::ExpectsReply,
+            crate::app_settings::MODE_EXPECTS_REPLY.get(store.as_ref(), &scope),
+        );
+        self.preferences = Some(store);
+        cx.set_window_appearance(match self.theme_mode {
+            crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
+            crate::theme::ThemeMode::Dark => Some(WindowAppearance::Dark),
+            crate::theme::ThemeMode::System => None,
+        });
+        self.refresh_theme(cx);
+        let weak = cx.weak_entity();
+        self._theme_sub = Some(window.observe_window_appearance(move |_, cx| {
+            weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
+        }));
+        self.classify_visible();
+        cx.notify();
+    }
+    fn refresh_theme(&self, cx: &mut App) {
+        let dark = matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+        let name = crate::theme::active_theme_name(self.theme_mode, &self.light_theme, &self.dark_theme, dark);
+        crate::theme::apply(cx, name);
     }
 
     /// Advance time-based mailbox behavior, including snooze wake-up and outbox flush.

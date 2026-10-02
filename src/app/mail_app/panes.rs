@@ -120,6 +120,10 @@ impl Panes {
         self.orientation
     }
 
+    pub(super) fn set_orientation(&mut self, orientation: Orientation) {
+        self.orientation = orientation;
+    }
+
     pub fn sidebar_visible(&self) -> bool {
         self.sidebar_visible
     }

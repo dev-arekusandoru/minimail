@@ -201,7 +201,6 @@ impl MailApp {
         self.palette.is_some()
             || self.help.is_some()
             || self.snooze.is_some()
-            || self.settings.is_some()
             || self.rules_panel.is_some()
             || self.dialog.is_some()
             || self.folder_picker.is_some()

@@ -111,11 +111,24 @@ impl PrefStore for MemoryPrefs {
 pub struct Setting<T> {
     pub key: &'static str,
     pub default: T,
+    default_fn: Option<fn() -> T>,
 }
 
 impl<T> Setting<T> {
     pub const fn new(key: &'static str, default: T) -> Self {
-        Self { key, default }
+        Self { key, default, default_fn: None }
+    }
+
+    /// Define a const setting whose effective default is computed without GPUI.
+    pub const fn with_default_fn(key: &'static str, default: T, default_fn: fn() -> T) -> Self {
+        Self { key, default, default_fn: Some(default_fn) }
+    }
+
+    pub fn default_value(&self) -> T
+    where
+        T: Clone,
+    {
+        self.default_fn.map_or_else(|| self.default.clone(), |default| default())
     }
 }
 
@@ -136,7 +149,7 @@ impl<T: Serialize + DeserializeOwned + PartialEq + Clone> Setting<T> {
         {
             return v;
         }
-        self.default.clone()
+        self.default_value()
     }
 
     /// Store `value` at exactly `scope`. A value equal to what the scope
@@ -144,7 +157,7 @@ impl<T: Serialize + DeserializeOwned + PartialEq + Clone> Setting<T> {
     /// value for an account) deletes the row instead of storing it.
     pub fn set(&self, store: &dyn PrefStore, scope: &Scope, value: T) {
         let inherited = match scope {
-            Scope::Global => self.default.clone(),
+            Scope::Global => self.default_value(),
             Scope::Account(_) => self.get(store, &Scope::Global),
         };
         if value == inherited {

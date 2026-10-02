@@ -34,7 +34,6 @@ impl MailApp {
         self.palette = None;
         self.folder_picker = None;
         self.snooze = None;
-        self.settings = None;
         self.rules_panel = None;
         self.dialog = None;
         self.help = None;
@@ -243,11 +242,15 @@ impl MailApp {
         cx.notify();
     }
 
-    pub(super) fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings.is_some() {
-            self.close_modals(window, cx);
-            return;
+    fn save_setting<T>(&self, setting: &crate::prefs::Setting<T>, value: T)
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Clone,
+    {
+        if let Some(store) = &self.preferences {
+            setting.set(store.as_ref(), &crate::prefs::Scope::Global, value);
         }
+    }
+    pub(super) fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings(false, window, cx);
     }
 
@@ -304,10 +307,15 @@ impl MailApp {
             .collect()
     }
 
-    /// Open settings, on the Accounts page when `accounts` (reopening if settings are already up).
+    /// Open Settings in its own native window, reusing and activating the existing window.
     pub(super) fn open_settings(&mut self, accounts: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings.is_some() {
-            self.close_modals(window, cx);
+        if let Some(handle) = self.settings_window {
+            if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+                return;
+            }
+            self.settings_window = None;
+            self.settings = None;
+            self._settings_sub = None;
         }
         if self.modal_open() {
             return;
@@ -316,53 +324,160 @@ impl MailApp {
         let preview = self.preview_lines;
         let rows = self.account_rows();
         let gmail_configured = crate::provider::gmail::ClientConfig::from_env().is_some();
-        let panel = cx.new(|cx| {
-            let panel = SettingsPanel::new(
-                self.policy.clone(),
-                self.summaries_enabled,
-                group,
-                preview,
-                self.panes.orientation(),
-                window,
-                cx,
-            )
-            .tab_avatars(self.tab_avatars)
-            .mailbox_state(
-                self.mailbox.blocked().into_iter().map(|(email, _)| email).collect(),
-                self.mailbox.unsubscribed().to_vec(),
-                self.mailbox.follow_up_timeout(),
-            )
-            .accounts(rows, gmail_configured);
-            if accounts { panel.on_accounts_page() } else { panel }
-        });
-        self._modal_sub = Some(cx.subscribe_in(
+        let policy = self.policy.clone();
+        let summaries = self.summaries_enabled;
+        let orientation = self.panes.orientation();
+        let theme_mode = self.theme_mode;
+        let light_theme = self.light_theme.clone();
+        let dark_theme = self.dark_theme.clone();
+        let tab_avatars = self.tab_avatars;
+        let blocked = self.mailbox.blocked().into_iter().map(|(email, _)| email).collect();
+        let follow_up = self.mailbox.follow_up_timeout();
+        let app = cx.weak_entity();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(820.), px(650.)), cx)),
+            window_min_size: Some(size(px(620.), px(460.))),
+            titlebar: Some(TitlebarOptions { title: Some("Settings".into()), ..Default::default() }),
+            ..Default::default()
+        };
+        let Ok((handle, panel)) = gpui_kit::open_window(options, cx, move |settings_window, cx| {
+            let app = app.clone();
+            settings_window.on_window_should_close(cx, move |_, cx| {
+                app.update(cx, |this, cx| {
+                    this.settings = None;
+                    this.settings_window = None;
+                    this._settings_sub = None;
+                    cx.notify();
+                })
+                .ok();
+                true
+            });
+            let panel = cx.new(|cx| {
+                let panel = SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
+                    .tab_avatars(tab_avatars)
+                    .mailbox_state(blocked, follow_up)
+                    .theme_preferences(theme_mode, light_theme, dark_theme)
+                    .accounts(rows, gmail_configured);
+                if accounts { panel.on_accounts_page() } else { panel }
+            });
+            let focus = panel.read(cx).focus_handle(cx).clone();
+            settings_window.focus(&focus, cx);
+            panel
+        }) else {
+            return;
+        };
+        let panel_weak = panel.downgrade();
+        self._settings_sub = Some(cx.subscribe_in(
             &panel,
             window,
-            |this, _, event: &SettingsEvent, window, cx| match event {
+            move |this, _, event: &SettingsEvent, window, cx| match event {
+                SettingsEvent::ResetAll => {
+                    if let Some(store) = &this.preferences {
+                        let scope = crate::prefs::Scope::Global;
+                        crate::app_settings::THEME_MODE.reset(store.as_ref(), &scope);
+                        crate::app_settings::LIGHT_THEME.reset(store.as_ref(), &scope);
+                        crate::app_settings::DARK_THEME.reset(store.as_ref(), &scope);
+                        crate::app_settings::PANE_LAYOUT.reset(store.as_ref(), &scope);
+                        crate::app_settings::TAB_AVATARS.reset(store.as_ref(), &scope);
+                        crate::app_settings::GROUP_THREADS.reset(store.as_ref(), &scope);
+                        crate::app_settings::PREVIEW_LINES.reset(store.as_ref(), &scope);
+                        crate::app_settings::FOLLOW_UP_DAYS.reset(store.as_ref(), &scope);
+                        crate::app_settings::SUMMARIES.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_SPAM.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_NEEDS_REPLY.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_EXPECTS_REPLY.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_URGENCY.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
+                    }
+                    this.policy = JudgePolicy::default();
+                    this.theme_mode = crate::theme::ThemeMode::System;
+                    this.light_theme = crate::theme::names_for(cx, true)
+                        .first()
+                        .map(ToString::to_string)
+                        .unwrap_or_default();
+                    this.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
+                    cx.set_window_appearance(None);
+                    this.summaries_enabled = false;
+                    this.group_threads = false;
+                    this.tab_avatars = true;
+                    this.preview_lines = crate::preview::DEFAULT_LINES;
+                    this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
+                    this.panes.set_orientation(PaneLayout::SideBySide);
+                    let light = crate::theme::names_for(cx, true).first().cloned().unwrap_or_default();
+                    let dark = crate::app_settings::DEFAULT_DARK_THEME;
+                    let system_is_dark =
+                        matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+                    let name = crate::theme::active_theme_name(
+                        crate::theme::ThemeMode::System,
+                        &light,
+                        dark,
+                        system_is_dark,
+                    );
+                    crate::theme::apply(cx, name);
+                    panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
+                    cx.notify();
+                }
                 SettingsEvent::Changed(policy, summaries) => {
                     this.policy = policy.clone();
                     this.summaries_enabled = *summaries;
+                    this.save_setting(&crate::app_settings::SUMMARIES, *summaries);
+                    for question in QuestionKey::ALL {
+                        let setting = match question {
+                            QuestionKey::Spam => &crate::app_settings::MODE_SPAM,
+                            QuestionKey::NeedsReply => &crate::app_settings::MODE_NEEDS_REPLY,
+                            QuestionKey::ExpectsReply => &crate::app_settings::MODE_EXPECTS_REPLY,
+                            QuestionKey::Urgency => &crate::app_settings::MODE_URGENCY,
+                            QuestionKey::Kind => &crate::app_settings::MODE_KIND,
+                        };
+                        this.save_setting(setting, policy.mode(question));
+                    }
+                    cx.notify();
+                }
+                SettingsEvent::Theme { mode, light, dark } => {
+                    this.theme_mode = *mode;
+                    this.light_theme = light.clone();
+                    this.dark_theme = dark.clone();
+                    this.save_setting(&crate::app_settings::THEME_MODE, *mode);
+                    this.save_setting(&crate::app_settings::LIGHT_THEME, light.clone());
+                    this.save_setting(&crate::app_settings::DARK_THEME, dark.clone());
+                    cx.set_window_appearance(match mode {
+                        crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
+                        crate::theme::ThemeMode::Dark => Some(WindowAppearance::Dark),
+                        crate::theme::ThemeMode::System => None,
+                    });
+                    this.refresh_theme(cx);
                     cx.notify();
                 }
                 SettingsEvent::TabAvatars(on) => {
                     this.tab_avatars = *on;
+                    this.save_setting(&crate::app_settings::TAB_AVATARS, *on);
                     cx.notify();
                 }
                 SettingsEvent::Grouping(on) => {
                     this.set_grouping(*on);
+                    this.save_setting(&crate::app_settings::GROUP_THREADS, *on);
                     cx.notify();
                 }
                 SettingsEvent::PreviewLines(n) => {
                     this.preview_lines = (*n).min(5);
+                    this.save_setting(&crate::app_settings::PREVIEW_LINES, this.preview_lines);
                     cx.notify();
                 }
                 SettingsEvent::PaneLayout(orientation) => {
                     if this.panes.orientation() != *orientation {
                         this.set_pane_layout(*orientation, window, cx);
                     }
+                    this.save_setting(
+                        &crate::app_settings::PANE_LAYOUT,
+                        if *orientation == PaneLayout::Stacked { "stacked" } else { "side_by_side" }.to_owned(),
+                    );
                 }
                 SettingsEvent::FollowUp(timeout) => {
                     this.mailbox.set_follow_up_timeout(*timeout);
+                    this.save_setting(
+                        &crate::app_settings::FOLLOW_UP_DAYS,
+                        (*timeout).div_euclid(DAY).clamp(1, 14) as u8,
+                    );
                     cx.notify();
                 }
                 SettingsEvent::Unblock(email) => {
@@ -377,12 +492,22 @@ impl MailApp {
                     cx.notify();
                 }
                 SettingsEvent::AccountStyle { id, icon, color } => this.set_account_style(id, icon, color, window, cx),
-                SettingsEvent::Close => this.close_modals(window, cx),
+                SettingsEvent::Close => this.close_settings(window, cx),
             },
         ));
-        self.settings = Some(panel.clone());
-        self.host_in_dialog(panel.clone(), |vw| 760f32.min(vw * 0.9), window, cx);
-        window.focus(&panel.focus_handle(cx), cx);
+        self.settings = Some(panel);
+        self.settings_window = Some(handle);
+        cx.notify();
+    }
+
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = self.settings_window.take();
+        self.settings = None;
+        self._settings_sub = None;
+        if let Some(handle) = handle {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 

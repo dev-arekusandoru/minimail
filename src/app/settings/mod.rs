@@ -1,12 +1,13 @@
-//! Settings panel: gpui-kit's `Settings` component (sidebar pages with search, grouped setting
-//! items) hosted in a modal. The panel entity owns the settings state and emits
-//! [`SettingsEvent`]s; the component's field getters/setters reach it through a `WeakEntity`.
+//! Settings window panel. Its entity owns transient page state and emits
+//! [`SettingsEvent`]s for changes applied live by the mail window.
 use gpui_kit::prelude::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Selectable as _;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::popover::Popover;
 use std::collections::HashMap;
 
@@ -24,6 +25,12 @@ use gpui_kit::{
     *,
 };
 
+mod accounts;
+mod appearance;
+mod inbox;
+mod ai;
+mod senders;
+
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
 
@@ -32,6 +39,7 @@ pub enum SettingsEvent {
     Grouping(bool),
     TabAvatars(bool),
     PreviewLines(u8),
+    Theme { mode: theme::ThemeMode, light: String, dark: String },
     PaneLayout(Orientation),
     /// New global follow-up timeout, in seconds (`mailbox.set_follow_up_timeout`).
     FollowUp(Timestamp),
@@ -46,6 +54,7 @@ pub enum SettingsEvent {
     /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
     AccountNickname { id: String, nickname: String },
     Close,
+    ResetAll,
 }
 
 /// One row of the Accounts page.
@@ -71,7 +80,7 @@ pub struct AccountRow {
 }
 
 /// Index of the Accounts page in [`SettingsPanel::pages`].
-const ACCOUNTS_PAGE: usize = 5;
+const ACCOUNTS_PAGE: usize = 0;
 
 const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
 const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
@@ -95,10 +104,11 @@ pub struct SettingsPanel {
     tab_avatars: bool,
     preview_lines: u8,
     orientation: Orientation,
+    theme_mode: theme::ThemeMode,
+    light_theme: String,
+    dark_theme: String,
     /// Blocked sender addresses, sorted; `Unblock` removes one and emits [`SettingsEvent::Unblock`].
     blocked: Vec<String>,
-    /// Unsubscribed senders, read-only: resubscribing happens at the source.
-    unsubscribed: Vec<String>,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
     accounts: Vec<AccountRow>,
@@ -130,8 +140,10 @@ impl SettingsPanel {
             tab_avatars: true,
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
             orientation,
+            theme_mode: theme::ThemeMode::System,
+            light_theme: String::new(),
+            dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             blocked: Vec::new(),
-            unsubscribed: Vec::new(),
             accounts: Vec::new(),
             controls: HashMap::new(),
             confirm_remove: None,
@@ -145,6 +157,12 @@ impl SettingsPanel {
     /// Whether tabs show the sender's avatar (the row's initial value).
     pub fn tab_avatars(mut self, on: bool) -> Self {
         self.tab_avatars = on;
+        self
+    }
+    pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
+        self.theme_mode = mode;
+        self.light_theme = light;
+        self.dark_theme = dark;
         self
     }
 
@@ -161,16 +179,9 @@ impl SettingsPanel {
         self
     }
 
-    /// Seed the mailbox-backed rows: the blocked-sender list, the read-only unsubscribed list and
-    /// the current follow-up timeout (seconds).
-    pub fn mailbox_state(
-        mut self,
-        blocked: Vec<String>,
-        unsubscribed: Vec<String>,
-        follow_up_timeout: Timestamp,
-    ) -> Self {
+    /// Seed the blocked-sender list and follow-up timeout (seconds).
+    pub fn mailbox_state(mut self, blocked: Vec<String>, follow_up_timeout: Timestamp) -> Self {
         self.blocked = blocked;
-        self.unsubscribed = unsubscribed;
         self.follow_up_days = follow_up_timeout
             .div_euclid(DAY)
             .clamp((*FOLLOW_UP_DAYS.start()).into(), (*FOLLOW_UP_DAYS.end()).into())
@@ -190,6 +201,49 @@ impl SettingsPanel {
             cx.emit(SettingsEvent::FollowUp(i64::from(days) * DAY));
             cx.notify();
         }
+    }
+    fn set_theme_mode(&mut self, mode: theme::ThemeMode, cx: &mut Context<Self>) {
+        if self.theme_mode != mode {
+            self.theme_mode = mode;
+            self.emit_theme(cx);
+        }
+    }
+
+    fn set_light_theme(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.light_theme != name {
+            self.light_theme = name;
+            self.emit_theme(cx);
+        }
+    }
+
+    fn set_dark_theme(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.dark_theme != name {
+            self.dark_theme = name;
+            self.emit_theme(cx);
+        }
+    }
+
+    fn emit_theme(&self, cx: &mut Context<Self>) {
+        cx.emit(SettingsEvent::Theme {
+            mode: self.theme_mode,
+            light: self.light_theme.clone(),
+            dark: self.dark_theme.clone(),
+        });
+        cx.notify();
+    }
+    pub(super) fn reset_fields(&mut self, cx: &mut Context<Self>) {
+        self.policy = JudgePolicy::default();
+        self.summaries = false;
+        self.group = false;
+        self.tab_avatars = true;
+        self.preview_lines = preview::DEFAULT_LINES;
+        self.orientation = Orientation::SideBySide;
+        self.theme_mode = theme::ThemeMode::System;
+        self.light_theme.clear();
+        self.dark_theme = crate::app_settings::DEFAULT_DARK_THEME.to_owned();
+        self.follow_up_days =
+            (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY).clamp(1, 14) as u8;
+        cx.notify();
     }
 
     fn set_confidence(&mut self, question: QuestionKey, confidence: Confidence, cx: &mut Context<Self>) {
@@ -342,296 +396,18 @@ impl SettingsPanel {
 
     fn pages(&self, weak: &Weak, cx: &App) -> Vec<SettingPage> {
         vec![
-            self.general_page(weak),
+            self.accounts_page(weak),
             self.appearance_page(weak, cx),
             self.inbox_page(weak),
-            self.blocked_page(weak),
             self.classifier_page(weak),
-            self.accounts_page(weak),
+            self.blocked_page(weak),
         ]
     }
 
-    fn accounts_page(&self, weak: &Weak) -> SettingPage {
-        let keywords = ["accounts", "gmail", "add account", "remove account", "sign in", "email"];
-        let mut linked = SettingGroup::new();
-        if self.accounts.is_empty() {
-            linked = linked.item(note("accounts-empty", "No accounts.").keywords(keywords));
-        }
-        for (index, account) in self.accounts.iter().cloned().enumerate() {
-            let nickname_input = self.controls.get(&account.id).map(|c| c.nickname.clone());
-            let weak = weak.clone();
-            let label = account.email.clone();
-            let confirming = self.confirm_remove.as_deref() == Some(account.id.as_str());
-            linked = linked.item(
-                SettingItem::render(move |_, _, cx| account_card(index, &account, nickname_input.as_ref(), confirming, &weak, cx))
-                    .keywords(keywords.into_iter().chain([label.as_str()])),
-            );
-        }
-        let configured = self.gmail_configured;
-        let weak = weak.clone();
-        let add = SettingItem::render(move |_, _, cx| {
-            let weak = weak.clone();
-            let hint = if configured {
-                "Sign in with your browser; the token is kept in the system keychain."
-            } else {
-                GMAIL_ENV_HINT
-            };
-            div()
-                .id("account-add")
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .text_sm()
-                .child(
-                    div().flex().flex_col().flex_1().min_w_0().child("Add Gmail account").child(
-                        div().text_xs().text_color(cx.theme().muted_foreground).child(hint),
-                    ),
-                )
-                .child(
-                    div().flex_none().child(
-                        button("account-add-gmail", "Add Gmail…", "Sign in to a Gmail account", "", cx)
-                            .on_click(move |_, _, cx| {
-                                weak.update(cx, |_, cx| cx.emit(SettingsEvent::AddGmail)).ok();
-                            }),
-                    ),
-                )
-        })
-        .keywords(keywords);
-        SettingPage::new("Accounts")
-            .resettable(false)
-            .groups([linked, SettingGroup::new().title("Add account").item(add)])
-    }
 
-    fn general_page(&self, weak: &Weak) -> SettingPage {
-        SettingPage::new("General").resettable(false).group(SettingGroup::new().item(
-            SettingItem::new(
-                "Thread summaries",
-                switch(weak, |this| this.summaries, SettingsPanel::set_summaries),
-            )
-            .description("Opt in to generated summaries above conversations.")
-            .keywords(["opt in to generated summaries"]),
-        ))
-    }
 
-    fn appearance_page(&self, weak: &Weak, cx: &App) -> SettingPage {
-        let themes = theme::names(cx).into_iter().map(|name| (name.clone(), name)).collect();
-        let theme_field = {
-            let weak = weak.clone();
-            SettingField::dropdown(
-                themes,
-                |cx| cx.theme().theme_name().clone(),
-                move |name: SharedString, cx| {
-                    theme::apply(cx, &name);
-                    weak.update(cx, |this, cx| this.changed(cx)).ok();
-                },
-            )
-        };
-        let layout_field = {
-            let (get, set) = (weak.clone(), weak.clone());
-            SettingField::dropdown(
-                options(&PANE_LAYOUTS),
-                move |cx| {
-                    let stacked = get
-                        .read_with(cx, |this, _| this.orientation == Orientation::Stacked)
-                        .unwrap_or_default();
-                    pick(&PANE_LAYOUTS, usize::from(stacked))
-                },
-                move |value: SharedString, cx| {
-                    let orientation =
-                        if value == "stacked" { Orientation::Stacked } else { Orientation::SideBySide };
-                    set.update(cx, |this, cx| this.set_orientation(orientation, cx)).ok();
-                },
-            )
-        };
-        SettingPage::new("Appearance").resettable(false).group(
-            SettingGroup::new()
-                .item(
-                    SettingItem::new("Theme", theme_field)
-                        .description("Choose the color scheme used throughout the app.")
-                        .keywords(["appearance", "color scheme"]),
-                )
-                .item(
-                    SettingItem::new("Pane layout", layout_field)
-                        .description("Stack the message list and the reader side by side or one above the other.")
-                        .keywords(["side by side", "stacked", "layout", "appearance"]),
-                )
-                .item(
-                    SettingItem::new(
-                        "Show sender avatar in tabs",
-                        switch(weak, |this| this.tab_avatars, SettingsPanel::set_tab_avatars),
-                    )
-                    .description("Show the sender's monogram as each reader tab's icon.")
-                    .keywords(["avatar", "monogram", "tab icon", "appearance"]),
-                ),
-        )
-    }
 
-    fn inbox_page(&self, weak: &Weak) -> SettingPage {
-        let preview_options = (0..=MAX_PREVIEW_LINES)
-            .map(|lines| (SharedString::from(lines.to_string()), SharedString::from(preview::lines_label(lines))))
-            .collect();
-        let preview_field = {
-            let (get, set) = (weak.clone(), weak.clone());
-            SettingField::dropdown(
-                preview_options,
-                move |cx| {
-                    let lines = get.read_with(cx, |this, _| this.preview_lines).unwrap_or_default();
-                    SharedString::from(lines.to_string())
-                },
-                move |value: SharedString, cx| {
-                    if let Ok(lines) = value.parse::<u8>() {
-                        set.update(cx, |this, cx| this.set_preview_lines(lines, cx)).ok();
-                    }
-                },
-            )
-        };
-        let follow_up_field = {
-            let (get, set) = (weak.clone(), weak.clone());
-            SettingField::number_input(
-                NumberFieldOptions {
-                    min: f64::from(*FOLLOW_UP_DAYS.start()),
-                    max: f64::from(*FOLLOW_UP_DAYS.end()),
-                    step: 1.,
-                },
-                move |cx| get.read_with(cx, |this, _| f64::from(this.follow_up_days)).unwrap_or_default(),
-                move |days, cx| {
-                    set.update(cx, |this, cx| this.set_follow_up(days, cx)).ok();
-                },
-            )
-        };
-        SettingPage::new("Inbox & Threads").resettable(false).group(
-            SettingGroup::new()
-                .item(
-                    SettingItem::new(
-                        "Group by thread",
-                        switch(weak, |this| this.group, SettingsPanel::set_grouping),
-                    )
-                    .description("Show one inbox row per conversation instead of per message.")
-                    .keywords(["inbox", "threads"]),
-                )
-                .item(
-                    SettingItem::new("Preview lines", preview_field)
-                        .description("Snippet lines shown under each subject in the inbox.")
-                        .keywords(["message snippet", "inbox"]),
-                )
-                .item(
-                    SettingItem::new("Follow-up after", follow_up_field)
-                        .description("Days to wait for a reply before flagging (1–14).")
-                        .keywords(["follow up", "wait for a response", "flag", "days"]),
-                ),
-        )
-    }
 
-    fn blocked_page(&self, weak: &Weak) -> SettingPage {
-        let keywords = ["blocked senders", "blocked", "unblock", "unsubscribed", "resubscribe", "senders"];
-        let mut blocked = SettingGroup::new().title("Blocked senders");
-        if self.blocked.is_empty() {
-            blocked = blocked.item(note("blocked-empty", "No blocked senders.").keywords(keywords));
-        }
-        for (index, email) in self.blocked.iter().cloned().enumerate() {
-            let weak = weak.clone();
-            let label = email.clone();
-            blocked = blocked.item(
-                SettingItem::render(move |_, _, cx| {
-                    let (weak, email) = (weak.clone(), email.clone());
-                    let t = cx.theme();
-                    div()
-                        .id(("blocked-row", index))
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .text_sm()
-                        .child(div().flex().flex_col().child(email.clone()).child(
-                            div().text_xs().text_color(t.muted_foreground).child("Blocked sender"),
-                        ))
-                        .child(
-                            button(("blocked-unblock", index), "Unblock", "Allow mail from this sender again", "", cx)
-                                .on_click(move |_, _, cx| {
-                                    weak.update(cx, |this, cx| this.unblock(&email, cx)).ok();
-                                }),
-                        )
-                })
-                .keywords(keywords.into_iter().chain([label.as_str()])),
-            );
-        }
-        let mut unsubscribed = SettingGroup::new()
-            .title("Unsubscribed")
-            .description("Read-only: resubscribing happens at the original subscription.");
-        if self.unsubscribed.is_empty() {
-            unsubscribed = unsubscribed.item(note("unsubscribed-empty", "None.").keywords(keywords));
-        }
-        for (index, email) in self.unsubscribed.iter().cloned().enumerate() {
-            let label = email.clone();
-            unsubscribed = unsubscribed.item(
-                SettingItem::render(move |_, _, _| {
-                    div().id(("unsubscribed-row", index)).text_sm().child(email.clone())
-                })
-                .keywords(keywords.into_iter().chain([label.as_str()])),
-            );
-        }
-        SettingPage::new("Blocked senders").resettable(false).groups([blocked, unsubscribed])
-    }
-
-    fn classifier_page(&self, weak: &Weak) -> SettingPage {
-        let groups = QuestionKey::ALL.into_iter().map(|question| {
-            let mode_field = {
-                let (get, set) = (weak.clone(), weak.clone());
-                SettingField::dropdown(
-                    options(&CLASSIFIER_MODES),
-                    move |cx| {
-                        let index = get
-                            .read_with(cx, |this, _| match this.policy.mode(question) {
-                                Mode::Auto(_) => 0,
-                                Mode::Review => 1,
-                                Mode::Off => 2,
-                            })
-                            .unwrap_or_default();
-                        pick(&CLASSIFIER_MODES, index)
-                    },
-                    move |value: SharedString, cx| {
-                        set.update(cx, |this, cx| this.set_classifier_mode(question, &value, cx)).ok();
-                    },
-                )
-            };
-            let confidence_field = {
-                let (get, set) = (weak.clone(), weak.clone());
-                SettingField::dropdown(
-                    options(&CONFIDENCES),
-                    move |cx| {
-                        let index = get
-                            .read_with(cx, |this, _| match this.policy.mode(question) {
-                                Mode::Auto(Confidence::High) => 0,
-                                Mode::Auto(Confidence::Low) => 2,
-                                _ => 1,
-                            })
-                            .unwrap_or_default();
-                        pick(&CONFIDENCES, index)
-                    },
-                    move |value: SharedString, cx| {
-                        let confidence = match &*value {
-                            "high" => Confidence::High,
-                            "low" => Confidence::Low,
-                            _ => Confidence::Medium,
-                        };
-                        set.update(cx, |this, cx| this.set_confidence(question, confidence, cx)).ok();
-                    },
-                )
-            };
-            let auto = matches!(self.policy.mode(question), Mode::Auto(_));
-            SettingGroup::new().title(question.label()).items([
-                SettingItem::new("Handling", mode_field)
-                    .description("Choose automatic handling, manual review, or off.")
-                    .keywords([question.label(), "auto apply or review", "classifier"]),
-                SettingItem::new("Confidence", confidence_field)
-                    .description("How sure the classifier must be for automatic handling.")
-                    .keywords([question.label(), "classifier confidence"])
-                    .disabled(!auto),
-            ])
-        });
-        SettingPage::new("Classifier").resettable(false).groups(groups)
-    }
 }
 
 /// A switch field backed by a panel bool and its setter.
@@ -806,14 +582,34 @@ impl Render for SettingsPanel {
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);
-        let height = f32::from(window.viewport_size().height) * 0.8;
+        let reset = button("settings-reset-all", "Reset all settings…", "Reset preferences to their defaults", "", cx)
+            .on_click(move |_, window, cx| {
+                let weak = weak.clone();
+                window.open_alert_dialog(cx, move |alert, _, _| {
+                    let weak = weak.clone();
+                    alert
+                        .title("Reset all settings?")
+                        .description("This affects preferences only, not accounts or mail.")
+                        .confirm()
+                        .ok_text("Reset")
+                        .ok_variant(ButtonVariant::Danger)
+                        .cancel_text("Cancel")
+                        .on_ok(move |_, _, cx| {
+                            weak.update(cx, |this, cx| {
+                                this.reset_fields(cx);
+                                cx.emit(SettingsEvent::ResetAll);
+                            })
+                            .ok();
+                            true
+                        })
+                })
+            });
         div()
             .key_context(SETTINGS_CONTEXT)
             .track_focus(&self.focus)
             .flex()
             .flex_col()
-            .w_full()
-            .h(px(height))
+            .size_full()
             .p_3()
             .gap_2()
             .child(
@@ -837,6 +633,15 @@ impl Render for SettingsPanel {
                             .default_selected_index(SelectIndex { page_ix: self.start_page, group_ix: None })
                             .pages(pages),
                     ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .border_t_1()
+                    .border_color(t.border)
+                    .pt_2()
+                    .child(reset),
             )
     }
 }
