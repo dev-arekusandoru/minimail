@@ -2,6 +2,7 @@
 
 Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0.7. Mock data by default (`fixtures/`); optional Gmail accounts sync through `src/provider/` + `src/sync/`. AI providers are deterministic stubs.
 
+- Never work on `main`. Do all work on a dedicated branch in its own worktree, managed with the `wt` CLI (`wt switch --create <branch>`, `wt list`, `wt merge`, `wt remove`). Don't hand-roll `git worktree`/`git branch` commands.
 - Verify with: `cargo build`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. All must pass before committing.
 - Commit as you go: one commit per completed, verified step (build, clippy, tests green), with a descriptive message. Don't batch a whole feature into one commit or leave finished work uncommitted. When parallel subagents edit disjoint files, commit only after they finish and the tree is green.
 - Pure logic lives in `src/*.rs` (no GPUI); views live in `src/app/`. Keep business logic out of views.
