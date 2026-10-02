@@ -129,6 +129,7 @@ impl Mailbox {
         v.sort();
         v
     }
+
     pub fn unsubscribe(&mut self, email: &str, move_to: Option<TriageState>) -> usize {
         let e = lower(email);
         if self.unsubscribed.iter().any(|u| lower(u) == e) {
@@ -318,5 +319,16 @@ impl Mailbox {
     }
     pub fn set_follow_up_timeout(&mut self, secs: Timestamp) {
         self.follow_up_timeout = secs.max(0);
+    }
+}
+
+/// How long ago a sender was blocked, relative to the app's clock: "Blocked
+/// today", "Blocked yesterday" or "Blocked N days ago". A block time in the
+/// future (clock skew) reads as today.
+pub fn blocked_ago(now: Timestamp, at: Timestamp) -> String {
+    match now.saturating_sub(at).max(0) / DAY {
+        0 => "Blocked today".to_owned(),
+        1 => "Blocked yesterday".to_owned(),
+        days => format!("Blocked {days} days ago"),
     }
 }

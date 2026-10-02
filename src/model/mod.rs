@@ -23,6 +23,7 @@ mod undo;
 mod visibility;
 
 pub use triage::Triage;
+pub use visibility::blocked_ago;
 
 pub type MessageId = u32;
 
