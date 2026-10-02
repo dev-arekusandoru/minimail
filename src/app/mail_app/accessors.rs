@@ -22,6 +22,16 @@ impl MailApp {
         self.settings.is_some()
     }
 
+    /// Handle of the native Settings window while it is open.
+    pub fn settings_window(&self) -> Option<AnyWindowHandle> {
+        self.settings_window
+    }
+
+    /// The theme preferences in force: mode plus the light and dark theme names.
+    pub fn theme_preferences(&self) -> (crate::theme::ThemeMode, String, String) {
+        (self.theme_mode, self.light_theme.clone(), self.dark_theme.clone())
+    }
+
     pub fn rules_open(&self) -> bool {
         self.rules_panel.is_some()
     }

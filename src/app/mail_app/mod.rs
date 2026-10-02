@@ -221,7 +221,7 @@ impl MailApp {
             tabs: Tabs::default(),
             tab_avatars: true,
             theme_mode: crate::theme::ThemeMode::System,
-            light_theme: String::new(),
+            light_theme: crate::app_settings::DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             palette: None,
             compose: None,
