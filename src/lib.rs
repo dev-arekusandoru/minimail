@@ -24,3 +24,4 @@ pub mod html;
 pub mod summary;
 pub mod tabs;
 pub mod threads;
+pub mod tz;

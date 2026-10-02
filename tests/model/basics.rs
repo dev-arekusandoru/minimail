@@ -1,4 +1,4 @@
-use crate::helpers::{State, assert_invariant, mailbox, sample};
+use crate::helpers::{State, assert_invariant, mailbox, sample, utc};
 use mail_classifier::model::{Location, Mailbox};
 use mail_classifier::search::Query;
 
@@ -50,9 +50,9 @@ fn a_location_query_and_its_count_select_the_same_mail() {
         0,
     );
     let inbox = mb.location_query(&Location::Inbox("personal".into()));
-    assert!(mb.ids_matching(&inbox, NOW).contains(&1));
-    assert_eq!(mb.count_at(&Location::Archive("personal".into()), NOW), 1);
-    assert_eq!(mb.count_at(&Location::Folder(1), NOW), 0);
+    assert!(mb.ids_matching(&inbox, &utc(NOW)).contains(&1));
+    assert_eq!(mb.count_at(&Location::Archive("personal".into()), &utc(NOW)), 1);
+    assert_eq!(mb.count_at(&Location::Folder(1), &utc(NOW)), 0);
     assert_eq!(mb.query_location(&inbox), Some(Location::Inbox("personal".into())));
 }
 #[test]
@@ -94,5 +94,5 @@ fn fixture_covers_every_triage_state_with_real_folders_and_wake_times() {
 #[test]
 fn empty_mailbox_views_are_empty() {
     let mb = mailbox(&[]);
-    assert!(mb.ids_matching(&Query::default(), 0).is_empty());
+    assert!(mb.ids_matching(&Query::default(), &utc(0)).is_empty());
 }

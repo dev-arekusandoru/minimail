@@ -1,10 +1,10 @@
 //! Date operands for `before:` / `after:` / `on:`: absolute `yyyy-mm-dd` or relative `<n><d|w|m|y>`.
 //!
-//! Both resolve to a UTC calendar day (`yyyy-mm-dd`) so comparisons are plain string compares
-//! against the first ten characters of a message's RFC 3339 `received`.
+//! Both resolve to a calendar day on the user's own clock (`yyyy-mm-dd`), so a message's day
+//! is its local day and the comparisons stay plain string compares.
 
-use crate::clock::{DAY, Timestamp};
-use crate::model::format_rfc3339;
+use crate::clock::DAY;
+use crate::tz::Now;
 
 /// `yyyy-mm-dd` with a plausible month/day.
 pub fn valid_absolute(s: &str) -> bool {
@@ -51,20 +51,20 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-/// The calendar day (`yyyy-mm-dd`, UTC) `value` denotes when "today" is `now`.
+/// The calendar day (`yyyy-mm-dd`, local) `value` denotes when "today" is `now`.
 /// `None` if `value` is not a valid date operand. Months and years are calendar
 /// months/years (day clamped to the target month's length).
-pub fn resolve(value: &str, now: Timestamp) -> Option<String> {
+pub fn resolve(value: &str, now: &Now) -> Option<String> {
     if valid_absolute(value) {
         return Some(value.to_owned());
     }
     let (n, unit) = parse_relative(value)?;
     let n = i64::from(n);
     match unit {
-        'd' => Some(day_string(now - n * DAY)),
-        'w' => Some(day_string(now - n * 7 * DAY)),
+        'd' => Some(now.day(now.at() - n * DAY)),
+        'w' => Some(now.day(now.at() - n * 7 * DAY)),
         _ => {
-            let today = day_string(now);
+            let today = now.day(now.at());
             let year: i64 = today[..4].parse().ok()?;
             let month: i64 = today[5..7].parse().ok()?;
             let day: i64 = today[8..10].parse().ok()?;
@@ -77,8 +77,4 @@ pub fn resolve(value: &str, now: Timestamp) -> Option<String> {
             Some(format!("{year:04}-{month:02}-{day:02}"))
         }
     }
-}
-
-fn day_string(ts: Timestamp) -> String {
-    format_rfc3339(ts)[..10].to_owned()
 }

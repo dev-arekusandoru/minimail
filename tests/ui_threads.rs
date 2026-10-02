@@ -13,6 +13,7 @@ use mail_classifier::app::row::{message_row_height, thread_row_height};
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, TriageState, TriageState::*};
 use mail_classifier::threads::Row;
+use mail_classifier::tz::Utc;
 
 const NOON: Timestamp = 1_790_683_200;
 
@@ -40,7 +41,7 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, c2, window, cx));
+                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx));
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },

@@ -13,6 +13,7 @@ use mail_classifier::provider::{
     RemoteMessage, RemoteState, Scope, Window,
 };
 use mail_classifier::sync::cache::Cache;
+use mail_classifier::tz::{Now, Utc};
 use mail_classifier::sync::{
     RoundSummary, SharedProvider, apply_body, apply_moves, apply_reads, apply_round, body_request,
     has_older, pending_moves, pending_reads, persist_local, plan_round, run_body, run_moves,
@@ -407,8 +408,11 @@ fn seeded() -> Cache {
     cache
 }
 
+fn utc(at: Timestamp) -> Now {
+    Now::new(at, Rc::new(Utc))
+}
 fn inbox(mb: &Mailbox) -> Vec<MessageId> {
-    mb.ids_matching(&mb.location_query(&inbox_location()), NOW)
+    mb.ids_matching(&mb.location_query(&inbox_location()), &utc(NOW))
 }
 
 fn inbox_location() -> Location {

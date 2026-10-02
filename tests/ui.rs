@@ -61,7 +61,7 @@ impl Harness<'_> {
         TriageState::ALL.map(|s| self.count(s))
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
+        self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
     }
     fn index(&mut self) -> usize {
         self.read(|a| a.triage.cursor_index())
@@ -388,7 +388,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     // Move the cursor (via keys) to a message whose sender has several messages.
     let multi = |h: &mut Harness| {
         h.read(|a| {
-            let id = a.triage.cursor(&a.mailbox, a.now()).unwrap();
+            let id = a.triage.cursor(&a.mailbox, &a.local_now()).unwrap();
             let email = a.mailbox.get(id).unwrap().from_email.clone();
             let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
             (email, n)

@@ -46,21 +46,36 @@ impl MailApp {
         ctx
     }
 
-    pub(super) fn clock_label(received: &str, newest: &str) -> String {
-        const MONTHS: [&str; 12] = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-        ];
-        let date = received.get(..10).unwrap_or(received);
-        if date == newest.get(..10).unwrap_or(newest) {
-            return received.get(11..16).unwrap_or("").to_string();
+    /// The date column of a row: the time when it falls on the same local day as the newest
+    /// message, otherwise `"Sep 14"`. An unreadable `received` reads as written.
+    pub(super) fn clock_label(&self, received: &str, newest: &str, now: &Now) -> String {
+        fn day_of(s: &str) -> &str {
+            s.get(..10).unwrap_or(s)
         }
-        let month = date
-            .get(5..7)
-            .and_then(|m| m.parse::<usize>().ok())
-            .and_then(|m| MONTHS.get(m.wrapping_sub(1)))
-            .unwrap_or(&"?");
-        let day = date.get(8..10).and_then(|d| d.parse::<u32>().ok()).unwrap_or(0);
-        format!("{month} {day}")
+        let local_day = |ts: Timestamp| now.day(ts);
+        let parsed = crate::model::parse_rfc3339(received);
+        let newest_parsed = crate::model::parse_rfc3339(newest);
+        match (parsed, newest_parsed) {
+            (Some(ts), Some(newest_ts)) if local_day(ts) == local_day(newest_ts) => now.hhmm(ts),
+            (Some(ts), _) => {
+                let (_, month, day) = now.civil(ts);
+                format!("{} {day}", MONTHS[(month - 1) as usize])
+            }
+            // An unparseable stamp keeps its old shape: the time when it matches the newest
+            // message's written day, else its written month and day.
+            (None, _) if day_of(received) == day_of(newest) => {
+                received.get(11..16).unwrap_or("").to_string()
+            }
+            (None, _) => {
+                let month = received
+                    .get(5..7)
+                    .and_then(|m| m.parse::<usize>().ok())
+                    .and_then(|m| MONTHS.get(m.wrapping_sub(1)))
+                    .unwrap_or(&"?");
+                let day = received.get(8..10).and_then(|d| d.parse::<u32>().ok()).unwrap_or(0);
+                format!("{month} {day}")
+            }
+        }
     }
 
     pub(super) fn newest(&self) -> String {
@@ -132,9 +147,9 @@ impl MailApp {
         visual.cursor = ix == self.cursor_ix();
         let date = match self.mailbox.snoozed_until(msg.id) {
             Some(until) if matches!(self.location(), Some(Location::Snoozed(_))) => {
-                format!("↩ {}", format_when(until))
+                format!("↩ {}", format_when(until, &self.local_now()))
             }
-            _ => Self::clock_label(&msg.received, newest),
+            _ => self.clock_label(&msg.received, newest, &self.local_now()),
         };
         let unread = visual.unread;
         let (shown, hidden) = self.row_icons(msg.id, self.list_w);

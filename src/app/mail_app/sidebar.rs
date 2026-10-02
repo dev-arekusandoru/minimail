@@ -175,7 +175,7 @@ impl MailApp {
         let is_active = *active == Some(loc.clone());
         let counted =
             matches!(loc, Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_));
-        let count = self.mailbox.count_at(&loc, self.now());
+        let count = self.mailbox.count_at(&loc, &self.local_now());
         let mut item = SidebarMenuItem::new(location_name(&loc).to_owned())
             .icon(Icon::new(icon).text_color(color))
             .active(is_active)

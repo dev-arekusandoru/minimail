@@ -175,28 +175,14 @@ impl MailApp {
     }
 }
 
-/// `Wed Oct 7 08:00` (UTC) for snooze return times.
-pub(super) fn format_when(ts: Timestamp) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    let days = ts.div_euclid(DAY);
-    let secs = ts.rem_euclid(DAY);
-    let weekday = WEEKDAYS[(days + 4).rem_euclid(7) as usize];
-    // Civil-from-days (Hinnant).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+/// `Wed Oct 7 08:00` on the user's own clock, for snooze return times.
+pub(super) fn format_when(ts: Timestamp, now: &Now) -> String {
+    let (days, _) = now.parts(ts);
+    let (_, month, day) = now.civil(ts);
     format!(
-        "{weekday} {} {day} {:02}:{:02}",
+        "{} {} {day} {}",
+        WEEKDAYS[Now::weekday(days)],
         MONTHS[(month - 1) as usize],
-        secs / 3600,
-        secs % 3600 / 60
+        now.hhmm(ts)
     )
 }

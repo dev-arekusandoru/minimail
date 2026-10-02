@@ -39,7 +39,7 @@ impl SettingsPanel {
             let weak = weak.clone();
             let email = email.clone();
             let address = email.clone();
-            let since = crate::model::blocked_ago(self.now, *at);
+            let since = crate::model::blocked_ago(&self.now, *at);
             blocked = blocked.item(
                 SettingItem::render(move |_, _, cx| {
                     let (weak, email) = (weak.clone(), email.clone());

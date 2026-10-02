@@ -1,5 +1,15 @@
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{Mailbox, MessageId, TriageState};
+use mail_classifier::tz::{FixedZone, Now, Utc};
+use std::rc::Rc;
+/// The clock a test judges at, read in UTC so a test's instants are its own labels.
+pub fn utc(at: i64) -> Now {
+    Now::new(at, Rc::new(Utc))
+}
+/// The same clock on a machine east of UTC: UTC+13, where the local day rolls over early.
+pub fn east13(at: i64) -> Now {
+    Now::new(at, Rc::new(FixedZone(13 * 3600)))
+}
 pub type State = TriageState;
 pub const T0: i64 = 1_790_812_800;
 pub fn mailbox(specs: &[(u32, &str, &str, State)]) -> Mailbox {

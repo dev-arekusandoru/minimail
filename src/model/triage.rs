@@ -17,20 +17,20 @@ impl Triage {
             anchor: None,
         }
     }
-    fn ids(&self, mb: &Mailbox, now: Timestamp) -> Vec<MessageId> {
+    fn ids(&self, mb: &Mailbox, now: &Now) -> Vec<MessageId> {
         mb.ids_matching(&self.query, now)
     }
     pub fn cursor_index(&self) -> usize {
         self.cursor
     }
-    pub fn cursor(&self, mb: &Mailbox, now: Timestamp) -> Option<MessageId> {
+    pub fn cursor(&self, mb: &Mailbox, now: &Now) -> Option<MessageId> {
         let ids = self.ids(mb, now);
         ids.get(clamp_index(self.cursor, ids.len())).copied()
     }
-    pub fn move_cursor(&mut self, mb: &Mailbox, now: Timestamp, delta: isize) {
+    pub fn move_cursor(&mut self, mb: &Mailbox, now: &Now, delta: isize) {
         self.cursor = shift(self.cursor, delta, self.ids(mb, now).len());
     }
-    pub fn extend(&mut self, mb: &Mailbox, now: Timestamp, delta: isize) {
+    pub fn extend(&mut self, mb: &Mailbox, now: &Now, delta: isize) {
         let ids = self.ids(mb, now);
         if ids.is_empty() {
             self.cursor = 0;
@@ -48,7 +48,7 @@ impl Triage {
         };
         self.selected = ids[lo..=hi].to_vec();
     }
-    pub fn toggle_select(&mut self, mb: &Mailbox, now: Timestamp) {
+    pub fn toggle_select(&mut self, mb: &Mailbox, now: &Now) {
         let ids = self.ids(mb, now);
         let Some(id) = ids.get(clamp_index(self.cursor, ids.len())).copied() else {
             return;
@@ -61,7 +61,7 @@ impl Triage {
         self.selected
             .sort_by_key(|s| ids.iter().position(|c| c == s).unwrap_or(usize::MAX));
     }
-    pub fn set_cursor(&mut self, mb: &Mailbox, now: Timestamp, index: usize) {
+    pub fn set_cursor(&mut self, mb: &Mailbox, now: &Now, index: usize) {
         self.cursor = clamp_index(index, self.ids(mb, now).len());
     }
     pub fn set_selection(&mut self, ids: Vec<MessageId>) {
@@ -80,7 +80,7 @@ impl Triage {
     pub fn is_selected(&self, id: MessageId) -> bool {
         self.selected.contains(&id)
     }
-    pub fn targets(&self, mb: &Mailbox, now: Timestamp) -> Vec<MessageId> {
+    pub fn targets(&self, mb: &Mailbox, now: &Now) -> Vec<MessageId> {
         if !self.selected.is_empty() {
             return self.selected.clone();
         }
@@ -88,7 +88,7 @@ impl Triage {
         ids.get(clamp_index(self.cursor, ids.len()))
             .map_or_else(Vec::new, |id| vec![*id])
     }
-    pub fn apply(&mut self, mb: &mut Mailbox, now: Timestamp, state: TriageState) -> usize {
+    pub fn apply(&mut self, mb: &mut Mailbox, now: &Now, state: TriageState) -> usize {
         let ids = self.targets(mb, now);
         let changed = mb.set_state(&ids, state);
         self.clear_selection();
@@ -97,7 +97,7 @@ impl Triage {
     }
     /// Move every message from the cursor's sender that shares the cursor
     /// message's state to `state`, then re-clamp the cursor.
-    pub fn apply_to_sender(&mut self, mb: &mut Mailbox, now: Timestamp, state: TriageState) -> usize {
+    pub fn apply_to_sender(&mut self, mb: &mut Mailbox, now: &Now, state: TriageState) -> usize {
         let Some((sender, from)) = self
             .cursor(mb, now)
             .and_then(|id| mb.get(id))
@@ -115,7 +115,7 @@ impl Triage {
         self.cursor = 0;
         self.clear_selection();
     }
-    fn clamp(&mut self, mb: &Mailbox, now: Timestamp) {
+    fn clamp(&mut self, mb: &Mailbox, now: &Now) {
         self.cursor = clamp_index(self.cursor, self.ids(mb, now).len());
     }
 }

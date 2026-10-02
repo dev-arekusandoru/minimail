@@ -26,6 +26,7 @@ use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, Summar
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
+use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{JudgePolicy, Kind, QuestionKey, Routed, StubJudge, classify};
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
@@ -114,6 +115,8 @@ pub struct MailApp {
     pub policy: JudgePolicy,
     pub rules: RuleBook,
     clock: Rc<dyn Clock>,
+    /// The zone every displayed date and every relative date is read in: the user's clock.
+    zone: Rc<dyn Zone>,
     /// One row per thread instead of per message (State panels).
     pub group_threads: bool,
     /// Threads whose messages are listed under their header.
@@ -196,12 +199,13 @@ pub struct MailApp {
 
 impl MailApp {
     pub fn new(mailbox: Mailbox, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_with_clock(mailbox, Rc::new(SystemClock), window, cx)
+        Self::new_with_clock(mailbox, Rc::new(SystemClock), Rc::new(SystemZone), window, cx)
     }
 
     pub fn new_with_clock(
         mailbox: Mailbox,
         clock: Rc<dyn Clock>,
+        zone: Rc<dyn Zone>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -241,6 +245,7 @@ impl MailApp {
             menu_target: None,
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
+            zone,
             clock,
             group_threads: false,
             expanded: HashSet::new(),

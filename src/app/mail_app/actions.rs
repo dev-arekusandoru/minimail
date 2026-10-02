@@ -124,7 +124,7 @@ impl MailApp {
         self.rules.accept(rule.clone());
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_matching(&self.mailbox.location_query(&Location::AllInboxes), self.now())
+            .ids_matching(&self.mailbox.location_query(&Location::AllInboxes), &self.local_now())
             .into_iter()
             .filter(|id| {
                 self.mailbox
@@ -199,7 +199,7 @@ impl MailApp {
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
         let query = self.mailbox.location_query(&Location::AllInboxes);
-        let ids = self.mailbox.ids_matching(&query, self.now());
+        let ids = self.mailbox.ids_matching(&query, &self.local_now());
         if ids.is_empty() {
             return;
         }
@@ -220,7 +220,7 @@ impl MailApp {
         let inbox = self.mailbox.location_query(&Location::AllInboxes);
         let ids: Vec<MessageId> = self
             .mailbox
-            .ids_matching(&inbox, self.now())
+            .ids_matching(&inbox, &self.local_now())
             .into_iter()
             .filter(|id| self.mailbox.pending(*id).is_empty())
             .collect();

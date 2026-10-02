@@ -3,9 +3,10 @@ use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::actions::{HelpPageDown, HelpPageUp, SelectNext, SelectPrev, ToggleHelp, commands};
 use crate::app::ui::shortcut_chips;
-use crate::clock::{Timestamp, DAY};
+use crate::clock::Timestamp;
 use crate::hints::{fit_hints, HintContext, HintMode};
 use crate::theme::ThemeColor;
+use crate::tz::{MONTHS, Now, WEEKDAYS};
 use gpui_kit::{
     assets::IconName,
     component::{button::{Button, ButtonVariants as _}, label::Label, scroll::ScrollableElement as _, separator::Separator, status_bar::StatusBar, Sizable as _},
@@ -22,66 +23,37 @@ fn hint(t: &ThemeColor, key: &str, what: &str, cx: &App) -> impl IntoElement {
         .child(div().text_xs().text_color(t.muted_foreground).child(SharedString::from(what.to_owned())))
 }
 
-/// Weekday names indexed by `days.rem_euclid(7)` for a Unix-epoch day count (0 = Thursday).
-const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/// UTC wall-clock label for a return time, e.g. `"Mon 5 Oct 08:00"`.
-pub fn format_time(ts: Timestamp) -> String {
-    let days = ts.div_euclid(DAY);
-    let secs = ts.rem_euclid(DAY);
-    // Civil-from-days (Howard Hinnant).
-    let z = days + 719_468;
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+/// Wall-clock label for a return time on the user's own clock, e.g. `"Mon 5 Oct 08:00"`.
+pub fn format_time(ts: Timestamp, now: &Now) -> String {
+    let (days, _) = now.parts(ts);
+    let (_, month, day) = now.civil(ts);
     format!(
-        "{} {} {} {:02}:{:02}",
-        WEEKDAYS[days.rem_euclid(7) as usize],
+        "{} {} {} {}",
+        WEEKDAYS[Now::weekday(days)],
         day,
         MONTHS[(month - 1) as usize],
-        secs / 3600,
-        secs % 3600 / 60
+        now.hhmm(ts)
     )
 }
 
-/// Civil `(year, month, day)` for a Unix-epoch day count (Howard Hinnant's algorithm).
-fn civil(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
-    (year, month as u32, day as u32)
-}
-
-/// Humanized UTC label for `ts` relative to `now`, e.g. `"Today 14:32"`, `"Yesterday 09:10"`,
-/// `"Mon 08:00"` (within the last six days), `"5 Oct"` (this year) or `"5 Oct 2025"`.
-/// Future instants fall back to the absolute [`format_time`].
-pub fn humanize_time(ts: Timestamp, now: Timestamp) -> String {
-    if ts > now {
-        return format_time(ts);
+/// Humanized label for `ts` relative to `now`, both on the user's own clock, e.g.
+/// `"Today 14:32"`, `"Yesterday 09:10"`, `"Mon 08:00"` (within the last six days),
+/// `"5 Oct"` (this year) or `"5 Oct 2025"`. Future instants fall back to the absolute
+/// [`format_time`].
+pub fn humanize_time(ts: Timestamp, now: &Now) -> String {
+    if ts > now.at() {
+        return format_time(ts, now);
     }
-    let ts_day = ts.div_euclid(DAY);
-    let now_day = now.div_euclid(DAY);
-    let secs = ts.rem_euclid(DAY);
-    let hhmm = format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60);
+    let (ts_day, _) = now.parts(ts);
+    let (now_day, _) = now.parts(now.at());
+    let hhmm = now.hhmm(ts);
     match now_day - ts_day {
         0 => format!("Today {hhmm}"),
         1 => format!("Yesterday {hhmm}"),
-        2..=6 => format!("{} {hhmm}", WEEKDAYS[ts_day.rem_euclid(7) as usize]),
+        2..=6 => format!("{} {hhmm}", WEEKDAYS[Now::weekday(ts_day)]),
         _ => {
-            let (year, month, day) = civil(ts_day);
-            let (now_year, ..) = civil(now_day);
+            let (year, month, day) = now.civil(ts);
+            let (now_year, ..) = now.civil(now.at());
             if year == now_year {
                 format!("{day} {}", MONTHS[(month - 1) as usize])
             } else {
@@ -276,57 +248,86 @@ impl Render for HelpPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::{civil, format_time, humanize_time};
-
-    #[test]
-    fn formats_utc_weekday_date_and_time() {
-        assert_eq!(format_time(0), "Thu 1 Jan 00:00");
-        assert_eq!(format_time(1_000_000_000), "Sun 9 Sep 01:46");
-        // Leap day, and a pre-epoch instant.
-        assert_eq!(format_time(1_709_164_800 + 8 * 3600), "Thu 29 Feb 08:00");
-        assert_eq!(format_time(-60), "Wed 31 Dec 23:59");
-    }
+    use super::{format_time, humanize_time};
+    use crate::tz::{FixedZone, Now, Utc};
+    use std::rc::Rc;
 
     /// `2026-10-05 14:32 UTC` — a Monday.
     const NOW: i64 = 1_791_210_720;
 
+    fn utc() -> Now {
+        Now::new(NOW, Rc::new(Utc))
+    }
+
+    /// UTC+13 (Auckland-ish), the far side of the date line from UTC-10.
+    fn east13() -> Now {
+        Now::new(NOW, Rc::new(FixedZone(13 * 3600)))
+    }
+
+    #[test]
+    fn formats_the_weekday_date_and_time_on_the_users_clock() {
+        let now = utc();
+        assert_eq!(format_time(0, &now), "Thu 1 Jan 00:00");
+        assert_eq!(format_time(1_000_000_000, &now), "Sun 9 Sep 01:46");
+        // Leap day, and a pre-epoch instant.
+        assert_eq!(format_time(1_709_164_800 + 8 * 3600, &now), "Thu 29 Feb 08:00");
+        assert_eq!(format_time(-60, &now), "Wed 31 Dec 23:59");
+    }
+
+    #[test]
+    fn a_local_zone_rolls_the_label_over_midnight() {
+        let now = east13();
+        // 5 Oct 14:32 UTC is already 6 Oct 03:32 on a UTC+13 clock.
+        assert_eq!(format_time(NOW, &now), "Tue 6 Oct 03:32");
+        assert_eq!(format_time(NOW - 12 * 3600, &now), "Mon 5 Oct 15:32");
+        assert_eq!(format_time(-60, &now), "Thu 1 Jan 12:59");
+    }
+
     #[test]
     fn humanizes_each_bucket() {
-        assert_eq!(humanize_time(1_791_191_400, NOW), "Today 09:10"); // 5 Oct 09:10
-        assert_eq!(humanize_time(1_791_105_000, NOW), "Yesterday 09:10"); // 4 Oct 09:10
-        assert_eq!(humanize_time(1_790_838_000, NOW), "Thu 07:00"); // 1 Oct, 4 days
-        assert_eq!(humanize_time(1_790_755_200, NOW), "Wed 08:00"); // 30 Sep, 5 days
-        assert_eq!(humanize_time(1_790_668_800, NOW), "Tue 08:00"); // 29 Sep, exactly 6 days
-        assert_eq!(humanize_time(1_790_582_400, NOW), "28 Sep"); // 28 Sep, exactly 7 days
-        assert_eq!(humanize_time(1_785_571_200, NOW), "1 Aug"); // this year, older
-        assert_eq!(humanize_time(1_759_651_200, NOW), "5 Oct 2025"); // previous year
+        let now = utc();
+        assert_eq!(humanize_time(1_791_191_400, &now), "Today 09:10"); // 5 Oct 09:10
+        assert_eq!(humanize_time(1_791_105_000, &now), "Yesterday 09:10"); // 4 Oct 09:10
+        assert_eq!(humanize_time(1_790_838_000, &now), "Thu 07:00"); // 1 Oct, 4 days
+        assert_eq!(humanize_time(1_790_755_200, &now), "Wed 08:00"); // 30 Sep, 5 days
+        assert_eq!(humanize_time(1_790_668_800, &now), "Tue 08:00"); // 29 Sep, exactly 6 days
+        assert_eq!(humanize_time(1_790_582_400, &now), "28 Sep"); // 28 Sep, exactly 7 days
+        assert_eq!(humanize_time(1_785_571_200, &now), "1 Aug"); // this year, older
+        assert_eq!(humanize_time(1_759_651_200, &now), "5 Oct 2025"); // previous year
     }
 
     #[test]
     fn humanize_buckets_are_day_based() {
         // 00:05 vs the previous 23:55 is "Yesterday", not "Today".
         let midnight = 1_791_158_400; // 2026-10-05 00:00
-        assert_eq!(humanize_time(midnight, midnight + 300), "Today 00:00");
-        assert_eq!(humanize_time(1_791_158_100, midnight + 300), "Yesterday 23:55");
+        let now = Now::new(midnight + 300, Rc::new(Utc));
+        assert_eq!(humanize_time(midnight, &now), "Today 00:00");
+        assert_eq!(humanize_time(1_791_158_100, &now), "Yesterday 23:55");
+    }
+
+    #[test]
+    fn humanize_buckets_follow_the_local_day() {
+        // On a UTC+13 clock the local day rolls over 11 hours before UTC's does.
+        let midnight = 1_791_158_400; // 2026-10-05 00:00 UTC
+        let now = Now::new(midnight, Rc::new(FixedZone(13 * 3600)));
+        // 12 hours earlier is already 5 Oct 01:00 locally, the same local day.
+        assert_eq!(humanize_time(midnight - 12 * 3600, &now), "Today 01:00");
+        // 14 hours earlier is 4 Oct 23:00 locally: yesterday.
+        assert_eq!(humanize_time(midnight - 14 * 3600, &now), "Yesterday 23:00");
     }
 
     #[test]
     fn humanize_crosses_the_year_boundary() {
         let new_year = 1_767_261_600; // 2026-01-01 10:00, a Thursday
-        assert_eq!(humanize_time(1_767_222_000, new_year), "Yesterday 23:00"); // 31 Dec
-        assert_eq!(humanize_time(1_767_081_600, new_year), "Tue 08:00"); // 30 Dec, 2 days
-        assert_eq!(humanize_time(1_766_649_600, new_year), "25 Dec 2025"); // 7 days, last year
+        let now = Now::new(new_year, Rc::new(Utc));
+        assert_eq!(humanize_time(1_767_222_000, &now), "Yesterday 23:00"); // 31 Dec
+        assert_eq!(humanize_time(1_767_081_600, &now), "Tue 08:00"); // 30 Dec, 2 days
+        assert_eq!(humanize_time(1_766_649_600, &now), "25 Dec 2025"); // 7 days, last year
     }
 
     #[test]
     fn humanize_falls_back_to_absolute_for_the_future() {
-        assert_eq!(humanize_time(NOW + 3600, NOW), "Mon 5 Oct 15:32");
-    }
-
-    #[test]
-    fn civil_dates_are_exact() {
-        assert_eq!(civil(0), (1970, 1, 1));
-        assert_eq!(civil(20_731), (2026, 10, 5));
-        assert_eq!(civil(-1), (1969, 12, 31));
+        let now = utc();
+        assert_eq!(humanize_time(NOW + 3600, &now), "Mon 5 Oct 15:32");
     }
 }

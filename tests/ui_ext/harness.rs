@@ -8,6 +8,7 @@ use mail_classifier::app::actions::{bind_keys};
 use mail_classifier::app::MailApp;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
+use mail_classifier::tz::Utc;
 
 #[path = "../common/menu.rs"]
 mod menu;
@@ -60,7 +61,7 @@ fn harness_inner(
             cx,
             |window, cx| {
                 let view = cx.new(|cx| {
-                    let mut app = MailApp::new_with_clock(mailbox, c2, window, cx);
+                    let mut app = MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx);
                     if let Some(store) = prefs {
                         app.load_preferences(store, window, cx);
                     }
@@ -156,7 +157,7 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.count(s))
     }
     pub fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
+        self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
     }
     pub fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())

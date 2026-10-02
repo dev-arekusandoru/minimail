@@ -3,9 +3,9 @@
 use std::cell::OnceCell;
 
 use super::{Combinator, Field, Group, Query, dates};
-use crate::clock::Timestamp;
 use crate::judge::Kind;
 use crate::model::{Mailbox, Message, Tag, TriageState};
+use crate::tz::Now;
 
 /// Lowercased haystacks for one message, each computed on first use: counting a location
 /// for every sidebar row would otherwise lowercase every message's text on every frame.
@@ -13,7 +13,7 @@ struct Haystack<'a> {
     m: &'a Message,
     mailbox: &'a Mailbox,
     state: TriageState,
-    now: Timestamp,
+    now: &'a Now,
     name: OnceCell<String>,
     email: OnceCell<String>,
     subject: OnceCell<String>,
@@ -37,8 +37,13 @@ impl Haystack<'_> {
         self.body.get_or_init(|| crate::reading::reader_text(self.m).to_lowercase())
     }
 
-    fn date(&self) -> &str {
-        self.m.received.get(..10).unwrap_or(&self.m.received)
+    /// The message's calendar day on the user's clock, `yyyy-mm-dd`. An unreadable
+    /// `received` falls back to the leading ten characters, as written.
+    fn date(&self) -> String {
+        match self.m.received_at() {
+            Some(ts) => self.now.day(ts),
+            None => self.m.received.get(..10).unwrap_or(&self.m.received).to_owned(),
+        }
     }
 
     fn value(&self, field: Field, v: &str) -> bool {
@@ -51,8 +56,8 @@ impl Haystack<'_> {
             Field::Bcc => m.bcc.to_lowercase().contains(v),
             Field::Subject => self.subject().contains(v),
             Field::Body => self.body().contains(v),
-            Field::Before => dates::resolve(v, self.now).is_some_and(|d| self.date() < d.as_str()),
-            Field::After => dates::resolve(v, self.now).is_some_and(|d| self.date() >= d.as_str()),
+            Field::Before => dates::resolve(v, self.now).is_some_and(|d| self.date() < d),
+            Field::After => dates::resolve(v, self.now).is_some_and(|d| self.date() >= d),
             Field::On => dates::resolve(v, self.now).is_some_and(|d| self.date() == d),
             Field::Is => match v {
                 "inbox" => self.state == TriageState::Inbox,
@@ -106,8 +111,9 @@ impl Haystack<'_> {
 
 impl Query {
     /// Whether `m` satisfies every group and every free-text term. Relative dates resolve
-    /// against `now`; triage state, tags, folders and new-sender status come from `mailbox`.
-    pub fn matches(&self, m: &Message, mailbox: &Mailbox, now: Timestamp) -> bool {
+    /// against `now`, and a message's day is its day on that same clock; triage state, tags,
+    /// folders and new-sender status come from `mailbox`.
+    pub fn matches(&self, m: &Message, mailbox: &Mailbox, now: &Now) -> bool {
         let Some(state) = mailbox.state_of(m.id) else {
             return false;
         };

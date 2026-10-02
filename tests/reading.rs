@@ -1,4 +1,6 @@
 use mail_classifier::model::{Attachment, Message, TriageState};
+use mail_classifier::tz::{FixedZone, Now, Utc};
+use std::rc::Rc;
 use mail_classifier::reading::{
     Recipient, ReaderView, format_size, html_to_text, initials, parse_recipients, reader_text,
     received_label, recipient_line, safe_html, split_quoted, thread_others, thread_position,
@@ -84,10 +86,16 @@ fn recipient_line_counts_an_address_once_and_handles_none() {
 }
 
 #[test]
-fn received_label_formats_as_written() {
-    assert_eq!(received_label("2026-09-30T20:46:00Z"), "Sep 30, 2026 · 20:46");
-    assert_eq!(received_label("2026-01-05T07:03:00+02:00"), "Jan 5, 2026 · 07:03");
-    assert_eq!(received_label("garbage"), "garbage");
+fn received_label_reads_the_timestamp_on_the_users_clock() {
+    let utc = Now::new(0, Rc::new(Utc));
+    assert_eq!(received_label("2026-09-30T20:46:00Z", &utc), "Sep 30, 2026 · 20:46");
+    // An offset in the string is honoured: 07:03+02:00 is 05:03 UTC.
+    assert_eq!(received_label("2026-01-05T07:03:00+02:00", &utc), "Jan 5, 2026 · 05:03");
+    assert_eq!(received_label("garbage", &utc), "garbage");
+
+    // On a UTC+13 clock the same instant is already the next afternoon.
+    let east = Now::new(0, Rc::new(FixedZone(13 * 3600)));
+    assert_eq!(received_label("2026-09-30T20:46:00Z", &east), "Oct 1, 2026 · 09:46");
 }
 
 // -------------------------------------------------------------------- quoted

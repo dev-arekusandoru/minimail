@@ -82,12 +82,12 @@ impl MailApp {
             .child({
                 let tip = m
                     .received_at()
-                    .map_or_else(|| stamp(&m.received), |ts| humanize_time(ts, self.now()));
+                    .map_or_else(|| stamp(&m.received), |ts| humanize_time(ts, &self.local_now()));
                 div()
                     .id(("reader-msg-stamp", id))
                     .text_size(px(13.))
                     .text_color(t.muted_foreground)
-                    .child(SelectableText::new(("reader-sel-stamp", id), reading::received_label(&m.received)))
+                    .child(SelectableText::new(("reader-sel-stamp", id), reading::received_label(&m.received, &self.local_now())))
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
             .child(self.message_buttons(m.id, cx));
@@ -228,7 +228,7 @@ impl MailApp {
         let t = &look.t;
         let state_text = match m.state {
             TriageState::Snoozed => match self.mailbox.snoozed_until(m.id) {
-                Some(until) => format!("Snoozed · {}", super::format_when(until)),
+                Some(until) => format!("Snoozed · {}", super::format_when(until, &self.local_now())),
                 None => "Snoozed".to_owned(),
             },
             TriageState::Filed(folder) => format!(

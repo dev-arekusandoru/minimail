@@ -3,9 +3,21 @@ use mail_classifier::model::{Mailbox, Message, TriageState};
 use mail_classifier::rules::{Rule, RuleBook};
 use mail_classifier::model::parse_rfc3339;
 use mail_classifier::search::{Combinator, Field, Pill, Query};
+use mail_classifier::tz::{FixedZone, Now, Utc};
+use std::rc::Rc;
 
 /// 2026-09-29T12:00:00Z
 const NOW: i64 = 1_790_683_200;
+
+/// `NOW` read in UTC, so the fixtures' instants are the instants the tests name.
+fn utc() -> Now {
+    Now::new(NOW, Rc::new(Utc))
+}
+
+/// `NOW` read on a UTC+13 clock, where the local day has already rolled over.
+fn east13() -> Now {
+    Now::new(NOW, Rc::new(FixedZone(13 * 3600)))
+}
 
 fn msg(name: &str, email: &str, subject: &str, body: &str, received: &str) -> Message {
     Message {
@@ -46,7 +58,7 @@ fn mailbox(mut message: Message, state: TriageState) -> Mailbox {
 }
 fn hit(q: &str) -> bool {
     let message = m();
-    Query::parse(q).matches(&message, &mailbox(message.clone(), TriageState::Inbox), NOW)
+    Query::parse(q).matches(&message, &mailbox(message.clone(), TriageState::Inbox), &utc())
 }
 
 #[test]
@@ -74,29 +86,29 @@ fn new_state_operators_and_removed_operators() {
         ("is:deleted", TriageState::Deleted),
     ] {
         let message = m();
-        assert!(q(query).matches(&message, &mailbox(message.clone(), state), NOW));
+        assert!(q(query).matches(&message, &mailbox(message.clone(), state), &utc()));
     }
     let message = m();
     let mut snoozed = mailbox(message.clone(), TriageState::Inbox);
     snoozed.snooze(&[message.id], 30, 0);
-    assert!(q("is:snoozed").matches(&message, &snoozed, NOW));
+    assert!(q("is:snoozed").matches(&message, &snoozed, &utc()));
     let message = m();
-    assert!(!q("is:waiting").matches(&message, &mailbox(message.clone(), TriageState::Inbox), NOW));
-    assert!(!q("is:later").matches(&message, &mailbox(message.clone(), TriageState::Inbox), NOW));
-    assert!(!q("is:done").matches(&message, &mailbox(message.clone(), TriageState::Inbox), NOW));
-    assert!(!q("is:screener").matches(&message, &mailbox(message.clone(), TriageState::Inbox), NOW));
+    assert!(!q("is:waiting").matches(&message, &mailbox(message.clone(), TriageState::Inbox), &utc()));
+    assert!(!q("is:later").matches(&message, &mailbox(message.clone(), TriageState::Inbox), &utc()));
+    assert!(!q("is:done").matches(&message, &mailbox(message.clone(), TriageState::Inbox), &utc()));
+    assert!(!q("is:screener").matches(&message, &mailbox(message.clone(), TriageState::Inbox), &utc()));
 }
 
 #[test]
 fn sent_operator_uses_outgoing_status() {
     let mut sent = m();
     sent.outgoing = true;
-    assert!(Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), NOW));
+    assert!(Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), &utc()));
     let ordinary = m();
     assert!(
-        !Query::parse("is:sent").matches(&ordinary, &mailbox(ordinary.clone(), TriageState::Inbox), NOW)
+        !Query::parse("is:sent").matches(&ordinary, &mailbox(ordinary.clone(), TriageState::Inbox), &utc())
     );
-    assert!(!Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Deleted), NOW));
+    assert!(!Query::parse("is:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Deleted), &utc()));
 }
 
 #[test]
@@ -115,8 +127,8 @@ fn tag_operators_match_mailbox_tags() {
         },
         0,
     );
-    assert!(Query::parse("tag:spam").matches(&m, &mailbox, NOW));
-    assert!(!Query::parse("tag:needs-reply").matches(&m, &mailbox, NOW));
+    assert!(Query::parse("tag:spam").matches(&m, &mailbox, &utc()));
+    assert!(!Query::parse("tag:needs-reply").matches(&m, &mailbox, &utc()));
 }
 
 #[test]
@@ -158,7 +170,7 @@ fn unknown_or_malformed_keys_are_free_text() {
         "see foo:bar here",
         "2026-01-01T00:00:00Z",
     );
-    assert!(Query::parse("foo:bar").matches(&mm, &mailbox(mm.clone(), TriageState::Inbox), NOW));
+    assert!(Query::parse("foo:bar").matches(&mm, &mailbox(mm.clone(), TriageState::Inbox), &utc()));
 }
 
 #[test]
@@ -265,7 +277,7 @@ fn full() -> Message {
 }
 
 fn hit_msg(q: &str, x: &Message, now: i64) -> bool {
-    Query::parse(q).matches(x, &mailbox(x.clone(), TriageState::Inbox), now)
+    Query::parse(q).matches(x, &mailbox(x.clone(), TriageState::Inbox), &Now::new(now, Rc::new(Utc)))
 }
 
 #[test]
@@ -320,6 +332,31 @@ fn relative_dates_resolve_against_the_passed_now() {
 }
 
 #[test]
+fn date_filters_use_the_days_the_reader_sees() {
+    let q = |s: &str| Query::parse(s);
+    // NOW is 2026-09-29T12:00Z, which is already 30 Sep 01:00 on a UTC+13 clock. So a
+    // message late on the 29th is today in UTC and already tomorrow at UTC+13, and one in
+    // the small hours is the day before in UTC and today at UTC+13.
+    let evening = msg("A", "a@x.com", "s", "b", "2026-09-29T23:00:00Z");
+    let mb = mailbox(evening.clone(), TriageState::Inbox);
+    assert!(q("on:0d").matches(&evening, &mb, &utc()), "today in UTC");
+    assert!(!q("on:2026-09-30").matches(&evening, &mb, &utc()));
+    assert!(q("on:2026-09-30").matches(&evening, &mb, &east13()));
+    assert!(q("on:0d").matches(&evening, &mb, &east13()), "still today at 12:00 on the 30th");
+    assert!(q("after:1d").matches(&evening, &mb, &east13()));
+    assert!(!q("before:1d").matches(&evening, &mb, &east13()));
+
+    let small_hours = msg("A", "a@x.com", "s", "b", "2026-09-28T23:30:00Z");
+    let mb = mailbox(small_hours.clone(), TriageState::Inbox);
+    assert!(q("on:2026-09-28").matches(&small_hours, &mb, &utc()));
+    assert!(!q("on:2026-09-29").matches(&small_hours, &mb, &utc()));
+    assert!(!q("on:2026-09-28").matches(&small_hours, &mb, &east13()));
+    assert!(q("on:2026-09-29").matches(&small_hours, &mb, &east13()));
+    assert!(q("after:1d").matches(&small_hours, &mb, &east13()));
+    assert!(!q("before:1d").matches(&small_hours, &mb, &east13()));
+}
+
+#[test]
 fn relative_months_clamp_to_month_length() {
     let end_of_feb = msg("A", "a@x.com", "s", "b", "2026-02-28T10:00:00Z");
     let mar31 = parse_rfc3339("2026-03-31T12:00:00Z").unwrap();
@@ -362,9 +399,9 @@ fn set_combinator_changes_matching() {
     let x = full();
     let mut q = Query::parse("from:alice from:bob");
     let mb = mailbox(x.clone(), TriageState::Inbox);
-    assert!(!q.matches(&x, &mb, NOW));
+    assert!(!q.matches(&x, &mb, &utc()));
     assert!(q.set_combinator(Field::From, Combinator::Or));
-    assert!(q.matches(&x, &mb, NOW));
+    assert!(q.matches(&x, &mb, &utc()));
     assert!(!q.set_combinator(Field::To, Combinator::Or), "no such group");
 }
 
@@ -384,7 +421,7 @@ fn kind_account_and_in_use_existing_semantics() {
         },
         0,
     );
-    let q = |s: &str| Query::parse(s).matches(&x, &mb, NOW);
+    let q = |s: &str| Query::parse(s).matches(&x, &mb, &utc());
     assert!(q("kind:receipt"));
     assert!(!q("kind:person"));
     assert!(q("kind:person,receipt"));
@@ -405,7 +442,7 @@ fn kind_account_and_in_use_existing_semantics() {
 fn in_locations_follow_triage_state_and_direction() {
     let x = m();
     let at = |q: &str, st: TriageState| {
-        Query::parse(q).matches(&x, &mailbox(x.clone(), st), NOW)
+        Query::parse(q).matches(&x, &mailbox(x.clone(), st), &utc())
     };
     assert!(at("in:archived", TriageState::Archived));
     assert!(at("in:archive", TriageState::Archived));
@@ -414,12 +451,12 @@ fn in_locations_follow_triage_state_and_direction() {
     assert!(!at("in:inbox", TriageState::Archived));
     let mut sent = m();
     sent.outgoing = true;
-    assert!(Query::parse("in:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), NOW));
-    assert!(!Query::parse("in:inbox").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), NOW));
-    assert!(!Query::parse("in:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Deleted), NOW));
+    assert!(Query::parse("in:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), &utc()));
+    assert!(!Query::parse("in:inbox").matches(&sent, &mailbox(sent.clone(), TriageState::Inbox), &utc()));
+    assert!(!Query::parse("in:sent").matches(&sent, &mailbox(sent.clone(), TriageState::Deleted), &utc()));
     let mut snoozed = mailbox(x.clone(), TriageState::Inbox);
     snoozed.snooze(&[x.id], 30, 0);
-    assert!(Query::parse("in:snoozed").matches(&x, &snoozed, NOW));
+    assert!(Query::parse("in:snoozed").matches(&x, &snoozed, &utc()));
 }
 
 #[test]
@@ -428,10 +465,10 @@ fn in_folder_name_matches_filed_mail_of_that_account() {
     let mut mb = mailbox(x.clone(), TriageState::Inbox);
     let (_, moved) = mb.create_folder_and_file("personal", "Receipts 2026", None, &[x.id]);
     assert_eq!(moved, 1);
-    assert!(Query::parse("in:\"receipts 2026\"").matches(&x, &mb, NOW));
-    assert!(!Query::parse("in:other").matches(&x, &mb, NOW));
-    assert!(!Query::parse("in:inbox").matches(&x, &mb, NOW));
-    assert!(Query::parse("is:filed").matches(&x, &mb, NOW));
+    assert!(Query::parse("in:\"receipts 2026\"").matches(&x, &mb, &utc()));
+    assert!(!Query::parse("in:other").matches(&x, &mb, &utc()));
+    assert!(!Query::parse("in:inbox").matches(&x, &mb, &utc()));
+    assert!(Query::parse("is:filed").matches(&x, &mb, &utc()));
 }
 
 fn rt(s: &str) -> Query {

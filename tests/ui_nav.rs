@@ -14,6 +14,7 @@ use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 
 use mail_classifier::model::{Location, Mailbox, MessageId, OUTBOX_DELAY, TriageState};
 use mail_classifier::app::filter_popover::Step;
+use mail_classifier::tz::Utc;
 use mail_classifier::search::Field;
 
 const NOON: Timestamp = 1_790_683_200;
@@ -43,7 +44,7 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, ticker, window, cx));
+                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, ticker, Rc::new(Utc), window, cx));
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },

@@ -195,9 +195,9 @@ impl MailApp {
         // Captured now: a message menu's target only lives for its own dispatch.
         let ids = ids.unwrap_or_else(|| self.target_ids());
         if quick {
-            let now = self.now();
-            if let Some((_, until)) = self.mailbox.snooze_presets(now).into_iter().next() {
-                self.mailbox.snooze(&ids, until, now);
+            let now = self.local_now();
+            if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
+                self.mailbox.snooze(&ids, until, now.at());
                 self.triage.clear_selection();
                 self.session_advance();
             }
@@ -207,10 +207,10 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        let now = self.now();
+        let now = self.local_now();
         let presets: Vec<(String, Timestamp)> = self
             .mailbox
-            .snooze_presets(now)
+            .snooze_presets(&now)
             .into_iter()
             .map(|(l, t)| (l.to_string(), t))
             .collect();
@@ -225,11 +225,11 @@ impl MailApp {
                 let until = *until;
                 this.close_modals(window, cx);
                 let ids = &ids;
-                let now = this.now();
-                let n = this.mailbox.snooze(ids, until, now);
+                let local = this.local_now();
+                let n = this.mailbox.snooze(ids, until, local.at());
                 this.triage.clear_selection();
                 this.show_toast(
-                    format!("Snoozed {n} until {} · u to undo", format_when(until)),
+                    format!("Snoozed {n} until {} · u to undo", format_when(until, &local)),
                     window,
                     cx,
                 );
@@ -341,7 +341,7 @@ impl MailApp {
         let tab_avatars = self.tab_avatars;
         let block_remote_images = self.block_remote_images;
         let blocked = self.mailbox.blocked();
-        let now = self.now();
+        let now = self.local_now();
         let follow_up = self.mailbox.follow_up_timeout();
         let app = cx.weak_entity();
         let options = WindowOptions {
@@ -530,7 +530,7 @@ impl MailApp {
         let Some(panel) = &self.settings else {
             return;
         };
-        let now = self.now();
+        let now = self.local_now();
         let blocked = self.mailbox.blocked();
         panel.update(cx, |panel, cx| panel.set_blocked(blocked, now, cx));
     }

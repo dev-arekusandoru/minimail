@@ -91,7 +91,7 @@ impl MailApp {
                     .child(crate::preview::snippet(&text)),
             )
             .when(!m.attachments.is_empty(), |d| d.child(icons::icon(Glyph::Attachment, t, 13.)))
-            .child(look.mono(Self::clock_label(&m.received, newest), t.muted_foreground).flex_none())
+            .child(look.mono(self.clock_label(&m.received, newest, &self.local_now()), t.muted_foreground).flex_none())
             .into_any_element()
     }
 }

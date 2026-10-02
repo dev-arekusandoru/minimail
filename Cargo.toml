@@ -16,7 +16,7 @@ sha2 = "0.10"
 rand = "0.8"
 url = "2"
 futures = "0.3"
-chrono = { version = "0.4", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false, features = ["system-fonts", "complex-scripts"] }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
