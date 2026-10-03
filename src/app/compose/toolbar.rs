@@ -1,11 +1,12 @@
-//! The composer's compact Markdown toolbar: the everyday formatting inline, the rest one
-//! menu away.
+//! The composer's Markdown toolbar: every format inline while the row has room, the ones
+//! that no longer fit one menu away.
 //!
 //! Every button and every keyboard chord runs the same action, so what the button does to
 //! the selection is exactly what the shortcut does — only the route to it differs.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::toolbar::Toolbar;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -21,8 +22,9 @@ pub struct Tool {
     pub key: &'static str,
 }
 
-/// The everyday tools, shown inline. Order is display order.
-pub const INLINE_TOOLS: [Tool; 4] = [
+/// Every format, in display order. Nothing is put behind the overflow while the row can
+/// hold it.
+pub const TOOLS: [Tool; 10] = [
     Tool {
         id: "compose-bold",
         icon: IconName::Bold,
@@ -51,10 +53,6 @@ pub const INLINE_TOOLS: [Tool; 4] = [
         tip: "Bulleted list",
         key: "cmd-shift-8",
     },
-];
-
-/// What the overflow menu holds, in display order.
-pub const MORE_TOOLS: [Tool; 6] = [
     Tool {
         id: "compose-numbered-list",
         icon: IconName::ListOrdered,
@@ -86,8 +84,8 @@ pub const MORE_TOOLS: [Tool; 6] = [
     Tool {
         id: "compose-strike",
         icon: IconName::Strikethrough,
-        label: "Strikethrough",
         tip: "Strikethrough",
+        label: "Strikethrough",
         key: "cmd-shift-x",
     },
     Tool {
@@ -99,10 +97,27 @@ pub const MORE_TOOLS: [Tool; 6] = [
     },
 ];
 
-/// The overflow menu's tools, in display order. The menu lists the same tools the row
-/// holds, so a format that is not inline can still be found by name.
-pub fn more_tools() -> &'static [Tool] {
-    &MORE_TOOLS
+/// A tool button is 24 wide with a 4px gap after it.
+const TOOL_SLOT: f32 = 28.;
+/// The bar's own padding, left and right.
+const BAR_PADDING: f32 = 16.;
+/// What the right-hand controls (Preview and Attach) take, plus the gaps around them.
+const TRAILING_WIDTH: f32 = 64.;
+
+/// How many tools fit in `width` pixels before the overflow trigger is needed.
+///
+/// When not all of them fit, one more slot is given up to the trigger itself, so the count
+/// is one short of the raw fit. A width of zero (not laid out yet) keeps every tool.
+pub fn visible_tools(width: f32, total: usize) -> usize {
+    if width <= 0. {
+        return total;
+    }
+    let room = width - BAR_PADDING - TRAILING_WIDTH;
+    if room <= 0. {
+        return 0;
+    }
+    let fit = ((room + 4.) / TOOL_SLOT).floor() as usize;
+    if fit >= total { total } else { fit.saturating_sub(1) }
 }
 
 impl Tool {
@@ -137,31 +152,53 @@ impl Tool {
     }
 }
 
-/// The toolbar row: the inline tools, then the overflow trigger, then whatever the owner
-/// puts on the right (the attachment button, preview toggle).
-pub fn bar<'a>(
-    tools: impl IntoIterator<Item = &'a Tool>,
+/// The toolbar row: the format tools that fit, an overflow trigger when some do not, a
+/// spacer, then the trailing controls (Preview, Attach).
+///
+/// It spans the composer's full width and carries the kit's [`Toolbar`] semantics, so the
+/// arrow keys move along it and it reads as one bar.
+pub fn bar(
+    visible: usize,
     disabled: bool,
-    overflow: AnyElement,
-    trailing: Option<AnyElement>,
+    overflow: Option<AnyElement>,
+    trailing: Vec<AnyElement>,
     cx: &App,
-) -> impl IntoElement {
+) -> Toolbar {
     let t = cx.theme();
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap_1()
+    let mut toolbar = Toolbar::new("compose-toolbar")
+        .w_full()
         .h(px(26.))
         .px_2()
         .border_b(px(1.))
-        .border_color(t.border)
-        .children(
-            tools
-                .into_iter()
-                .map(|tool| tool.button(disabled, cx).into_any_element()),
-        )
-        .child(overflow)
-        .child(div().flex_1())
-        .when_some(trailing, |d, el| d.child(el))
+        .border_color(t.border);
+    for tool in TOOLS.iter().take(visible.min(TOOLS.len())) {
+        toolbar = toolbar.content(tool.button(disabled, cx));
+    }
+    if let Some(overflow) = overflow {
+        toolbar = toolbar.content(overflow);
+    }
+    toolbar = toolbar.content(div().flex_1().min_w_0());
+    for el in trailing {
+        toolbar = toolbar.content(el);
+    }
+    toolbar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TOOLS, visible_tools};
+
+    /// A wide row keeps every format inline, and as the row narrows the last ones move to
+    /// the overflow one at a time — never all at once, and never extra room for the trigger.
+    #[test]
+    fn tools_move_to_the_overflow_only_as_width_runs_out() {
+        let total = TOOLS.len();
+        assert_eq!(visible_tools(1200., total), total, "room for everything");
+        assert_eq!(visible_tools(-40., total), 0, "no room at all");
+        // A wide-enough row keeps all ten; a little narrower starts spilling into the menu.
+        assert!(visible_tools(400., total) < total);
+        assert!(visible_tools(400., total) >= visible_tools(360., total));
+        // The count never exceeds the tools that exist.
+        assert_eq!(visible_tools(10_000., total), total);
+    }
 }

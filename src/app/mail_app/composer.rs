@@ -1927,6 +1927,16 @@ impl MailApp {
         self.follow_active_tab(cx);
         self.close_other_inline(cx);
         self.inline_composer = Some(id);
+        // The composer is the thread's last child, so the reader has to be at the bottom for
+        // it to be on screen. The reveal runs on the next render, after the reply is in the
+        // tree, and is what an inline reply opened from a message higher up already does.
+        if let Some(thread) = self.mailbox.get(source).map(|message| message.thread_id) {
+            self.reader_panes
+                .borrow_mut()
+                .entry(thread)
+                .or_default()
+                .reveal_composer = true;
+        }
         self.focus_draft_body(id, window, cx);
         cx.notify();
     }

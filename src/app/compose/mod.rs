@@ -13,6 +13,7 @@ pub mod toolbar;
 use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, WindowExt as _, scroll::ScrollableElement as _,
 };
@@ -430,6 +431,9 @@ pub struct Composer {
     to: Entity<Recipients>,
     cc: Entity<Recipients>,
     bcc: Entity<Recipients>,
+    /// Whether the Cc field is on screen. It starts shown only when the draft already has a
+    /// Cc, so an empty `Cc` row does not take a line of its own.
+    cc_shown: bool,
     bcc_shown: bool,
     subject: Entity<InputState>,
     body: Entity<TextareaState>,
@@ -454,6 +458,10 @@ pub struct Composer {
     /// A hold or a send is in flight; the controls stop offering another one rather than
     /// pretending the message has not left.
     sending: bool,
+    /// The width the formatting toolbar was last laid out at, so the tools that no longer
+    /// fit move behind the overflow instead of being clipped. `None` until the first
+    /// layout: the default is to show every tool.
+    toolbar_width: Option<f32>,
     _subs: Vec<Subscription>,
 }
 
@@ -482,6 +490,7 @@ impl Composer {
             b.set_value(draft.body.source.as_str(), window, cx)
         });
         let mode = draft.body.mode;
+        let cc_shown = !draft.cc.trim().is_empty();
         let bcc_shown = !draft.bcc.trim().is_empty();
         let mut subs = Vec::new();
         for entity in [&to, &cc, &bcc] {
@@ -543,6 +552,7 @@ impl Composer {
             to,
             cc,
             bcc,
+            cc_shown,
             bcc_shown,
             subject,
             body,
@@ -559,6 +569,7 @@ impl Composer {
             accounts,
             pending_record: None,
             sending: false,
+            toolbar_width: None,
             _subs: subs,
         };
         this.sync_frozen_fields(cx);
@@ -642,6 +653,7 @@ impl Composer {
             self.pending_paste = None;
         }
         self.mode = self.draft.body.mode;
+        self.cc_shown = self.cc_shown || !self.draft.cc.trim().is_empty();
         self.bcc_shown = self.bcc_shown || !self.draft.bcc.trim().is_empty();
         if body_changed {
             self.invalidate_preview();
@@ -1067,9 +1079,23 @@ impl Composer {
         cx.emit(ComposeEvent::Edited);
     }
 
-    /// Show or hide Cc and Bcc, keeping whatever is already typed there.
-    fn toggle_bcc(&mut self, cx: &mut Context<Self>) {
-        self.bcc_shown = !self.bcc_shown;
+    /// Reveal a hidden recipient field and put the caret in it, so the link that asked for it
+    /// leads straight to typing. The link hides itself once the field is on screen.
+    fn reveal_field(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) {
+        let entity = match field {
+            Field::To => {
+                self.to.clone()
+            }
+            Field::Cc => {
+                self.cc_shown = true;
+                self.cc.clone()
+            }
+            Field::Bcc => {
+                self.bcc_shown = true;
+                self.bcc.clone()
+            }
+        };
+        entity.update(cx, |recipients, cx| recipients.focus(window, cx));
         cx.notify();
     }
 
@@ -1125,9 +1151,18 @@ impl Focusable for Composer {
 impl EventEmitter<ComposeEvent> for Composer {}
 
 impl Composer {
-    fn header_row(&self, label: &'static str, field: Entity<Recipients>, cx: &App) -> Div {
+    fn header_row(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        field: Entity<Recipients>,
+        trailing: Option<AnyElement>,
+        cx: &App,
+    ) -> AnyElement {
         let t = cx.theme();
         div()
+            .id(id)
+            .test_support()
             .flex()
             .flex_none()
             .items_start()
@@ -1143,6 +1178,34 @@ impl Composer {
                     .child(label),
             )
             .child(div().flex_1().min_w_0().child(field))
+            .when_some(trailing, |d, el| d.child(el))
+            .into_any_element()
+    }
+
+    /// The small `Cc` / `Bcc` link that reveals a hidden field and puts the caret in it.
+    fn reveal_link(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        field: Field,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        Button::new(id)
+            .label(label)
+            .ghost()
+            .xsmall()
+            .h(px(18.))
+            .px_1()
+            .text_size(px(11.))
+            .text_color(muted)
+            .tooltip(format!("Show the {label} field"))
+            .disabled(disabled)
+            .on_click(
+                cx.listener(move |this, _, window, cx| this.reveal_field(field, window, cx)),
+            )
+            .into_any_element()
     }
 
     fn subject_row(&self, cx: &App) -> Div {
@@ -1219,9 +1282,6 @@ impl Composer {
     }
 
     fn render_headers(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Div {
-        // The colour is copied out rather than the theme borrowed: the row's own click
-        // handler needs the context mutably, and a live theme borrow would forbid it.
-        let muted = cx.theme().muted_foreground;
         let frozen = self.frozen();
         let app = cx.weak_entity();
         let account = self.account_selector(cx).map(|selector| {
@@ -1253,100 +1313,150 @@ impl Composer {
                 crate::app::menu::populate(menu, &items, &run, window, cx)
             })
         });
+        // The Cc/Bcc reveal links share the right end of the To row with the account: one
+        // row for the addresses, nothing on its own line.
+        let mut to_trailing = div().flex().flex_none().items_center().gap_1();
+        if !self.cc_shown {
+            to_trailing =
+                to_trailing.child(self.reveal_link("compose-show-cc", "Cc", Field::Cc, frozen, cx));
+        }
+        if !self.bcc_shown {
+            to_trailing = to_trailing
+                .child(self.reveal_link("compose-show-bcc", "Bcc", Field::Bcc, frozen, cx));
+        }
+        if let Some(account) = account {
+            to_trailing = to_trailing.child(account);
+        }
         div()
             .flex()
             .flex_none()
             .flex_col()
             .px_3()
             .pt_2()
-            .child(self.header_row("To", self.to.clone(), cx))
-            .child(self.header_row("Cc", self.cc.clone(), cx))
-            .when(self.bcc_shown, |d| {
-                d.child(self.header_row("Bcc", self.bcc.clone(), cx))
+            .child(self.header_row(
+                "compose-to",
+                "To",
+                self.to.clone(),
+                Some(to_trailing.into_any_element()),
+                cx,
+            ))
+            .when(self.cc_shown, |d| {
+                d.child(self.header_row("compose-cc", "Cc", self.cc.clone(), None, cx))
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .pb_1()
-                    .child(
-                        crate::app::ui::button(
-                            "compose-show-cc",
-                            if self.bcc_shown {
-                                "Hide Cc/Bcc"
-                            } else {
-                                "Cc/Bcc"
-                            },
-                            "Show or hide the carbon-copy fields",
-                            "",
-                            cx,
-                        )
-                        .disabled(frozen)
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_bcc(cx))),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .text_size(px(10.))
-                            .text_color(muted)
-                            .child(self.draft.kind.label()),
-                    )
-                    .when_some(account, |d, el| d.child(el)),
-            )
+            .when(self.bcc_shown, |d| {
+                d.child(self.header_row("compose-bcc", "Bcc", self.bcc.clone(), None, cx))
+            })
             .child(self.subject_row(cx))
     }
 
-    /// The compact toolbar: the everyday formats inline, the rest behind the overflow.
+    /// The formatting toolbar: every format inline while the row has room, the rest behind
+    /// an overflow menu, with Preview and Attach at its right end.
     fn render_toolbar(&mut self, cx: &mut Context<Self>) -> Div {
         // A held or in-flight message is not edited, and neither is an imported rich body
         // whose conversion is still undecided, so the formatting controls do not pretend to
         // be available.
         let locked = self.body_locked() || self.mode == BodyMode::Preview;
-        let tools = toolbar::INLINE_TOOLS.iter();
+        let previewing = self.mode == BodyMode::Preview;
+        let visible = match self.toolbar_width {
+            Some(width) => toolbar::visible_tools(width, toolbar::TOOLS.len()),
+            // Not laid out yet: show everything rather than guessing a narrower row.
+            None => toolbar::TOOLS.len(),
+        };
         // The overflow's rows dispatch the same actions the chords do, through the same
-        // weak handle the account menu uses.
+        // weak handle the account menu uses. It is only there when a tool does not fit.
+        let hidden: Vec<&'static toolbar::Tool> =
+            toolbar::TOOLS.iter().skip(visible).collect();
         let app = cx.weak_entity();
-        let overflow = DropdownButton::new("compose-more-format")
-            .disabled(locked)
-            .button(
-                Button::new("compose-more-format-label")
-                    .icon(gpui_kit::assets::IconName::Ellipsis)
-                    .ghost()
-                    .xsmall()
-                    .h(px(22.))
-                    .w(px(24.))
-                    .px_0(),
+        let overflow = (!hidden.is_empty()).then(|| {
+            Button::new("compose-more-format")
+                .icon(gpui_kit::assets::IconName::Ellipsis)
+                .ghost()
+                .xsmall()
+                .h(px(22.))
+                .w(px(24.))
+                .px_0()
+                .text_color(cx.theme().foreground)
+                .tooltip("More formatting")
+                .disabled(locked)
+                .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
+                    let owner = app.clone();
+                    let run: crate::app::menu::MenuRun = Rc::new(move |action, window, cx| {
+                        owner
+                            .update(cx, |_, cx| window.dispatch_action(action, cx))
+                            .ok();
+                    });
+                    crate::app::menu::populate(
+                        menu,
+                        &hidden
+                            .iter()
+                            .filter_map(|tool| {
+                                let action = tool_action(tool.id)?;
+                                Some(crate::app::menu::MenuItem::action_fn(
+                                    tool.label.to_owned(),
+                                    move || action(),
+                                ))
+                            })
+                            .collect::<Vec<_>>(),
+                        &run,
+                        window,
+                        cx,
+                    )
+                })
+                .into_any_element()
+        });
+        // Preview and Attach move into the toolbar, at its right end.
+        let trailing = vec![
+            crate::app::ui::icon_button(
+                "compose-attach",
+                gpui_kit::assets::IconName::Paperclip,
+                "Attach files",
+                "cmd-shift-a",
+                cx,
             )
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, window, cx| {
-                let owner = app.clone();
-                let run: crate::app::menu::MenuRun = Rc::new(move |action, window, cx| {
-                    owner
-                        .update(cx, |_, cx| window.dispatch_action(action, cx))
-                        .ok();
-                });
-                crate::app::menu::populate(
-                    menu,
-                    &toolbar::more_tools()
-                        .iter()
-                        .filter_map(|tool| {
-                            let action = tool_action(tool.id)?;
-                            Some(crate::app::menu::MenuItem::action_fn(
-                                tool.label.to_owned(),
-                                move || action(),
-                            ))
-                        })
-                        .collect::<Vec<_>>(),
-                    &run,
-                    window,
-                    cx,
-                )
-            })
-            .into_any_element();
+            .disabled(self.frozen() || self.attachments_busy)
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Attach)))
+            .into_any_element(),
+            crate::app::ui::icon_button(
+                "compose-preview",
+                if previewing {
+                    gpui_kit::assets::IconName::FileText
+                } else {
+                    gpui_kit::assets::IconName::Eye
+                },
+                if previewing {
+                    "Edit the Markdown source"
+                } else {
+                    "Preview the outgoing message"
+                },
+                "cmd-shift-v",
+                cx,
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_preview(window, cx)))
+            .into_any_element(),
+        ];
+        let bar = toolbar::bar(visible, locked, overflow, trailing, cx);
+        // The width the bar is laid out at decides how many tools stay inline; measuring it
+        // after layout is the only way to know, and a redraw is only asked for on a change.
+        let view = cx.weak_entity();
         div()
             .flex()
             .flex_none()
-            .child(toolbar::bar(tools, locked, overflow, None, cx))
+            .w_full()
+            .on_children_prepainted(move |bounds, _, cx| {
+                let Some(width) = bounds.first().map(|b| f32::from(b.size.width)) else {
+                    return;
+                };
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                view.update(cx, |this, cx| {
+                    if this.toolbar_width != Some(width) {
+                        this.toolbar_width = Some(width);
+                        cx.notify();
+                    }
+                });
+            })
+            .child(bar)
     }
 
     /// The banner shown while an imported rich body has unapproved, lossy Markdown.
@@ -1488,6 +1598,8 @@ impl Composer {
                 )
         });
         let bar = div()
+            .id("compose-attachments")
+            .test_support()
             .flex_none()
             .flex()
             .flex_wrap()
@@ -1511,8 +1623,10 @@ impl Composer {
         let status = self.status();
         let frozen = self.frozen();
         let conflicted = matches!(self.draft.state, DraftState::Conflict);
-        let previewing = self.mode == BodyMode::Preview;
         let inline = self.placement == Placement::Inline;
+        // Collapse only makes sense for a draft that came out of a thread: a fresh message
+        // never had one, so the control is not offered at all.
+        let collapsible = !inline && self.draft.source_message.is_some();
         div()
             .flex()
             .flex_none()
@@ -1537,54 +1651,29 @@ impl Composer {
                     })
                     .child(status),
             )
-            .child(
-                crate::app::ui::icon_button(
-                    "compose-attach",
-                    gpui_kit::assets::IconName::Paperclip,
-                    "Attach files",
-                    "cmd-shift-a",
-                    cx,
+            .when(inline, |d| {
+                d.child(
+                    crate::app::ui::button(
+                        "compose-expand",
+                        "Expand",
+                        "Move this draft into its own tab",
+                        "",
+                        cx,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Expand))),
                 )
-                .disabled(frozen || self.attachments_busy)
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Attach))),
-            )
-            .child(
-                crate::app::ui::icon_button(
-                    "compose-preview",
-                    if previewing {
-                        gpui_kit::assets::IconName::FileText
-                    } else {
-                        gpui_kit::assets::IconName::Eye
-                    },
-                    if previewing {
-                        "Edit the Markdown source"
-                    } else {
-                        "Preview the outgoing message"
-                    },
-                    "cmd-shift-v",
-                    cx,
+            })
+            .when(collapsible, |d| {
+                d.child(
+                    crate::app::ui::button(
+                        "compose-collapse",
+                        "Collapse",
+                        "Move this draft back under its thread",
+                        "",
+                        cx,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Collapse))),
                 )
-                .on_click(cx.listener(|this, _, window, cx| this.toggle_preview(window, cx))),
-            )
-            .child(if inline {
-                crate::app::ui::button(
-                    "compose-expand",
-                    "Expand",
-                    "Move this draft into its own tab",
-                    "",
-                    cx,
-                )
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Expand)))
-            } else {
-                crate::app::ui::button(
-                    "compose-collapse",
-                    "Collapse",
-                    "Move this draft back under its thread",
-                    "",
-                    cx,
-                )
-                .disabled(self.draft.source_message.is_none())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Collapse)))
             })
             // A conflicted draft is not left in a dead end: the choice is right here, and
             // the local snapshot is kept until it is made.

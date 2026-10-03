@@ -276,4 +276,15 @@ impl MailApp {
     pub(super) fn scroll_to_cursor(&self) {
         self.list_state.scroll_to_reveal_item(self.cursor_ix());
     }
+
+    /// The reader's scroll state for `thread`, as `(offset_y, max_offset_y)` in pixels, so a
+    /// test can tell where a thread sits without driving a real scrollbar.
+    pub fn reader_scroll(&self, thread: u32) -> Option<(f32, f32)> {
+        let panes = self.reader_panes.borrow();
+        let pane = panes.get(&thread)?;
+        Some((
+            f32::from(pane.scroll.offset().y),
+            f32::from(pane.scroll.max_offset().y),
+        ))
+    }
 }
