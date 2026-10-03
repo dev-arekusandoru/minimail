@@ -203,9 +203,12 @@ impl MailApp {
         self.go_account_location(Location::Trash, cx);
     }
 
+    /// Close the Triage tab, whether the session is running or only its summary is up. The
+    /// dock removes the tab's group on its next sync; the user's tabs were never touched.
     pub(super) fn end_session(&mut self) {
         self.session = None;
         self.session_end = None;
+        self.session_view = None;
     }
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
@@ -214,7 +217,8 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        self.open_view(query, Location::AllInboxes, false, cx);
+        // The session's list is its own: the user's tabs, cursors and reader stay as they are.
+        self.session_view = Some(ListView::new(query, Location::AllInboxes));
         self.session_end = None;
         self.session = Some(Session {
             ids,

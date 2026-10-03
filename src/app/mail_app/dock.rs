@@ -17,9 +17,13 @@
 //! and hands it back for the model to take.
 //!
 //! The reader group mirrors [`crate::tabs::Tabs`]: one panel per open thread, in tab
-//! order, with the active tab displayed. `None` threads means a session owns the reader,
-//! which shows it alone and draws no tab bar. Either way a panel standing for "nothing is
-//! open" keeps the group alive, so the group never disappears out from under the layout.
+//! order, with the active tab displayed. A panel standing for "nothing is open" keeps the
+//! group alive, so the group never disappears out from under the layout.
+//!
+//! A triage session adds a third group, holding one [`TriagePanel`] that draws the session's
+//! list and reader together. The group exists only while the session does, and is zoomed
+//! over the whole dock for as long as it is wanted; the other two groups are rebuilt as they
+//! were, so nothing the user arranged is touched.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -44,12 +48,14 @@ pub(super) struct Dock {
     /// The list slot as last painted. Shared with the list panel, which measures it, so
     /// the app can read the pane's real width without leasing a panel that is mid-render.
     measured: Rc<Cell<(f32, f32)>>,
-    /// The reader shown when no thread has a tab — and, during a session, the reader a
-    /// session owns. It lives in the reader group at all times so the group is never
-    /// empty, and draws only when no thread tab is there to draw instead.
+    /// The reader shown when no thread has a tab. It lives in the reader group at all
+    /// times so the group is never empty, and draws only when no thread tab is there to
+    /// draw instead.
     blank: Entity<ReaderPanel>,
     /// One panel per open thread, in [`crate::tabs::Tabs`] order.
     readers: Vec<Entity<ReaderPanel>>,
+    /// The Triage tab's panel, in a group of its own, while a session is running.
+    triage: Option<Entity<TriagePanel>>,
     /// Which way the centre splits.
     orientation: Orientation,
     /// The centre split's list slot, remembered per orientation so each keeps its own.
@@ -70,10 +76,11 @@ pub(super) struct Dock {
 #[derive(PartialEq, Eq, Clone)]
 struct Built {
     orientation: Orientation,
-    /// Threads in tab order, or `None` while a session owns the reader.
-    threads: Option<Vec<u32>>,
+    threads: Vec<u32>,
     /// The views the list group is showing, in tab order.
     views: Vec<Query>,
+    /// Whether the Triage group is there.
+    triage: bool,
 }
 
 impl Dock {
@@ -114,6 +121,7 @@ impl Dock {
             measured,
             blank,
             readers: Vec::new(),
+            triage: None,
             orientation: Orientation::default(),
             sizes: default_sizes(window),
             list_w_default: Cell::new(available_width(
@@ -136,10 +144,11 @@ impl Dock {
         };
         // The window opens on one pinned view, so the list group starts with that one panel.
         let tabs = TabSets {
-            readers: Some(Vec::new()),
+            readers: Vec::new(),
             reader: None,
             views: vec![initial.clone()],
             list: 0,
+            triage: false,
         };
         dock.rebuild_now(&tabs, window, cx);
         dock
@@ -171,12 +180,13 @@ impl Dock {
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) -> Dragged {
-        let TabSets { readers: threads, reader: active, views, list: list_active } = tabs;
+        let TabSets { readers: threads, reader: active, views, list: list_active, triage } = tabs;
         let mut dragged = Dragged { readers: None, lists: None };
         let wanted = Built {
             orientation: self.orientation,
             threads: threads.clone(),
             views: views.clone(),
+            triage: *triage,
         };
         if self.built.as_ref() != Some(&wanted) {
             let ix = active.and_then(|thread| self.reader_ix(thread, cx));
@@ -184,7 +194,7 @@ impl Dock {
             self.rebuild(tabs, ix.unwrap_or(0), list_ix, window, cx);
             return dragged;
         }
-        dragged.readers = threads.as_deref().and_then(|threads| self.dragged_order(threads, cx));
+        dragged.readers = self.dragged_order(threads, cx);
         dragged.lists = self.dragged_views(views, cx);
         if let Some(order) = dragged.readers.as_ref().map(|dragged| dragged.order.clone()) {
             let mut panels: Vec<(usize, Entity<ReaderPanel>)> = std::mem::take(&mut self.readers)
@@ -198,8 +208,9 @@ impl Dock {
             self.readers = panels.into_iter().map(|(_, panel)| panel).collect();
             self.built = Some(Built {
                 orientation: self.orientation,
-                threads: Some(order),
+                threads: order,
                 views: views.clone(),
+                triage: *triage,
             });
         }
         if let Some(order) = dragged.lists.as_ref().map(|dragged| dragged.order.clone()) {
@@ -216,6 +227,7 @@ impl Dock {
                 orientation: self.orientation,
                 threads: threads.clone(),
                 views: order,
+                triage: *triage,
             });
         }
         // The active tab may have moved with the panels — or the drag may have opened it — so
@@ -376,17 +388,76 @@ impl Dock {
 
     /// Whether the centre tree's `node` is a tab group holding any of `panels`.
     fn node_holds(&self, node: NodeId, panels: &[PanelId], cx: &App) -> bool {
+        self.node_with(panels, cx) == Some(node)
+    }
+
+    /// The centre tree's tab group holding any of `panels`.
+    fn node_with(&self, panels: &[PanelId], cx: &App) -> Option<NodeId> {
         let area = self.area.read(cx);
-        let Some(tree) = area.layout(DockPlacement::Center) else { return false };
-        let mut hit = false;
+        let tree = area.layout(DockPlacement::Center)?;
+        let mut found = None;
         tree.root().walk(&mut |pane| {
-            if pane.id() == node
-                && let PaneRef::Tabs { panels: held, .. } = pane.kind()
+            if let PaneRef::Tabs { panels: held, .. } = pane.kind()
+                && held.iter().any(|id| panels.contains(id))
             {
-                hit = held.iter().any(|id| panels.contains(id));
+                found = Some(pane.id());
             }
         });
-        hit
+        found
+    }
+
+    /// The panels of the group `zoom` names, for finding that group in the tree.
+    fn zoom_panels(&self, zoom: Zoom, cx: &App) -> Vec<PanelId> {
+        let _ = cx;
+        match zoom {
+            Zoom::List => self.lists.iter().map(|panel| PanelId::from(panel.entity_id())).collect(),
+            Zoom::Reader => self
+                .readers
+                .iter()
+                .chain(std::iter::once(&self.blank))
+                .map(|panel| PanelId::from(panel.entity_id()))
+                .collect(),
+            Zoom::Triage => self.triage.iter().map(|panel| PanelId::from(panel.entity_id())).collect(),
+        }
+    }
+
+    /// How many tab groups the centre holds: the list, the reader, and the Triage tab's.
+    pub(super) fn group_count(&self, cx: &App) -> usize {
+        let area = self.area.read(cx);
+        let mut groups = 0;
+        if let Some(tree) = area.layout(DockPlacement::Center) {
+            tree.root().walk(&mut |pane| {
+                if matches!(pane.kind(), PaneRef::Tabs { .. }) {
+                    groups += 1;
+                }
+            });
+        }
+        groups
+    }
+
+    /// The group that fills the dock now, if one does.
+    pub(super) fn zoomed(&self, cx: &App) -> Option<Zoom> {
+        let node = self.area.read(cx).zoomed_group()?;
+        [Zoom::Triage, Zoom::List, Zoom::Reader]
+            .into_iter()
+            .find(|zoom| self.node_holds(node, &self.zoom_panels(*zoom, cx), cx))
+    }
+
+    /// `alt-z`: give the dock back if a group fills it, else zoom `zoom`'s group in. A group
+    /// whose displayed panel is not zoomable refuses, which is the kit's call.
+    pub(super) fn toggle_zoom(&mut self, zoom: Zoom, window: &mut Window, cx: &mut Context<MailApp>) {
+        if self.area.read(cx).is_zoomed() {
+            self.area.update(cx, |area, cx| area.set_zoomed_out(window, cx));
+        } else {
+            self.zoom_in(zoom, window, cx);
+        }
+    }
+
+    fn zoom_in(&mut self, zoom: Zoom, window: &mut Window, cx: &mut Context<MailApp>) {
+        let panels = self.zoom_panels(zoom, cx);
+        if let Some(node) = self.node_with(&panels, cx) {
+            self.area.update(cx, |area, cx| area.set_zoomed_in(node, window, cx));
+        }
     }
 
     /// The reader group's tabs as the dock's own tree now holds them, when that order differs
@@ -455,9 +526,14 @@ impl Dock {
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) {
-        let TabSets { readers, views, .. } = tabs;
-        let session = readers.is_none();
-        let threads: &[u32] = readers.as_deref().unwrap_or(&[]);
+        let TabSets { readers: threads, views, triage, .. } = tabs;
+        // A rebuild replaces the groups, so a zoom has to be put back on the new one — or, as the
+        // Triage group comes and goes, given to it or taken away.
+        let zoomed = self.zoomed(cx);
+        let had_triage = self.triage.is_some();
+        if zoomed.is_some() {
+            self.area.update(cx, |area, cx| area.set_zoomed_out(window, cx));
+        }
         // One panel per open thread, reusing the entity that already draws one so a tab
         // keeps its identity across a rebuild that only changed its neighbours.
         let mut pool = std::mem::take(&mut self.readers);
@@ -505,9 +581,24 @@ impl Dock {
         }
         self.lists = lists;
         self.blank.update(cx, |panel, _| panel.standalone = self.readers.is_empty());
+        self.triage = match (*triage, self.triage.take()) {
+            (true, Some(panel)) => Some(panel),
+            (true, None) => {
+                let app = self.app.clone();
+                let app_entity = cx.entity();
+                Some(cx.new(|cx| TriagePanel {
+                    app,
+                    measured: Rc::new(Cell::new((0., 0.))),
+                    focus: cx.focus_handle(),
+                    _app_sub: watch_app(&app_entity, cx),
+                }))
+            }
+            (false, _) => None,
+        };
 
         let list = list_layout(self, list_active, cx);
         let reader = self.reader_layout(active, cx);
+        let triage_group = self.triage.as_ref().map(|panel| DockLayout::tabs().panel_view(panel_handle(panel.clone()), cx));
         let orientation = self.orientation;
         let size = Some(px(self.sizes[orientation.ix()]));
 
@@ -516,15 +607,30 @@ impl Dock {
                 Orientation::SideBySide => DockLayout::h_split(),
                 Orientation::Stacked => DockLayout::v_split(),
             };
-            area.set_center(split.child(list, size).child(reader, None), window, cx);
+            let mut split = split.child(list, size).child(reader, None);
+            if let Some(group) = triage_group {
+                split = split.child(group, None);
+            }
+            area.set_center(split, window, cx);
         });
         self.active = (active < self.readers.len()).then_some(active);
         self.list_active = list_active.min(self.lists.len().saturating_sub(1));
         self.built = Some(Built {
             orientation,
-            threads: (!session).then(|| threads.to_vec()),
+            threads: threads.to_vec(),
             views: views.clone(),
+            triage: *triage,
         });
+        let zoom = match (had_triage, *triage) {
+            // A session just began: its tab takes the view.
+            (false, true) => Some(Zoom::Triage),
+            // It just ended: the dock is given back whole.
+            (true, false) => None,
+            _ => zoomed,
+        };
+        if let Some(zoom) = zoom {
+            self.zoom_in(zoom, window, cx);
+        }
     }
 
     /// The reader group: the open tabs in order, then the panel that stands in when there
@@ -568,14 +674,34 @@ pub(super) struct Dragged {
 /// showing. The two panes are two strips, so each carries its own.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct TabSets {
-    /// Threads in tab order, or `None` while a session owns the reader.
-    pub readers: Option<Vec<u32>>,
+    /// Threads in tab order.
+    pub readers: Vec<u32>,
     /// The reader tab to display.
     pub reader: Option<u32>,
     /// The views in tab order.
     pub views: Vec<Query>,
     /// The list tab to display, as an index into `views`.
     pub list: usize,
+    /// Whether a session's Triage tab exists, and so its group.
+    pub triage: bool,
+}
+
+/// A tab group that can fill the dock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Zoom {
+    List,
+    Reader,
+    Triage,
+}
+
+impl Zoom {
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Zoom::List => "list",
+            Zoom::Reader => "reader",
+            Zoom::Triage => "triage",
+        }
+    }
 }
 
 /// The list group: one panel per open view, in tab order, with the active tab displayed.
@@ -624,7 +750,7 @@ impl BasePanel for ListPanel {
         false
     }
     fn zoomable(&self, _: &App) -> bool {
-        false
+        true
     }
 }
 
@@ -664,8 +790,11 @@ impl Render for ListPanel {
         let measured = self.measured.clone();
         let Some(app) = self.app.upgrade() else { return div() };
         let list = app.update(cx, |app, cx| {
+            let before = app.enter_slot(Slot::Tab);
             app.list_w = app.list_width();
-            app.render_list(cx)
+            let list = app.render_list(cx);
+            app.leave_slot(before);
+            list
         });
         div().size_full().min_w_0().min_h_0().on_prepaint(move |bounds, _, _| {
             measured.set((f32::from(bounds.size.width), f32::from(bounds.size.height)))
@@ -677,10 +806,10 @@ impl Render for ListPanel {
 pub(super) struct ReaderPanel {
     app: WeakEntity<MailApp>,
     /// The thread this tab shows, or `None` for the panel that stands in when no thread
-    /// has a tab — and, during a session, for the reader a session owns.
+    /// has a tab.
     thread: Option<u32>,
     /// Set on the stand-in: it draws only while it is the reader group's one visible
-    /// panel, which is what keeps a session and an empty inbox both free of a tab bar.
+    /// panel, which is what keeps an empty inbox free of a tab bar.
     standalone: bool,
     focus: FocusHandle,
     _app_sub: Subscription,
@@ -697,7 +826,7 @@ impl BasePanel for ReaderPanel {
         false
     }
     fn zoomable(&self, _: &App) -> bool {
-        false
+        true
     }
 }
 
@@ -734,12 +863,96 @@ impl Focusable for ReaderPanel {
 impl Render for ReaderPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(app) = self.app.upgrade() else { return div() };
-        let content = app.update(cx, |app, cx| {
-            if let Some(compose) = &app.compose {
-                return div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element();
-            }
-            app.render_reader(cx)
-        });
+        let content = app.update(cx, |app, cx| reader_content(app, Slot::Tab, cx));
         div().size_full().min_w_0().min_h_0().flex().flex_col().child(content)
+    }
+}
+
+/// The reader `slot` draws: the composer when it is open and this is the reader it replies
+/// from — the Triage tab's while one exists — otherwise the opened thread.
+fn reader_content(app: &mut MailApp, slot: Slot, cx: &mut Context<MailApp>) -> AnyElement {
+    let before = app.enter_slot(slot);
+    let content = match &app.compose {
+        Some(compose) if (slot == Slot::Triage) == app.triage_open() => {
+            div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element()
+        }
+        _ => app.render_reader(cx),
+    };
+    app.leave_slot(before);
+    content
+}
+
+/// The Triage tab: the session's list and the session's reader side by side (or stacked, like
+/// the centre), in a group of its own that lives as long as the session does. It is the only
+/// tab in its strip and is never closed or pinned: ending the session is what removes it.
+pub(super) struct TriagePanel {
+    app: WeakEntity<MailApp>,
+    /// The list half as last painted, so its rows size themselves from the real pane.
+    measured: Rc<Cell<(f32, f32)>>,
+    focus: FocusHandle,
+    _app_sub: Subscription,
+}
+
+impl BasePanel for TriagePanel {
+    fn panel_name(&self) -> &'static str {
+        "mail.triage"
+    }
+    fn closable(&self, _: &App) -> bool {
+        false
+    }
+    fn zoomable(&self, _: &App) -> bool {
+        true
+    }
+}
+
+impl Panel for TriagePanel {
+    fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().child("Triage")
+    }
+
+    fn inner_padding(&self, _: &App) -> bool {
+        false
+    }
+
+    fn zoom_control(&self, _: &App) -> Option<PanelControl> {
+        Some(PanelControl::Toolbar)
+    }
+}
+
+impl EventEmitter<PanelEvent> for TriagePanel {}
+
+impl Focusable for TriagePanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl Render for TriagePanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(app) = self.app.upgrade() else { return div() };
+        let measured = self.measured.clone();
+        let (list, reader, stacked) = app.update(cx, |app, cx| {
+            let before = app.enter_slot(Slot::Triage);
+            let painted = measured.get().0;
+            app.list_w = if painted > 0. { painted } else { app.list_width() };
+            let list = app.render_list(cx);
+            app.leave_slot(before);
+            let reader = reader_content(app, Slot::Triage, cx);
+            (list, reader, app.orientation() == Orientation::Stacked)
+        });
+        let share = |d: Div| if stacked { d.w_full().h(relative(0.45)) } else { d.h_full().w(relative(0.42)) };
+        div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .when(stacked, |d| d.flex_col())
+            .child(
+                share(div().flex_none().min_w_0().min_h_0().on_prepaint(move |bounds, _, _| {
+                    measured.set((f32::from(bounds.size.width), f32::from(bounds.size.height)))
+                }))
+                .child(list),
+            )
+            .child(div().flex_1().min_w_0().min_h_0().flex().flex_col().child(reader))
     }
 }

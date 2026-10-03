@@ -163,8 +163,10 @@ impl MailApp {
     /// Point the list at `query`. A view is a tab of its own, so this opens the new view as
     /// one and leaves the tabs already open alone; `Clear filters` finds the plain view again.
     pub(super) fn apply_query(&mut self, query: Query, cx: &mut Context<Self>) {
-        self.end_session();
+        // The query was built from the list the user is looking at — the session's, when one
+        // is running — so its folder is taken before the session goes.
         let folder = self.view().folder.clone();
+        self.end_session();
         self.open_view(query, folder, false, cx);
         self.scroll_to_cursor();
         self.close_filter_popover();

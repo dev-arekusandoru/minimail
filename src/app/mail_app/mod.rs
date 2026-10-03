@@ -37,7 +37,7 @@ use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
 use crate::list_tabs::ListTabs;
 
-use self::list_strip::Pane;
+use self::list_strip::{Pane, Slot};
 use self::list_view::ListView;
 
 mod accessors;
@@ -142,6 +142,14 @@ pub struct MailApp {
     pending_rule: Option<Rule>,
     session: Option<Session>,
     session_end: Option<(usize, i64)>,
+    /// The list a session works through: its own cursor, selection and scroll over the queue,
+    /// so a session never touches the user's list tabs. Present exactly while `session` or
+    /// `session_end` is (see [`MailApp::triage_open`]).
+    session_view: Option<ListView>,
+    /// Which list and reader the render in flight draws, when it is not the default
+    /// ([`MailApp::slot`]). Set only while a panel renders, so the user's own tabs and the
+    /// Triage tab can each draw their own state in the same frame.
+    drawing: std::cell::Cell<Option<Slot>>,
     summary: Option<(u32, ThreadSummary)>,
     toast_gen: u64,
     focus_handle: FocusHandle,
@@ -255,6 +263,8 @@ impl MailApp {
             pending_rule: None,
             session: None,
             session_end: None,
+            session_view: None,
+            drawing: std::cell::Cell::new(None),
             summary: None,
             toast_gen: 0,
             focus_handle: cx.focus_handle(),

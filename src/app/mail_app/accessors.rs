@@ -97,12 +97,9 @@ impl MailApp {
     /// The message shown in the reader: the session's current one during a session, nothing
     /// on the session end card, otherwise the active tab's message.
     pub fn opened(&self) -> Option<MessageId> {
-        if self.session.is_some() {
-            self.session_current()
-        } else if self.session_end.is_some() {
-            None
-        } else {
-            self.tabs.opened()
+        match self.slot() {
+            Slot::Triage => self.session_current(),
+            Slot::Tab => self.tabs.opened(),
         }
     }
 
@@ -171,7 +168,9 @@ impl MailApp {
         if let Some(id) = self.menu_target.as_ref().and_then(|ids| ids.first()) {
             return Some(*id);
         }
-        if let Some(id) = self.session_current() {
+        if self.slot() == Slot::Triage
+            && let Some(id) = self.session_current()
+        {
             return Some(id);
         }
         if self.grouped() {
@@ -209,8 +208,8 @@ impl MailApp {
             self.view_mut().row_cursor = next;
         } else {
             let now = self.now();
-            let ix = self.list_tabs.active_index();
-            self.list_views[ix].triage.move_cursor(&self.mailbox, now, delta);
+            let (view, mailbox) = self.view_and_mailbox();
+            view.triage.move_cursor(mailbox, now, delta);
         }
     }
 

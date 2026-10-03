@@ -18,19 +18,67 @@ pub(super) enum Pane {
     Reader,
 }
 
+/// Whose list and reader the app is speaking for: the user's own tabs, or the Triage tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Slot {
+    /// The active list tab and the active reader tab.
+    Tab,
+    /// The session's list and the session's message.
+    Triage,
+}
+
 impl MailApp {
     // ------------------------------------------------------------------ the active view
 
-    /// The view the active list tab shows. The strip is never empty — the last tab cannot be
-    /// closed — so there is always one.
+    /// Whether the Triage tab exists: a session is running or its end card is up.
+    pub(super) fn triage_open(&self) -> bool {
+        self.session.is_some() || self.session_end.is_some()
+    }
+
+    /// Whose list the app speaks for now. Outside a render that is the Triage tab while it
+    /// exists, since a session takes the keyboard; inside a panel's render it is that panel's.
+    pub(super) fn slot(&self) -> Slot {
+        let default = if self.triage_open() && self.session_view.is_some() { Slot::Triage } else { Slot::Tab };
+        match self.drawing.get() {
+            Some(Slot::Triage) if self.session_view.is_none() => Slot::Tab,
+            Some(slot) => slot,
+            None => default,
+        }
+    }
+
+    /// Draw as `slot` until [`Self::leave_slot`] gives back what it returns.
+    pub(super) fn enter_slot(&self, slot: Slot) -> Option<Slot> {
+        self.drawing.replace(Some(slot))
+    }
+
+    pub(super) fn leave_slot(&self, before: Option<Slot>) {
+        self.drawing.set(before);
+    }
+
+    /// The view the list shows: the session's while the Triage tab speaks, otherwise the active
+    /// list tab's. The strip is never empty — the last tab cannot be closed — so there is
+    /// always one.
     pub(super) fn view(&self) -> &ListView {
-        &self.list_views[self.list_tabs.active_index()]
+        match (self.slot(), &self.session_view) {
+            (Slot::Triage, Some(view)) => view,
+            _ => &self.list_views[self.list_tabs.active_index()],
+        }
     }
 
     pub(super) fn view_mut(&mut self) -> &mut ListView {
+        self.view_and_mailbox().0
+    }
+
+    /// [`Self::view_mut`] together with the mailbox, for the model calls that need both.
+    pub(super) fn view_and_mailbox(&mut self) -> (&mut ListView, &Mailbox) {
+        let triage = self.slot() == Slot::Triage;
         let ix = self.list_tabs.active_index();
         debug_assert!(ix < self.list_views.len(), "a view for every tab");
-        &mut self.list_views[ix]
+        let view = match (triage, self.session_view.as_mut()) {
+            (true, Some(view)) => view,
+            _ => &mut self.list_views[ix],
+        };
+        (view, &self.mailbox)
     }
 
     /// The state the list tab in slot `ix` keeps: where its cursor is, what it has selected

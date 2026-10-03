@@ -16,10 +16,12 @@ use crate::app::row;
 use crate::model::MessageId;
 use crate::threads::{self, Row};
 
+use super::list_strip::Slot;
+
 impl MailApp {
-    /// Grouped rows are in effect: setting on and not in a triage session.
+    /// Grouped rows are in effect: setting on, and not the Triage tab's list during a session.
     pub(super) fn grouped(&self) -> bool {
-        self.group_threads && !self.in_session()
+        self.group_threads && !(self.in_session() && self.slot() == Slot::Triage)
     }
 
     /// The list rows when grouped (empty otherwise): threads collapsed or expanded.
@@ -58,8 +60,8 @@ impl MailApp {
     pub(super) fn extend_by(&mut self, delta: isize) {
         if !self.grouped() {
             let now = self.now();
-            let ix = self.list_tabs.active_index();
-            self.list_views[ix].triage.extend(&self.mailbox, now, delta);
+            let (view, mailbox) = self.view_and_mailbox();
+            view.triage.extend(mailbox, now, delta);
             return;
         }
         let rows = self.rows();
@@ -89,8 +91,8 @@ impl MailApp {
     pub(super) fn toggle_select_cursor(&mut self) {
         if !self.grouped() {
             let now = self.now();
-            let ix = self.list_tabs.active_index();
-            self.list_views[ix].triage.toggle_select(&self.mailbox, now);
+            let (view, mailbox) = self.view_and_mailbox();
+            view.triage.toggle_select(mailbox, now);
             return;
         }
         let Some(row) = self.cursor_row() else { return };
@@ -178,8 +180,8 @@ impl MailApp {
         let now = self.now();
         let ids = self.visible_ids();
         if let Some(at) = ids.iter().position(|x| *x == id) {
-            let ix = self.list_tabs.active_index();
-            self.list_views[ix].triage.set_cursor(&self.mailbox, now, at);
+            let (view, mailbox) = self.view_and_mailbox();
+            view.triage.set_cursor(mailbox, now, at);
         }
     }
 

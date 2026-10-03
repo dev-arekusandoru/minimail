@@ -233,6 +233,7 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, w, cx| this.toggle_sidebar(w, cx)))
+            .on_action(cx.listener(|this, _: &ZoomGroup, w, cx| this.toggle_zoom(w, cx)))
             .child(self.render_titlebar(window, cx))
             .child(self.render_panes(cx))
             .when_some(banner, |d, rule| {

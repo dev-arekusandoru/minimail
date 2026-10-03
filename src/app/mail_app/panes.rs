@@ -9,7 +9,7 @@
 //! What lives here is what the dock cannot hold for us: whether the sidebar is on
 //! screen, how wide it is, and the size each orientation remembers for the list.
 use gpui_kit::component::ActiveTheme as _;
-use super::dock::TabSets;
+use super::dock::{TabSets, Zoom};
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 
 use super::dock::Dock;
@@ -120,15 +120,6 @@ impl Panes {
     /// Which way the centre splits from now on; the next sync re-lays it.
     pub(super) fn set_orientation(&mut self, orientation: Orientation) {
         self.dock.set_orientation(orientation);
-    }
-
-    /// Which threads the reader group should be showing: `None` while a session owns the
-    /// reader, which shows it alone with no tabs.
-    fn reader_threads(&self, app: &MailApp) -> Option<Vec<u32>> {
-        if app.in_session() || app.session_end.is_some() {
-            return None;
-        }
-        Some(app.tabs.tabs().iter().map(|tab| tab.thread).collect())
     }
 
     pub fn sidebar_visible(&self) -> bool {
@@ -247,6 +238,32 @@ impl MailApp {
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
+    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. While the
+    /// Triage tab exists it is the group in focus — a session takes the keyboard — otherwise
+    /// it is the list or the reader, whichever the tab keys are acting on.
+    pub(super) fn toggle_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.modal_open() {
+            return;
+        }
+        let group = match (self.triage_open(), self.focused_pane()) {
+            (true, _) => Zoom::Triage,
+            (false, Pane::List) => Zoom::List,
+            (false, Pane::Reader) => Zoom::Reader,
+        };
+        self.panes.dock_mut().toggle_zoom(group, window, cx);
+        cx.notify();
+    }
+
+    /// The group filling the dock — `"list"`, `"reader"` or `"triage"` — if one does.
+    pub fn zoomed_group(&self, cx: &App) -> Option<&'static str> {
+        self.panes.dock_ref().zoomed(cx).map(Zoom::name)
+    }
+
+    /// How many tab groups the dock's centre holds.
+    pub fn dock_groups(&self, cx: &App) -> usize {
+        self.panes.dock_ref().group_count(cx)
+    }
+
     /// Hide or show the sidebar. Collapsed draws nothing at all, divider band included;
     /// the group's state is left alone, so the width comes back with it.
     pub(super) fn toggle_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -280,8 +297,9 @@ impl MailApp {
     /// What the dock should be holding: both strips' tabs and the one each is showing.
     fn tab_sets(&self) -> TabSets {
         TabSets {
-            readers: self.panes.reader_threads(self),
+            readers: self.tabs.tabs().iter().map(|tab| tab.thread).collect(),
             reader: active_thread(self),
+            triage: self.triage_open() && self.session_view.is_some(),
             views: self.list_tabs.tabs().iter().map(|tab| tab.query.clone()).collect(),
             list: self.list_tabs.active_index(),
         }

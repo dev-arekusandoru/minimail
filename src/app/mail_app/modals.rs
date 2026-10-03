@@ -623,6 +623,8 @@ impl MailApp {
         } else if let Some(s) = self.session.take() {
             if s.handled > 0 {
                 self.session_end = Some((s.handled, self.now() - s.started));
+            } else {
+                self.session_view = None;
             }
         } else if self.session_end.is_some() {
             self.end_session();

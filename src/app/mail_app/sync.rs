@@ -384,7 +384,7 @@ impl MailApp {
         self.reader_panes.borrow_mut().clear();
         self.finds.clear();
         self.summary = None;
-        self.session = None;
+        self.end_session();
         self.menu_target = None;
     }
 

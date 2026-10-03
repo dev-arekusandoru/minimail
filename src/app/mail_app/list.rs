@@ -32,6 +32,7 @@ impl MailApp {
     }
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let slot = self.slot();
         let count = self.visible_ids().len();
         let row_count = if self.grouped() { self.rows().len() } else { count };
         self.sync_list(row_count, cx);
@@ -97,7 +98,14 @@ impl MailApp {
                 .child(
                     list(
                         self.view().list_state.clone(),
-                        cx.processor(|this, ix: usize, _window, cx| this.render_list_row(ix, cx)),
+                        cx.processor(move |this, ix: usize, _window, cx| {
+                            // Rows are drawn later, outside this panel's render: whose list
+                            // they belong to has to come with them.
+                            let before = this.enter_slot(slot);
+                            let row = this.render_list_row(ix, cx);
+                            this.leave_slot(before);
+                            row
+                        }),
                     )
                     .w_full()
                     .flex_1(),

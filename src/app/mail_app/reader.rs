@@ -48,7 +48,7 @@ impl MailApp {
     /// the dock's now — one tab per open thread, drawn by each reader panel's title.
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
         let pane = self.render_reader_pane(cx);
-        if self.in_session() || self.session_end.is_some() || self.tabs.is_empty() {
+        if self.slot() == Slot::Triage || self.tabs.is_empty() {
             return pane;
         }
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
@@ -71,7 +71,8 @@ impl MailApp {
         let pane = div().flex_1().min_w_0().min_h_0().flex().flex_col().px_5().py_4()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full());
-        if let Some((handled, secs)) = self.session_end {
+        let triage = self.slot() == Slot::Triage;
+        if let Some((handled, secs)) = self.session_end.filter(|_| triage) {
             return pane
                 .items_center()
                 .justify_center()
@@ -150,7 +151,7 @@ impl MailApp {
 
         let column = |el: AnyElement| div().w_full().child(el);
         pane.gap_3()
-            .when_some(self.session.as_ref(), |d, s| {
+            .when_some(self.session.as_ref().filter(|_| triage), |d, s| {
                 d.child(SessionCard::new(s.index + 1, s.ids.len()))
             })
             .child(

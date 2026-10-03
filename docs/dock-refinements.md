@@ -174,7 +174,8 @@ expands it over the centre — list and viewer area — while the sidebar stays 
 
 Done: sidebar out of the dock; list tabs; focused strip follows the panes; a folder dropped on the
 list strip opens a pinned tab; a message dropped on a list tab (or the list background, for the
-active tab) files it there. Remaining: the Triage tab with zoom.
+active tab) files it there. The Triage tab: a session runs in its own zoomed third group and no longer
+touches the user's tabs; alt-z toggles zoom on the focused group.
 
 ## Order of work
 
