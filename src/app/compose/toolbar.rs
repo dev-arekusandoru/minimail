@@ -194,10 +194,19 @@ mod tests {
     fn tools_move_to_the_overflow_only_as_width_runs_out() {
         let total = TOOLS.len();
         assert_eq!(visible_tools(1200., total), total, "room for everything");
-        assert_eq!(visible_tools(-40., total), 0, "no room at all");
-        // A wide-enough row keeps all ten; a little narrower starts spilling into the menu.
-        assert!(visible_tools(400., total) < total);
-        assert!(visible_tools(400., total) >= visible_tools(360., total));
+        assert_eq!(
+            visible_tools(0., total),
+            total,
+            "a row that has not been laid out yet shows everything"
+        );
+        assert_eq!(visible_tools(1., total), 0, "no room at all");
+        // All ten fit with a little slack; narrower starts spilling into the menu, and does
+        // not suddenly drop more than the room lost.
+        assert_eq!(visible_tools(400., total), total, "all ten still fit");
+        let narrower = visible_tools(300., total);
+        assert!(narrower < total, "a narrower row hides some");
+        assert!(narrower >= visible_tools(280., total));
+        assert!(narrower < total - 1, "the overflow keeps its own room");
         // The count never exceeds the tools that exist.
         assert_eq!(visible_tools(10_000., total), total);
     }
