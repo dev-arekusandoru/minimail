@@ -27,7 +27,9 @@ gpui_kit::assets::icon_assets!(
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
         ReplyAll, Forward, Regex, WholeWord,
         // Composer formatting controls.
-        Bold, Italic, Link, List, ListOrdered, Heading, Quote, Code, Strikethrough, Table
+        Bold, Italic, Link, List, ListOrdered, Heading, Quote, Code, Strikethrough, Table,
+        // Draft tabs: a document-with-pen glyph, not in gpui-kit's default bundle.
+        FilePen
     ]
 );
 
