@@ -16,6 +16,15 @@ use crate::outgoing::{DraftId, DraftRecord, DraftState, HoldProgress, PendingHol
 /// follows every edit.
 pub const REMOTE_DEBOUNCE_SECS: i64 = 2;
 
+/// How long after the last keystroke the *local* write waits for a pause.
+///
+/// A keystroke is not worth a database transaction: each edit already updates the in-memory
+/// record, and a burst of typing is written once when it settles. Three seconds is long
+/// enough that ordinary typing coalesces into one write, and short enough that a crash or a
+/// close loses at most the last three seconds of typing. Explicit paths — Send, Close,
+/// switching account, app quit — flush the pending write at once instead of waiting.
+pub const LOCAL_DEBOUNCE_SECS: i64 = 3;
+
 /// What the user is told about one draft's durability, in the composer's status line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveStatus {
@@ -60,6 +69,9 @@ pub struct OpenDraft {
     /// The provider's copy is behind what is stored here. Tracked apart from the local save:
     /// acknowledging a local write must not make an unmirrored edit look mirrored.
     pub remote_dirty: bool,
+    /// This draft's pending write should not wait out the autosave debounce. Explicit saves
+    /// — Close, Send, quitting — set it so the newest text reaches the store at once.
+    pub urgent: bool,
     /// One local save at a time; network and attachment work do not block this lane.
     pub in_flight: bool,
     pub operation: Option<DraftOperation>,
@@ -86,6 +98,7 @@ impl OpenDraft {
             dirty_since,
             queued: None,
             remote_dirty,
+            urgent: false,
             in_flight: false,
             operation: None,
             inline: false,
@@ -216,9 +229,25 @@ impl OpenDraft {
         self.status = SaveStatus::Dirty;
     }
 
-    /// Whether a local save can start right now.
-    pub fn save_due(&self) -> bool {
-        !self.in_flight && self.queued.is_some()
+    /// Whether a local save can start at `now`. A save follows a pause in typing rather than
+    /// every keystroke: the snapshot is queued at once, but the write waits out
+    /// [`LOCAL_DEBOUNCE_SECS`] from the newest edit — unless an explicit save marked it
+    /// urgent, or a save is already in flight for this draft.
+    pub fn save_due(&self, now: Timestamp) -> bool {
+        !self.in_flight
+            && self.queued.is_some()
+            && (self.urgent
+                || self
+                    .dirty_since
+                    .is_some_and(|at| now >= at + LOCAL_DEBOUNCE_SECS))
+    }
+
+    /// Mark the pending write as one the user asked for (Close, Send, quitting), so the beat
+    /// writes it without waiting out the debounce.
+    pub fn mark_urgent(&mut self) {
+        if self.queued.is_some() {
+            self.urgent = true;
+        }
     }
 
     /// The snapshot a local save should write. Taken from the queue so the caller never
@@ -343,13 +372,14 @@ impl ComposerState {
         Some(self.drafts.remove(ix))
     }
 
-    /// The drafts whose local save is due. A local save follows every edit, so this is
-    /// "has something queued and nothing in flight", oldest edit first.
-    pub fn due_saves(&self) -> Vec<DraftId> {
+    /// The drafts whose local save is due at `now`. A local save follows a pause in typing:
+    /// "has something queued, nothing in flight, and the newest edit is old enough" — oldest
+    /// edit first. An explicit save marked urgent skips the wait.
+    pub fn due_saves(&self, now: Timestamp) -> Vec<DraftId> {
         let mut due: Vec<(DraftId, Timestamp)> = self
             .drafts
             .iter()
-            .filter(|d| d.save_due())
+            .filter(|d| d.save_due(now))
             .filter_map(|d| d.dirty_since.map(|at| (d.record.id, at)))
             .collect();
         due.sort_by_key(|(_, at)| *at);
@@ -388,6 +418,7 @@ impl ComposerState {
             draft.record.state = DraftState::Held;
             draft.dirty_since = None;
             draft.queued = None;
+            draft.urgent = false;
             draft.status = SaveStatus::Local;
             draft.operation = None;
         }
@@ -435,16 +466,26 @@ mod tests {
         r
     }
 
-    /// An edit is written to the local store at once: a draft must survive a crash at any
-    /// moment, so no debounce sits between the keystroke and the disk.
+    /// An edit queues a local write at once, but the write waits for a pause in typing: a
+    /// keystroke is not worth its own database transaction, and a crash can still only lose
+    /// the last few seconds of typing.
     #[test]
-    fn an_edit_is_due_for_a_local_save_immediately() {
+    fn an_edit_waits_out_the_autosave_debounce() {
         let mut state = ComposerState::default();
         state.put(record(1, "a@b.test"));
         let mut r = record(1, "a@b.test");
         r.body.source = "hi".into();
         state.get_mut(DraftId(1)).expect("open").touch(r, 100);
-        assert_eq!(state.due_saves(), vec![DraftId(1)]);
+        assert!(state.due_saves(100).is_empty(), "not on the keystroke");
+        assert!(
+            state.due_saves(100 + LOCAL_DEBOUNCE_SECS - 1).is_empty(),
+            "not a moment before the pause is up"
+        );
+        assert_eq!(
+            state.due_saves(100 + LOCAL_DEBOUNCE_SECS),
+            vec![DraftId(1)],
+            "the write follows the pause"
+        );
         // The remote mirror, unlike the local write, waits for a pause in typing.
         assert!(state.due_remote_syncs(100).is_empty());
         let open = state.get_mut(DraftId(1)).expect("draft");
@@ -453,6 +494,39 @@ mod tests {
             state.due_remote_syncs(100 + REMOTE_DEBOUNCE_SECS),
             vec![DraftId(1)]
         );
+    }
+
+    /// Every keystroke restarts the pause, so a burst of typing is one write when it settles
+    /// rather than one write per character.
+    #[test]
+    fn typing_restarts_the_debounce_so_a_burst_is_one_save() {
+        let mut state = ComposerState::default();
+        state.put(record(1, "a@b.test"));
+        for (at, text) in [(100, "a"), (101, "ab"), (102, "abc")] {
+            let mut r = state.record(DraftId(1)).expect("open").clone();
+            r.body.source = text.into();
+            state.get_mut(DraftId(1)).expect("open").touch(r, at);
+            assert!(
+                state.due_saves(at + LOCAL_DEBOUNCE_SECS - 1).is_empty(),
+                "the newest keystroke pushes the pause out"
+            );
+        }
+        assert!(state.due_saves(104).is_empty(), "102 + pause is still ahead");
+        assert_eq!(state.due_saves(102 + LOCAL_DEBOUNCE_SECS), vec![DraftId(1)]);
+    }
+
+    /// An explicit save (Close, Send, quitting) skips the pause: the newest text is written
+    /// at once instead of waiting out the debounce.
+    #[test]
+    fn an_urgent_save_skips_the_debounce() {
+        let mut state = ComposerState::default();
+        state.put(record(1, "a@b.test"));
+        let mut r = record(1, "a@b.test");
+        r.body.source = "close me".into();
+        let open = state.get_mut(DraftId(1)).expect("open");
+        open.touch(r, 100);
+        open.mark_urgent();
+        assert_eq!(state.due_saves(100), vec![DraftId(1)]);
     }
 
     /// A save running must not swallow the next keystroke: the newer snapshot waits in
@@ -465,7 +539,10 @@ mod tests {
         let mut typed = first.record.clone();
         typed.body.source = "one".into();
         first.touch(typed.clone(), 100);
-        assert_eq!(state.due_saves(), vec![DraftId(1)]);
+        assert_eq!(
+            state.due_saves(100 + LOCAL_DEBOUNCE_SECS),
+            vec![DraftId(1)]
+        );
         let open = state.get_mut(DraftId(1)).expect("open");
         let taken = open.take_queued().expect("snapshot");
         open.in_flight = true;
@@ -475,7 +552,10 @@ mod tests {
         let mut typed_again = open.record.clone();
         typed_again.body.source = "one two".into();
         open.touch(typed_again, 101);
-        assert!(state.due_saves().is_empty(), "one save at a time");
+        assert!(
+            state.due_saves(101 + LOCAL_DEBOUNCE_SECS).is_empty(),
+            "one save at a time"
+        );
         let open = state.get_mut(DraftId(1)).expect("open");
         open.in_flight = false;
         let queued = open
@@ -560,7 +640,7 @@ mod tests {
         open.requeue(open.record.clone(), 101);
         assert_eq!(open.generation, open_gen, "a requeue is not a new edit");
         assert!(
-            open.save_due() || open.in_flight,
+            open.save_due(101 + LOCAL_DEBOUNCE_SECS) || open.in_flight,
             "the content is queued again"
         );
         open.in_flight = false;
@@ -630,7 +710,10 @@ mod tests {
         state.get_mut(DraftId(1)).expect("open").touch(edited, now);
         let hold = PendingHold::start(DraftId(1), "personal".into(), now);
         state.begin_hold(hold);
-        assert!(state.due_saves().is_empty(), "a held draft is not saved");
+        assert!(
+            state.due_saves(now + LOCAL_DEBOUNCE_SECS).is_empty(),
+            "a held draft is not saved"
+        );
         assert!(
             !state.get(DraftId(1)).expect("open").can_send(),
             "held, not sendable"

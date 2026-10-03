@@ -24,15 +24,20 @@ pub enum DraftsEvent {
     Open(DraftId),
 }
 
+/// Whether the Drafts list would offer this draft to reopen. A delivered message is not a
+/// draft to finish: the Sent folder is where it is read, and offering a "send" on it would
+/// only fail. Everything else is offered, with its state shown, including one whose send
+/// could not be confirmed.
+pub fn listed(record: &DraftRecord) -> bool {
+    !matches!(record.state, DraftState::Sent { .. })
+}
+
 /// The drafts as the picker shows them: the record and a searchable label per draft.
 pub fn rows(records: &[DraftRecord], query: &str) -> Vec<(DraftId, String)> {
     let needle = query.trim().to_lowercase();
     records
         .iter()
-        // A delivered message is not a draft to finish: the Sent folder is where it is read,
-        // and offering a "send" on it would only fail. Everything else is offered, with its
-        // state shown, including one whose send could not be confirmed.
-        .filter(|record| !matches!(record.state, DraftState::Sent { .. }))
+        .filter(|record| listed(record))
         .filter_map(|record| {
             let subject = subject_of(record);
             let recipients = first_recipient(record);

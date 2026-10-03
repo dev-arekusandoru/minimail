@@ -12,6 +12,7 @@ use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
 use mail_classifier::outgoing::{DraftId, DraftKind, HOLD_SECONDS};
 use mail_classifier::tz::Utc;
+use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -425,6 +426,9 @@ impl Harness<'_> {
     }
 
     pub fn settle(&mut self) {
+        // The local autosave is debounced, so a pending write only becomes due once typing
+        // has paused: let the fake clock pass that pause before waiting on the worker.
+        self.advance(LOCAL_DEBOUNCE_SECS);
         self.await_composer("the composer never settled", |a| a.composer_idle());
     }
 
@@ -486,6 +490,24 @@ impl Harness<'_> {
         self.cx
             .update_window(self.window, |_, window, _| window.try_find(id).is_some())
             .unwrap_or(false)
+    }
+
+    /// How many drafts have a local write queued but not yet started: the autosave is
+    /// debounced, so this stays non-zero until typing pauses.
+    pub fn pending_saves(&mut self) -> usize {
+        self.read(|a| {
+            a.composer
+                .drafts
+                .iter()
+                .filter(|d| d.queued.is_some())
+                .count()
+        })
+    }
+
+    /// The sidebar row id of the Drafts item: All Inboxes is row 0 and the accounts follow,
+    /// with Drafts last.
+    pub fn drafts_sidebar_index(&mut self) -> usize {
+        self.read(|a| a.mailbox.accounts().len()) + 1
     }
 }
 

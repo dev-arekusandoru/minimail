@@ -1,6 +1,7 @@
 use crate::harness::{Harness, harness, harness_with};
 use crate::snooze::snooze_box;
 use gpui_kit::TestAppContext;
+use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
 use mail_classifier::model::MessageId;
 use mail_classifier::model::TriageState::*;
 use mail_classifier::outgoing::DraftKind;
@@ -139,10 +140,10 @@ pub fn a_second_submit_does_not_bypass_the_hold(cx: &mut TestAppContext) {
     h.tick();
 }
 
-/// Every keystroke is written on its own, so the second and third edits are saves in their
-/// own right, made against the revision the store handed back rather than the one from
-/// before. What the provider finally receives is the newest text, which only happens if
-/// each round was accepted instead of refused as stale.
+/// Edits settle and are written, then more edits settle and are written again, each against
+/// the revision the store handed back rather than the one from before. What the provider
+/// finally receives is the newest text, which only happens if each round was accepted
+/// instead of refused as stale.
 #[gpui_kit::gpui::test]
 pub fn every_edit_after_the_first_is_written_in_turn(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
@@ -462,28 +463,83 @@ pub fn closing_keeps_the_draft_and_discard_removes_it(cx: &mut TestAppContext) {
     h.assert_invariant("close");
 }
 
-/// Every keystroke is written locally as it lands, so a crash cannot lose a draft: the
-/// queued snapshot is empty once the store has it, and the record the store answered with
-/// never overwrites what was typed after the request started.
+/// Typing does not write on every keystroke: the edit is queued, and one write follows the
+/// pause. A burst is still a single pending write, and only when typing stops does it reach
+/// the store.
 #[gpui_kit::gpui::test]
-pub fn an_edit_is_written_locally_without_waiting_for_a_debounce(cx: &mut TestAppContext) {
+pub fn typing_debounces_the_local_save_until_the_pause(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
-    h.compose_reply("first");
-    assert!(
-        h.read(|a| a.inline_composer.is_some()),
-        "the reply is an open draft"
-    );
-    h.settle();
-    assert!(
-        h.read(|a| a.composer.drafts.iter().all(|d| d.queued.is_none())),
-        "the local write went out without a second keystroke to prompt it"
-    );
-    h.type_text(" second");
-    h.settle();
+    h.new_draft();
+    h.type_text("one");
     assert_eq!(
-        h.draft_fields().3,
-        "first second",
-        "nothing typed was lost to a save"
+        h.pending_saves(),
+        1,
+        "the keystroke queued a write, not a database transaction"
+    );
+    h.type_text(" two");
+    assert_eq!(h.pending_saves(), 1, "a burst is still one pending write");
+
+    // Nothing has been written yet: the pause has not passed.
+    h.advance(LOCAL_DEBOUNCE_SECS - 1);
+    assert_eq!(h.pending_saves(), 1, "still within the pause");
+
+    h.settle();
+    assert_eq!(h.pending_saves(), 0, "the write followed the pause");
+    assert_eq!(h.draft_fields().3, "one two", "and it carried every edit");
+}
+
+/// Closing is an explicit save: the pending write goes out at once rather than waiting out
+/// the debounce, so the user never loses the seconds since their last keystroke.
+#[gpui_kit::gpui::test]
+pub fn closing_flushes_the_pending_write_immediately(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("typed then closed");
+    assert_eq!(h.pending_saves(), 1, "the edit is queued, not yet written");
+
+    h.keys("escape");
+    h.tick();
+    assert!(!h.read(|a| a.inline_compose_open()), "the surface closed");
+    h.await_composer("the close wrote the draft", |a| a.composer_idle());
+    assert_eq!(h.pending_saves(), 0, "close did not wait out the debounce");
+
+    // Reopen: the text survived without an idle pause.
+    let id = h.read(|a| a.composer.drafts[0].record.id);
+    h.show_draft(id);
+    assert_eq!(h.draft_fields().3, "typed then closed");
+}
+
+/// The sidebar's Drafts row is the way to the drafts list: clicking it shows every stored
+/// draft, and choosing a row reopens that draft in the composer.
+#[gpui_kit::gpui::test]
+pub fn the_sidebar_drafts_row_opens_the_list_and_reopens_a_draft(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("from the sidebar");
+    h.settle();
+    let id = h.read(|a| a.composer.drafts[0].record.id);
+    // Close it so the draft is only reachable through the list.
+    h.keys("escape");
+    h.tick();
+    assert!(!h.read(|a| a.inline_compose_open()));
+
+    let row = h.drafts_sidebar_index();
+    assert!(h.has(row), "the sidebar has a Drafts row");
+    h.click(row);
+    h.tick();
+    assert!(h.drafts_picker_open(), "the row opens the drafts list");
+    assert_eq!(h.drafts_rows().len(), 1, "the stored draft is listed");
+
+    h.keys("enter");
+    h.tick();
+    assert_eq!(
+        h.read(|a| a.tabs.active_draft()),
+        Some(id),
+        "the same draft reopened"
+    );
+    assert_eq!(h.draft_fields().3, "from the sidebar");
+    assert_eq!(
+        h.read(|a| a.composer.drafts.len()),
+        1,
+        "one record, not a copy"
     );
 }
 

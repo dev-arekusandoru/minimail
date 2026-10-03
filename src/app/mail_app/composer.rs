@@ -123,6 +123,7 @@ impl MailApp {
             Ok(stores) => {
                 self.composer_worker = Some(ComposerWorker::start(stores, self.provider_handles()));
                 self.spawn_composer_beat(window, cx);
+                self.watch_window_close(window, cx);
                 self.composer_recover(cx);
             }
             Err(e) => self.show_toast(format!("Drafts are unavailable: {e}"), window, cx),
@@ -136,6 +137,7 @@ impl MailApp {
             Ok(stores) => {
                 self.composer_worker = Some(ComposerWorker::start(stores, self.provider_handles()));
                 self.spawn_composer_beat(window, cx);
+                self.watch_window_close(window, cx);
                 self.composer_recover(cx);
             }
             Err(e) => self.show_toast(format!("Drafts are unavailable: {e}"), window, cx),
@@ -192,6 +194,42 @@ impl MailApp {
             entity.update(cx, |composer, cx| {
                 composer.set_accounts(accounts.clone(), cx)
             });
+        }
+    }
+
+    /// Save every draft that still has a pending write when the main window closes, so
+    /// quitting does not drop the last few seconds of typing. The window is gone by the time
+    /// this runs, so the writes go to the local lane's thread; it is the hook GPUI offers
+    /// here. Only the main window counts: a Settings window closing must not touch drafts.
+    fn watch_window_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let main = window.window_handle().window_id();
+        let app = cx.weak_entity();
+        let sub = cx.on_window_closed(move |cx, closed| {
+            if closed != main {
+                return;
+            }
+            app.update(cx, |this, cx| this.flush_dirty_drafts(cx))
+                .ok();
+        });
+        self._composer_subs.push(sub);
+    }
+
+    /// Mark every draft with a queued snapshot urgent and start its write, skipping the
+    /// autosave debounce. The window-close hook calls this; tests call it directly.
+    pub fn flush_dirty_drafts(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<DraftId> = self
+            .composer
+            .drafts
+            .iter()
+            .filter(|d| d.queued.is_some())
+            .map(|d| d.record.id)
+            .collect();
+        for id in ids {
+            if let Some(open) = self.composer.get_mut(id) {
+                open.mark_urgent();
+            }
+            self.write_draft(id);
+            self.sync_composer_status(id, cx);
         }
     }
 
@@ -252,8 +290,9 @@ impl MailApp {
                 }
                 did = true;
             }
-            // A local save follows every edit, so it never waits out a debounce.
-            for id in self.composer.due_saves() {
+            // A local write follows a pause in typing, so a burst of keystrokes is one save
+            // rather than one transaction per character.
+            for id in self.composer.due_saves(now) {
                 self.write_draft(id);
                 self.sync_composer_status(id, cx);
                 did = true;
@@ -1124,7 +1163,8 @@ impl MailApp {
                 };
                 let record = composer.read(cx).record();
                 self.queue_edit(id, record);
-                self.write_draft(id);
+                // The write itself is not started here: the beat writes the queued snapshot
+                // once typing pauses, so a keystroke never waits on a database transaction.
                 self.sync_composer_status(id, cx);
             }
             ComposeEvent::Send => self.request_send(id, window, cx),
@@ -1193,6 +1233,9 @@ impl MailApp {
             open.record.synced_content_revision = None;
         }
         self.queue_edit(id, record);
+        if let Some(open) = self.composer.get_mut(id) {
+            open.mark_urgent();
+        }
         self.sync_composer_record(id, cx);
         self.write_draft(id);
         if had_remote {
@@ -1240,6 +1283,10 @@ impl MailApp {
 
     /// Write the queued snapshot to the local store. One save at a time per draft: a second
     /// would be refused by the store's revision check anyway, and this makes that explicit.
+    ///
+    /// Called both from the beat (when the autosave debounce is up) and directly by the
+    /// explicit save paths — Close, Send, switching account — which is why it writes the
+    /// queue rather than consulting the debounce itself.
     fn write_draft(&mut self, id: DraftId) {
         let Some(worker) = self.composer_worker.as_ref() else {
             return;
@@ -1248,11 +1295,14 @@ impl MailApp {
             return;
         };
         if open.in_flight {
+            // The pending snapshot stays queued, and an explicit save keeps its urgency so
+            // the write that follows the in-flight answer does not wait out the debounce.
             return;
         }
         let Some(record) = open.take_queued() else {
             return;
         };
+        open.urgent = false;
         let expected = record.editor_revision;
         open.status = SaveStatus::Saving;
         open.in_flight = true;
@@ -1263,11 +1313,16 @@ impl MailApp {
         });
     }
 
-    /// Queue the draft the composer is editing right now, straight from the form.
+    /// Queue the draft the composer is editing right now, straight from the form, and write
+    /// it without waiting out the autosave debounce: Send, switching account and Close all
+    /// come through here because the newest text has to be durable before they proceed.
     fn save_from_editor(&mut self, id: DraftId, cx: &mut Context<Self>) {
         if let Some(entity) = self.composers.get(&id).cloned() {
             let record = entity.read(cx).record();
             self.queue_edit(id, record);
+        }
+        if let Some(open) = self.composer.get_mut(id) {
+            open.mark_urgent();
         }
         self.write_draft(id);
     }
@@ -1953,6 +2008,12 @@ impl MailApp {
     /// reopens from the drafts list. An untouched draft is kept too — closing is never a
     /// discard, and only the discard path asks first and then deletes.
     fn close_composer(&mut self, id: DraftId) {
+        // Closing is an explicit save: the pending write goes out now instead of waiting out
+        // the autosave debounce, even if a save is already in flight (it then follows that
+        // answer without another wait).
+        if let Some(open) = self.composer.get_mut(id) {
+            open.mark_urgent();
+        }
         self.write_draft(id);
         if self.inline_composer == Some(id) {
             self.inline_composer = None;

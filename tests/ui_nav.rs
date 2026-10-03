@@ -10,6 +10,7 @@ use gpui_kit::{
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
+use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 
 use mail_classifier::app::filter_popover::Step;
@@ -185,8 +186,10 @@ impl Harness<'_> {
         panic!("{what}");
     }
     /// Run the heartbeat until the composer has nothing queued and nothing in flight, so a
-    /// test asserts on a settled draft rather than on a race with the worker.
+    /// test asserts on a settled draft rather than on a race with the worker. The local
+    /// autosave is debounced, so the clock is moved past the pause first.
     fn settle(&mut self) {
+        self.advance(LOCAL_DEBOUNCE_SECS);
         self.await_state("the composer never settled", |a| {
             !a.composer
                 .drafts

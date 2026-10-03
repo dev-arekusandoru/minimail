@@ -137,6 +137,7 @@ impl MailApp {
                     .children(children),
             );
         }
+        items.push(self.drafts_item(cx));
         let header = div()
             .flex()
             .w_full()
@@ -237,5 +238,31 @@ impl MailApp {
             );
         }
         item
+    }
+
+    /// The Drafts row: every stored draft, reachable from anywhere without a shortcut. It
+    /// carries the same kind of count badge as Inbox, so the sidebar says how many are
+    /// waiting to be finished. Clicking it opens the drafts list, and choosing a row there
+    /// reopens that draft in the composer.
+    fn drafts_item(&self, cx: &Context<Self>) -> SidebarMenuItem {
+        let count = self.stored_draft_count();
+        let active = self.drafts_picker.is_some();
+        let mut item = SidebarMenuItem::new("Drafts".to_owned())
+            .icon(Icon::new(IconName::FileText).text_color(cx.theme().info))
+            .active(active)
+            .on_click(run(ShowDrafts));
+        if count > 0 {
+            item = item.suffix(move |_, cx| count_badge(cx.theme(), count, active));
+        }
+        item
+    }
+
+    /// How many drafts the Drafts list would offer. A delivered message is not one.
+    fn stored_draft_count(&self) -> usize {
+        self.composer
+            .drafts
+            .iter()
+            .filter(|d| crate::app::compose::drafts::listed(&d.record))
+            .count()
     }
 }
