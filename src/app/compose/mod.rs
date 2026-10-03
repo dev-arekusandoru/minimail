@@ -1440,7 +1440,12 @@ impl Composer {
         )
     }
 
-    fn render_attachments(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_attachments(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // No attachments means no strip: an empty bar would leave a divider and a blank
+        // line between the editor and the footer.
+        if self.draft.attachments.is_empty() {
+            return None;
+        }
         // The chip's own remove handler needs the context mutably, so the border colour is
         // copied out rather than borrowed from the theme for the length of the map.
         let border = cx.theme().border;
@@ -1482,7 +1487,7 @@ impl Composer {
                         })),
                 )
         });
-        div()
+        let bar = div()
             .flex_none()
             .flex()
             .flex_wrap()
@@ -1493,7 +1498,8 @@ impl Composer {
             .border_t(px(1.))
             .border_color(border)
             .children(chips)
-            .into_any_element()
+            .into_any_element();
+        Some(bar)
     }
 
     fn render_footer(&mut self, cx: &mut Context<Self>) -> Div {
@@ -1842,7 +1848,7 @@ impl Render for Composer {
                     .flex_col()
                     .child(body),
             )
-            .child(self.render_attachments(cx))
+            .when_some(self.render_attachments(cx), |d, el| d.child(el))
             .child(self.render_footer(cx))
     }
 }
