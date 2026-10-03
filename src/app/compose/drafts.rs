@@ -1,190 +1,108 @@
-//! The Drafts picker: the way back to a draft that is not in a tab.
+//! The Drafts list, as the main pane shows it: every stored draft of one account with its
+//! recipient, subject, snippet and when it was last touched. Pure functions, no UI.
 //!
 //! Closing a composer keeps its draft, and the durable store is the only thing that holds
-//! it, so there has to be a list the user can come back to from anywhere. This is that list:
-//! every stored draft, its subject, its recipients and when it was last touched, filtered by
-//! typing. Choosing a row reopens that draft in its own tab; nothing is fetched to do it,
+//! it, so there has to be a way back to it. The sidebar's per-account *Drafts* row opens
+//! this list; choosing a row reopens that draft in a composer tab. Nothing is fetched,
 //! because the record is already local.
 
-use std::rc::Rc;
-
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::{
-    base::IndexPath,
-    component::command::{Command, CommandItem, CommandState},
-    *,
-};
-
+use crate::clock::Timestamp;
 use crate::outgoing::{DraftId, DraftRecord, DraftState};
 
-/// What choosing a row means.
+/// One row of the Drafts pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DraftsEvent {
-    /// Reopen this draft in its own tab.
-    Open(DraftId),
+pub struct DraftRow {
+    pub id: DraftId,
+    /// The account that owns the draft, so a row opened from the list binds to the right one.
+    pub account: String,
+    /// Recipients as written, e.g. `"cal@example.com, dee@example.com"`.
+    pub recipients: String,
+    pub subject: String,
+    /// Plain-text snippet of the body, the muted line under the subject.
+    pub snippet: String,
+    /// When the draft was last touched, for the time column.
+    pub updated_at: Timestamp,
+    pub state: DraftState,
 }
 
-/// Whether the Drafts list would offer this draft to reopen. A delivered message is not a
-/// draft to finish: the Sent folder is where it is read, and offering a "send" on it would
-/// only fail. Everything else is offered, with its state shown, including one whose send
-/// could not be confirmed.
+impl DraftRow {
+    /// The recipient column: the addresses, or `"(no recipient)"` for a draft with none.
+    pub fn recipient_label(&self) -> &str {
+        if self.recipients.is_empty() {
+            "(no recipient)"
+        } else {
+            &self.recipients
+        }
+    }
+
+    /// The subject column: the subject, or `"(no subject)"` for a draft without one.
+    pub fn subject_label(&self) -> &str {
+        if self.subject.is_empty() {
+            "(no subject)"
+        } else {
+            &self.subject
+        }
+    }
+
+    /// How the draft's own state reads beside the subject.
+    pub fn state_note(&self) -> &'static str {
+        match self.state {
+            DraftState::Editing => "editing",
+            DraftState::Held => "held",
+            DraftState::Sending => "sending",
+            DraftState::Sent { .. } => "sent",
+            DraftState::Uncertain => "not confirmed",
+            DraftState::Failed { .. } => "not sent",
+            DraftState::Conflict => "changed on the server",
+        }
+    }
+}
+
+/// Whether the Drafts list would offer this draft. A delivered message is not a draft to
+/// finish: the Sent folder is where it is read, and offering a "send" on it would only fail.
+/// Everything else is offered, with its state shown, including one whose send could not be
+/// confirmed.
 pub fn listed(record: &DraftRecord) -> bool {
     !matches!(record.state, DraftState::Sent { .. })
 }
 
-/// The drafts as the picker shows them: the record and a searchable label per draft.
-pub fn rows(records: &[DraftRecord], query: &str) -> Vec<(DraftId, String)> {
-    let needle = query.trim().to_lowercase();
-    records
-        .iter()
-        .filter(|record| listed(record))
-        .filter_map(|record| {
-            let subject = subject_of(record);
-            let recipients = first_recipient(record);
-            let label = if subject.is_empty() {
-                if recipients.is_empty() {
-                    "(no subject)".to_owned()
-                } else {
-                    format!("(no subject) · {recipients}")
-                }
-            } else if recipients.is_empty() {
-                subject
-            } else {
-                format!("{subject} · {recipients}")
-            };
-            let matches = needle.is_empty()
-                || label.to_lowercase().contains(&needle)
-                || record.account.to_lowercase().contains(&needle);
-            matches.then_some((record.id, label))
-        })
-        .collect()
+/// The drafts of `account` as the pane lists them: unfinished, newest edit first (ties by
+/// id, so the order is stable). One row per draft.
+pub fn rows<'a>(records: impl IntoIterator<Item = &'a DraftRecord>, account: &str) -> Vec<DraftRow> {
+    let mut out: Vec<DraftRow> = records
+        .into_iter()
+        .filter(|record| record.account == account && listed(record))
+        .map(row)
+        .collect();
+    // Newest first; the id keeps drafts edited in the same second in a stable order.
+    out.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    out
 }
 
-fn subject_of(record: &DraftRecord) -> String {
-    let subject = record.subject.trim();
-    if subject.is_empty() {
-        String::new()
-    } else {
-        format!("{subject}  ·  {}", state_note(&record.state))
+fn row(record: &DraftRecord) -> DraftRow {
+    DraftRow {
+        id: record.id,
+        account: record.account.clone(),
+        recipients: recipients(record),
+        subject: record.subject.trim().to_owned(),
+        snippet: crate::preview::snippet(&record.body.source),
+        updated_at: record.updated_at,
+        state: record.state.clone(),
     }
 }
 
-fn first_recipient(record: &DraftRecord) -> String {
-    record
-        .to
-        .split(',')
-        .map(str::trim)
-        .find(|part| !part.is_empty())
+/// The recipient column's text: To, else Cc, else Bcc, as written.
+fn recipients(record: &DraftRecord) -> String {
+    [&record.to, &record.cc, &record.bcc]
+        .into_iter()
+        .map(|s| s.trim())
+        .find(|s| !s.is_empty())
         .unwrap_or_default()
         .to_owned()
-}
-
-fn state_note(state: &DraftState) -> &'static str {
-    match state {
-        DraftState::Editing => "editing",
-        DraftState::Held => "held",
-        DraftState::Sending => "sending",
-        DraftState::Sent { .. } => "sent",
-        DraftState::Uncertain => "not confirmed",
-        DraftState::Failed { .. } => "not sent",
-        DraftState::Conflict => "changed on the server",
-    }
-}
-
-/// The drafts picker, hosted in a dialog by the owner.
-pub struct DraftsPicker {
-    state: Entity<CommandState>,
-    drafts: Vec<(DraftId, String)>,
-    query: String,
-    /// Every stored draft, so the rows can be re-derived when the filter changes.
-    records: Vec<DraftRecord>,
-}
-
-impl DraftsPicker {
-    pub fn new(records: Vec<DraftRecord>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self {
-            state: cx.new(|cx| CommandState::new(window, cx)),
-            drafts: rows(&records, ""),
-            query: String::new(),
-            records,
-        }
-    }
-
-    /// The visible rows, top to bottom.
-    pub fn rows(&self) -> Vec<String> {
-        self.drafts.iter().map(|(_, label)| label.clone()).collect()
-    }
-
-    pub fn focus(&self, window: &mut Window, cx: &mut App) {
-        self.state
-            .clone()
-            .update(cx, |state, cx| state.focus(window, cx));
-    }
-}
-
-impl EventEmitter<DraftsEvent> for DraftsPicker {}
-
-impl Render for DraftsPicker {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let weak = cx.weak_entity();
-        let labels: Vec<SharedString> = self
-            .drafts
-            .iter()
-            .map(|(_, label)| label.clone().into())
-            .collect();
-        let events: Rc<Vec<DraftsEvent>> = Rc::new(
-            self.drafts
-                .iter()
-                .map(|(id, _)| DraftsEvent::Open(*id))
-                .collect(),
-        );
-        let on_query = weak.clone();
-        Command::new(&self.state)
-            .bordered(false)
-            .filterable(false)
-            .max_h(px(360.))
-            .placeholder("Filter drafts")
-            .header(move |_, _, cx| {
-                div()
-                    .px_3()
-                    .pt_3()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(cx.theme().foreground)
-                    .child("Drafts")
-            })
-            .empty(|_, _, cx| {
-                div()
-                    .p_4()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No drafts on this Mac.")
-            })
-            .items(
-                labels
-                    .into_iter()
-                    .map(|label| CommandItem::new().label(label)),
-            )
-            .on_query(move |q, _, cx| {
-                on_query
-                    .update(cx, |picker, cx| {
-                        let q = q.trim().to_owned();
-                        if picker.query != q {
-                            picker.query = q;
-                            picker.drafts = rows(&picker.records, &picker.query);
-                            cx.notify();
-                        }
-                    })
-                    .ok();
-            })
-            .on_confirm(move |ix: IndexPath, _, cx| {
-                let Some(DraftsEvent::Open(id)) = events.get(ix.row) else {
-                    return;
-                };
-                weak.update(cx, |_, cx| cx.emit(DraftsEvent::Open(*id)))
-                    .ok();
-            })
-    }
 }
 
 #[cfg(test)]
@@ -207,26 +125,47 @@ mod tests {
         sent.state = DraftState::Sent {
             remote_id: "mid".into(),
         };
-        let listed = rows(&[sent], "");
         assert!(
-            listed.is_empty(),
+            rows([&sent], "personal").is_empty(),
             "Sent lives in the Sent folder, not in Drafts"
         );
     }
 
     #[test]
-    fn the_filter_matches_the_subject_the_recipient_and_the_account() {
-        let drafts = vec![draft(1, "Budget question", "cal@example.com")];
-        assert_eq!(rows(&drafts, "budget").len(), 1, "subject");
-        assert_eq!(
-            rows(&drafts, "CAL@").len(),
-            1,
-            "recipient, case-insensitively"
+    fn only_the_named_accounts_drafts_are_listed() {
+        let mut other = draft(2, "Work note", "boss@corp.io");
+        other.account = "work".into();
+        let rows = rows([&draft(1, "Personal note", "cal@example.com"), &other], "personal");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subject, "Personal note");
+    }
+
+    #[test]
+    fn newest_edit_comes_first() {
+        let rows = rows(
+            [
+                &draft(1, "Older", "a@x.com"),
+                &draft(3, "Newest", "b@x.com"),
+                &draft(2, "Middle", "c@x.com"),
+            ],
+            "personal",
         );
-        assert_eq!(rows(&drafts, "personal").len(), 1, "account");
-        assert!(
-            rows(&drafts, "lunch").is_empty(),
-            "an unmatched filter shows nothing"
-        );
+        let subjects: Vec<&str> = rows.iter().map(|r| r.subject.as_str()).collect();
+        assert_eq!(subjects, ["Newest", "Middle", "Older"]);
+    }
+
+    #[test]
+    fn subject_and_recipient_fall_back_to_placeholders() {
+        let rows = rows([&draft(1, "", "")], "personal");
+        assert_eq!(rows[0].subject_label(), "(no subject)");
+        assert_eq!(rows[0].recipient_label(), "(no recipient)");
+    }
+
+    #[test]
+    fn the_snippet_drops_quoted_lines_and_signatures() {
+        let mut quoted = draft(1, "Re: Budget", "cal@example.com");
+        quoted.body.source = "Here is the answer.\n\n> quoted text\n-- \nsig".into();
+        let rows = rows([&quoted], "personal");
+        assert_eq!(rows[0].snippet, "Here is the answer.");
     }
 }

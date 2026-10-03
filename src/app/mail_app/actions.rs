@@ -179,6 +179,10 @@ impl MailApp {
         self.go_account_location(Location::Snoozed, cx);
     }
 
+    pub(super) fn go_drafts(&mut self, cx: &mut Context<Self>) {
+        self.go_account_location(Location::Drafts, cx);
+    }
+
     pub(super) fn go_sent(&mut self, cx: &mut Context<Self>) {
         self.go_account_location(Location::Sent, cx);
     }

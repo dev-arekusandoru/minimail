@@ -28,7 +28,6 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::app::compose::drafts::{DraftsEvent, DraftsPicker};
 use crate::app::compose::{ComposeEvent, Composer, Focus, Placement};
 use crate::app::composer_state::{DraftOperation, SaveStatus};
 use crate::app::composer_worker::{
@@ -2106,8 +2105,9 @@ impl MailApp {
         );
     }
 
-    /// Ask first, so this runs where there is a window to ask in.
-    fn confirm_discard(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
+    /// Ask first, so this runs where there is a window to ask in. The Drafts pane's delete
+    /// path and the composer's own Discard control both come through here.
+    pub(super) fn confirm_discard(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
         let subject = self
             .composer
             .record(id)
@@ -2192,40 +2192,9 @@ impl MailApp {
 
     // ------------------------------------------------------------------- the drafts list
 
-    /// The Drafts list: every stored draft, so one that is not in a tab is still reachable.
-    /// `cmd-shift-d` from anywhere that is not typing.
-    pub(super) fn open_drafts_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal_open() {
-            return;
-        }
-        let records: Vec<DraftRecord> = self
-            .composer
-            .drafts
-            .iter()
-            .map(|d| d.record.clone())
-            .collect();
-        if records.is_empty() {
-            self.show_toast("No drafts".into(), window, cx);
-            return;
-        }
-        let picker = cx.new(|cx| DraftsPicker::new(records, window, cx));
-        self._drafts_sub = Some(cx.subscribe_in(
-            &picker,
-            window,
-            |this, _, event: &DraftsEvent, window, cx| {
-                let DraftsEvent::Open(id) = *event;
-                this.close_modals(window, cx);
-                this.reopen_draft(id, window, cx);
-            },
-        ));
-        self.drafts_picker = Some(picker.clone());
-        self.host_in_dialog(picker.clone(), |vw| 480f32.min(vw * 0.9), window, cx);
-        picker.update(cx, |p, cx| p.focus(window, cx));
-        cx.notify();
-    }
-
-    /// Reopen a stored draft in its own tab, from the record the store already holds.
-    fn reopen_draft(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
+    /// Reopen a stored draft in its own tab, from the record the store already holds. This
+    /// is the Drafts pane's Enter/click path.
+    pub(super) fn reopen_draft(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(record) = self.composer.record(id).cloned() else {
             return;
         };

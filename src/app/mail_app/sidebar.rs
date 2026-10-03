@@ -38,6 +38,7 @@ fn location_name(loc: &Location) -> &'static str {
         Location::AllInboxes => "All Inboxes",
         Location::Inbox(_) => "Inbox",
         Location::Snoozed(_) => "Snoozed",
+        Location::Drafts(_) => "Drafts",
         Location::Sent(_) => "Sent",
         Location::Archive(_) => "Archive",
         Location::Trash(_) => "Trash",
@@ -50,6 +51,7 @@ fn location_account(loc: &Location) -> AccountId {
     match loc {
         Location::Inbox(a)
         | Location::Snoozed(a)
+        | Location::Drafts(a)
         | Location::Sent(a)
         | Location::Archive(a)
         | Location::Trash(a) => a.clone(),
@@ -70,6 +72,7 @@ fn location_icon(loc: &Location, t: &ThemeColor, open: bool) -> (IconName, Hsla)
         Location::AllInboxes => (IconName::Mails, t.primary),
         Location::Inbox(_) => (IconName::Inbox, theme::inbox(t)),
         Location::Snoozed(_) => (IconName::AlarmClock, theme::snoozed(t)),
+        Location::Drafts(_) => (IconName::FileText, t.info),
         Location::Sent(_) => (IconName::Send, t.info),
         Location::Archive(_) => (IconName::Archive, theme::archived(t)),
         Location::Trash(_) => (IconName::Trash, theme::deleted(t)),
@@ -113,6 +116,7 @@ impl MailApp {
             let mut children: Vec<SidebarMenuItem> = [
                 Location::Inbox(account.id.clone()),
                 Location::Snoozed(account.id.clone()),
+                Location::Drafts(account.id.clone()),
                 Location::Sent(account.id.clone()),
                 Location::Archive(account.id.clone()),
                 Location::Trash(account.id.clone()),
@@ -137,7 +141,6 @@ impl MailApp {
                     .children(children),
             );
         }
-        items.push(self.drafts_item(cx));
         let header = div()
             .flex()
             .w_full()
@@ -187,7 +190,7 @@ impl MailApp {
     }
 
     /// One location row: its icon in the location's colour, active when it is the view, a count
-    /// suffix for All Inboxes / Inbox / Snoozed when non-zero. Clicking shows the location.
+    /// suffix for All Inboxes / Inbox / Snoozed / Drafts when non-zero. Clicking shows the location.
     fn location_item(
         &self,
         loc: Location,
@@ -196,9 +199,16 @@ impl MailApp {
     ) -> SidebarMenuItem {
         let (icon, color) = location_icon(&loc, cx.theme(), false);
         let is_active = *active == Some(loc.clone());
-        let counted =
-            matches!(loc, Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_));
-        let count = self.mailbox.count_at(&loc, &self.local_now());
+        let counted = matches!(
+            loc,
+            Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_) | Location::Drafts(_)
+        );
+        // Drafts are not messages, so their count comes from the composer's durable state
+        // rather than the mailbox the other locations are counted in.
+        let count = match &loc {
+            Location::Drafts(account) => self.account_draft_count(account),
+            _ => self.mailbox.count_at(&loc, &self.local_now()),
+        };
         let mut item = SidebarMenuItem::new(location_name(&loc).to_owned())
             .icon(Icon::new(icon).text_color(color))
             .active(is_active)
@@ -240,28 +250,13 @@ impl MailApp {
         item
     }
 
-    /// The Drafts row: every stored draft, reachable from anywhere without a shortcut. It
-    /// carries the same kind of count badge as Inbox, so the sidebar says how many are
-    /// waiting to be finished. Clicking it opens the drafts list, and choosing a row there
-    /// reopens that draft in the composer.
-    fn drafts_item(&self, cx: &Context<Self>) -> SidebarMenuItem {
-        let count = self.stored_draft_count();
-        let active = self.drafts_picker.is_some();
-        let mut item = SidebarMenuItem::new("Drafts".to_owned())
-            .icon(Icon::new(IconName::FileText).text_color(cx.theme().info))
-            .active(active)
-            .on_click(run(ShowDrafts));
-        if count > 0 {
-            item = item.suffix(move |_, cx| count_badge(cx.theme(), count, active));
-        }
-        item
-    }
-
-    /// How many drafts the Drafts list would offer. A delivered message is not one.
-    fn stored_draft_count(&self) -> usize {
+    /// How many drafts the account still has to finish. A delivered message is not one, so
+    /// the same predicate the drafts list uses decides. This is the sidebar badge's count.
+    pub fn account_draft_count(&self, account: &str) -> usize {
         self.composer
             .drafts
             .iter()
+            .filter(|d| d.record.account == account)
             .filter(|d| crate::app::compose::drafts::listed(&d.record))
             .count()
     }

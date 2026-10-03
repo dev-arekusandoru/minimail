@@ -1,11 +1,21 @@
-use crate::harness::{Harness, harness, harness_with};
+use crate::harness::{Harness, harness, harness_with, mailbox, msg};
 use crate::snooze::snooze_box;
 use gpui_kit::TestAppContext;
 use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
 use mail_classifier::model::MessageId;
 use mail_classifier::model::TriageState::*;
+use mail_classifier::model::Location;
 use mail_classifier::outgoing::DraftKind;
 use std::path::PathBuf;
+
+/// One JSON message in the `work` account: the shared [`msg`] helper writes personal ones,
+/// and the shared fixture has no work mail to compose on.
+fn work_msg(id: u32, thread: u32, email: &str, subject: &str, day: u32, state: &str) -> String {
+    let name = email.split('@').next().unwrap();
+    format!(
+        r#"{{"id":{id},"thread_id":{thread},"from_name":"{name}","from_email":"{email}","to":"you@example.com","subject":"{subject}","body":"Just checking in about this.","received":"2026-09-{day:02}T09:00:00Z","state":"{state}","snooze":null,"account":"work"}}"#
+    )
+}
 
 /// Native mouse focus must remain in compose inputs instead of triggering list actions.
 #[gpui_kit::gpui::test]
@@ -508,10 +518,10 @@ pub fn closing_flushes_the_pending_write_immediately(cx: &mut TestAppContext) {
     assert_eq!(h.draft_fields().3, "typed then closed");
 }
 
-/// The sidebar's Drafts row is the way to the drafts list: clicking it shows every stored
-/// draft, and choosing a row reopens that draft in the composer.
+/// The per-account Drafts row (directly above Sent) opens the Drafts pane in the main area:
+/// the account's stored drafts are listed, and Enter reopens the cursor one in the composer.
 #[gpui_kit::gpui::test]
-pub fn the_sidebar_drafts_row_opens_the_list_and_reopens_a_draft(cx: &mut TestAppContext) {
+pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("from the sidebar");
     h.settle();
@@ -521,19 +531,31 @@ pub fn the_sidebar_drafts_row_opens_the_list_and_reopens_a_draft(cx: &mut TestAp
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()));
 
-    let row = h.drafts_sidebar_index();
-    assert!(h.has(row), "the sidebar has a Drafts row");
-    h.click(row);
+    // The account's children are Inbox, Snoozed, Drafts, Sent, …: row 2 is Drafts.
+    assert!(h.has("1-2"), "the account has a Drafts row");
+    h.click("1-2");
     h.tick();
-    assert!(h.drafts_picker_open(), "the row opens the drafts list");
-    assert_eq!(h.drafts_rows().len(), 1, "the stored draft is listed");
+    assert_eq!(
+        h.location(),
+        Some(Location::Drafts("personal".into())),
+        "the Drafts row shows the Drafts pane"
+    );
+    assert!(h.drafts_pane_open());
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1, "the account's stored draft is listed");
+    assert_eq!(rows[0].0, "personal", "and it is this account's");
+    assert!(
+        rows[0].3.contains("from the sidebar"),
+        "the snippet shows what was written: {rows:?}"
+    );
 
-    h.keys("enter");
+    // A click opens the row, the same as Enter.
+    h.click(("draft-row", 0usize));
     h.tick();
     assert_eq!(
         h.read(|a| a.tabs.active_draft()),
         Some(id),
-        "the same draft reopened"
+        "the clicked draft opened"
     );
     assert_eq!(h.draft_fields().3, "from the sidebar");
     assert_eq!(
@@ -541,6 +563,99 @@ pub fn the_sidebar_drafts_row_opens_the_list_and_reopens_a_draft(cx: &mut TestAp
         1,
         "one record, not a copy"
     );
+}
+
+/// The Drafts pane is per account: each account's row lists only its own drafts, and the
+/// count the sidebar badge uses is that same set.
+#[gpui_kit::gpui::test]
+pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) {
+    // The shared fixture is all-personal, so this mailbox gives each account one message to
+    // compose on.
+    let mb = mailbox(&[
+        msg(1, 101, "dana@whitfield.dev", "Personal note", 14, "Inbox"),
+        work_msg(2, 202, "ravi@acme.co", "Work note", 14, "Inbox"),
+    ]);
+    let mut h = harness_with(cx, mb);
+    h.click("1-0");
+    h.new_draft();
+    h.type_text("personal draft");
+    h.settle();
+    let personal = h.read(|a| a.tabs.active_draft().expect("personal draft tab"));
+    h.close_draft_tab(personal);
+    h.click("2-0");
+    h.new_draft();
+    h.type_text("work draft");
+    h.settle();
+    let work = h.read(|a| a.tabs.active_draft().expect("work draft tab"));
+    h.close_draft_tab(work);
+
+    h.click("1-2");
+    h.tick();
+    assert_eq!(h.location(), Some(Location::Drafts("personal".into())));
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1, "personal's own draft only");
+    assert_eq!(rows[0].0, "personal");
+    assert!(rows[0].3.contains("personal draft"), "{rows:?}");
+    assert_eq!(
+        h.read(|a| a.account_draft_count("personal")),
+        1,
+        "the badge counts the same set"
+    );
+
+    h.click("2-2");
+    h.tick();
+    assert_eq!(h.location(), Some(Location::Drafts("work".into())));
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1, "work's own draft only");
+    assert_eq!(rows[0].0, "work");
+    assert!(rows[0].3.contains("work draft"), "{rows:?}");
+    assert_eq!(h.read(|a| a.account_draft_count("work")), 1);
+    assert_eq!(
+        h.read(|a| a.account_draft_count("personal")),
+        1,
+        "the other account's draft is untouched"
+    );
+}
+
+/// The Drafts pane shows the account's drafts newest edit first, and deleting the cursor one
+/// through the same confirmation the composer uses removes it from the list.
+#[gpui_kit::gpui::test]
+pub fn drafts_are_newest_first_and_discard_removes_them(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("1-0");
+    h.new_draft();
+    h.type_text("older draft");
+    h.settle();
+    let first = h.read(|a| a.tabs.active_draft().expect("first draft tab"));
+    h.close_draft_tab(first);
+    // A later edit makes the second draft the newer one.
+    h.advance(60);
+    h.click("1-0");
+    h.new_draft();
+    h.type_text("newer draft");
+    h.settle();
+    let second = h.read(|a| a.tabs.active_draft().expect("second draft tab"));
+    h.close_draft_tab(second);
+
+    h.click("1-2");
+    h.tick();
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 2, "both drafts are listed");
+    assert!(
+        rows[0].3.contains("newer draft") && rows[1].3.contains("older draft"),
+        "newest edit first: {rows:?}"
+    );
+
+    // `d` deletes the cursor draft after the same confirmation the composer asks for.
+    h.keys("d");
+    h.tick();
+    assert!(h.read(|a| a.modal_open()), "the discard is confirmed first");
+    h.keys("1");
+    h.await_composer("the draft is gone", |a| a.draft_rows().len() == 1);
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1, "the discarded draft left the list");
+    assert!(rows[0].3.contains("older draft"), "{rows:?}");
+    assert_eq!(h.read(|a| a.account_draft_count("personal")), 1);
 }
 
 /// Expanding moves the *same* draft into the shared tab strip: one record, one entity, so
@@ -627,10 +742,10 @@ pub fn several_drafts_stay_open_independently(cx: &mut TestAppContext) {
     );
 }
 
-/// A closed draft is only useful if there is a way back to it: the Drafts list holds every
-/// stored draft, and choosing one reopens that same record rather than a fresh blank one.
+/// A closed draft is only useful if there is a way back to it: `cmd-shift-d` opens the
+/// Drafts pane, and Enter reopens that same record rather than a fresh blank one.
 #[gpui_kit::gpui::test]
-pub fn a_closed_draft_reopens_from_the_drafts_list(cx: &mut TestAppContext) {
+pub fn a_closed_draft_reopens_from_the_drafts_pane(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("kept for later");
     h.settle();
@@ -644,9 +759,11 @@ pub fn a_closed_draft_reopens_from_the_drafts_list(cx: &mut TestAppContext) {
 
     h.keys("cmd-shift-d");
     h.tick();
-    assert!(
-        h.read(|a| a.drafts_picker_open()),
-        "cmd-shift-d opens the Drafts list"
+    assert!(h.drafts_pane_open(), "cmd-shift-d opens the Drafts pane");
+    assert_eq!(
+        h.read(|a| a.composer.drafts.len()),
+        1,
+        "the pane lists the stored draft"
     );
     h.keys("enter");
     h.tick();
@@ -665,17 +782,27 @@ pub fn a_closed_draft_reopens_from_the_drafts_list(cx: &mut TestAppContext) {
         1,
         "one record, not a copy"
     );
-    assert!(h.read(|a| a.compose_in_tab()), "and it is back in a tab");
 }
 
-/// An empty Drafts list says so rather than opening a blank panel.
+/// An empty Drafts pane says so rather than showing nothing at all.
 #[gpui_kit::gpui::test]
-pub fn the_drafts_list_says_when_there_is_nothing_to_reopen(cx: &mut TestAppContext) {
+pub fn the_drafts_pane_says_when_there_is_nothing_to_reopen(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.keys("cmd-shift-d");
     h.tick();
-    assert!(!h.read(|a| a.drafts_picker_open()), "no drafts, so no list");
-    assert!(h.toast().contains("No drafts"), "the user is told why");
+    assert!(
+        h.drafts_pane_open(),
+        "the keyboard still reaches the Drafts pane"
+    );
+    assert!(
+        h.draft_rows().is_empty(),
+        "an empty account has no drafts to list"
+    );
+    assert!(
+        h.header().contains("Drafts"),
+        "the header names the pane: {}",
+        h.header()
+    );
 }
 
 // ---------------------------------------------------------------- Classifier

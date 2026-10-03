@@ -90,16 +90,20 @@ impl Render for MailApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ClearSelection, window, cx| this.escape(window, cx)))
-            .on_action(cx.listener(|this, _: &OpenMessage, _, cx| {
-                this.open_cursor(cx);
+            .on_action(cx.listener(|this, _: &OpenMessage, window, cx| {
+                this.open_cursor(window, cx);
                 cx.notify();
             }))
             .on_action(
                 cx.listener(|this, _: &Archive, w, cx| this.mark(TriageState::Archived, w, cx)),
             )
-            .on_action(
-                cx.listener(|this, _: &Delete, w, cx| this.mark(TriageState::Deleted, w, cx)),
-            )
+            .on_action(cx.listener(|this, _: &Delete, w, cx| {
+                if this.in_drafts() {
+                    this.confirm_discard_cursor(w, cx);
+                } else {
+                    this.mark(TriageState::Deleted, w, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &File, w, cx| {
                 if !this.modal_open() {
                     this.open_file_picker(w, cx);
@@ -176,7 +180,7 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &NewMail, window, cx| this.new_mail(window, cx)))
             .on_action(
-                cx.listener(|this, _: &ShowDrafts, window, cx| this.open_drafts_picker(window, cx)),
+                cx.listener(|this, _: &ShowDrafts, _, cx| this.go_drafts(cx)),
             )
             // Each countdown toast undoes its own draft; the key path recalls the oldest
             // hold when nothing has been clicked.

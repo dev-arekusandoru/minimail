@@ -17,9 +17,10 @@ use crate::model::MessageId;
 use crate::threads::{self, Row};
 
 impl MailApp {
-    /// Grouped rows are in effect: setting on and not in a triage session.
+    /// Grouped rows are in effect: setting on and not in a triage session, and not while the
+    /// Drafts pane is the list (drafts are not message threads).
     pub(super) fn grouped(&self) -> bool {
-        self.group_threads && !self.in_session()
+        self.group_threads && !self.in_session() && !self.in_drafts()
     }
 
     /// The list rows when grouped (empty otherwise): threads collapsed or expanded.
@@ -136,8 +137,15 @@ impl MailApp {
         self.row_cursor = self.row_cursor.min(len.saturating_sub(1));
     }
 
-    /// `enter`: open the cursor message; a collapsed thread header also expands.
-    pub(super) fn open_cursor(&mut self, cx: &mut Context<Self>) {
+    /// `enter`: open the cursor message; a collapsed thread header also expands. In the
+    /// Drafts pane it reopens the cursor draft in a composer tab instead.
+    pub(super) fn open_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.in_drafts() {
+            if let Some(row) = self.cursor_draft() {
+                self.reopen_draft(row.id, window, cx);
+            }
+            return;
+        }
         if self.grouped()
             && let Some(Row::Header {
                 expanded: false,

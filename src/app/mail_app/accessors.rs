@@ -27,17 +27,18 @@ impl MailApp {
         self.tabs.draft_ids()
     }
 
-    /// Whether the Drafts list is open.
-    pub fn drafts_picker_open(&self) -> bool {
-        self.drafts_picker.is_some()
+    /// Whether the Drafts pane is the list the app is showing.
+    pub fn drafts_pane_open(&self) -> bool {
+        self.in_drafts()
     }
 
-    /// The rows of the open Drafts list, top to bottom.
-    pub fn drafts_rows(&self, cx: &App) -> Vec<String> {
-        self.drafts_picker
-            .as_ref()
-            .map(|p| p.read(cx).rows())
-            .unwrap_or_default()
+    /// The draft rows the Drafts pane shows, newest edit first: the current account's
+    /// unfinished drafts. Empty while another location is the list.
+    pub fn draft_rows(&self) -> Vec<crate::app::compose::drafts::DraftRow> {
+        match self.location() {
+            Some(Location::Drafts(account)) => self.account_drafts(&account),
+            _ => Vec::new(),
+        }
     }
 
     pub fn help_open(&self) -> bool {
@@ -237,10 +238,41 @@ impl MailApp {
     }
 
     pub(super) fn cursor_ix(&self) -> usize {
+        if self.in_drafts() {
+            return self.draft_cursor_ix();
+        }
         if self.grouped() {
             return self.row_cursor();
         }
         self.triage.cursor_index()
+    }
+
+    /// Whether the Drafts pane is the list the app is showing. Drafts are not messages, so
+    /// the list, the cursor and the open key all take their drafts-pane path.
+    pub(super) fn in_drafts(&self) -> bool {
+        matches!(self.location(), Some(Location::Drafts(_)))
+    }
+
+    /// The drafts `account` still has to finish, newest edit first.
+    pub(super) fn account_drafts(
+        &self,
+        account: &str,
+    ) -> Vec<crate::app::compose::drafts::DraftRow> {
+        crate::app::compose::drafts::rows(
+            self.composer.drafts.iter().map(|d| &d.record),
+            account,
+        )
+    }
+
+    /// Index of the draft under the cursor, clamped to the rows.
+    fn draft_cursor_ix(&self) -> usize {
+        let len = self.draft_rows().len();
+        self.draft_cursor.min(len.saturating_sub(1))
+    }
+
+    /// The draft under the cursor while the Drafts pane is showing.
+    pub fn cursor_draft(&self) -> Option<crate::app::compose::drafts::DraftRow> {
+        self.draft_rows().into_iter().nth(self.draft_cursor_ix())
     }
 
     /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
@@ -258,7 +290,10 @@ impl MailApp {
     }
 
     pub(super) fn move_cursor(&mut self, delta: isize) {
-        if self.grouped() {
+        if self.in_drafts() {
+            let max = self.draft_rows().len().saturating_sub(1) as isize;
+            self.draft_cursor = (self.draft_cursor as isize + delta).clamp(0, max) as usize;
+        } else if self.grouped() {
             let len = self.rows().len();
             let max = len.saturating_sub(1) as isize;
             self.row_cursor = (self.row_cursor() as isize + delta).clamp(0, max) as usize;

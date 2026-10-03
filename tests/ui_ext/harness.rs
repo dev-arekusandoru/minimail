@@ -9,7 +9,7 @@ use gpui_kit::{
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
-use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
+use mail_classifier::model::{Location, Mailbox, MessageId, Tag, TriageState};
 use mail_classifier::outgoing::{DraftId, DraftKind, HOLD_SECONDS};
 use mail_classifier::tz::Utc;
 use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
@@ -432,14 +432,31 @@ impl Harness<'_> {
         self.await_composer("the composer never settled", |a| a.composer_idle());
     }
 
-    /// Whether the Drafts list is open.
-    pub fn drafts_picker_open(&mut self) -> bool {
-        self.read(|a| a.drafts_picker_open())
+    /// Whether the Drafts pane is the list the app is showing.
+    pub fn drafts_pane_open(&mut self) -> bool {
+        self.read(|a| a.drafts_pane_open())
     }
 
-    /// The rows of the open Drafts list, top to bottom.
-    pub fn drafts_rows(&mut self) -> Vec<String> {
-        self.app.read_with(self.cx, |a, cx| a.drafts_rows(cx))
+    /// The Drafts pane's rows, top to bottom: `(account, subject, recipient, snippet)`.
+    pub fn draft_rows(&mut self) -> Vec<(String, String, String, String)> {
+        self.read(|a| {
+            a.draft_rows()
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.account.clone(),
+                        r.subject.clone(),
+                        r.recipients.clone(),
+                        r.snippet.clone(),
+                    )
+                })
+                .collect()
+        })
+    }
+
+    /// The draft the pane cursor is on, if the Drafts pane is showing.
+    pub fn cursor_draft(&mut self) -> Option<DraftId> {
+        self.read(|a| a.cursor_draft().map(|r| r.id))
     }
 
     /// Move the draft the composer is showing into the tab strip, through the real control.
@@ -476,9 +493,16 @@ impl Harness<'_> {
     pub fn pills(&mut self) -> Vec<String> {
         self.read(|a| a.pill_texts())
     }
-    /// The list header's first line, e.g. `"Inbox · 12"`.
+    /// The list header's first line, e.g. `"Inbox · 12"` (or the Drafts pane's count).
     pub fn header(&mut self) -> String {
-        self.read(|a| a.header_title(a.visible_ids().len()))
+        self.read(|a| {
+            let count = if a.drafts_pane_open() {
+                a.draft_rows().len()
+            } else {
+                a.visible_ids().len()
+            };
+            a.header_title(count)
+        })
     }
     /// The query the list is showing, as text.
     pub fn query(&mut self) -> String {
@@ -504,10 +528,9 @@ impl Harness<'_> {
         })
     }
 
-    /// The sidebar row id of the Drafts item: All Inboxes is row 0 and the accounts follow,
-    /// with Drafts last.
-    pub fn drafts_sidebar_index(&mut self) -> usize {
-        self.read(|a| a.mailbox.accounts().len()) + 1
+    /// The location the list is showing, or `None` for a global search.
+    pub fn location(&mut self) -> Option<Location> {
+        self.read(|a| a.location())
     }
 }
 

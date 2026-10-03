@@ -174,6 +174,7 @@ impl MailApp {
         self.triage.set_query(query);
         self.row_cursor = 0;
         self.row_anchor = None;
+        self.draft_cursor = 0;
         self.scroll_to_cursor();
         self.close_filter_popover();
         cx.notify();

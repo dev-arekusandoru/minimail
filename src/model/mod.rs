@@ -150,6 +150,9 @@ pub enum Location {
     AllInboxes,
     Inbox(AccountId),
     Snoozed(AccountId),
+    /// The account's unfinished drafts. They are not messages, so the list pane renders them
+    /// from the composer's durable state rather than from the mailbox.
+    Drafts(AccountId),
     Sent(AccountId),
     Archive(AccountId),
     Trash(AccountId),

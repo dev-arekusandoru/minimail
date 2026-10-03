@@ -47,6 +47,7 @@ const BEAT_INTERVAL: Duration = Duration::from_millis(50);
 
 mod accessors;
 mod composer;
+mod drafts;
 use composer::{PendingOpen, PendingUi};
 mod actions;
 mod filters;
@@ -136,9 +137,6 @@ pub struct MailApp {
     pending_resolutions: HashMap<DraftId, crate::app::composer_worker::ResolveMode>,
     /// Repaint active hold notifications only when their countdown changes.
     hold_painted_at: Option<Timestamp>,
-    /// The Drafts list, when it is open: the way back to a draft that is not in a tab.
-    drafts_picker: Option<Entity<crate::app::compose::drafts::DraftsPicker>>,
-    _drafts_sub: Option<Subscription>,
     help: Option<Entity<HelpPanel>>,
     /// Toast text, if visible.
     pub toast: Option<SharedString>,
@@ -171,6 +169,8 @@ pub struct MailApp {
     /// Cursor over grouped rows.
     row_cursor: usize,
     row_anchor: Option<usize>,
+    /// Cursor over the Drafts pane rows while that pane is the list.
+    draft_cursor: usize,
     snooze: Option<Entity<SnoozePicker>>,
     /// Generic choice dialog (post-send, block, spam, sender-wide confirms).
     dialog: Option<Entity<ChoiceDialog>>,
@@ -301,8 +301,6 @@ impl MailApp {
             pending_attachment_ops: HashMap::new(),
             pending_resolutions: HashMap::new(),
             hold_painted_at: None,
-            drafts_picker: None,
-            _drafts_sub: None,
             help: None,
             toast: None,
             summaries_enabled: false,
@@ -320,8 +318,9 @@ impl MailApp {
             group_threads: false,
             expanded: HashSet::new(),
             row_cursor: 0,
-            _theme_sub: None,
             row_anchor: None,
+            draft_cursor: 0,
+            _theme_sub: None,
             snooze: None,
             dialog: None,
             folder_picker: None,

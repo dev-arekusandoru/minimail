@@ -237,7 +237,7 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
         vec!["in:inbox", "tag:needs-reply", "and", "tag:reminder"]
     );
 
-    h.click("2-3");
+    h.click("2-4");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
     assert_eq!(
         h.query(),
@@ -254,13 +254,13 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert_eq!(h.visible(), vec![1]);
     assert_eq!(h.read(|a| a.location_label()), "Personal · Inbox");
 
-    h.click("1-2");
+    h.click("1-3");
     assert_eq!(h.location(), Some(Location::Sent("personal".into())));
     assert!(h.visible().is_empty(), "no replies sent yet");
 
-    assert!(h.has("2-5"), "Projects is a work folder");
-    assert!(h.has("2-5-0"), "Northwind nests under Projects");
-    h.click("2-6");
+    assert!(h.has("2-6"), "Projects is a work folder");
+    assert!(h.has("2-6-0"), "Northwind nests under Projects");
+    h.click("2-7");
     assert_eq!(
         h.location(),
         Some(Location::Folder(6)),
@@ -354,7 +354,7 @@ fn the_number_keys_toggle_quick_filter_pills_everywhere(cx: &mut TestAppContext)
     assert_eq!(h.pills(), vec!["in:inbox", "tag:urgent", "and", "tag:spam"]);
 
     // Quick filters are not Inbox-only: they work in the archive too.
-    h.click("2-3");
+    h.click("2-4");
     h.keys("1");
     assert_eq!(
         h.query(),
@@ -576,7 +576,7 @@ fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_search_from_a_folder_keeps_the_folder_until_its_pill_is_removed(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("2-3");
+    h.click("2-4");
     h.keys("/");
     h.type_text("bob");
     h.keys("enter");

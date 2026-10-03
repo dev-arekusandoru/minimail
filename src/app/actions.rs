@@ -421,7 +421,6 @@ pub fn commands() -> Vec<CommandSpec> {
             ApproveConversion
         ),
         cmd!(Triage, "Paste as plain text", "", PasteAsPlain),
-        cmd!(Triage, "Drafts…", "cmd-shift-d", ShowDrafts),
         cmd!(Triage, "Resolve this draft's conflict", "", ResolveConflict),
         cmd!(Triage, "Check this draft's delivery", "", CheckDelivery),
         cmd!(App, "Toggle command palette", "cmd-k", ToggleCommandPalette),
@@ -476,6 +475,7 @@ pub fn commands() -> Vec<CommandSpec> {
         // Sidebar navigation.
         cmd!(Navigate, "Go to inbox", "g i", GoInbox),
         cmd!(Navigate, "Go to snoozed", "g s", GoSnoozed),
+        cmd!(Navigate, "Go to drafts", "cmd-shift-d", ShowDrafts),
         cmd!(Navigate, "Go to sent", "g t", GoSent),
         cmd!(Navigate, "Go to archive", "g a", GoArchive),
         cmd!(Navigate, "Go to trash", "g d", GoTrash),

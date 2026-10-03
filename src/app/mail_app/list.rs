@@ -39,18 +39,28 @@ impl MailApp {
     }
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let count = self.visible_in_frame().len();
+        // The Drafts pane lists drafts, not messages: its rows come from the composer's
+        // durable state and nothing is fetched for it.
+        let in_drafts = self.in_drafts();
+        let count = if in_drafts {
+            self.draft_rows().len()
+        } else {
+            self.visible_in_frame().len()
+        };
         let row_count = if self.grouped() {
             self.rows().len()
         } else {
             count
         };
         self.sync_list(row_count, cx);
-        // Near the end of the list, ask the server for the next page of older mail.
+        // Near the end of the list, ask the server for the next page of older mail. There is
+        // no server side to drafts.
         let cursor = self.cursor_ix();
         let near_end = self.list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= row_count
             || cursor + LOAD_MORE_MARGIN >= row_count;
-        self.maybe_load_older(near_end);
+        if !in_drafts {
+            self.maybe_load_older(near_end);
+        }
         let selected = self.triage.selected().len();
         let pills = self.render_pills(cx);
         let t = cx.theme();
@@ -100,7 +110,11 @@ impl MailApp {
         let body = if self.mailbox.accounts().is_empty() {
             self.render_onboarding(cx)
         } else if count == 0 {
-            let title = format!("No mail in {}", self.location_label());
+            let title = if in_drafts {
+                format!("No drafts in {}", self.location_label())
+            } else {
+                format!("No mail in {}", self.location_label())
+            };
             Empty::new()
                 .header(EmptyHeader::new().title(EmptyTitle::new().child(title)))
                 .into_any_element()
@@ -179,8 +193,11 @@ impl MailApp {
         self.list_shape = Some(shape);
     }
 
-    /// Row `ix` of the list: a thread header or a message row, measured to its own content.
+    /// Row `ix` of the list: the Drafts pane's draft row, or a thread header, or a message row.
     fn render_list_row(&self, ix: usize, cx: &Context<Self>) -> AnyElement {
+        if self.in_drafts() {
+            return self.render_draft_row(ix, cx);
+        }
         let newest = self.newest();
         if self.grouped() {
             match self.rows().get(ix) {
