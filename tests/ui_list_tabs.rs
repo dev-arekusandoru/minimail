@@ -250,3 +250,36 @@ fn dragging_a_tab_in_the_list_strip_reorders_the_model(cx: &mut TestAppContext) 
         "the model followed the strip"
     );
 }
+
+#[gpui_kit::gpui::test]
+fn a_click_in_the_reader_content_gives_it_the_tab_keys(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.cmd_click("1-3"); // pin Archive, so the list strip has tabs to cycle
+    h.click("1-4"); // the preview takes Trash
+    h.click(("list-tab", 0usize)); // back to the inbox, where the rows are
+
+    // Two reader tabs to cycle between and close.
+    h.row(4);
+    h.keys("enter"); // landing on the previewed message pins its tab
+    h.row(3);
+    h.keys("enter");
+    assert_eq!(h.read(|a| a.tabs.tabs().len()), 2, "the reader has two tabs");
+
+    // A list row click leaves the keys on the list.
+    h.row(4);
+    h.keys("ctrl-tab");
+    assert_eq!(h.active(), 1, "the list strip cycled");
+    h.keys("cmd-w");
+    assert_eq!(h.tabs().len(), 2, "cmd-w closed a list tab");
+    assert_eq!(h.read(|a| a.tabs.tabs().len()), 2, "the reader strip was left alone");
+
+    // A click in the reader's content is what moves them to the reader — no tab or
+    // row, just the message the reader is showing.
+    h.click("reader-body");
+    let before = h.opened();
+    h.keys("ctrl-tab");
+    assert_ne!(h.opened(), before, "the reader strip cycled");
+    h.keys("cmd-w");
+    assert_eq!(h.read(|a| a.tabs.tabs().len()), 1, "cmd-w closed a reader tab");
+    assert_eq!(h.tabs().len(), 2, "the list strip was left alone");
+}

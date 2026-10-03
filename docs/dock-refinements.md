@@ -74,8 +74,12 @@ list group unchanged.
 - The sidebar highlight follows the active list tab, not the last click.
 - Switching a list tab does not touch the reader's tabs: two panes, two strips.
 - Counts and the status bar follow the active tab.
-- Dropping a message on a list tab files it under that tab's location — cheap and natural once
-  the strip exists; extends S2.
+- Dropping a message on a list tab files it under that tab's location: Inbox / Archive / Trash /
+  a folder map to `Inbox` / `Archived` / `Deleted` / `Filed(folder)`. A Snoozed tab opens the
+  snooze picker instead (the invariant needs a wake time, so a drop cannot pick one); Sent and
+  All Inboxes do nothing. A drop elsewhere on the list pane files under the *active* tab.
+  Targets are our own elements — the tab titles — because the dock's drop event names the group,
+  not the tab.
 - A folder dropped on the list strip opens as a **new pinned tab**; if that location is already
   open, its tab is activated instead of a second one opening. (Accepted limits of the drop
   event: it reports the group, not a tab slot, so the tab lands at the end; and it cannot tell

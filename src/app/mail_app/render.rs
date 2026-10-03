@@ -44,6 +44,13 @@ impl Render for MailApp {
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
                     // Clicking never steals key focus from the list (or a modal's input).
                     if !this.modal_open() {
+                        // The dock's groups focus their active panel on mouse-down before
+                        // this runs, so the focused handle says which pane was clicked —
+                        // the tab keys follow the pane the user was last in, wherever in
+                        // it they clicked.
+                        if let Some(pane) = this.panes.dock_ref().focused_pane(window, cx) {
+                            this.focus_pane(pane);
+                        }
                         window.focus(&this.focus_handle, cx);
                     }
                 }),

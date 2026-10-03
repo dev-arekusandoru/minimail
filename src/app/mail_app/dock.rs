@@ -338,6 +338,22 @@ impl Dock {
         self.lists.iter().position(|panel| &panel.read(cx).query == query)
     }
 
+    /// Which pane the window's focus says the user last touched, read from the panels
+    /// rather than from any list of interactions: a mouse-down in a group focuses that
+    /// group's active panel, so a click anywhere in the reader's content — body, headers,
+    /// find bar, background — is caught as surely as one on a tab. `None` when the focus
+    /// is neither pane (the app's own handle, a modal's input), leaving the pane as it was.
+    pub(super) fn focused_pane(&self, window: &Window, cx: &App) -> Option<Pane> {
+        let holds = |panel_focus: &FocusHandle| panel_focus.contains_focused(window, cx);
+        if self.lists.iter().any(|panel| holds(&panel.read(cx).focus)) {
+            return Some(Pane::List);
+        }
+        if self.readers.iter().chain(std::iter::once(&self.blank)).any(|panel| holds(&panel.read(cx).focus)) {
+            return Some(Pane::Reader);
+        }
+        None
+    }
+
     /// Whether `node` is the centre group holding the reader tabs — the only drop target that
     /// opens mail. The list is a tab group too, and a drop on it means nothing.
     pub(super) fn is_reader_node(&self, node: NodeId, cx: &App) -> bool {
