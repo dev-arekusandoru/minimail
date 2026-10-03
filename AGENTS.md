@@ -10,6 +10,7 @@ Keyboard-first triage mail client in Rust (edition 2024) + GPUI via `gpui-kit` 0
 - **Test imports**: import names explicitly in tests — a `gpui_kit::*` glob shadows `#[test]`.
 - **Keybindings**: bind bare-letter keys under `"MailApp && !Input"`, or they fire while typing in inputs.
 - **Actions**: new ones go in `src/app/actions.rs` (`bind_keys` + `commands()` with a palette `Category`), which puts them in the palette and help automatically; palette and folder-picker matching lives in `src/fuzzy.rs`.
+- **Build/test loop**: make the whole change first, then `cargo check --all-targets` for type errors — it is much faster than `build`. While iterating, run only the test targets the change can touch (`cargo test --test <name>`); the suites share the app harness, so a change can still break a suite that looks unrelated, which is why the final run is the full one: one `cargo clippy --all-targets -- -D warnings` then one `cargo test`. Never run cargo commands in parallel — they queue on the target-dir lock.
 - **Tests**: UI tests are headless keystroke tests (`cx.simulate_keystrokes`) in `tests/ui*.rs`. Test behavior, not wiring.
 - **Providers**: new backends go behind `MailProvider`, new classifiers behind `Judge`. Tests use fakes, never the network; no real providers unless explicitly asked.
 
