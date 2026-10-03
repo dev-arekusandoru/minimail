@@ -78,7 +78,7 @@ impl MailApp {
             return;
         }
         let n = self.mailbox.set_state(&ids, state);
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {
                 TriageState::Inbox => format!("Moved {n} to inbox · u to undo"),
@@ -103,7 +103,7 @@ impl MailApp {
     ) {
         let (name, email) = (name.to_owned(), email.to_owned());
         let n = self.mailbox.set_state_for_sender(&email, from, state);
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = format!(
                 "Marked {n} from {name} {} · u to undo",
@@ -162,7 +162,7 @@ impl MailApp {
                 None => return,
             },
         };
-        self.show_location(location, cx);
+        self.show_location(location, false, cx);
     }
 
     /// `g s` / `g t` / `g a` / `g d`: the current account's location.
@@ -172,7 +172,7 @@ impl MailApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(account) = self.nav_account() {
-            self.show_location(location(account), cx);
+            self.show_location(location(account), false, cx);
         }
     }
 
@@ -203,8 +203,7 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        self.folder = Location::AllInboxes;
-        self.triage.set_query(query);
+        self.open_view(query, Location::AllInboxes, false, cx);
         self.session_end = None;
         self.session = Some(Session {
             ids,

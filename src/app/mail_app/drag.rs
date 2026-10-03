@@ -73,7 +73,7 @@ impl MailApp {
         thread: Option<u32>,
         label: (SharedString, SharedString),
     ) -> Stateful<Div> {
-        let Some(drag) = MailDrag::for_row(&self.triage.selected(), ids, thread) else {
+        let Some(drag) = MailDrag::for_row(&self.triage().selected(), ids, thread) else {
             return row;
         };
         let (sender, subject) = label;

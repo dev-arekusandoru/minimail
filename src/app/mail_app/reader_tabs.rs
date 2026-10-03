@@ -20,6 +20,8 @@ impl MailApp {
         if pin {
             self.tabs.pin(thread);
         }
+        // Opening a message is what the reader is for, so the tab keys follow it there.
+        self.focus_pane(Pane::Reader);
     }
 
     /// Open `id` and make its tab permanent (replying to it).
@@ -72,6 +74,7 @@ impl MailApp {
             }
             self.follow_active_tab();
         }
+        self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -81,12 +84,13 @@ impl MailApp {
             self.forget_thread(thread);
             self.follow_active_tab();
         }
+        self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
-    /// `cmd-w`.
-    pub(super) fn close_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// `cmd-w` with the reader focused: close its active tab.
+    pub(super) fn close_active_reader_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }
@@ -95,8 +99,9 @@ impl MailApp {
         }
     }
 
-    /// `ctrl-tab` / `ctrl-shift-tab`: step to the next or previous tab, wrapping.
-    pub(super) fn cycle_tab(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+    /// `ctrl-tab` / `ctrl-shift-tab` with the reader focused: step to the next or previous
+    /// tab, wrapping.
+    pub(super) fn cycle_reader_tabs(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }

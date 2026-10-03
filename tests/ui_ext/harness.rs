@@ -156,7 +156,7 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.count(s))
     }
     pub fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
+        self.read(|a| a.triage().cursor(&a.mailbox, a.now()))
     }
     pub fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())

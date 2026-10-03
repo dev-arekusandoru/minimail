@@ -5,7 +5,6 @@ use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
-use crate::model::Location;
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
 use gpui_kit::*;
 
@@ -426,11 +425,4 @@ gpui_kit::actions!(
         ClearFilters
     ]
 );
-
-/// Jump the sidebar to one location (a sidebar row click).
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct ShowLocation {
-    pub location: Location,
-}
 

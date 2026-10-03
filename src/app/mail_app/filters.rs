@@ -54,19 +54,19 @@ impl Shown {
 impl MailApp {
     /// The one query the list is: its location is the `in:` value, everything else is a pill.
     pub fn query(&self) -> &Query {
-        &self.triage.query
+        &self.triage().query
     }
 
     /// The location the list shows: the browsed folder while the query still holds its
     /// `in:` and `account:` values, else whatever place the query names on its own (a typed
     /// `in:archived`), else `None` for a global search.
     pub fn location(&self) -> Option<Location> {
-        let q = &self.triage.query;
+        let q = &self.triage().query;
         let own = self.implicit_query();
         let keeps_folder = q.values(Field::In) == own.values(Field::In)
             && own.values(Field::Account).iter().all(|a| q.values(Field::Account).contains(a));
         if keeps_folder {
-            Some(self.folder.clone())
+            Some(self.folder().clone())
         } else {
             self.mailbox.query_location(q)
         }
@@ -75,17 +75,17 @@ impl MailApp {
     /// The query the browsed folder implies on its own: `in:<place>` plus `account:`.
     /// Its pills stay invisible while the list's query is exactly this.
     pub(super) fn implicit_query(&self) -> Query {
-        self.mailbox.location_query(&self.folder)
+        self.mailbox.location_query(self.folder())
     }
 
     /// Whether anything beyond the location narrows the list.
     pub fn is_filtered(&self) -> bool {
-        self.triage.query != self.implicit_query()
+        self.triage().query != self.implicit_query()
     }
 
     /// Every pill the query holds, free-text terms included.
     fn shown_pills(&self) -> Vec<Shown> {
-        self.triage
+        self.triage()
             .query
             .pills()
             .into_iter()
@@ -95,7 +95,7 @@ impl MailApp {
                 combinator: p.combinator,
                 text: false,
             })
-            .chain(self.triage.query.text().iter().map(|t| Shown {
+            .chain(self.triage().query.text().iter().map(|t| Shown {
                 field: Field::Body,
                 value: t.clone(),
                 combinator: None,
@@ -130,7 +130,7 @@ impl MailApp {
 
     /// `Some("search: …")` while anything beyond the location is applied.
     pub fn search_header(&self) -> Option<String> {
-        self.is_filtered().then(|| format!("search: {}", self.triage.query.describe()))
+        self.is_filtered().then(|| format!("search: {}", self.triage().query.describe()))
     }
 
     /// The pill row as text, left to right: each pill, with its group's `and`/`or` before
@@ -160,22 +160,14 @@ impl MailApp {
 
     // ------------------------------------------------------------------ query edits
 
-    /// Point the list at `query`: the cursor goes to the top and the reader stays.
+    /// Point the list at `query`. A view is a tab of its own, so this opens the new view as
+    /// one and leaves the tabs already open alone; `Clear filters` finds the plain view again.
     pub(super) fn apply_query(&mut self, query: Query, cx: &mut Context<Self>) {
         self.end_session();
-        self.triage.set_query(query);
-        self.row_cursor = 0;
-        self.row_anchor = None;
+        let folder = self.view().folder.clone();
+        self.open_view(query, folder, false, cx);
         self.scroll_to_cursor();
         self.close_filter_popover();
-        cx.notify();
-    }
-
-    /// Show `location` the way the sidebar does: a fresh `in:` and no other filters.
-    pub(super) fn show_location(&mut self, location: Location, cx: &mut Context<Self>) {
-        let query = self.mailbox.location_query(&location);
-        self.folder = location;
-        self.apply_query(query, cx);
     }
 
     /// Add `value` to `field`, or swap it for `replacing` when editing a pill.
@@ -186,7 +178,7 @@ impl MailApp {
         replacing: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let mut query = self.triage.query.clone();
+        let mut query = self.triage().query.clone();
         let changed = match replacing {
             Some(old) => query.replace(field, &old, &value),
             None => query.add(field, &value),
@@ -198,7 +190,7 @@ impl MailApp {
 
     /// Remove one free-text term.
     pub(super) fn remove_text_pill(&mut self, term: &str, cx: &mut Context<Self>) {
-        let mut query = self.triage.query.clone();
+        let mut query = self.triage().query.clone();
         if query.remove_text(term) {
             self.apply_query(query, cx);
         }
@@ -206,10 +198,10 @@ impl MailApp {
 
     /// Flip a field's group between `and` and `or`.
     pub(super) fn toggle_combinator(&mut self, field: Field, cx: &mut Context<Self>) {
-        let Some(current) = self.triage.query.combinator(field) else {
+        let Some(current) = self.triage().query.combinator(field) else {
             return;
         };
-        let mut query = self.triage.query.clone();
+        let mut query = self.triage().query.clone();
         query.set_combinator(field, current.toggled());
         self.apply_query(query, cx);
     }
@@ -219,7 +211,7 @@ impl MailApp {
         match crate::filters::quick_filter(index) {
             Some(QuickFilter::Clear) => self.clear_filters(cx),
             Some(QuickFilter::Toggle(field, value)) => {
-                let mut query = self.triage.query.clone();
+                let mut query = self.triage().query.clone();
                 query.toggle(field, value);
                 self.apply_query(query, cx);
             }
@@ -443,7 +435,7 @@ impl MailApp {
         if pill.text {
             self.remove_text_pill(&pill.value, cx);
         } else {
-            let mut query = self.triage.query.clone();
+            let mut query = self.triage().query.clone();
             if query.remove(pill.field, &pill.value) {
                 self.apply_query(query, cx);
             }

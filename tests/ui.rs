@@ -61,10 +61,10 @@ impl Harness<'_> {
         TriageState::ALL.map(|s| self.count(s))
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, a.now()))
+        self.read(|a| a.triage().cursor(&a.mailbox, a.now()))
     }
     fn index(&mut self) -> usize {
-        self.read(|a| a.triage.cursor_index())
+        self.read(|a| a.triage().cursor_index())
     }
     fn view(&mut self) -> Option<Location> {
         self.read(|a| a.location())
@@ -343,7 +343,7 @@ fn multi_select_then_archive(cx: &mut TestAppContext) {
 
     // Range select with shift-j.
     h.keys("shift-j shift-j");
-    let sel = h.read(|a| a.triage.selected());
+    let sel = h.read(|a| a.triage().selected());
     assert_eq!(sel.len(), 3);
     assert!(sel.iter().all(|s| ids[..3].contains(s)));
     h.keys("e");
@@ -351,7 +351,7 @@ fn multi_select_then_archive(cx: &mut TestAppContext) {
         assert_eq!(h.state_of(*id), Archived);
     }
     assert_eq!(h.count(Inbox), start[0] - 3);
-    assert!(h.read(|a| a.triage.selected().is_empty()));
+    assert!(h.read(|a| a.triage().selected().is_empty()));
 
     // Undo restores all three in one step.
     h.keys("u");
@@ -359,9 +359,9 @@ fn multi_select_then_archive(cx: &mut TestAppContext) {
 
     // shift-k extends upward.
     h.keys("j j j shift-k");
-    assert_eq!(h.read(|a| a.triage.selected().len()), 2);
+    assert_eq!(h.read(|a| a.triage().selected().len()), 2);
     h.keys("escape");
-    assert!(h.read(|a| a.triage.selected().is_empty()));
+    assert!(h.read(|a| a.triage().selected().is_empty()));
 }
 
 #[gpui_kit::gpui::test]
@@ -370,7 +370,7 @@ fn x_toggles_selection_then_archive(cx: &mut TestAppContext) {
     let start = h.counts();
     let ids = h.read(|a| a.mailbox.ids_in(Inbox));
     h.keys("x j j x");
-    let mut sel = h.read(|a| a.triage.selected());
+    let mut sel = h.read(|a| a.triage().selected());
     sel.sort();
     let mut want = vec![ids[0], ids[2]];
     want.sort();
@@ -388,7 +388,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     // Move the cursor (via keys) to a message whose sender has several messages.
     let multi = |h: &mut Harness| {
         h.read(|a| {
-            let id = a.triage.cursor(&a.mailbox, a.now()).unwrap();
+            let id = a.triage().cursor(&a.mailbox, a.now()).unwrap();
             let email = a.mailbox.get(id).unwrap().from_email.clone();
             let n = a.mailbox.messages().iter().filter(|m| m.from_email == email).count();
             (email, n)

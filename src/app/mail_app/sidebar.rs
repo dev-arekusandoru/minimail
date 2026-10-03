@@ -32,6 +32,18 @@ pub(super) fn location_label(loc: &Location, mailbox: &Mailbox) -> String {
     }
 }
 
+/// The label a sidebar row shows for a location: the location's own name, with the account
+/// left to the submenu around the row. [`location_label`] is the account-qualified form, for
+/// headers; this is what the row — and so the list tab that opens it — reads.
+pub(super) fn row_label(loc: &Location, mailbox: &Mailbox) -> String {
+    match loc {
+        Location::Folder(id) => {
+            mailbox.folder(*id).map_or_else(|| location_name(loc).to_owned(), |folder| folder.name.clone())
+        }
+        loc => location_name(loc).to_owned(),
+    }
+}
+
 /// Name of a location inside one account, e.g. `"Inbox"`.
 fn location_name(loc: &Location) -> &'static str {
     match loc {
@@ -85,6 +97,17 @@ fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Tag {
         (t.secondary, t.muted_foreground)
     };
     Tag::custom(bg, fg, bg).small().rounded_full().flex_none().child(n.to_string())
+}
+
+/// What a sidebar row does when it is clicked: show the location in the list strip. The
+/// plain click takes over the preview tab, and a cmd-click or a double-click pins the view,
+/// so a second location does not push it away again.
+fn click_to_show(loc: Location, cx: &Context<MailApp>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + use<> {
+    let app = cx.weak_entity();
+    move |event: &ClickEvent, _window: &mut Window, cx: &mut App| {
+        let pin = event.modifiers().platform || event.click_count() >= 2;
+        app.update(cx, |app, cx| app.show_location(loc.clone(), pin, cx)).ok();
+    }
 }
 
 impl MailApp {
@@ -176,10 +199,10 @@ impl MailApp {
         let counted =
             matches!(loc, Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_));
         let count = self.mailbox.count_at(&loc, self.now());
-        let mut item = SidebarMenuItem::new(location_name(&loc).to_owned())
+        let mut item = SidebarMenuItem::new(row_label(&loc, &self.mailbox))
             .icon(Icon::new(icon).text_color(color))
             .active(is_active)
-            .on_click(run(ShowLocation { location: loc }));
+            .on_click(click_to_show(loc.clone(), cx));
         if counted && count > 0 {
             item = item.suffix(move |_, cx| count_badge(cx.theme(), count, is_active));
         }
@@ -205,7 +228,7 @@ impl MailApp {
         let mut item = SidebarMenuItem::new(folder.name.clone())
             .icon(Icon::new(icon).text_color(color))
             .active(*active == Some(loc.clone()))
-            .on_click(run(ShowLocation { location: loc }));
+            .on_click(click_to_show(loc.clone(), cx));
         if !subfolders.is_empty() {
             item = item.default_open(true).children(
                 subfolders

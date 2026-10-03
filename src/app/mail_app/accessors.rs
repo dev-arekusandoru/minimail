@@ -74,7 +74,7 @@ impl MailApp {
 
     pub fn new_senders_open(&self) -> bool {
         crate::known_senders::KNOWN_SENDERS_ENABLED
-            && self.triage.query.has(Field::Is, "new")
+            && self.triage().query.has(Field::Is, "new")
     }
 
     /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.
@@ -150,7 +150,7 @@ impl MailApp {
 
     /// Exactly the message ids the list shows, top to bottom.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        self.mailbox.ids_matching(&self.triage.query, self.now())
+        self.mailbox.ids_matching(&self.triage().query, self.now())
     }
 
     pub fn now(&self) -> Timestamp {
@@ -177,14 +177,14 @@ impl MailApp {
         if self.grouped() {
             return self.cursor_row().map(|r| r.primary());
         }
-        self.triage.cursor(&self.mailbox, self.now())
+        self.triage().cursor(&self.mailbox, self.now())
     }
 
     pub(super) fn cursor_ix(&self) -> usize {
         if self.grouped() {
             return self.row_cursor();
         }
-        self.triage.cursor_index()
+        self.triage().cursor_index()
     }
 
     /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
@@ -192,22 +192,25 @@ impl MailApp {
         if let Some(ids) = &self.menu_target {
             return ids.clone();
         }
-        if self.grouped() && self.triage.selected().is_empty() {
+        if self.grouped() && self.triage().selected().is_empty() {
             return self.cursor_row().map(|r| r.ids()).unwrap_or_default();
         }
         if self.in_session() {
             return self.cursor_id().into_iter().collect();
         }
-        self.triage.targets(&self.mailbox, self.now())
+        self.triage().targets(&self.mailbox, self.now())
     }
 
     pub(super) fn move_cursor(&mut self, delta: isize) {
         if self.grouped() {
             let len = self.rows().len();
             let max = len.saturating_sub(1) as isize;
-            self.row_cursor = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
+            let next = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
+            self.view_mut().row_cursor = next;
         } else {
-            self.triage.move_cursor(&self.mailbox, self.now(), delta);
+            let now = self.now();
+            let ix = self.list_tabs.active_index();
+            self.list_views[ix].triage.move_cursor(&self.mailbox, now, delta);
         }
     }
 
@@ -229,6 +232,6 @@ impl MailApp {
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state
     /// works it out.
     pub(super) fn scroll_to_cursor(&self) {
-        self.list_state.scroll_to_reveal_item(self.cursor_ix());
+        self.view().list_state.scroll_to_reveal_item(self.cursor_ix());
     }
 }

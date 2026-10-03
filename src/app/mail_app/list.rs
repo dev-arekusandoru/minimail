@@ -37,10 +37,10 @@ impl MailApp {
         self.sync_list(row_count, cx);
         // Near the end of the list, ask the server for the next page of older mail.
         let cursor = self.cursor_ix();
-        let near_end = self.list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= row_count
+        let near_end = self.view().list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= row_count
             || cursor + LOAD_MORE_MARGIN >= row_count;
         self.maybe_load_older(near_end);
-        let selected = self.triage.selected().len();
+        let selected = self.triage().selected().len();
         let pills = self.render_pills(cx);
         let t = cx.theme();
         let header = div()
@@ -96,7 +96,7 @@ impl MailApp {
                 .flex_col()
                 .child(
                     list(
-                        self.list_state.clone(),
+                        self.view().list_state.clone(),
                         cx.processor(|this, ix: usize, _window, cx| this.render_list_row(ix, cx)),
                     )
                     .w_full()
@@ -131,12 +131,6 @@ impl MailApp {
     /// measured for an older preview setting, pane width, grouping or row count. Anything
     /// that changes those bumps the shape and is re-measured on the next render.
     fn sync_list(&mut self, count: usize, _cx: &mut Context<Self>) {
-        if self.list_shape.is_none() {
-            // Remember where the viewport ends, so a scroll near the last row can
-            // ask the server for the next page of older mail.
-            let end = self.list_visible_end.clone();
-            self.list_state.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
-        }
         let shape = ListShape {
             count,
             grouped: self.grouped(),
@@ -144,21 +138,28 @@ impl MailApp {
             // Sub-pixel pane resizes do not change the layout.
             width: self.list_w.round() as i32,
         };
-        if self.list_shape == Some(shape) {
+        let view = self.view_mut();
+        if view.list_shape.is_none() {
+            // Remember where the viewport ends, so a scroll near the last row can
+            // ask the server for the next page of older mail.
+            let end = view.list_visible_end.clone();
+            view.list_state.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
+        }
+        if view.list_shape == Some(shape) {
             return;
         }
-        let same_rows = self.list_shape.is_some_and(|old| old.count == count);
+        let same_rows = view.list_shape.is_some_and(|old| old.count == count);
         if same_rows {
-            self.list_state.remeasure();
+            view.list_state.remeasure();
         } else {
-            let top = self.list_state.logical_scroll_top();
-            self.list_state.reset(count);
-            self.list_state.scroll_to(ListOffset {
+            let top = view.list_state.logical_scroll_top();
+            view.list_state.reset(count);
+            view.list_state.scroll_to(ListOffset {
                 item_ix: top.item_ix.min(count),
                 offset_in_item: top.offset_in_item,
             });
         }
-        self.list_shape = Some(shape);
+        view.list_shape = Some(shape);
     }
 
     /// Row `ix` of the list: a thread header or a message row, measured to its own content.

@@ -95,6 +95,16 @@ impl Harness<'_> {
         self.cx.update_window(self.window, |_, window, cx| window.click(id, cx)).expect("window alive");
         self.cx.run_until_parked();
     }
+
+    /// Click `id` inside `scope`. A sidebar row's id is a bare index, which the dock's own
+    /// tabs also use, so a global lookup of one is ambiguous once a strip is on screen.
+    fn click_in(&mut self, scope: impl Into<ElementId>, id: impl Into<ElementId>) {
+        let (scope, id) = (scope.into(), id.into());
+        self.cx
+            .update_window(self.window, |_, window, cx| window.within(scope).click(id, cx))
+            .expect("window alive");
+        self.cx.run_until_parked();
+    }
     fn type_text(&mut self, text: &str) {
         let window = self.window;
         self.cx.update_window(window, |_, window, cx| window.input(text, cx)).unwrap();
@@ -194,7 +204,7 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert_eq!(h.location(), Some(Location::Folder(6)), "a folder of the work account");
     assert_eq!(h.read(|a| a.location_label()), "Recruiting");
 
-    h.click(0usize);
+    h.click_in("sidebar", 0usize);
     assert_eq!(h.read(|a| a.location_label()), "All Inboxes");
 }
 
@@ -359,11 +369,11 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Some(Location::Inbox("personal".into())));
 
     // From All Inboxes the first account answers, and `g i` keeps it unified.
-    h.click(0usize);
+    h.click_in("sidebar", 0usize);
     assert_eq!(h.location(), Some(Location::AllInboxes));
     h.keys("g a");
     assert_eq!(h.location(), Some(Location::Archive("personal".into())));
-    h.click(0usize);
+    h.click_in("sidebar", 0usize);
     h.keys("g i");
     assert_eq!(h.location(), Some(Location::AllInboxes), "`g i` stays on All Inboxes");
 

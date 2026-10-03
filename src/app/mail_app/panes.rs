@@ -9,6 +9,7 @@
 //! What lives here is what the dock cannot hold for us: whether the sidebar is on
 //! screen, how wide it is, and the size each orientation remembers for the list.
 use gpui_kit::component::ActiveTheme as _;
+use super::dock::TabSets;
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 
 use super::dock::Dock;
@@ -101,12 +102,16 @@ pub struct Panes {
 }
 
 impl Panes {
-    pub(super) fn new(app: &WeakEntity<MailApp>, window: &mut Window, cx: &mut Context<MailApp>) -> Self {
+    pub(super) fn new(
+        app: &WeakEntity<MailApp>,
+        initial: &Query,
+        window: &mut Window,
+        cx: &mut Context<MailApp>,
+    ) -> Self {
         let sidebar = cx.new(|_| ResizableState::default());
         let sub = cx.observe(&sidebar, |_, _, cx| cx.notify());
-        Self { dock: Dock::new(app, window, cx), sidebar, sidebar_visible: true, _subs: vec![sub] }
+        Self { dock: Dock::new(app, initial, window, cx), sidebar, sidebar_visible: true, _subs: vec![sub] }
     }
-
 
     pub fn orientation(&self) -> Orientation {
         self.dock.orientation()
@@ -207,18 +212,16 @@ impl MailApp {
         if size <= 0. {
             return;
         }
-        let threads = self.panes.reader_threads(self);
-        let active = active_thread(self);
+        let tabs = self.tab_sets();
         let sidebar = self.panes.sidebar_room(cx);
-        self.panes.dock_mut().place_list(size + delta, sidebar, threads.as_deref(), active, window, cx);
+        self.panes.dock_mut().place_list(size + delta, sidebar, &tabs, window, cx);
     }
 
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let threads = self.panes.reader_threads(self);
-        let active = active_thread(self);
+        let tabs = self.tab_sets();
         let sidebar = self.panes.sidebar_room(cx);
-        self.panes.dock_mut().forget_sizes(sidebar, threads.as_deref(), active, window, cx);
+        self.panes.dock_mut().forget_sizes(sidebar, &tabs, window, cx);
         self.show_toast("Pane sizes reset".into(), window, cx);
     }
 
@@ -239,9 +242,8 @@ impl MailApp {
             return;
         }
         self.panes.dock_mut().set_orientation(orientation);
-        let threads = self.panes.reader_threads(self);
-        let active = active_thread(self);
-        self.panes.dock_mut().rebuild_now(threads.as_deref(), active, window, cx);
+        let tabs = self.tab_sets();
+        self.panes.dock_mut().rebuild_now(&tabs, window, cx);
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
@@ -252,18 +254,36 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Keep the dock's panel set in step with the app's: the reader group's tabs, the
-    /// active one, and the orientation. A tab dragged in the strip is a dock edit the model
-    /// never saw, so the order it was left in goes back into `Tabs`.
+    /// Keep the dock's panel set in step with the app's: both strips' tabs, the tab each
+    /// one shows, and the orientation. A tab dragged in a strip is a dock edit the model
+    /// never saw, so the order it was left in goes back into `Tabs` and `ListTabs`.
     pub(super) fn sync_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let threads = self.panes.reader_threads(self);
-        let active = active_thread(self);
-        let dragged = self.panes.dock_mut().sync(threads.as_deref(), active, window, cx);
-        if let Some(dragged) = dragged {
+        let tabs = self.tab_sets();
+        let dragged = self.panes.dock_mut().sync(&tabs, window, cx);
+        if let Some(dragged) = dragged.readers {
             self.tabs.reorder_to(&dragged.order);
             if let Some(ix) = dragged.active.and_then(|thread| self.tabs.index_of(thread)) {
                 self.tabs.activate(ix);
+                self.focus_pane(Pane::Reader);
             }
+        }
+        if let Some(dragged) = dragged.lists {
+            self.adopt_dragged_order(&dragged.order);
+            if let Some(ix) = dragged.active.and_then(|query| self.list_tabs.index_of(&query)) {
+                self.list_tabs.activate(ix);
+                self.follow_active_view();
+                self.focus_pane(Pane::List);
+            }
+        }
+    }
+
+    /// What the dock should be holding: both strips' tabs and the one each is showing.
+    fn tab_sets(&self) -> TabSets {
+        TabSets {
+            readers: self.panes.reader_threads(self),
+            reader: active_thread(self),
+            views: self.list_tabs.tabs().iter().map(|tab| tab.query.clone()).collect(),
+            list: self.list_tabs.active_index(),
         }
     }
 

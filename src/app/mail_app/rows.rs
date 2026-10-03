@@ -17,7 +17,7 @@ impl MailApp {
         } else if self.new_senders_open() {
             HintMode::NewSenders
         } else {
-            match self.triage.selected().len() {
+            match self.triage().selected().len() {
                 0 if self.opened().is_some() => HintMode::Reader,
                 0 => HintMode::List,
                 n => HintMode::Selection(n),
@@ -93,7 +93,7 @@ impl MailApp {
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
-            selected: self.triage.is_selected(id),
+            selected: self.triage().is_selected(id),
             partial: false,
             unread,
             urgent,

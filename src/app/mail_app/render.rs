@@ -140,9 +140,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &Forward, window, cx| {
                 this.open_compose_kind(crate::draft::DraftKind::Forward, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
-            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
-            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_focused_tab(window, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_focused_tab(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_focused_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &OpenFind, window, cx| this.open_find(window, cx)))
             .on_action(cx.listener(|this, _: &CloseFind, window, cx| this.close_find(window, cx)))
             .on_action(cx.listener(|this, _: &FindNext, _, cx| this.find_step(1, cx)))
@@ -162,7 +162,6 @@ impl Render for MailApp {
                 }
             }))
             // Sidebar navigation and the list header's filter pills.
-            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))

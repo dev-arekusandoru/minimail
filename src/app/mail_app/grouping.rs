@@ -34,13 +34,13 @@ impl MailApp {
 
     /// Index of the cursor row, clamped to the rows.
     pub fn row_cursor(&self) -> usize {
-        self.row_cursor.min(self.rows().len().saturating_sub(1))
+        self.view().row_cursor.min(self.rows().len().saturating_sub(1))
     }
 
     /// Row under the cursor (grouped mode).
     pub(super) fn cursor_row(&self) -> Option<Row> {
         let rows = self.rows();
-        let at = self.row_cursor.min(rows.len().saturating_sub(1));
+        let at = self.view().row_cursor.min(rows.len().saturating_sub(1));
         rows.into_iter().nth(at)
     }
 
@@ -51,26 +51,28 @@ impl MailApp {
 
     pub(super) fn row_selected(&self, row: &Row) -> bool {
         let ids = row.ids();
-        ids.iter().all(|id| self.triage.is_selected(*id))
+        ids.iter().all(|id| self.triage().is_selected(*id))
     }
 
     /// Shift-selection over rows, like `shift-j`/`shift-k`.
     pub(super) fn extend_by(&mut self, delta: isize) {
         if !self.grouped() {
-            self.triage.extend(&self.mailbox, self.now(), delta);
+            let now = self.now();
+            let ix = self.list_tabs.active_index();
+            self.list_views[ix].triage.extend(&self.mailbox, now, delta);
             return;
         }
         let rows = self.rows();
         if rows.is_empty() {
             return;
         }
-        if self.triage.selected().is_empty() {
-            self.row_anchor = None;
+        if self.triage().selected().is_empty() {
+            self.view_mut().row_anchor = None;
         }
-        let cur = self.row_cursor.min(rows.len() - 1);
-        let anchor = *self.row_anchor.get_or_insert(cur);
+        let cur = self.row_cursor().min(rows.len() - 1);
+        let anchor = *self.view_mut().row_anchor.get_or_insert(cur);
         let next = (cur as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
-        self.row_cursor = next;
+        self.view_mut().row_cursor = next;
         let (lo, hi) = (anchor.min(next), anchor.max(next));
         let mut ids: Vec<MessageId> = Vec::new();
         for row in &rows[lo..=hi] {
@@ -80,17 +82,19 @@ impl MailApp {
                 }
             }
         }
-        self.triage.set_selection(ids);
+        self.triage_mut().set_selection(ids);
     }
 
     /// `x`: toggle the cursor row (every message of a thread row) in the selection.
     pub(super) fn toggle_select_cursor(&mut self) {
         if !self.grouped() {
-            self.triage.toggle_select(&self.mailbox, self.now());
+            let now = self.now();
+            let ix = self.list_tabs.active_index();
+            self.list_views[ix].triage.toggle_select(&self.mailbox, now);
             return;
         }
         let Some(row) = self.cursor_row() else { return };
-        let mut sel = self.triage.selected();
+        let mut sel = self.triage().selected();
         if self.row_selected(&row) {
             sel.retain(|id| !row.ids().contains(id));
         } else {
@@ -100,7 +104,7 @@ impl MailApp {
                 }
             }
         }
-        self.triage.set_selection(sel);
+        self.triage_mut().set_selection(sel);
     }
 
     /// Expand (`true`) or collapse the thread under the cursor. Collapsing from a child
@@ -120,7 +124,7 @@ impl MailApp {
                 .iter()
                 .position(|r| matches!(r, Row::Header { thread_id, .. } if *thread_id == thread))
             {
-                self.row_cursor = at;
+                self.view_mut().row_cursor = at;
             }
         }
     }
@@ -131,7 +135,7 @@ impl MailApp {
             self.expanded.insert(thread);
         }
         let len = self.rows().len();
-        self.row_cursor = self.row_cursor.min(len.saturating_sub(1));
+        self.view_mut().row_cursor = self.row_cursor().min(len.saturating_sub(1));
     }
 
     /// `enter`: open the cursor message; a collapsed thread header also expands.
@@ -167,14 +171,15 @@ impl MailApp {
                     .position(|r| matches!(r, Row::Header { ids, .. } if ids.contains(&id)))
             };
             if let Some(at) = exact.or_else(header) {
-                self.row_cursor = at;
+                self.view_mut().row_cursor = at;
             }
             return;
         }
         let now = self.now();
         let ids = self.visible_ids();
         if let Some(at) = ids.iter().position(|x| *x == id) {
-            self.triage.set_cursor(&self.mailbox, now, at);
+            let ix = self.list_tabs.active_index();
+            self.list_views[ix].triage.set_cursor(&self.mailbox, now, at);
         }
     }
 
@@ -185,8 +190,8 @@ impl MailApp {
         }
         let cur = self.cursor_id();
         self.group_threads = on;
-        self.triage.clear_selection();
-        self.row_anchor = None;
+        self.triage_mut().clear_selection();
+        self.view_mut().row_anchor = None;
         if let Some(id) = cur {
             self.focus_message(id, false);
         }
@@ -251,7 +256,7 @@ impl MailApp {
             .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), Self::clock_label(&m.received, newest)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
-        let selected_count = ids.iter().filter(|id| self.triage.is_selected(**id)).count();
+        let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
         let unread = ids.iter().any(|id| {
             !self.mailbox.is_read(*id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
         });

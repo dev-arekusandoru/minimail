@@ -3,7 +3,7 @@ use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::*;
 
-use super::{MailApp, PaneLayout};
+use super::{MailApp, Pane, PaneLayout};
 
 impl MailApp {
     /// Move the cursor to visible row `ix` (either list mode), clamped.
@@ -30,13 +30,14 @@ impl MailApp {
             self.cursor_to(ix);
             self.toggle_select_cursor();
         } else {
-            self.triage.clear_selection();
+            self.triage_mut().clear_selection();
             self.cursor_to(ix);
             if let Some(id) = self.cursor_id() {
                 self.open_message(id, event.click_count() >= 2);
             }
         }
         self.scroll_to_cursor();
+        self.focus_pane(Pane::List);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }

@@ -149,13 +149,13 @@ fn switching_tabs_moves_the_list_cursor_but_not_the_selection(cx: &mut TestAppCo
     h.keys("enter");
     h.row(4);
     h.keys("x");
-    let selected = h.read(|a| a.triage.selected());
+    let selected = h.read(|a| a.triage().selected());
     assert_eq!(selected, vec![4]);
 
     h.click(("reader-tab", 2usize));
     assert_eq!(h.opened(), Some(3));
     assert_eq!(h.cursor(), Some(3));
-    assert_eq!(h.read(|a| a.triage.selected()), selected);
+    assert_eq!(h.read(|a| a.triage().selected()), selected);
 
     h.keys("ctrl-tab");
     assert_eq!((h.opened(), h.cursor()), (Some(4), Some(4)));

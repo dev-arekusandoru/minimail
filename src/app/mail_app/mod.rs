@@ -35,6 +35,10 @@ use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
 use crate::tabs::Tabs;
 use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
+use crate::list_tabs::ListTabs;
+
+use self::list_strip::Pane;
+use self::list_view::ListView;
 
 mod accessors;
 mod actions;
@@ -46,6 +50,9 @@ mod help;
 mod list;
 mod menus;
 mod modals;
+mod list_strip;
+mod list_tabbar;
+pub mod list_view;
 mod mouse;
 pub mod panes;
 mod reader;
@@ -79,10 +86,13 @@ struct Session {
 
 pub struct MailApp {
     pub mailbox: Mailbox,
-    pub triage: Triage,
-    /// The folder the sidebar last showed. Its `in:` (and `account:`) values are the query's
-    /// implicit part: hidden as pills until something else is applied.
-    folder: Location,
+    /// The open views of the mailbox, one tab each, and which one the list is showing.
+    pub list_tabs: ListTabs,
+    /// The state of every open list tab, in `list_tabs`' order (see [`MailApp::view`]): each
+    /// view's cursor, selection and scroll, so no tab can be left holding another's.
+    list_views: Vec<ListView>,
+    /// Which pane the tab keys act on.
+    pane_focus: Pane,
     /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
     /// (see [`MailApp::opened`]).
     pub tabs: Tabs,
@@ -119,11 +129,7 @@ pub struct MailApp {
     pub group_threads: bool,
     /// Threads whose messages are listed under their header.
     expanded: HashSet<u32>,
-    /// Cursor over grouped rows.
-    row_cursor: usize,
-    row_anchor: Option<usize>,
     snooze: Option<Entity<SnoozePicker>>,
-    /// Generic choice dialog (post-send, block, spam, sender-wide confirms).
     dialog: Option<Entity<ChoiceDialog>>,
     /// Folder picker (`f` and the dialogs' `File…`).
     folder_picker: Option<Entity<FolderPicker>>,
@@ -139,13 +145,6 @@ pub struct MailApp {
     summary: Option<(u32, ThreadSummary)>,
     toast_gen: u64,
     focus_handle: FocusHandle,
-    /// Variable-height message list: rows are measured, so thread headers can size to
-    /// their content.
-    list_state: ListState,
-    /// What `list_state` was last measured against, so a stale row height is re-measured.
-    list_shape: Option<list::ListShape>,
-    /// End of the list's visible range, from its scroll handler.
-    list_visible_end: std::cell::Cell<usize>,
     help_scroll: ScrollHandle,
     /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
     /// opened message can be scrolled into view.
@@ -216,11 +215,14 @@ impl MailApp {
             }
         })
         .detach();
-        let panes = Panes::new(&cx.weak_entity(), window, cx);
+        // A window opens on All Inboxes, and that tab can never be closed.
+        let all_inboxes = mailbox.location_query(&Location::AllInboxes);
+        let panes = Panes::new(&cx.weak_entity(), &all_inboxes, window, cx);
         let mut app = Self {
             mailbox,
-            triage: Triage::new(Query::parse("in:inbox")),
-            folder: Location::AllInboxes,
+            list_tabs: ListTabs::new(all_inboxes.clone()),
+            list_views: vec![ListView::new(all_inboxes, Location::AllInboxes)],
+            pane_focus: Pane::default(),
             tabs: Tabs::default(),
             tab_avatars: true,
             theme_mode: crate::theme::ThemeMode::System,
@@ -242,9 +244,7 @@ impl MailApp {
             clock,
             group_threads: false,
             expanded: HashSet::new(),
-            row_cursor: 0,
             _theme_sub: None,
-            row_anchor: None,
             snooze: None,
             dialog: None,
             folder_picker: None,
@@ -258,9 +258,6 @@ impl MailApp {
             summary: None,
             toast_gen: 0,
             focus_handle: cx.focus_handle(),
-            list_state: ListState::new(0, ListAlignment::Top, px(200.)),
-            list_shape: None,
-            list_visible_end: std::cell::Cell::new(0),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),
             finds: HashMap::new(),

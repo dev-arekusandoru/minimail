@@ -376,8 +376,9 @@ impl MailApp {
 
     /// Reset the list, tabs and reader to a fresh state after accounts were removed.
     fn reset_view_state(&mut self) {
-        self.folder = Location::AllInboxes;
-        self.triage = Triage::new(self.mailbox.location_query(&Location::AllInboxes));
+        let all_inboxes = self.mailbox.location_query(&Location::AllInboxes);
+        self.list_tabs = ListTabs::new(all_inboxes.clone());
+        self.list_views = vec![ListView::new(all_inboxes, Location::AllInboxes)];
         self.tabs = Tabs::default();
         self.expanded.clear();
         self.reader_panes.borrow_mut().clear();
@@ -385,7 +386,6 @@ impl MailApp {
         self.summary = None;
         self.session = None;
         self.menu_target = None;
-        self.row_cursor = 0;
     }
 
 
