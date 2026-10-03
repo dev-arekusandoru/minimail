@@ -59,9 +59,9 @@ impl MailApp {
     /// Shift-selection over rows, like `shift-j`/`shift-k`.
     pub(super) fn extend_by(&mut self, delta: isize) {
         if !self.grouped() {
-            let now = self.now();
+            let now = self.local_now();
             let (view, mailbox) = self.view_and_mailbox();
-            view.triage.extend(mailbox, now, delta);
+            view.triage.extend(mailbox, &now, delta);
             return;
         }
         let rows = self.rows();
@@ -90,9 +90,9 @@ impl MailApp {
     /// `x`: toggle the cursor row (every message of a thread row) in the selection.
     pub(super) fn toggle_select_cursor(&mut self) {
         if !self.grouped() {
-            let now = self.now();
+            let now = self.local_now();
             let (view, mailbox) = self.view_and_mailbox();
-            view.triage.toggle_select(mailbox, now);
+            view.triage.toggle_select(mailbox, &now);
             return;
         }
         let Some(row) = self.cursor_row() else { return };
@@ -177,11 +177,11 @@ impl MailApp {
             }
             return;
         }
-        let now = self.now();
         let ids = self.visible_ids();
         if let Some(at) = ids.iter().position(|x| *x == id) {
+            let now = self.local_now();
             let (view, mailbox) = self.view_and_mailbox();
-            view.triage.set_cursor(mailbox, now, at);
+            view.triage.set_cursor(mailbox, &now, at);
         }
     }
 
@@ -254,8 +254,9 @@ impl MailApp {
         };
         let t = cx.theme();
         let latest = self.mailbox.get(ids[0]);
+        let now = self.local_now();
         let (from, subject, date) = latest
-            .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), Self::clock_label(&m.received, newest)))
+            .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), self.clock_label(&m.received, newest, &now)))
             .unwrap_or_default();
         let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();

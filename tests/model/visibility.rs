@@ -1,6 +1,6 @@
-use crate::helpers::{State, sample};
-use mail_classifier::clock::Timestamp;
-use mail_classifier::model::Location;
+use crate::helpers::{State, east13, sample, utc};
+use mail_classifier::clock::{DAY, HOUR, Timestamp};
+use mail_classifier::model::{Location, blocked_ago};
 use mail_classifier::search::{Field, Query};
 
 /// Instant the sample mailbox is judged at (its newest message is 2026-09-29).
@@ -66,17 +66,17 @@ fn filters_narrow_every_location_and_muted_mail_never_matches() {
     let mut archive = Query::default();
     archive.add(Field::In, "archived");
     archive.add(Field::Account, "personal");
-    assert_eq!(mb.ids_matching(&archive, NOW), vec![3]);
+    assert_eq!(mb.ids_matching(&archive, &utc(NOW)), vec![3]);
     // A sender pill is a filter like any other, and hides what it names.
     archive.add(Field::From, "a@x.test");
-    assert_eq!(mb.ids_matching(&archive, NOW), vec![3], "message 3 is from a@x.test");
+    assert_eq!(mb.ids_matching(&archive, &utc(NOW)), vec![3], "message 3 is from a@x.test");
     archive.add(Field::From, "c@x.test");
-    assert!(mb.ids_matching(&archive, NOW).is_empty(), "one of the two senders, not both");
+    assert!(mb.ids_matching(&archive, &utc(NOW)).is_empty(), "one of the two senders, not both");
 
     let mut mb = mb;
     assert!(mb.mute_thread(3));
-    assert!(mb.ids_matching(&archive, NOW).is_empty(), "a muted thread is out of the list");
-    assert_eq!(mb.ids_matching(&Query::default(), NOW).len(), 4, "hidden mail is not listed");
+    assert!(mb.ids_matching(&archive, &utc(NOW)).is_empty(), "a muted thread is out of the list");
+    assert_eq!(mb.ids_matching(&Query::default(), &utc(NOW)).len(), 4, "hidden mail is not listed");
 }
 #[test]
 fn a_location_query_round_trips_through_its_tokens() {
@@ -93,7 +93,7 @@ fn a_location_query_round_trips_through_its_tokens() {
     inbox.add(Field::Tag, "needs-reply");
     inbox.add(Field::Account, "personal");
     inbox.add(Field::In, "inbox");
-    assert_eq!(mb.ids_matching(&inbox, NOW), vec![1]);
+    assert_eq!(mb.ids_matching(&inbox, &utc(NOW)), vec![1]);
     assert_eq!(
         mb.query_location(&inbox),
         Some(Location::Inbox("personal".into())),
@@ -105,13 +105,13 @@ fn a_location_query_round_trips_through_its_tokens() {
     mb.send_reply_at(1, "sent".into(), false, 0);
     mb.tick(10);
     let sent = mb.location_query(&Location::Sent("personal".into()));
-    assert_eq!(mb.ids_matching(&sent, NOW).len(), 1);
+    assert_eq!(mb.ids_matching(&sent, &utc(NOW)).len(), 1);
     assert_eq!(mb.query_location(&sent), Some(Location::Sent("personal".into())));
 
     let folder = mb.create_folder("personal", "Zebras", None);
     mb.set_state(&[2], State::Filed(folder));
     let filed = mb.location_query(&Location::Folder(folder));
-    assert_eq!(mb.ids_matching(&filed, NOW), vec![2]);
+    assert_eq!(mb.ids_matching(&filed, &utc(NOW)), vec![2]);
     assert_eq!(mb.query_location(&filed), Some(Location::Folder(folder)));
     // The folder's own path is the `in:` value, so a nested folder still resolves.
     assert_eq!(filed.values(Field::In), ["zebras"]);
@@ -142,4 +142,21 @@ fn creating_a_folder_and_filing_undoes_as_one_step() {
     assert_eq!(mb.state_of(2), Some(State::Inbox));
     assert!(mb.folder(folder).is_none(), "the folder goes with the move");
     assert!(!mb.undo(), "one step covered both");
+}
+
+#[test]
+fn blocked_ago_counts_days_on_the_users_clock() {
+    let at = 1_790_683_200; // 2026-09-29T12:00Z
+    let utc = utc(at);
+    assert_eq!(blocked_ago(&utc, at), "Blocked today");
+    assert_eq!(blocked_ago(&utc, at - DAY), "Blocked yesterday");
+    assert_eq!(blocked_ago(&utc, at - 4 * DAY), "Blocked 4 days ago");
+    assert_eq!(blocked_ago(&utc, at + DAY), "Blocked today", "clock skew reads as today");
+
+    // On a UTC+13 clock the local day has already rolled over, so a block taken before
+    // UTC's midnight reads as yesterday rather than today.
+    let east = east13(at);
+    let midnight = at - HOUR; // 2026-09-29T11:00Z, exactly midnight on the 30th at UTC+13
+    assert_eq!(blocked_ago(&east, midnight), "Blocked today");
+    assert_eq!(blocked_ago(&east, midnight - 2 * HOUR), "Blocked yesterday");
 }

@@ -154,22 +154,21 @@ impl Mailbox {
         meta.snoozed_until = None;
     }
 
-    /// Tonight 18:00, Tomorrow 08:00, next Monday 08:00 (all UTC). Tonight
-    /// rolls to tomorrow 18:00 once 18:00 has passed.
-    pub fn snooze_presets(&self, now: Timestamp) -> [(&'static str, Timestamp); 3] {
-        let today = now.div_euclid(DAY) * DAY;
-        let tonight = if now < today + 18 * HOUR {
-            today + 18 * HOUR
+    /// Tonight 18:00, Tomorrow 08:00, next Monday 08:00, each at that time on the user's
+    /// own clock. Tonight rolls to tomorrow 18:00 once 18:00 has passed.
+    pub fn snooze_presets(&self, now: &Now) -> [(&'static str, Timestamp); 3] {
+        // Today's local midnight as wall-clock seconds: everything below is written on the
+        // user's clock and converted back to an instant at the end.
+        let midnight = now.parts(now.at()).0 * DAY;
+        let tonight_at = midnight + 18 * HOUR;
+        let tonight = now.instant(if now.local_secs(now.at()) < tonight_at {
+            tonight_at
         } else {
-            today + DAY + 18 * HOUR
-        };
-        // 1970-01-01 was a Thursday; Monday = 0.
-        let weekday = (now.div_euclid(DAY) + 3).rem_euclid(7);
-        let monday = today + (7 - weekday) * DAY + 8 * HOUR;
-        [
-            ("Tonight", tonight),
-            ("Tomorrow", today + DAY + 8 * HOUR),
-            ("Monday", monday),
-        ]
+            tonight_at + DAY
+        });
+        let tomorrow = now.instant(midnight + DAY + 8 * HOUR);
+        // Monday is weekday 1 (0 is Sunday).
+        let monday = now.instant(midnight + now.days_until_weekday(now.at(), 1, 8 * HOUR) + 8 * HOUR);
+        [("Tonight", tonight), ("Tomorrow", tomorrow), ("Monday", monday)]
     }
 }

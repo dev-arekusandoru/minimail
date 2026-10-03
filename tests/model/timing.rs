@@ -55,3 +55,26 @@ fn snoozed_fixture_requires_wake_seed() {
     assert_eq!(mb.state_of(1), Some(TriageState::Snoozed));
     assert_eq!(mb.snoozed_until(1), Some(T0 + DAY));
 }
+
+#[test]
+fn snooze_presets_land_on_the_users_clock() {
+    use crate::helpers::{east13, utc};
+    let mb = threaded(&[]);
+    let at = 1_790_683_200; // 2026-09-29T12:00Z, a Tuesday
+    let midnight = at - 12 * HOUR; // 2026-09-29T00:00Z
+
+    let utc_presets = mb.snooze_presets(&utc(at));
+    assert_eq!(utc_presets[0].1, midnight + 18 * HOUR, "tonight at 18:00 UTC");
+    assert_eq!(utc_presets[1].1, midnight + DAY + 8 * HOUR, "tomorrow at 08:00 UTC");
+    // Tuesday, so the next Monday is six days out.
+    assert_eq!(utc_presets[2].1, midnight + 6 * DAY + 8 * HOUR, "Monday at 08:00 UTC");
+
+    // At UTC+13 it is already 01:00 on Wednesday the 30th, so the local day is one ahead
+    // and every target is written on that clock: tonight at 18:00 local is 05:00 UTC, and
+    // the next local Monday (the 5th) 08:00 local is 19:00 UTC on the 4th.
+    let east = mb.snooze_presets(&east13(at));
+    let local_midnight = midnight + DAY - 13 * HOUR; // 2026-09-30T00:00 at UTC+13
+    assert_eq!(east[0].1, local_midnight + 18 * HOUR, "tonight 18:00 local");
+    assert_eq!(east[1].1, local_midnight + DAY + 8 * HOUR, "tomorrow 08:00 local");
+    assert_eq!(east[2].1, local_midnight + 5 * DAY + 8 * HOUR, "Monday 08:00 local");
+}

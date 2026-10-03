@@ -382,7 +382,7 @@ impl MailApp {
         let is_active = *active == Some(loc.clone());
         let counted =
             matches!(loc, Location::AllInboxes | Location::Inbox(_) | Location::Snoozed(_));
-        let count = if counted { self.mailbox.count_at(&loc, self.now()) } else { 0 };
+        let count = if counted { self.mailbox.count_at(&loc, &self.local_now()) } else { 0 };
         SidebarRow::new(row_id(&loc), row_label(&loc, &self.mailbox), Icon::new(icon).text_color(color))
             .active(is_active)
             .count(count)

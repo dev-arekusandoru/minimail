@@ -23,6 +23,7 @@ use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::icon_button;
 use crate::clock::{DAY, Timestamp};
 use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
+use crate::tz::{Now, Utc};
 use crate::{preview, theme};
 use gpui_kit::{
     component::setting::{
@@ -219,8 +220,8 @@ pub struct SettingsPanel {
     /// The filter's input (with its subscription).
     filter_input: Entity<InputState>,
     _filter_sub: Subscription,
-    /// The app's clock when the window opened, for relative dates.
-    now: Timestamp,
+    /// The app's clock and the user's zone, for relative dates.
+    now: Now,
     /// Days to wait for a reply before flagging a thread.
     follow_up_days: u8,
     /// The number field of the follow-up row.
@@ -292,7 +293,7 @@ impl SettingsPanel {
             filter: String::new(),
             filter_input,
             _filter_sub: filter_sub,
-            now: 0,
+            now: Now::new(0, Rc::new(Utc)),
             accounts: Vec::new(),
             controls: HashMap::new(),
             gmail_configured: false,
@@ -411,7 +412,7 @@ impl SettingsPanel {
     pub fn mailbox_state(
         mut self,
         blocked: Vec<(String, Timestamp)>,
-        now: Timestamp,
+        now: Now,
         follow_up_timeout: Timestamp,
     ) -> Self {
         self.blocked = blocked;
@@ -425,8 +426,8 @@ impl SettingsPanel {
     }
 
     /// Re-read the blocked senders and the clock (undo restores a block).
-    pub fn set_blocked(&mut self, blocked: Vec<(String, Timestamp)>, now: Timestamp, cx: &mut Context<Self>) {
-        if self.blocked != blocked || self.now != now {
+    pub fn set_blocked(&mut self, blocked: Vec<(String, Timestamp)>, now: Now, cx: &mut Context<Self>) {
+        if self.blocked != blocked || self.now.at() != now.at() {
             self.blocked = blocked;
             self.now = now;
             cx.notify();

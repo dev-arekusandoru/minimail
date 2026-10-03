@@ -147,11 +147,17 @@ impl MailApp {
 
     /// Exactly the message ids the list shows, top to bottom.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        self.mailbox.ids_matching(&self.triage().query, self.now())
+        self.mailbox.ids_matching(&self.triage().query, &self.local_now())
     }
 
     pub fn now(&self) -> Timestamp {
         self.clock.now()
+    }
+
+    /// The current instant together with the user's zone: what every date a person reads,
+    /// and every relative date, is resolved against.
+    pub fn local_now(&self) -> Now {
+        Now::new(self.clock.now(), self.zone.clone())
     }
 
     pub(super) fn in_session(&self) -> bool {
@@ -176,7 +182,7 @@ impl MailApp {
         if self.grouped() {
             return self.cursor_row().map(|r| r.primary());
         }
-        self.triage().cursor(&self.mailbox, self.now())
+        self.triage().cursor(&self.mailbox, &self.local_now())
     }
 
     pub(super) fn cursor_ix(&self) -> usize {
@@ -197,7 +203,7 @@ impl MailApp {
         if self.in_session() {
             return self.cursor_id().into_iter().collect();
         }
-        self.triage().targets(&self.mailbox, self.now())
+        self.triage().targets(&self.mailbox, &self.local_now())
     }
 
     pub(super) fn move_cursor(&mut self, delta: isize) {
@@ -207,9 +213,9 @@ impl MailApp {
             let next = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
             self.view_mut().row_cursor = next;
         } else {
-            let now = self.now();
+            let now = self.local_now();
             let (view, mailbox) = self.view_and_mailbox();
-            view.triage.move_cursor(mailbox, now, delta);
+            view.triage.move_cursor(mailbox, &now, delta);
         }
     }
 

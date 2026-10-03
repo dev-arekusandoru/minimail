@@ -8,6 +8,7 @@ use gpui_kit::component::ActiveTheme as _;
 use crate::app::ui::{button, shortcut};
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
+use crate::tz::Now;
 use gpui_kit::{
     component::input::{Input, InputEvent, InputState},
     prelude::FluentBuilder as _,
@@ -34,7 +35,7 @@ pub type ParseSnooze = fn(&str, Timestamp) -> Option<Timestamp>;
 pub struct SnoozePicker {
     focus: FocusHandle,
     presets: Vec<(SharedString, Timestamp)>,
-    now: Timestamp,
+    now: Now,
     parse: ParseSnooze,
     input: Entity<InputState>,
     custom: bool,
@@ -44,7 +45,7 @@ pub struct SnoozePicker {
 impl SnoozePicker {
     pub fn new(
         presets: impl IntoIterator<Item = (impl Into<SharedString>, Timestamp)>,
-        now: Timestamp,
+        now: Now,
         parse: ParseSnooze,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -91,7 +92,7 @@ impl SnoozePicker {
     /// Enter in the custom input: parse it and pick, or flag it invalid.
     fn submit_custom(&mut self, cx: &mut Context<Self>) {
         let text = self.input.read(cx).value().to_string();
-        match (self.parse)(text.trim(), self.now) {
+        match (self.parse)(text.trim(), self.now.at()) {
             Some(ts) => cx.emit(SnoozeEvent::Pick(ts)),
             None => {
                 self.invalid = true;
@@ -136,6 +137,7 @@ impl Render for SnoozePicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let invalid = self.invalid;
+        let now = &self.now;
         div()
             .key_context(SNOOZE_CONTEXT)
             .track_focus(&self.focus)
@@ -155,7 +157,7 @@ impl Render for SnoozePicker {
                     t,
                     &(i + 1).to_string(),
                     label.clone(),
-                    SharedString::from(format_time(*ts)),
+                    SharedString::from(format_time(*ts, now)),
                 )
                 .id(("snooze-preset", i))
                 .test_support()

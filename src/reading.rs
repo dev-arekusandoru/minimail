@@ -7,8 +7,9 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{Message, MessageId};
+use crate::model::{Message, MessageId, parse_rfc3339};
 use crate::threads::thread_order;
+use crate::tz::{MONTHS, Now};
 
 // ---------------------------------------------------------------- recipients
 
@@ -96,18 +97,17 @@ pub fn recipient_line(msg: &Message, me: &str) -> String {
     segments.join(" · ")
 }
 
-/// `Sep 30, 2026 · 20:46` from an RFC 3339 timestamp, as written (no clock, no zone math).
-/// Falls back to the raw string when it doesn't parse.
-pub fn received_label(received: &str) -> String {
-    const MONTHS: [&str; 12] =
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let parsed = (|| {
-        let (y, m, d) = (received.get(..4)?, received.get(5..7)?, received.get(8..10)?);
-        let month = MONTHS.get(m.parse::<usize>().ok()?.checked_sub(1)?)?;
-        let day: u32 = d.parse().ok()?;
-        y.parse::<u32>().ok()?;
-        Some(format!("{month} {day}, {y} · {}", received.get(11..16)?))
-    })();
+/// `Sep 30, 2026 · 20:46` for an RFC 3339 timestamp, on the user's own clock. Falls back
+/// to the raw string when it doesn't parse.
+pub fn received_label(received: &str, now: &Now) -> String {
+    let parsed = parse_rfc3339(received).map(|ts| {
+        let (year, month, day) = now.civil(ts);
+        format!(
+            "{} {day}, {year} · {}",
+            MONTHS[(month - 1) as usize],
+            now.hhmm(ts)
+        )
+    });
     parsed.unwrap_or_else(|| received.to_owned())
 }
 

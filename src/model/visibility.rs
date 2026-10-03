@@ -223,7 +223,7 @@ impl Mailbox {
     }
     /// Ids of every visible message `query` matches, newest first. Muted, blocked and
     /// unsubscribed mail never matches. Relative dates resolve against `now`.
-    pub fn ids_matching(&self, query: &Query, now: Timestamp) -> Vec<MessageId> {
+    pub fn ids_matching(&self, query: &Query, now: &Now) -> Vec<MessageId> {
         self.newest_first
             .iter()
             .copied()
@@ -234,7 +234,7 @@ impl Mailbox {
             .collect()
     }
     /// How many visible messages `location` holds.
-    pub fn count_at(&self, location: &Location, now: Timestamp) -> usize {
+    pub fn count_at(&self, location: &Location, now: &Now) -> usize {
         self.ids_matching(&self.location_query(location), now).len()
     }
     /// A folder's name including its parents, e.g. `"Projects/Northwind"`.
@@ -322,11 +322,12 @@ impl Mailbox {
     }
 }
 
-/// How long ago a sender was blocked, relative to the app's clock: "Blocked
+/// How long ago a sender was blocked, counted in days on the user's own clock: "Blocked
 /// today", "Blocked yesterday" or "Blocked N days ago". A block time in the
 /// future (clock skew) reads as today.
-pub fn blocked_ago(now: Timestamp, at: Timestamp) -> String {
-    match now.saturating_sub(at).max(0) / DAY {
+pub fn blocked_ago(now: &Now, at: Timestamp) -> String {
+    let days = (now.parts(now.at()).0 - now.parts(at).0).max(0);
+    match days {
         0 => "Blocked today".to_owned(),
         1 => "Blocked yesterday".to_owned(),
         days => format!("Blocked {days} days ago"),

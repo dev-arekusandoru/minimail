@@ -3,7 +3,6 @@
 use gpui_kit::TestAppContext;
 use mail_classifier::clock::DAY;
 use mail_classifier::judge::{Confidence, Mode, QuestionKey};
-use mail_classifier::model::blocked_ago;
 
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
@@ -107,13 +106,4 @@ fn unblocking_a_sender_then_undoing_restores_it_with_its_block_time(cx: &mut Tes
         vec![("spammer@example.com".to_owned(), blocked_at)],
         "undo restores the block, with the time it was blocked"
     );
-}
-
-#[test]
-fn the_blocked_line_counts_days_from_the_app_clock() {
-    let now = harness::NOON;
-    assert_eq!(blocked_ago(now, now), "Blocked today");
-    assert_eq!(blocked_ago(now, now - DAY), "Blocked yesterday");
-    assert_eq!(blocked_ago(now, now - 4 * DAY), "Blocked 4 days ago");
-    assert_eq!(blocked_ago(now, now + DAY), "Blocked today", "clock skew reads as today");
 }
