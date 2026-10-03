@@ -7,7 +7,7 @@ use gpui_kit::{
     AppContext, ElementId, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Point, TestAppContext,
     point, px,
 };
-use mail_classifier::model::{Location, Mailbox, MessageId};
+use mail_classifier::model::{Location, Mailbox, MessageId, TriageState};
 
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
@@ -368,4 +368,152 @@ fn dropping_a_folder_on_a_list_tab_opens_it_as_a_pinned_tab(cx: &mut TestAppCont
         "the folder dropped on a tab title opened as a pinned tab"
     );
     assert_eq!(h.active(), 2);
+}
+impl Harness<'_> {
+    /// Drag the list row of `id` onto the title of tab slot `ix`.
+    fn drag_row_to_tab(&mut self, id: MessageId, ix: usize) {
+        let onto = self.centre(("list-tab", ix));
+        self.drag(("row", id as usize), onto);
+    }
+    /// Drag the list row of `id` onto the list pane's background.
+    fn drag_row_to_list(&mut self, id: MessageId) {
+        self.drag(("row", id as usize), point(px(ON_THE_LIST.0), px(ON_THE_LIST.1)));
+    }
+    /// Undo one step straight on the mailbox; false when there was nothing to undo.
+    fn undo_step(&mut self) -> bool {
+        self.app.update(self.cx, |a, _| a.mailbox.undo())
+    }
+    /// Pin the given sidebar rows as tabs left to right after the Inbox, then show the Inbox.
+    fn pin_then_inbox(&mut self, rows: &[&'static str]) {
+        for row in rows {
+            self.cmd_click(*row);
+        }
+        self.click(("list-tab", 0usize));
+        assert_eq!(self.active(), 0);
+    }
+}
+
+/// A harness whose setup undo steps (none of which touch a message's state) are dropped, so an
+/// empty undo stack means a drop pushed nothing.
+fn fresh(cx: &mut TestAppContext) -> Harness<'_> {
+    let mut h = harness_with(cx, mailbox());
+    while h.undo_step() {}
+    h
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_message_on_an_archive_tab_archives_it_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-archive-personal"]);
+    h.drag_row_to_tab(4, 1);
+    assert_eq!(h.state_of(4), TriageState::Archived);
+    assert_eq!(h.state_of(3), TriageState::Inbox, "only the dragged message moved");
+    assert!(h.toast().contains("Marked 1 archived"), "toast: {}", h.toast());
+    assert_eq!(h.active(), 0, "the drop does not switch tabs");
+
+    assert!(h.undo_step());
+    assert_eq!(h.state_of(4), TriageState::Inbox, "one undo restores it");
+    assert!(!h.undo_step(), "and it was the only step");
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_message_on_a_trash_tab_deletes_it(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-trash-personal"]);
+    h.drag_row_to_tab(3, 1);
+    assert_eq!(h.state_of(3), TriageState::Deleted);
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_message_on_a_folder_tab_files_it_there(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-folder-1"]); // Receipts
+    h.drag_row_to_tab(4, 1);
+    assert_eq!(h.state_of(4), TriageState::Filed(1));
+    assert!(h.undo_step());
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_message_on_the_inbox_tab_moves_an_archived_one_back(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.cmd_click("sidebar-inbox-personal");
+    h.cmd_click("sidebar-archive-personal");
+    assert_eq!(h.active(), 2);
+    h.drag_row_to_tab(2, 1);
+    assert_eq!(h.state_of(2), TriageState::Inbox);
+    assert!(h.toast().contains("Moved 1 to inbox"), "toast: {}", h.toast());
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_on_the_list_background_files_under_the_active_tab(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.cmd_click("sidebar-archive-personal");
+    assert_eq!(h.active(), 1);
+    // Search the Archive tab for inbox mail, so a message that is not archived is on screen.
+    h.keys("/");
+    h.type_text("in:inbox");
+    h.keys("enter");
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+    assert!(h.visible().contains(&4), "the inbox message is on screen: {:?}", h.visible());
+    h.drag_row_to_list(4);
+    assert_eq!(h.state_of(4), TriageState::Archived, "filed under the active (Archive) tab");
+    assert!(h.undo_step());
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+}
+
+#[gpui_kit::gpui::test]
+fn a_drop_that_moves_nothing_leaves_no_undo_step_and_no_toast(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    // Message 4 already is in the inbox: dropped on the Inbox tab and on the Inbox background.
+    h.pin_then_inbox(&["sidebar-inbox-personal"]);
+    h.click(("list-tab", 1usize));
+    h.drag_row_to_tab(4, 1);
+    h.drag_row_to_list(4);
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+    assert_eq!(h.toast(), "");
+    assert!(!h.undo_step(), "no undo step was pushed");
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_on_a_sent_or_all_inboxes_tab_changes_nothing(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-sent-personal"]);
+    h.drag_row_to_tab(4, 1); // Sent
+    h.drag_row_to_tab(4, 0); // All Inboxes, the first tab
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+    assert_eq!(h.toast(), "");
+    assert!(!h.undo_step(), "no undo step was pushed");
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_message_on_a_snoozed_tab_opens_the_snooze_picker_for_it(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-snoozed-personal"]);
+    h.drag_row_to_tab(4, 1);
+    assert!(h.read(|a| a.snooze_open()), "the picker opened");
+    assert_eq!(h.state_of(4), TriageState::Inbox, "nothing is snoozed until a time is picked");
+    assert!(!h.undo_step());
+
+    h.keys("1");
+    assert_eq!(h.state_of(4), TriageState::Snoozed);
+    assert_eq!(h.state_of(3), TriageState::Inbox, "the dragged message alone");
+    assert!(h.undo_step());
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+}
+
+#[gpui_kit::gpui::test]
+fn dragging_a_selected_row_moves_the_whole_selection_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut h = fresh(cx);
+    h.pin_then_inbox(&["sidebar-archive-personal"]);
+    h.keys("x j x");
+    assert_eq!(h.read(|a| a.triage().selected()).len(), 2);
+    h.drag_row_to_tab(4, 1);
+    assert_eq!(h.state_of(3), TriageState::Archived);
+    assert_eq!(h.state_of(4), TriageState::Archived);
+    assert!(h.read(|a| a.triage().selected()).is_empty(), "the selection was cleared");
+    assert!(h.undo_step());
+    assert_eq!(h.state_of(3), TriageState::Inbox);
+    assert_eq!(h.state_of(4), TriageState::Inbox);
+    assert!(!h.undo_step(), "both moved in a single step");
 }

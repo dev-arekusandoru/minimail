@@ -3,7 +3,7 @@
 //! Plain data, so the rules below are testable without a UI: which messages a drag applies to,
 //! and which message a drop on the reader tab strip opens. Views own the chip and the wiring.
 
-use crate::model::{Location, MessageId};
+use crate::model::{Location, MessageId, TriageState};
 
 /// A drag that started on a sidebar folder row: the view it stands for, and the label the
 /// chip that follows the pointer shows.
@@ -50,4 +50,27 @@ pub fn payload_ids(selected: &[MessageId], row_ids: &[MessageId]) -> Vec<Message
         return selected.to_vec();
     }
     row_ids.to_vec()
+}
+
+/// What dropping messages on a list tab (or the list pane, standing for its active tab) does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropAction {
+    /// Move the messages to this state.
+    File(TriageState),
+    /// Open the snooze picker for the messages.
+    Snooze,
+    /// The location accepts no messages.
+    Nothing,
+}
+
+/// The action a message drop on a tab showing `location` performs.
+pub fn drop_action(location: &Location) -> DropAction {
+    match location {
+        Location::Inbox(_) => DropAction::File(TriageState::Inbox),
+        Location::Archive(_) => DropAction::File(TriageState::Archived),
+        Location::Trash(_) => DropAction::File(TriageState::Deleted),
+        Location::Folder(id) => DropAction::File(TriageState::Filed(*id)),
+        Location::Snoozed(_) => DropAction::Snooze,
+        Location::AllInboxes | Location::Sent(_) => DropAction::Nothing,
+    }
 }

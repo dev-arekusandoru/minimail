@@ -170,6 +170,12 @@ expands it over the centre — list and viewer area — while the sidebar stays 
   keypress rate, not frame rate, and the open tab survives it. Worth revisiting only if the kit
   grows a way to re-axis a split in place.
 
+## Status
+
+Done: sidebar out of the dock; list tabs; focused strip follows the panes; a folder dropped on the
+list strip opens a pinned tab; a message dropped on a list tab (or the list background, for the
+active tab) files it there. Remaining: the Triage tab with zoom.
+
 ## Order of work
 
 0. **Done.** The sidebar is out of the dock: an `h_resizable("mail-sidebar")` group of ours with

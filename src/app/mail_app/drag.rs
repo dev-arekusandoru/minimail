@@ -2,7 +2,7 @@
 //! `on_drag` wiring every row shares.
 
 use super::*;
-use crate::dnd::{FolderDrag, MailDrag};
+use crate::dnd::{DropAction, FolderDrag, MailDrag, drop_action};
 use gpui_kit::component::dock::{AnyDrag as DockDrag, DropTarget};
 use gpui_kit::component::ActiveTheme as _;
 
@@ -137,20 +137,50 @@ impl MailApp {
         cx.notify();
     }
 
-    /// A folder dropped on the list strip opens its view as a pinned tab; a drop anywhere else
-    /// — the reader strip included — does nothing.
+    /// A folder dropped on the list strip opens its view as a pinned tab; messages dropped on
+    /// the list group are filed under the active tab. A drop anywhere else — the reader strip
+    /// included — does nothing.
     pub(super) fn drop_on_list(
         &mut self,
         item: &DockDrag,
         target: &DropTarget,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = item.value().downcast_ref::<FolderDrag>() else {
-            return;
-        };
         if !self.panes.dock_ref().is_list_node(target.node(), cx) {
             return;
         }
-        self.show_location(drag.location.clone(), true, cx);
+        if let Some(drag) = item.value().downcast_ref::<FolderDrag>() {
+            self.show_location(drag.location.clone(), true, cx);
+        } else if let Some(drag) = item.value().downcast_ref::<MailDrag>() {
+            let location = self.list_views[self.list_tabs.active_index()].location().clone();
+            self.drop_messages(&drag.ids, &location, window, cx);
+        }
+    }
+
+    /// Messages dropped on a tab showing `location` (or on the pane, for the active tab): file
+    /// them there, open the snooze picker, or do nothing, per [`drop_action`]. A drop that
+    /// would move nothing leaves no undo step and no toast.
+    pub(super) fn drop_messages(
+        &mut self,
+        ids: &[MessageId],
+        location: &Location,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match drop_action(location) {
+            DropAction::Nothing => {}
+            DropAction::File(state) => {
+                if ids.iter().any(|id| self.mailbox.state_of(*id).is_some_and(|s| s != state)) {
+                    self.file_ids(ids, state, window, cx);
+                }
+            }
+            DropAction::Snooze => {
+                if self.modal_open() {
+                    return;
+                }
+                self.open_snooze_for(Some(ids.to_vec()), window, cx);
+            }
+        }
     }
 }

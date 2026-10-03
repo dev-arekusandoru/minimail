@@ -6,7 +6,7 @@
 //! string the sidebar row shows, and the preview is italic with no close button.
 
 use super::*;
-use crate::dnd::FolderDrag;
+use crate::dnd::{FolderDrag, MailDrag};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dock::AnyDrag as DockDrag;
@@ -24,15 +24,19 @@ impl MailApp {
             .child(title)
             .test_support()
             // A folder dropped here opens its view as a pinned tab, like a drop on the list
-            // itself. Anything else — a message drag — falls through to the dock.
+            // itself; messages are filed under this tab's location.
             .can_drop(|value, _, _| {
-                value
-                    .downcast_ref::<DockDrag>()
-                    .is_some_and(|item| item.value().downcast_ref::<FolderDrag>().is_some())
+                value.downcast_ref::<DockDrag>().is_some_and(|item| {
+                    item.value().downcast_ref::<FolderDrag>().is_some()
+                        || item.value().downcast_ref::<MailDrag>().is_some()
+                })
             })
-            .on_drop(cx.listener(move |this, item: &DockDrag, _window, cx| {
+            .on_drop(cx.listener(move |this, item: &DockDrag, window, cx| {
                 if let Some(drag) = item.value().downcast_ref::<FolderDrag>() {
                     this.show_location(drag.location.clone(), true, cx);
+                } else if let Some(drag) = item.value().downcast_ref::<MailDrag>() {
+                    let location = this.list_views[ix].location().clone();
+                    this.drop_messages(&drag.ids, &location, window, cx);
                 }
             }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {

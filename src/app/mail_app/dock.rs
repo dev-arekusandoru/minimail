@@ -128,7 +128,7 @@ impl Dock {
                 cx.subscribe_in(&area, window, |app: &mut MailApp, _, event: &DockEvent, window, cx| {
                     if let DockEvent::DragDrop { item, target } = event {
                         app.drop_on_reader(item, target, window, cx);
-                        app.drop_on_list(item, target, cx);
+                        app.drop_on_list(item, target, window, cx);
                     }
                     cx.notify();
                 }),

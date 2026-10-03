@@ -74,10 +74,21 @@ impl MailApp {
 
     pub(super) fn mark(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.target_ids();
+        self.file_ids(&ids, state, window, cx);
+    }
+
+    /// Move `ids` to `state` as one undo step: clear the selection, toast, advance a session.
+    pub(super) fn file_ids(
+        &mut self,
+        ids: &[MessageId],
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if ids.is_empty() {
             return;
         }
-        let n = self.mailbox.set_state(&ids, state);
+        let n = self.mailbox.set_state(ids, state);
         self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {

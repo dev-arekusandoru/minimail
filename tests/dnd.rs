@@ -1,6 +1,7 @@
 //! Drag payload rules: which messages a drag out of the list carries, and what a drop opens.
 
-use mail_classifier::dnd::{MailDrag, payload_ids};
+use mail_classifier::dnd::{DropAction, MailDrag, drop_action, payload_ids};
+use mail_classifier::model::{Location, TriageState};
 
 fn drag(selected: &[u32], row: &[u32]) -> MailDrag {
     MailDrag::for_row(selected, row, None).expect("a row with messages is draggable")
@@ -60,4 +61,24 @@ fn the_thread_rides_along_for_the_tab_strip() {
 #[test]
 fn payload_ids_keeps_the_selection_order() {
     assert_eq!(payload_ids(&[9, 7, 8], &[7]), vec![9, 7, 8]);
+}
+
+#[test]
+fn a_drop_on_a_tab_files_under_the_tabs_location() {
+    let a = || "personal".to_owned();
+    assert_eq!(drop_action(&Location::Inbox(a())), DropAction::File(TriageState::Inbox));
+    assert_eq!(drop_action(&Location::Archive(a())), DropAction::File(TriageState::Archived));
+    assert_eq!(drop_action(&Location::Trash(a())), DropAction::File(TriageState::Deleted));
+    assert_eq!(drop_action(&Location::Folder(7)), DropAction::File(TriageState::Filed(7)));
+}
+
+#[test]
+fn a_drop_on_a_snoozed_tab_asks_for_a_time() {
+    assert_eq!(drop_action(&Location::Snoozed("personal".into())), DropAction::Snooze);
+}
+
+#[test]
+fn sent_and_all_inboxes_take_no_drop() {
+    assert_eq!(drop_action(&Location::Sent("personal".into())), DropAction::Nothing);
+    assert_eq!(drop_action(&Location::AllInboxes), DropAction::Nothing);
 }
