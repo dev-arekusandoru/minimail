@@ -7,6 +7,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{ActiveTheme as _, Icon};
 
 /// Longest tab title, in characters.
 const TITLE_MAX: usize = 28;
@@ -59,21 +60,33 @@ impl MailApp {
                     cx.stop_propagation();
                     this.close_tab(ix, window, cx);
                 }));
-            // Avatar, title and close share one row inside the tab's padded label box, so
-            // both edge insets match and the gaps between the three are equal.
+            // Avatar (thread) or draft glyph and title and close share one row inside the
+            // tab's padded label box, so both edge insets match and the gaps between them
+            // are equal. The draft keeps the same leading slot, so the two kinds of tab
+            // line up; the setting hides the slot for both.
             let row = div()
                 .flex()
                 .items_center()
                 .gap_1()
-                .when(self.tab_avatars && draft.is_none(), |row| {
-                    row.child(match latest {
-                        Some(m) => div()
+                .when(self.tab_avatars, |row| {
+                    row.child(match (draft, latest) {
+                        (Some(_), _) => div()
+                            .id(("reader-tab-draft", ix))
+                            .test_support()
+                            .flex_shrink_0()
+                            .child(
+                                Icon::new(IconName::FilePen)
+                                    .with_size(px(AVATAR))
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .into_any_element(),
+                        (None, Some(m)) => div()
                             .id(("reader-tab-avatar", thread))
                             .test_support()
                             .flex_shrink_0()
                             .child(look.monogram(&m.from_name, &m.from_email, AVATAR))
                             .into_any_element(),
-                        None => div().into_any_element(),
+                        (None, None) => div().into_any_element(),
                     })
                 })
                 .child(label)

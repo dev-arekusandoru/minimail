@@ -2,6 +2,7 @@
 mod harness;
 
 mod composer_ui;
+mod draft_tabs;
 mod misc;
 mod outbox_classifier;
 mod rules_new_senders;
