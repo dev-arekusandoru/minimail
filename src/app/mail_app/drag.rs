@@ -2,7 +2,7 @@
 //! `on_drag` wiring every row shares.
 
 use super::*;
-use crate::dnd::MailDrag;
+use crate::dnd::{FolderDrag, MailDrag};
 use gpui_kit::component::dock::{AnyDrag as DockDrag, DropTarget};
 use gpui_kit::component::ActiveTheme as _;
 
@@ -63,6 +63,35 @@ impl Render for MailDragPreview {
     }
 }
 
+/// The chip that follows the pointer while a sidebar folder row is dragged: the row's label.
+pub(super) struct FolderDragPreview {
+    label: SharedString,
+}
+
+impl FolderDragPreview {
+    pub(super) fn new(label: SharedString) -> Self {
+        Self { label }
+    }
+}
+
+impl Render for FolderDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        div()
+            .id("folder-drag-chip")
+            .test_support()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(t.border)
+            .bg(t.background)
+            .opacity(0.95)
+            .text_sm()
+            .child(self.label.clone())
+    }
+}
+
 impl MailApp {
     /// `row` with a drag attached. `ids` are the messages the row stands for, `label` names it on
     /// the chip. A row that stands for nothing stays undraggable.
@@ -106,5 +135,22 @@ impl MailApp {
             self.open_message(anchor, false);
         }
         cx.notify();
+    }
+
+    /// A folder dropped on the list strip opens its view as a pinned tab; a drop anywhere else
+    /// — the reader strip included — does nothing.
+    pub(super) fn drop_on_list(
+        &mut self,
+        item: &DockDrag,
+        target: &DropTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(drag) = item.value().downcast_ref::<FolderDrag>() else {
+            return;
+        };
+        if !self.panes.dock_ref().is_list_node(target.node(), cx) {
+            return;
+        }
+        self.show_location(drag.location.clone(), true, cx);
     }
 }

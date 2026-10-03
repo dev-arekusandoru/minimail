@@ -3,7 +3,17 @@
 //! Plain data, so the rules below are testable without a UI: which messages a drag applies to,
 //! and which message a drop on the reader tab strip opens. Views own the chip and the wiring.
 
-use crate::model::MessageId;
+use crate::model::{Location, MessageId};
+
+/// A drag that started on a sidebar folder row: the view it stands for, and the label the
+/// chip that follows the pointer shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderDrag {
+    /// The location a drop on the list strip opens.
+    pub location: Location,
+    /// The row's label, e.g. `"Projects"`, for the drag chip.
+    pub label: String,
+}
 
 /// A drag that started on a list row.
 #[derive(Clone, Debug, PartialEq, Eq)]

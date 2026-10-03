@@ -4,7 +4,8 @@
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, ElementId, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext, point, px,
+    AppContext, ElementId, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Point, TestAppContext,
+    point, px,
 };
 use mail_classifier::model::{Location, Mailbox, MessageId};
 
@@ -28,6 +29,16 @@ fn mailbox() -> Mailbox {
 const INBOX: &str = "in:inbox";
 const ARCHIVE: &str = "in:archived account:personal";
 const TRASH: &str = "in:deleted account:personal";
+const RECEIPTS: &str = "in:receipts account:personal";
+const FAMILY: &str = "in:family account:personal";
+const TRAVEL: &str = "in:travel account:personal";
+
+/// A point on the list pane's own background (the list group's content, below its strip):
+/// the sidebar takes 190px and the list ~42% of what is left, so the list runs to ~x=614 in
+/// the 1200x800 harness window.
+const ON_THE_LIST: (f32, f32) = (350., 300.);
+/// A point inside the reader pane.
+const IN_THE_READER: (f32, f32) = (900., 400.);
 
 impl Harness<'_> {
     /// The strip as the model holds it: `(query, pinned)` per tab, left to right.
@@ -100,6 +111,37 @@ impl Harness<'_> {
         self.cx.update_window(self.window, |_, window, cx| window.draw(cx)).ok();
         self.cx.run_until_parked();
     }
+
+    /// Centre of the element `id`, as a point to start or end a gesture on.
+    fn centre(&mut self, id: impl Into<ElementId>) -> Point<gpui_kit::Pixels> {
+        let id = id.into();
+        let bounds = self
+            .cx
+            .update_window(self.window, |_, window, _| window.find(id).bounds())
+            .expect("window alive");
+        self.cx.run_until_parked();
+        point(
+            px(f32::from(bounds.origin.x) + f32::from(bounds.size.width) / 2.),
+            px(f32::from(bounds.origin.y) + f32::from(bounds.size.height) / 2.),
+        )
+    }
+
+    /// Press on the element `from` and release at `to`, the way a drag is performed. The drop
+    /// is a dock edit the app reads back on its next frame, so draw once after it.
+    fn drag(&mut self, from: impl Into<ElementId>, to: Point<gpui_kit::Pixels>) {
+        let from = self.centre(from);
+        self.cx
+            .update_window(self.window, |_, window, cx| window.drag(from, to, cx))
+            .expect("window alive");
+        self.cx.run_until_parked();
+        self.cx.update_window(self.window, |_, window, cx| window.draw(cx)).ok();
+        self.cx.run_until_parked();
+    }
+
+    /// Drag the sidebar row `from` onto the list pane's background.
+    fn drag_to_list(&mut self, from: impl Into<ElementId>) {
+        self.drag(from, point(px(ON_THE_LIST.0), px(ON_THE_LIST.1)));
+    }
 }
 
 #[gpui_kit::gpui::test]
@@ -107,7 +149,7 @@ fn a_sidebar_click_opens_a_preview_tab_and_the_next_replaces_it(cx: &mut TestApp
     let mut h = harness_with(cx, mailbox());
     assert_eq!(h.tabs(), vec![(INBOX.to_owned(), true)], "a window opens on All Inboxes");
 
-    h.click("1-3"); // Personal · Archive
+    h.click("sidebar-archive-personal"); // Personal · Archive
     assert_eq!(
         h.tabs(),
         vec![(INBOX.to_owned(), true), (ARCHIVE.to_owned(), false)],
@@ -115,7 +157,7 @@ fn a_sidebar_click_opens_a_preview_tab_and_the_next_replaces_it(cx: &mut TestApp
     );
     assert_eq!(h.active(), 1);
 
-    h.click("1-4"); // Personal · Trash
+    h.click("sidebar-trash-personal"); // Personal · Trash
     assert_eq!(
         h.tabs(),
         vec![(INBOX.to_owned(), true), (TRASH.to_owned(), false)],
@@ -128,7 +170,7 @@ fn a_sidebar_click_opens_a_preview_tab_and_the_next_replaces_it(cx: &mut TestApp
 #[gpui_kit::gpui::test]
 fn a_cmd_click_pins_the_view_it_opens(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3");
+    h.cmd_click("sidebar-archive-personal");
     assert_eq!(
         h.tabs(),
         vec![(INBOX.to_owned(), true), (ARCHIVE.to_owned(), true)],
@@ -136,7 +178,7 @@ fn a_cmd_click_pins_the_view_it_opens(cx: &mut TestAppContext) {
     );
 
     // A plain click after it now appends rather than replacing.
-    h.click("1-4");
+    h.click("sidebar-trash-personal");
     assert_eq!(h.tabs().len(), 3, "the pinned tab is kept, the preview takes the new view");
     assert_eq!(h.tabs()[2], (TRASH.to_owned(), false));
 }
@@ -144,11 +186,11 @@ fn a_cmd_click_pins_the_view_it_opens(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn clicking_a_view_that_is_already_pinned_activates_its_tab(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive
-    h.click("1-4"); // the preview takes Trash
+    h.cmd_click("sidebar-archive-personal"); // pin Archive
+    h.click("sidebar-trash-personal"); // the preview takes Trash
     assert_eq!(h.active(), 2);
 
-    h.click("1-3");
+    h.click("sidebar-archive-personal");
     assert_eq!(h.tabs().len(), 3, "no second tab for a view that is already open");
     assert_eq!(h.active(), 1, "its own tab was activated instead");
     assert_eq!(h.read(|a| a.location()), Some(Location::Archive("personal".into())));
@@ -157,12 +199,12 @@ fn clicking_a_view_that_is_already_pinned_activates_its_tab(cx: &mut TestAppCont
 #[gpui_kit::gpui::test]
 fn every_tab_keeps_its_own_cursor_selection_and_scroll(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive
-    h.click("1-4"); // the preview takes Trash, which is empty
+    h.cmd_click("sidebar-archive-personal"); // pin Archive
+    h.click("sidebar-trash-personal"); // the preview takes Trash, which is empty
     assert_eq!(h.state(2), (0, Vec::new(), 0), "an empty view starts at the top");
 
     // Give the Archive tab a cursor and a selection of its own.
-    h.click("1-3");
+    h.click("sidebar-archive-personal");
     assert_eq!(h.active(), 1);
     h.keys("x j x");
     let archive = h.state(1);
@@ -170,18 +212,18 @@ fn every_tab_keeps_its_own_cursor_selection_and_scroll(cx: &mut TestAppContext) 
     assert!(!archive.1.is_empty(), "the Archive tab holds a selection of its own");
 
     // Onto the Trash tab, and back: nothing of the Archive tab moved.
-    h.click("1-4");
+    h.click("sidebar-trash-personal");
     assert_eq!(h.active(), 2);
     assert_eq!(h.state(2), (0, Vec::new(), 0), "the other tab's state is untouched");
-    h.click("1-3");
+    h.click("sidebar-archive-personal");
     assert_eq!(h.state(1), archive, "the Archive tab kept its cursor, selection and scroll");
 }
 
 #[gpui_kit::gpui::test]
 fn ctrl_tab_cycles_the_focused_pane_and_cmd_w_closes_its_tab(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive
-    h.click("1-4"); // the preview takes Trash
+    h.cmd_click("sidebar-archive-personal"); // pin Archive
+    h.click("sidebar-trash-personal"); // the preview takes Trash
     assert_eq!(h.tabs().len(), 3);
 
     // The list was the last pane touched, so the keys are the list's.
@@ -214,7 +256,7 @@ fn ctrl_tab_cycles_the_focused_pane_and_cmd_w_closes_its_tab(cx: &mut TestAppCon
 #[gpui_kit::gpui::test]
 fn the_readers_preview_follows_the_active_list_tab(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive
+    h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.click(("list-tab", 0usize));
     h.row(4);
     h.keys("enter");
@@ -235,8 +277,8 @@ fn the_readers_preview_follows_the_active_list_tab(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn dragging_a_tab_in_the_list_strip_reorders_the_model(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive
-    h.cmd_click("1-4"); // pin Trash
+    h.cmd_click("sidebar-archive-personal"); // pin Archive
+    h.cmd_click("sidebar-trash-personal"); // pin Trash
     assert_eq!(h.tabs().len(), 3);
 
     h.drag_tab(0, 2);
@@ -254,8 +296,8 @@ fn dragging_a_tab_in_the_list_strip_reorders_the_model(cx: &mut TestAppContext) 
 #[gpui_kit::gpui::test]
 fn a_click_in_the_reader_content_gives_it_the_tab_keys(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.cmd_click("1-3"); // pin Archive, so the list strip has tabs to cycle
-    h.click("1-4"); // the preview takes Trash
+    h.cmd_click("sidebar-archive-personal"); // pin Archive, so the list strip has tabs to cycle
+    h.click("sidebar-trash-personal"); // the preview takes Trash
     h.click(("list-tab", 0usize)); // back to the inbox, where the rows are
 
     // Two reader tabs to cycle between and close.
@@ -282,4 +324,48 @@ fn a_click_in_the_reader_content_gives_it_the_tab_keys(cx: &mut TestAppContext) 
     h.keys("cmd-w");
     assert_eq!(h.read(|a| a.tabs.tabs().len()), 1, "cmd-w closed a reader tab");
     assert_eq!(h.tabs().len(), 2, "the list strip was left alone");
+}
+
+#[gpui_kit::gpui::test]
+fn dragging_a_folder_onto_the_list_opens_a_pinned_tab_and_activates_it_again(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.drag_to_list("sidebar-folder-1"); // Receipts, a personal folder
+    assert_eq!(
+        h.tabs(),
+        vec![(INBOX.to_owned(), true), (RECEIPTS.to_owned(), true)],
+        "the folder opened as a new pinned tab"
+    );
+    assert_eq!(h.active(), 1, "and its tab is showing");
+    assert_eq!(h.read(|a| a.location()), Some(Location::Folder(1)));
+
+    // Its view is open now, so a second drop activates that tab instead of opening another.
+    h.drag_to_list("sidebar-folder-1");
+    assert_eq!(h.tabs().len(), 2, "no second tab for a view that is already open");
+    assert_eq!(h.active(), 1, "its own tab was activated instead");
+
+    // A folder dropped on the reader is not the list's: nothing happens.
+    h.drag("sidebar-folder-2", point(px(IN_THE_READER.0), px(IN_THE_READER.1)));
+    assert_eq!(h.tabs().len(), 2, "a drop on the reader does not open a list tab");
+    assert!(!h.tabs().iter().any(|(query, _)| query == TRAVEL), "no tab for the reader drop");
+}
+
+#[gpui_kit::gpui::test]
+fn dropping_a_folder_on_a_list_tab_opens_it_as_a_pinned_tab(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.drag_to_list("sidebar-folder-1"); // Receipts, so the strip has a second tab to aim at
+    assert_eq!(h.tabs().len(), 2);
+
+    // Dropped on the first tab's title — our own element — rather than the pane behind it.
+    let onto = h.centre(("list-tab", 0usize));
+    h.drag("sidebar-folder-3", onto); // Family
+    assert_eq!(
+        h.tabs(),
+        vec![
+            (INBOX.to_owned(), true),
+            (RECEIPTS.to_owned(), true),
+            (FAMILY.to_owned(), true),
+        ],
+        "the folder dropped on a tab title opened as a pinned tab"
+    );
+    assert_eq!(h.active(), 2);
 }

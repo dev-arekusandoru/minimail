@@ -134,6 +134,11 @@ expands it over the centre — list and viewer area — while the sidebar stays 
 
 **Settled**
 
+- The Triage tab is a panel that renders the list **and** the session reader together, in a
+  third dock group of its own that exists only for the session. That group is zoomed, so it
+  fills the dock body (the sidebar sits outside the dock and stays visible) and its strip shows
+  only "Triage": it acts as the only tab. Ending the session un-zooms and removes the group;
+  the user's list and reader tabs, cursors, selections and scroll are untouched throughout.
 - Zoom in and out happens automatically around the session; the skin's zoom control is turned on
   for the list group, and `alt-z` toggles zoom on the focused group (so it zooms any list tab in,
   not only the Triage tab).

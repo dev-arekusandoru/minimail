@@ -128,6 +128,7 @@ impl Dock {
                 cx.subscribe_in(&area, window, |app: &mut MailApp, _, event: &DockEvent, window, cx| {
                     if let DockEvent::DragDrop { item, target } = event {
                         app.drop_on_reader(item, target, window, cx);
+                        app.drop_on_list(item, target, cx);
                     }
                     cx.notify();
                 }),
@@ -355,22 +356,34 @@ impl Dock {
     }
 
     /// Whether `node` is the centre group holding the reader tabs — the only drop target that
-    /// opens mail. The list is a tab group too, and a drop on it means nothing.
+    /// opens mail. The list is a tab group too, and a drop on it means something else.
     pub(super) fn is_reader_node(&self, node: NodeId, cx: &App) -> bool {
-        let area = self.area.read(cx);
-        let Some(tree) = area.layout(DockPlacement::Center) else { return false };
         let readers: Vec<PanelId> = self
             .readers
             .iter()
             .chain(std::iter::once(&self.blank))
             .map(|panel| PanelId::from(panel.entity_id()))
             .collect();
+        self.node_holds(node, &readers, cx)
+    }
+
+    /// Whether `node` is the centre group holding the list tabs — the drop target that opens a
+    /// folder's view as a pinned tab.
+    pub(super) fn is_list_node(&self, node: NodeId, cx: &App) -> bool {
+        let lists: Vec<PanelId> = self.lists.iter().map(|panel| PanelId::from(panel.entity_id())).collect();
+        self.node_holds(node, &lists, cx)
+    }
+
+    /// Whether the centre tree's `node` is a tab group holding any of `panels`.
+    fn node_holds(&self, node: NodeId, panels: &[PanelId], cx: &App) -> bool {
+        let area = self.area.read(cx);
+        let Some(tree) = area.layout(DockPlacement::Center) else { return false };
         let mut hit = false;
         tree.root().walk(&mut |pane| {
             if pane.id() == node
-                && let PaneRef::Tabs { panels, .. } = pane.kind()
+                && let PaneRef::Tabs { panels: held, .. } = pane.kind()
             {
-                hit = panels.iter().any(|id| readers.contains(id));
+                hit = held.iter().any(|id| panels.contains(id));
             }
         });
         hit

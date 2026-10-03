@@ -6,8 +6,10 @@
 //! string the sidebar row shows, and the preview is italic with no close button.
 
 use super::*;
+use crate::dnd::FolderDrag;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dock::AnyDrag as DockDrag;
 use gpui_kit::component::Sizable as _;
 
 impl MailApp {
@@ -21,6 +23,18 @@ impl MailApp {
             .when(preview, |d| d.italic())
             .child(title)
             .test_support()
+            // A folder dropped here opens its view as a pinned tab, like a drop on the list
+            // itself. Anything else — a message drag — falls through to the dock.
+            .can_drop(|value, _, _| {
+                value
+                    .downcast_ref::<DockDrag>()
+                    .is_some_and(|item| item.value().downcast_ref::<FolderDrag>().is_some())
+            })
+            .on_drop(cx.listener(move |this, item: &DockDrag, _window, cx| {
+                if let Some(drag) = item.value().downcast_ref::<FolderDrag>() {
+                    this.show_location(drag.location.clone(), true, cx);
+                }
+            }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 this.click_list_tab(ix, event.click_count(), event.modifiers().platform, window, cx);
             }));

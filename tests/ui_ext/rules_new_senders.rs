@@ -24,12 +24,11 @@ pub fn repeat_sender_archive(h: &mut Harness<'_>) {
     click_all_inboxes(h);
 }
 
-/// The sidebar's All Inboxes row. Scoped, because the list strip's own tabs carry the same
-/// bare index once a second view is open.
+/// The sidebar's All Inboxes row, by its own stable id.
 fn click_all_inboxes(h: &mut Harness<'_>) {
     let window = h.window;
     let cx = &mut *h.cx;
-    cx.update_window(window, |_, window, cx| window.within("sidebar").click(0usize, cx))
+    cx.update_window(window, |_, window, cx| window.click("sidebar-all-inboxes", cx))
         .expect("window alive");
     cx.run_until_parked();
 }
