@@ -22,3 +22,11 @@ up without re-deriving the decision.
       hold comes back as an editable draft rather than a scheduled send.
 - [ ] **Templates and snippets** — reusable bodies and reusable text inserted
       from the palette. Nothing is stored or inserted yet.
+- [ ] **Hard flush on quit** — when the main window closes, dirty drafts are
+      marked urgent and their writes are *started* on the background local lane
+      (`flush_dirty_drafts`), but that lane's thread is not joined and the process
+      does not wait for it, so the last write is best-effort: a quit that tears
+      the process down immediately can still lose the final keystrokes. A hard
+      guarantee needs the close path to join/flush the local lane before the
+      window goes away (or a synchronous local write there); the seam is
+      `MailApp::watch_window_close` / `flush_dirty_drafts`.
