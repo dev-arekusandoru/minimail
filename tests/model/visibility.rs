@@ -116,7 +116,7 @@ fn a_location_query_round_trips_through_its_tokens() {
     let message = mb.get(1).unwrap().clone();
     let sent_id = mb.record_sent(message, Some(1), false, 0);
     let sent = mb.location_query(&Location::Sent("personal".into()));
-    assert_eq!(mb.ids_matching(&sent, &utc(NOW)).len(), 1);
+    assert_eq!(mb.ids_matching(&sent, &utc(NOW)), vec![sent_id]);
     assert_eq!(mb.query_location(&sent), Some(Location::Sent("personal".into())));
 
     let folder = mb.create_folder("personal", "Zebras", None);
