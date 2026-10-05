@@ -22,7 +22,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write as _;
+use std::hash::{Hash, Hasher};
 use std::panic::Location;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -41,10 +43,8 @@ mod native;
 pub const MAX_LIVE: usize = 8;
 /// Height of a document until its first measurement.
 const DEFAULT_HEIGHT: f32 = 48.;
-/// Extra page above and below the viewport that a snapshot covers, so a short scroll keeps it valid.
-const SNAP_MARGIN: f32 = 120.;
-/// How long a view must sit still before it is snapshotted ahead of an overlay.
-const SNAP_IDLE: Duration = Duration::from_millis(350);
+/// Extra page above and below the viewport that a snapshot covers.
+const SNAP_MARGIN: f32 = 16.;
 /// Re-measure the document this long after it loads, for images that arrive late.
 const REMEASURE: [Duration; 2] = [Duration::from_millis(300), Duration::from_millis(1500)];
 /// The document's laid-out height.
@@ -76,13 +76,37 @@ pub struct LoadedDoc {
     pub document: String,
 }
 
-/// Identity of the loaded HTML, cheap to compare every frame: the string's address and length
-/// plus the style. A message's HTML is only ever replaced wholesale.
+/// Identity of the loaded document: a hash of the HTML's bytes plus the style. The hash is taken
+/// when a message's HTML is first seen or changes, never per frame (see [`Fingerprint`]).
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DocSig {
+    hash: u64,
+    style: DocStyle,
+}
+
+/// Cheap per-frame check of whether a message's HTML is still the one that was hashed: its
+/// address, length and 128 sampled bytes. Only when that changes is the full hash recomputed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Fingerprint {
     ptr: usize,
     len: usize,
-    style: DocStyle,
+    ends: u64,
+}
+
+impl Fingerprint {
+    fn of(html: &str) -> Self {
+        let bytes = html.as_bytes();
+        let mut hasher = DefaultHasher::new();
+        bytes[..bytes.len().min(64)].hash(&mut hasher);
+        bytes[bytes.len().saturating_sub(64)..].hash(&mut hasher);
+        Self { ptr: bytes.as_ptr() as usize, len: bytes.len(), ends: hasher.finish() }
+    }
+}
+
+fn content_hash(html: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    html.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -120,12 +144,9 @@ struct ViewState {
     /// Bumped by anything that makes an in-flight snapshot stale; completions must match it.
     epoch: Cell<u64>,
     inflight: Cell<bool>,
-    scheduled: Cell<bool>,
-    want_snapshot: Cell<bool>,
     snap: RefCell<Option<Snap>>,
     /// Visible part of the view in view coordinates, and the view's size, as of the last frame.
     visible: Cell<[f32; 4]>,
-    scheduled_at: Cell<[f32; 4]>,
     size: Cell<[f32; 2]>,
 }
 
@@ -137,11 +158,8 @@ impl ViewState {
             loaded: Cell::new(false),
             epoch: Cell::new(0),
             inflight: Cell::new(false),
-            scheduled: Cell::new(false),
-            want_snapshot: Cell::new(false),
             snap: RefCell::new(None),
             visible: Cell::new([0.; 4]),
-            scheduled_at: Cell::new([0.; 4]),
             size: Cell::new([0.; 2]),
         })
     }
@@ -157,7 +175,6 @@ impl ViewState {
     fn reset(&self) {
         self.bump();
         self.loaded.set(false);
-        self.want_snapshot.set(false);
         self.width.set(f32::NAN);
         *self.snap.borrow_mut() = None;
     }
@@ -179,6 +196,7 @@ impl ViewState {
 
 struct Entry {
     sig: DocSig,
+    fingerprint: Fingerprint,
     blocked: usize,
     phase: Phase,
     pending: Option<Pending>,
@@ -186,6 +204,18 @@ struct Entry {
     native: Option<native::Native>,
     /// Logical clock of the last frame this view was laid out in.
     used: u64,
+}
+
+impl Entry {
+    /// Hide the native view and free its snapshot: a view nobody sees keeps no pixels.
+    fn hide(&self) {
+        if let Some(native) = &self.native {
+            native.set_visible(false);
+            if self.state.snap.borrow_mut().take().is_some() {
+                self.state.bump();
+            }
+        }
+    }
 }
 
 /// Wakes `MailApp` (and so the reader) from WebKit callbacks and timers.
@@ -249,10 +279,11 @@ impl EmailWebViews {
     pub fn body(&self, key: ViewKey, html: &str, style: DocStyle) -> (EmailView, usize) {
         let inner = &*self.0;
         inner.passes[usize::from(key.triage)].borrow_mut().push(key);
-        let sig = DocSig { ptr: html.as_ptr() as usize, len: html.len(), style };
+        let fingerprint = Fingerprint::of(html);
         let mut entries = inner.entries.borrow_mut();
         let e = entries.entry(key).or_insert_with(|| Entry {
-            sig,
+            sig: DocSig { hash: 0, style },
+            fingerprint: Fingerprint { ptr: 0, len: 0, ends: 0 },
             blocked: 0,
             phase: Phase::Empty,
             pending: None,
@@ -260,6 +291,11 @@ impl EmailWebViews {
             native: None,
             used: 0,
         });
+        if e.fingerprint != fingerprint {
+            e.fingerprint = fingerprint;
+            e.sig.hash = content_hash(html);
+        }
+        let sig = DocSig { hash: e.sig.hash, style };
         if e.sig != sig || e.phase == Phase::Empty {
             e.sig = sig;
             e.blocked = if style.block { crate::reading::blocked_images(html) } else { 0 };
@@ -280,11 +316,8 @@ impl EmailWebViews {
     pub fn end_pass(&self, triage: bool) {
         let pass = self.0.passes[usize::from(triage)].borrow();
         for (key, e) in self.0.entries.borrow().iter() {
-            if key.triage == triage
-                && !pass.contains(key)
-                && let Some(native) = &e.native
-            {
-                native.set_visible(false);
+            if key.triage == triage && !pass.contains(key) {
+                e.hide();
             }
         }
     }
@@ -293,10 +326,8 @@ impl EmailWebViews {
     pub fn set_slot_visible(&self, triage: bool, visible: bool) {
         if self.0.slot_visible[usize::from(triage)].replace(visible) && !visible {
             for (key, e) in self.0.entries.borrow().iter() {
-                if key.triage == triage
-                    && let Some(native) = &e.native
-                {
-                    native.set_visible(false);
+                if key.triage == triage {
+                    e.hide();
                 }
             }
         }
@@ -383,7 +414,7 @@ impl EmailWebViews {
 
         let showing = inner.slot_visible[usize::from(key.triage)].get() && visible[2] >= 1. && visible[3] >= 1.;
         if !showing {
-            native.set_visible(false);
+            e.hide();
             return None;
         }
         if overlay {
@@ -407,13 +438,6 @@ impl EmailWebViews {
             return None;
         }
         native.set_visible(true);
-        if state.loaded.get() {
-            if state.want_snapshot.replace(false) && !state.inflight.get() {
-                inner.snapshot(native, state, visible, cx);
-            } else if state.snapshot_for(visible).is_none() {
-                inner.schedule_snapshot(state, visible);
-            }
-        }
         None
     }
 }
@@ -506,8 +530,8 @@ impl Inner {
         e.phase = Phase::Live;
     }
 
-    /// Capture the visible part of the page plus a margin, decode it off the UI thread and keep
-    /// it for the next overlay. A completion that finds the epoch moved on is discarded.
+    /// Capture the visible part of the page plus a small margin when an overlay needs it, decode it
+    /// off the UI thread and keep only the decoded image while the view stays on screen. A completion that finds the epoch moved on is discarded.
     fn snapshot(&self, native: &native::Native, state: &Rc<ViewState>, visible: [f32; 4], cx: &App) {
         let size = state.size.get();
         let top = (visible[1] - SNAP_MARGIN).max(0.);
@@ -543,29 +567,6 @@ impl Inner {
                 .detach();
         });
     }
-
-    /// Ask for a snapshot once the view has sat still for [`SNAP_IDLE`].
-    fn schedule_snapshot(&self, state: &Rc<ViewState>, visible: [f32; 4]) {
-        if state.inflight.get() || state.scheduled.replace(true) {
-            return;
-        }
-        state.scheduled_at.set(visible);
-        idle_check(state.clone(), self.notifier.clone());
-    }
-}
-
-/// Wait for stillness, then flag the view for a snapshot (the next frame takes it).
-fn idle_check(state: Rc<ViewState>, notifier: Notifier) {
-    let wake = notifier.clone();
-    notifier.after(SNAP_IDLE, move || {
-        if state.visible.get() != state.scheduled_at.get() {
-            state.scheduled_at.set(state.visible.get());
-            return idle_check(state, wake);
-        }
-        state.scheduled.set(false);
-        state.want_snapshot.set(true);
-        wake.notify();
-    });
 }
 
 /// Read the document height into the view state, waking the reader when it changed.
