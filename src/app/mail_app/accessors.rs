@@ -229,6 +229,11 @@ impl MailApp {
             || self.folder_picker.is_some()
     }
 
+    /// The documents the email views loaded without a native window (the headless platform).
+    pub fn webview_loads(&self) -> Vec<crate::app::email_webview::LoadedDoc> {
+        self.webviews.loads()
+    }
+
     /// Any modal (the composer or a dialog-hosted view) is open.
     pub fn modal_open(&self) -> bool {
         self.compose.is_some() || self.dialog_hosted()

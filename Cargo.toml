@@ -19,6 +19,11 @@ futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 gpui-wry = "0.7.0"
 wry = { version = "0.53.3", package = "lb-wry" }
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-web-kit = "0.3"
 
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }

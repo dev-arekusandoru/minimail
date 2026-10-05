@@ -20,6 +20,7 @@ use crate::app::row::{self, RowVisual};
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::draft::DraftKind;
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
+use crate::app::email_webview::EmailWebViews;
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
@@ -160,6 +161,8 @@ pub struct MailApp {
     /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
     /// opened message can be scrolled into view.
     reader_panes: RefCell<HashMap<u32, reader::ReaderPane>>,
+    /// The native web views that draw HTML message bodies, kept per message while its tab lives.
+    webviews: EmailWebViews,
     /// Open find bars, by the thread of their tab.
     finds: HashMap<u32, reader_find::FindTab>,
     /// Layout of the text holding the current find match, from the frame numbered by the last
@@ -275,6 +278,7 @@ impl MailApp {
             focus_handle: cx.focus_handle(),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),
+            webviews: EmailWebViews::new(cx),
             finds: HashMap::new(),
             find_layout: RefCell::new(None),
             find_gen: std::cell::Cell::new(0),

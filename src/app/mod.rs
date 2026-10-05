@@ -7,6 +7,7 @@ pub mod icons;
 pub mod chrome;
 pub mod compose;
 pub mod dialog;
+pub mod email_webview;
 pub mod filter_popover;
 pub mod folder_picker;
 pub mod mail_app;

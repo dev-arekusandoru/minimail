@@ -1,0 +1,424 @@
+//! The macOS half of the email web view: building a locked-down `WKWebView`, keeping its frame
+//! in step with GPUI, and the few JavaScript / snapshot calls the app makes on it.
+//!
+//! Page content runs no JavaScript (`allowsContentJavaScript = false`); the app's own
+//! `evaluateJavaScript` calls are unaffected by that switch. Every view sits in a [`ClipView`] so
+//! the part of the page outside GPUI's scroll viewport is clipped natively.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use block2::RcBlock;
+use gpui_kit::*;
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, Bool};
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{NSImage, NSView, NSWorkspace};
+use objc2_foundation::{NSError, NSNumber, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
+#[allow(deprecated)]
+use objc2_web_kit::WKProcessPool;
+use objc2_web_kit::{
+    WKContentRuleList, WKContentRuleListStore, WKSnapshotConfiguration,
+    WKUserContentController, WKWebView, WKWebViewConfiguration, WKWebpagePreferences,
+    WKWebsiteDataStore,
+};
+use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use wry::{
+    NewWindowResponse, PageLoadEvent, WebViewBuilder, WebViewBuilderExtDarwin as _,
+    WebViewBuilderExtMacos as _, WebViewExtMacOS as _, WryWebView,
+};
+
+/// Compiled rule lists are cached on disk under this identifier; change it with the rules.
+const RULES_ID: &str = "mail-classifier.block-remote.v1";
+/// Block every remote subresource a message could load: images, CSS, fonts, media, fetches.
+const RULES: &str = r#"[{"trigger":{"url-filter":"^https?://","resource-type":["image","style-sheet","font","media","raw","svg-document"]},"action":{"type":"block"}}]"#;
+
+define_class!(
+    /// A flipped container: its children are positioned from the top left, like GPUI's.
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "MailEmailClipView"]
+    struct ClipView;
+
+    impl ClipView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> Bool {
+            Bool::YES
+        }
+    }
+
+    unsafe impl NSObjectProtocol for ClipView {}
+);
+
+define_class!(
+    /// The email's `WKWebView`: wry's view class, except that it never becomes first responder,
+    /// so every key stays with GPUI. Mouse scrolling, links and selection are unaffected.
+    #[unsafe(super(WryWebView))]
+    #[name = "MailEmailWebView"]
+    struct KeylessWebView;
+
+    impl KeylessWebView {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> Bool {
+            Bool::NO
+        }
+
+        #[unsafe(method(becomeFirstResponder))]
+        fn become_first_responder(&self) -> Bool {
+            Bool::NO
+        }
+    }
+
+    unsafe impl NSObjectProtocol for KeylessWebView {}
+);
+
+/// What every email view shares: one web process, one non-persistent data store, and the
+/// remote-content rule list once it has compiled.
+#[allow(deprecated)] // The pool is a no-op on current macOS (one shared web process); kept explicit.
+pub struct Shared {
+    mtm: MainThreadMarker,
+    pool: Retained<WKProcessPool>,
+    store: Retained<WKWebsiteDataStore>,
+    rules: Rc<RefCell<Rules>>,
+}
+
+pub enum Rules {
+    Idle,
+    Loading,
+    Ready(Retained<WKContentRuleList>),
+    Failed,
+}
+
+#[allow(deprecated)]
+impl Shared {
+    pub fn new() -> Option<Self> {
+        let mtm = MainThreadMarker::new()?;
+        // SAFETY: main thread; plain constructors.
+        let (pool, store) = unsafe {
+            (WKProcessPool::new(mtm), WKWebsiteDataStore::nonPersistentDataStore(mtm))
+        };
+        Some(Self { mtm, pool, store, rules: Rc::new(RefCell::new(Rules::Idle)) })
+    }
+
+    /// The compiled rules, starting the (cached) compile on first use. `done` runs once the
+    /// compile has finished, successfully or not.
+    pub fn rules(&self, done: impl Fn() + 'static) -> Option<Retained<WKContentRuleList>> {
+        match &*self.rules.borrow() {
+            Rules::Ready(list) => return Some(list.clone()),
+            Rules::Failed | Rules::Loading => return None,
+            Rules::Idle => {}
+        }
+        *self.rules.borrow_mut() = Rules::Loading;
+        let finish = {
+            let rules = self.rules.clone();
+            Rc::new(move |list: *mut WKContentRuleList| {
+                // SAFETY: WebKit hands over a valid list or null.
+                *rules.borrow_mut() = match unsafe { Retained::retain(list) } {
+                    Some(list) => Rules::Ready(list),
+                    None => Rules::Failed,
+                };
+                done();
+            })
+        };
+        // SAFETY: main thread; the blocks only touch `Rc` state on the main thread.
+        unsafe {
+            let Some(store) = WKContentRuleListStore::defaultStore(self.mtm) else {
+                finish(std::ptr::null_mut());
+                return None;
+            };
+            let id = NSString::from_str(RULES_ID);
+            let compile_store = store.clone();
+            let (compile_id, compile_finish) = (id.clone(), finish.clone());
+            let lookup = RcBlock::new(move |list: *mut WKContentRuleList, _: *mut NSError| {
+                if !list.is_null() {
+                    return finish(list);
+                }
+                let finish = compile_finish.clone();
+                let compiled =
+                    RcBlock::new(move |list: *mut WKContentRuleList, _: *mut NSError| finish(list));
+                compile_store
+                    .compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
+                        Some(&compile_id),
+                        Some(&NSString::from_str(RULES)),
+                        Some(&compiled),
+                    );
+            });
+            store.lookUpContentRuleListForIdentifier_completionHandler(Some(&id), Some(&lookup));
+        }
+        None
+    }
+}
+
+/// One email's native view: a `WKWebView` inside a clip container, both children of GPUI's
+/// content view.
+pub struct Native {
+    /// Owns the wry view; dropping it hides and (with the last handle) destroys the web view.
+    _view: gpui_wry::WebView,
+    web: Retained<WryWebView>,
+    clip: Retained<ClipView>,
+    parent: Retained<NSView>,
+    content: Retained<WKUserContentController>,
+    parent_flipped: bool,
+    shown: Cell<bool>,
+    /// Last applied `[clip x, y, w, h, view x, y, w, h, parent height]`.
+    frame: Cell<[f32; 9]>,
+}
+
+/// Why a native view could not be built.
+pub enum Unavailable {
+    /// No platform window (the headless test platform).
+    Headless,
+    Failed,
+}
+
+pub struct Config<'a> {
+    pub html: &'a str,
+    pub rules: Option<Retained<WKContentRuleList>>,
+    /// Called when the page has finished loading.
+    pub on_finished: Box<dyn Fn(&WKWebView)>,
+}
+
+/// Whether `window` is backed by a real `NSWindow` (the headless test platform is not).
+pub fn available(window: &Window) -> bool {
+    HasWindowHandle::window_handle(window).is_ok()
+}
+
+/// Open `url` in the system browser, if it is a link we hand over.
+pub fn open_external(url: &str) {
+    let allowed = url.split_once(':').is_some_and(|(scheme, _)| {
+        ["http", "https", "mailto"].iter().any(|s| scheme.eq_ignore_ascii_case(s))
+    });
+    if !allowed {
+        return;
+    }
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) {
+        // The navigation delegate runs on the main thread, which `sharedWorkspace` needs.
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+}
+
+impl Native {
+    pub fn new(
+        window: &mut Window,
+        cx: &mut App,
+        shared: &Shared,
+        config: Config<'_>,
+    ) -> Result<Self, Unavailable> {
+        let handle = HasWindowHandle::window_handle(&*window).map_err(|_| Unavailable::Headless)?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return Err(Unavailable::Headless);
+        };
+        // SAFETY: GPUI's content view outlives this call; we retain it.
+        let parent: Retained<NSView> = unsafe { Retained::retain(handle.ns_view.as_ptr().cast()) }
+            .ok_or(Unavailable::Failed)?;
+        let mtm = shared.mtm;
+
+        // SAFETY: main thread; configuration objects are ours until handed to wry.
+        let (configuration, content) = unsafe {
+            let configuration = WKWebViewConfiguration::new(mtm);
+            #[allow(deprecated)]
+            configuration.setProcessPool(&shared.pool);
+            configuration.setWebsiteDataStore(&shared.store);
+            let preferences = WKWebpagePreferences::new(mtm);
+            preferences.setAllowsContentJavaScript(false);
+            configuration.setDefaultWebpagePreferences(Some(&preferences));
+            let content = configuration.userContentController();
+            if let Some(rules) = &config.rules {
+                content.addContentRuleList(rules);
+            }
+            (configuration, content)
+        };
+
+        let slot: Rc<RefCell<Option<Retained<WryWebView>>>> = Rc::default();
+        let finished = {
+            let slot = slot.clone();
+            let on_finished = config.on_finished;
+            move |event: PageLoadEvent, _: String| {
+                if matches!(event, PageLoadEvent::Finished)
+                    && let Some(web) = slot.borrow().as_ref()
+                {
+                    on_finished(web);
+                }
+            }
+        };
+        let view = WebViewBuilder::new()
+            .with_webview_configuration(configuration)
+            .with_html(config.html)
+            .with_focused(false)
+            .with_accept_first_mouse(true)
+            .with_allow_link_preview(false)
+            // The document itself is `about:blank`; any other navigation is a link click, which
+            // belongs to the system browser.
+            .with_navigation_handler(|url| {
+                if url.starts_with("about:blank") {
+                    return true;
+                }
+                open_external(&url);
+                false
+            })
+            .with_new_window_req_handler(|url, _| {
+                open_external(&url);
+                NewWindowResponse::Deny
+            })
+            .with_download_started_handler(|_, _| false)
+            .with_on_page_load_handler(finished)
+            .build_as_child(window)
+            .map_err(|_| Unavailable::Failed)?;
+
+        let web = view.webview();
+        // Out of the window first: WebKit and AppKit key-value-observe the view while it is in
+        // one, and an isa swap under a live observer breaks that bookkeeping.
+        web.removeFromSuperview();
+        // SAFETY: `KeylessWebView` adds no ivars to its superclass, so swapping the class of a
+        // live `WryWebView` is layout-compatible.
+        unsafe {
+            objc2::ffi::object_setClass(
+                Retained::as_ptr(&web).cast_mut().cast::<AnyObject>(),
+                KeylessWebView::class(),
+            );
+        }
+        *slot.borrow_mut() = Some(web.clone());
+
+        // SAFETY: main thread; `addSubview` re-parents wry's view into the clip container.
+        let (clip, parent_flipped) = unsafe {
+            let clip: Retained<ClipView> = msg_send![ClipView::alloc(mtm), init];
+            clip.setWantsLayer(true);
+            let layer: Option<Retained<AnyObject>> = msg_send![&*clip, layer];
+            if let Some(layer) = layer {
+                let _: () = msg_send![&*layer, setMasksToBounds: true];
+            }
+            clip.setHidden(true);
+            clip.addSubview(&web);
+            parent.addSubview(&clip);
+            (clip, parent.isFlipped())
+        };
+        let view = gpui_wry::WebView::new(view, window, cx);
+        Ok(Self {
+            _view: view,
+            web,
+            clip,
+            parent,
+            content,
+            parent_flipped,
+            shown: Cell::new(false),
+            frame: Cell::new([f32::NAN; 9]),
+        })
+    }
+
+    pub fn web(&self) -> &WKWebView {
+        &self.web
+    }
+
+    /// Swap the document, applying the remote-content policy first.
+    pub fn load(&self, html: &str, rules: Option<&Retained<WKContentRuleList>>) {
+        // SAFETY: main thread.
+        unsafe {
+            self.content.removeAllContentRuleLists();
+            if let Some(rules) = rules {
+                self.content.addContentRuleList(rules);
+            }
+        }
+        let _ = self._view.raw().load_html(html);
+    }
+
+    /// Place the clip container at `clip` and the page inside it at `view` (`[x, y, w, h]`,
+    /// logical pixels, window coordinates for the clip and clip coordinates for the view). Does
+    /// nothing when nothing moved.
+    pub fn place(&self, clip: [f32; 4], view: [f32; 4]) {
+        let parent_h = if self.parent_flipped {
+            0.
+        } else {
+            self.parent.frame().size.height as f32
+        };
+        let key = [clip[0], clip[1], clip[2], clip[3], view[0], view[1], view[2], view[3], parent_h];
+        if key == self.frame.get() {
+            return;
+        }
+        self.frame.set(key);
+        let top = if self.parent_flipped { clip[1] } else { parent_h - clip[1] - clip[3] };
+        self.clip.setFrame(rect(clip[0], top, clip[2], clip[3]));
+        self.web.setFrame(rect(view[0], view[1], view[2], view[3]));
+    }
+
+    /// Show or hide the whole view. A hidden view never keeps first responder.
+    pub fn set_visible(&self, visible: bool) {
+        if self.shown.replace(visible) == visible {
+            return;
+        }
+        self.clip.setHidden(!visible);
+        if !visible {
+            self.release_first_responder();
+        }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.shown.get()
+    }
+
+    fn release_first_responder(&self) {
+        let Some(window) = self.web.window() else { return };
+        if let Some(responder) = window.firstResponder() {
+            let ours = Retained::as_ptr(&self.web).cast::<AnyObject>();
+            let held = std::ptr::eq(Retained::as_ptr(&responder).cast::<AnyObject>(), ours);
+            if held {
+                window.makeFirstResponder(Some(&self.parent));
+            }
+        }
+    }
+
+    /// Backing scale of the window the view is in.
+    pub fn scale(&self) -> f64 {
+        self.web.window().map_or(2., |w| w.backingScaleFactor())
+    }
+}
+
+impl Drop for Native {
+    fn drop(&mut self) {
+        self.release_first_responder();
+        self.clip.removeFromSuperview();
+    }
+}
+
+fn rect(x: f32, y: f32, w: f32, h: f32) -> NSRect {
+    NSRect::new(NSPoint::new(f64::from(x), f64::from(y)), NSSize::new(f64::from(w), f64::from(h)))
+}
+
+/// Run `js` in the page; `done` gets the raw result object (null on error).
+pub fn eval(web: &WKWebView, js: &str, done: impl Fn(*mut AnyObject) + 'static) {
+    let block = RcBlock::new(move |value: *mut AnyObject, _: *mut NSError| done(value));
+    // SAFETY: main thread; the block is copied by WebKit.
+    unsafe { web.evaluateJavaScript_completionHandler(&NSString::from_str(js), Some(&block)) };
+}
+
+/// The result of [`eval`] as a number.
+pub fn as_f64(value: *mut AnyObject) -> Option<f64> {
+    // SAFETY: WebKit passes a valid object or null.
+    let object = unsafe { value.as_ref() }?;
+    object.downcast_ref::<NSNumber>().map(NSNumber::doubleValue)
+}
+
+/// The result of [`eval`] as a string.
+pub fn as_string(value: *mut AnyObject) -> Option<String> {
+    // SAFETY: WebKit passes a valid object or null.
+    let object = unsafe { value.as_ref() }?;
+    object.downcast_ref::<NSString>().map(ToString::to_string)
+}
+
+/// Snapshot `rect` (`[x, y, w, h]`, page coordinates) at `scale`× resolution as TIFF bytes.
+pub fn snapshot(web: &WKWebView, rect_: [f32; 4], scale: f64, done: impl Fn(Option<Vec<u8>>) + 'static) {
+    let Some(mtm) = MainThreadMarker::new() else { return done(None) };
+    // SAFETY: main thread; the block is copied by WebKit.
+    unsafe {
+        let config = WKSnapshotConfiguration::new(mtm);
+        config.setRect(rect(rect_[0], rect_[1], rect_[2], rect_[3]));
+        config.setSnapshotWidth(Some(&NSNumber::new_f64(f64::from(rect_[2]) * scale)));
+        let block = RcBlock::new(move |image: *mut NSImage, _: *mut NSError| {
+            let bytes = image
+                .as_ref()
+                .and_then(NSImage::TIFFRepresentation)
+                .map(|data| data.to_vec());
+            done(bytes);
+        });
+        web.takeSnapshotWithConfiguration_completionHandler(Some(&config), &block);
+    }
+}

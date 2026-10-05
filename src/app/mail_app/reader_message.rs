@@ -4,6 +4,7 @@
 use super::super::*;
 use super::parts::{selectable_verbatim, stamp, Look, Role};
 use crate::app::chrome::humanize_time;
+use crate::app::email_webview::{luminance, rgb, DocStyle, ViewKey};
 use crate::find::Segment;
 use crate::judge::QuestionKey;
 use crate::reading;
@@ -13,7 +14,7 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::text::{Text, TextView};
+use gpui_kit::component::text::Text;
 use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
@@ -470,18 +471,22 @@ impl MailApp {
         let mut blocked = 0;
         let content = match html {
             Some(h) if !plain => {
-                let block = self.block_remote_images;
-                let document = if block {
-                    let safe = reading::safe_html(h);
-                    blocked = safe.blocked_images;
-                    safe.html
-                } else {
-                    h.to_owned()
+                let bg = rgb(t.background);
+                let style = DocStyle {
+                    block: self.block_remote_images,
+                    dark: luminance(bg) < 0.5,
+                    fg: rgb(t.foreground),
+                    bg,
                 };
+                let key = ViewKey { msg: mid, triage: self.slot() == Slot::Triage };
+                let (view, count) = self.webviews.body(key, h, style);
+                blocked = count;
                 div()
+                    .id(("reader-html", id))
+                    .test_support()
                     .w_full()
                     .min_w_0()
-                    .child(TextView::html(("reader-html", id), document).selectable(true))
+                    .child(view)
                     .into_any_element()
             }
             _ => self.text_content(m, look, cx),

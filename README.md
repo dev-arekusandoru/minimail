@@ -80,17 +80,19 @@ The reader shows the keys that apply to the current message in the footer (up to
 
 #### HTML mail
 
-HTML mail is rendered by **Blitz**: browser-grade CSS resolution, real font shaping, and HTML/table layout, rasterized off the UI thread and displayed as a native GPUI image.
+HTML mail is drawn by a native **WKWebView** (WebKit, via `gpui-wry`), so mail renders the way it was written for. The view is a real native view placed over the reader; a message loads into it once and the view stays until its tab is closed.
 
-- **Preserved:** inline styles and `<style>` blocks, colors, backgrounds, fonts, spacing, borders, tables, and responsive media queries. Wide documents scroll horizontally.
-- **Theme:** the app's light/dark preference is passed to CSS `prefers-color-scheme`; switching modes rerenders open HTML bodies. Explicit email colors, including white backgrounds, are not inverted.
-- **Safety:** email scripts never execute, sender-referenced local files are never read, and external CSS/font content is not loaded. Remote image requests are bounded and refuse private/internal addresses.
-- **Images:** PNG/JPEG/GIF/WebP images load by default, including bounded `data:` images. Enable **Settings → General → Block remote images** to prevent remote-image requests and show their blocked count. This is a session setting, retained when reopening Settings. Changing it updates open readers immediately.
-- **Links:** HTTP(S) and `mailto:` links open externally; other schemes are ignored.
-- **Reader mode (`v`)** shows the text part, or text extracted from HTML-only mail. Use it to select/copy body text; the original HTML view is a bitmap. Find automatically uses the text path for messages with matches.
-- **Limits:** HTML is capped at 8 MiB, decoded images at 16 megapixels total, and document rasters at 32 megapixels with a 16,000-pixel maximum side. Remote images have byte, request, redirect, and timeout limits; unavailable remote images do not fail the whole message. Invalid or oversized embedded images/documents show a rendering error.
+- **Persistence:** each message keeps its view while its tab lives — switching tabs only hides and shows it, never reloads. It reloads only when the HTML, the **Block remote images** setting or the theme changes. At most 8 views stay alive (least recently shown are dropped and rebuilt on their next show); closing a tab frees its views. All views share one web process.
+- **Scrolling:** the view is as tall as its document, so the reader's own scroll container scrolls lone messages and threads alike; wide documents scroll horizontally inside the view.
+- **Theme:** the app's light/dark preference sets the default text and background colors and the page's `color-scheme`; colors the email sets itself are not inverted.
+- **Safety:** JavaScript never runs in page content, there is no in-view navigation, downloads and new windows are refused, and the message is loaded without a base URL (no local file access).
+- **Images:** remote images load by default. **Settings → General → Block remote images** blocks every remote subresource (images, CSS, fonts, media) with a WebKit content rule list, compiled once and cached, and shows the count of blocked `<img>` elements. Changing the setting reloads open readers.
+- **Links:** HTTP(S) and `mailto:` links open in the system browser; other schemes are ignored.
+- **Keyboard and copy:** the view never takes key focus, so every shortcut stays with the app. Select text with the mouse and press `cmd-c`: the app asks WebKit for the selection and copies it. A click elsewhere in the window clears the selection.
+- **Overlays and drags:** GPUI cannot paint over a native view, so while the command palette, a dialog, a menu, a popover, a toast or a drag is up, the view is swapped for a snapshot at the same bounds and hidden; it comes back when they close.
+- **Reader mode (`v`)** shows the text part, or text extracted from HTML-only mail. Find automatically uses the text path for messages with matches.
 
-Blitz is still beta; unusual markup can differ from a browser. Blitz is pinned to an upstream table-layout fix, with a local painter correction under `vendor/blitz-paint` so collapsed borders respect each edge's style and color. The pinned Stylo derive dependency carries a local, explicitly typed `Result` fix under `vendor/stylo_derive` to compile alongside GPUI's formatting dependencies. See `docs/reader-spec.md`.
+CSS-referenced remote content other than `<img>` is blocked silently when blocking is on. See `docs/reader-spec.md`.
 
 ### Where the controls live
 

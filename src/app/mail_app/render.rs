@@ -10,6 +10,7 @@ impl Focusable for MailApp {
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.reconcile_tabs();
+        self.sync_webviews(cx);
         self.sync_settings_blocked(cx);
         self.place_find_match(window, cx);
         self.refresh_find();
@@ -42,6 +43,8 @@ impl Render for MailApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    // A click that reaches GPUI is outside every email view: drop their selections.
+                    this.webviews.clear_selections();
                     // Clicking never steals key focus from the list (or a modal's input).
                     if !this.modal_open() {
                         // The dock's groups focus their active panel on mouse-down before
@@ -124,6 +127,13 @@ impl Render for MailApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Undo, window, cx| this.undo(window, cx)))
+            // `cmd-c` is the kit's `Copy`, bound at its root. GPUI text copies as before; an email
+            // view's selection lives in WebKit, so ask it.
+            .on_action(cx.listener(|this, _: &gpui_kit::base::input::Copy, window, cx| {
+                if !gpui_kit::base::TextSelection::selected_text(window, cx).is_empty() || !this.webviews.copy_selection() {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 if this.palette.is_some() {
                     this.close_modals(window, cx);

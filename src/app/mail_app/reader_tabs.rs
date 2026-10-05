@@ -52,9 +52,29 @@ impl MailApp {
 
     /// Everything the reader keeps for a thread that no longer has a tab.
     fn forget_thread(&mut self, thread: u32) {
+        self.webviews.forget(|key| self.thread_of(key.msg) == Some(thread));
         self.reader.forget(thread);
         self.drop_find(thread);
         self.reader_panes.borrow_mut().remove(&thread);
+    }
+
+    /// Tell the email views what the window is doing: whether a GPUI overlay covers them, and
+    /// which reader slots are on screen at all (a zoomed group hides the others). Runs every
+    /// frame; each is a flag write.
+    pub(super) fn sync_webviews(&self, cx: &App) {
+        let overlay = self.modal_open()
+            || self.menu_open()
+            || self.filter_popover.is_some()
+            || self.toast.is_some()
+            || self.fetch_toast;
+        self.webviews.set_overlay(overlay);
+        let zoomed = self.zoomed_group(cx);
+        self.webviews.set_slot_visible(false, matches!(zoomed, None | Some("reader")));
+        self.webviews
+            .set_slot_visible(true, self.triage_open() && matches!(zoomed, None | Some("triage")));
+        if !self.triage_open() {
+            self.webviews.forget(|key| key.triage);
+        }
     }
 
     /// The list cursor follows the active tab's message when the list has it. Selection is

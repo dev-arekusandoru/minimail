@@ -872,12 +872,18 @@ impl Render for ReaderPanel {
 /// from — the Triage tab's while one exists — otherwise the opened thread.
 fn reader_content(app: &mut MailApp, slot: Slot, cx: &mut Context<MailApp>) -> AnyElement {
     let before = app.enter_slot(slot);
+    let triage = slot == Slot::Triage;
+    // The email views this pass draws stay; the others (another tab's, or all when the composer
+    // replaces the reader) are hidden.
+    let webviews = app.webviews.clone();
+    webviews.begin_pass(triage);
     let content = match &app.compose {
-        Some(compose) if (slot == Slot::Triage) == app.triage_open() => {
+        Some(compose) if triage == app.triage_open() => {
             div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element()
         }
         _ => app.render_reader(cx),
     };
+    webviews.end_pass(triage);
     app.leave_slot(before);
     content
 }
