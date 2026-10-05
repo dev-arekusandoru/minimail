@@ -3,9 +3,6 @@
 //! `gpui-kit` re-exports GPUI at its root, so `use gpui_kit::*` *is* GPUI.
 
 pub mod actions;
-// Blitz-rasterized email HTML is disabled (stack overflow on nested tables); kept for a retry.
-#[allow(dead_code)]
-mod html_view;
 pub mod icons;
 pub mod chrome;
 pub mod compose;
