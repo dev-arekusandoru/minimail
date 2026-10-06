@@ -159,6 +159,17 @@ Afterwards the file is yours, so deleting it just re-seeds on the next start.
 Everything else the app tracks (rules, themes) still comes from the fixtures.
 Messages come from the fixtures until a Gmail account is linked (below).
 
+### Nightly builds
+
+`scripts/package.sh` builds `dist/Minimail-<version>-arm64.dmg` (version
+`<Cargo version>-nightly.<YYYYMMDD>`). Run it locally with `.envrc` loaded;
+without a Developer ID identity (`MAIL_CLASSIFIER_SIGN_IDENTITY`) it signs
+ad-hoc and skips notarization. `.github/workflows/nightly.yml` runs it daily
+(skipping when `main` is unchanged) and replaces the rolling `nightly`
+prerelease. Repo secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
+`APPLE_APP_PASSWORD`.
+
 ### Gmail accounts
 
 Gmail is optional; without it the app runs on the mock mailbox. To connect it,
@@ -176,6 +187,10 @@ account is linked, the demo mail is dropped. Fetched mail is cached in
 `$MAIL_CLASSIFIER_MAIL_DB`, otherwise in
 `~/Library/Application Support/mail-classifier/mail.db`, and later launches
 start from that cache.
+
+Nightly builds ship with the OAuth client baked in (the secret of a Desktop-app
+client is not confidential; PKCE protects the flow), so testers only need to be
+added as test users in Google Cloud. The runtime variables above still override it.
 
 #### How syncing works
 
