@@ -1,6 +1,6 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
 //! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
-use gpui_kit::component::{scroll::ScrollableElement as _, ActiveTheme as _};
+use gpui_kit::component::{scroll::Scrollbar, ActiveTheme as _};
 
 use super::*;
 
@@ -160,36 +160,49 @@ impl MailApp {
                 d.child(div().px_5().pt_4().pb_3().child(SessionCard::new(s.index + 1, s.ids.len())))
             })
             .child(
+                // The scrollbar is a sibling of the scrolled area, over a relative wrapper the
+                // same size as it: as a child it would ride the content's scroll offset, so the
+                // thumb would cancel its own movement and read as stuck at the top.
                 div()
-                    .id("reader-scroll")
-                    // A click anywhere in the thread makes the tab permanent.
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                        this.pin_active_tab(cx);
-                    }))
-                    .track_scroll(&scroll)
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .when(true, |d| {
-                        let mut i = 0;
-                        let mut d = d;
-                        if let Some(s) = summary {
-                            d = d.child(edges(column(SummaryCard::new(&s).into_any_element()), i).pb_3());
-                            i += 1;
-                        }
-                        if let Some(el) = title {
-                            d = d.child(edges(column(el), i).pb_3());
-                            i += 1;
-                        }
-                        for el in rows {
-                            d = d.child(edges(column(el), i));
-                            i += 1;
-                        }
-                        d
-                    })
-                    .vertical_scrollbar(&scroll),
+                    .child(
+                        div()
+                            .id("reader-scroll")
+                            // A click anywhere in the thread makes the tab permanent.
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                this.pin_active_tab(cx);
+                            }))
+                            .track_scroll(&scroll)
+                            .size_full()
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .when(true, |d| {
+                                let mut i = 0;
+                                let mut d = d;
+                                if let Some(s) = summary {
+                                    d = d.child(edges(column(SummaryCard::new(&s).into_any_element()), i).pb_3());
+                                    i += 1;
+                                }
+                                if let Some(el) = title {
+                                    d = d.child(edges(column(el), i).pb_3());
+                                    i += 1;
+                                }
+                                for el in rows {
+                                    d = d.child(edges(column(el), i));
+                                    i += 1;
+                                }
+                                d
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .child(Scrollbar::vertical(&scroll).id("reader-scrollbar").viewport_from_layout()),
+                    ),
             )
             .into_any_element()
     }
