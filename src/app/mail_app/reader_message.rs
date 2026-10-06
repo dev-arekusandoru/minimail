@@ -8,6 +8,7 @@ use crate::app::email_webview::{luminance, rgb, DocStyle, ViewKey};
 use crate::find::Segment;
 use crate::judge::QuestionKey;
 use crate::reading;
+use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::alert::Alert;
@@ -204,7 +205,7 @@ impl MailApp {
             .rounded_md()
             .border_1()
             .border_color(t.border)
-            .bg(t.secondary)
+            .bg(message_card_bg(t))
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
@@ -471,7 +472,10 @@ impl MailApp {
         let mut blocked = 0;
         let content = match html {
             Some(h) if !plain => {
-                let bg = rgb(t.background);
+                // Exactly the card's background, not the window's: the page fills the card, so
+                // the loading skeleton, the no-snapshot fallback and the loaded page must all
+                // resolve to this one color or the reader flashes as they swap.
+                let bg = rgb(message_card_bg(t));
                 let style = DocStyle {
                     block: self.block_remote_images,
                     dark: luminance(bg) < 0.5,
@@ -597,4 +601,11 @@ impl MailApp {
                 ))
         }))
     }
+}
+
+/// Background of a message card. The embedded web page, its loading skeleton and its
+/// no-snapshot fallback all paint this same color, so the card never shows a seam between
+/// them; the token keeps light and dark in step.
+fn message_card_bg(t: &ThemeColor) -> Hsla {
+    t.secondary
 }
