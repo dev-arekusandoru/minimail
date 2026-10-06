@@ -45,7 +45,16 @@ impl SettingsPanel {
                         SettingsPanel::reset_follow_up,
                     ),
                     follow_up,
-                ))
+                )),
+        )
+    }
+}
+
+impl SettingsPanel {
+    /// How message bodies are shown.
+    pub(super) fn reader_page(&self, weak: &Weak) -> SettingPage {
+        SettingPage::new("Reader").resettable(true).group(
+            SettingGroup::new()
                 .item(row(
                     "Block remote images",
                     "Remote images can tell the sender you opened the message. Block them to stop \

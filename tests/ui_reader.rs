@@ -249,10 +249,10 @@ fn the_remote_image_setting_switches_the_reader_policy(cx: &mut TestAppContext) 
     );
     let mut h = harness_with(cx, mailbox_of(&[html]));
 
-    // Block remote images is the last row of the Inbox page (sidebar index 2).
+    // Block remote images is the Reader page's only row (sidebar index 3).
     let set_blocking = |h: &mut Harness<'_>, on: bool| {
-        h.settings_open_page(2);
-        h.settings_click_in(0, 3, "check");
+        h.settings_open_page(3);
+        h.settings_click_in(0, 0, "check");
         assert_eq!(h.read(|a| a.block_remote_images), on, "the switch sets the policy");
         h.settings_keys("escape");
         assert!(!h.read(|a| a.settings_open()));
