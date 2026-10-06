@@ -154,8 +154,7 @@ struct ViewState {
     epoch: Cell<u64>,
     inflight: Cell<bool>,
     snap: RefCell<Option<Snap>>,
-    /// Visible part of the view in view coordinates, and the view's size, as of the last frame.
-    visible: Cell<[f32; 4]>,
+    /// The view's size as of the last frame.
     size: Cell<[f32; 2]>,
 }
 
@@ -175,7 +174,6 @@ impl ViewState {
             epoch: Cell::new(0),
             inflight: Cell::new(false),
             snap: RefCell::new(None),
-            visible: Cell::new([0.; 4]),
             size: Cell::new([0.; 2]),
         })
     }
@@ -230,7 +228,9 @@ impl ViewState {
 
 struct Entry {
     sig: DocSig,
+    /// Cheap identity of the HTML last hashed, and that hash (which may be newer than `sig`'s).
     fingerprint: Fingerprint,
+    hash: u64,
     blocked: usize,
     phase: Phase,
     pending: Option<Pending>,
@@ -325,6 +325,7 @@ impl EmailWebViews {
         let e = entries.entry(key).or_insert_with(|| Entry {
             sig: DocSig { hash: 0, style },
             fingerprint: Fingerprint { ptr: 0, len: 0, ends: 0 },
+            hash: 0,
             blocked: 0,
             phase: Phase::Empty,
             pending: None,
@@ -334,9 +335,9 @@ impl EmailWebViews {
         });
         if e.fingerprint != fingerprint {
             e.fingerprint = fingerprint;
-            e.sig.hash = content_hash(html);
+            e.hash = content_hash(html);
         }
-        let sig = DocSig { hash: e.sig.hash, style };
+        let sig = DocSig { hash: e.hash, style };
         if e.sig != sig || e.phase == Phase::Empty {
             e.sig = sig;
             e.blocked = if style.block { crate::reading::blocked_images(html) } else { 0 };
@@ -459,7 +460,6 @@ impl EmailWebViews {
         let clip_h = if ready { cb - ct } else { 0. };
         native.place([cl, ct, cr - cl, clip_h], [vl - cl, vt - ct, vr - vl, vb - vt]);
         let visible = [cl - vl, ct - vt, cr - cl, cb - ct];
-        state.visible.set(visible);
         state.size.set([vr - vl, vb - vt]);
 
         let showing = inner.slot_visible[usize::from(key.triage)].get() && visible[2] >= 1. && visible[3] >= 1.;
