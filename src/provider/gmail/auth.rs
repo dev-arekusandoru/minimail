@@ -26,18 +26,33 @@ pub struct ClientConfig {
     pub client_secret: String,
 }
 
+/// Credentials compiled into release builds by `scripts/package.sh`. A distinct
+/// variable name from the runtime override so a dev shell's exported
+/// credentials never get baked into test or debug builds.
+const BUNDLED_CLIENT_ID: Option<&str> = option_env!("MAIL_CLASSIFIER_BUNDLED_GOOGLE_CLIENT_ID");
+const BUNDLED_CLIENT_SECRET: Option<&str> = option_env!("MAIL_CLASSIFIER_BUNDLED_GOOGLE_CLIENT_SECRET");
+
 impl ClientConfig {
-    /// Reads the OAuth desktop-client credentials from the environment.
-    /// `None` when either is missing or blank.
-    pub fn from_env() -> Option<Self> {
-        let client_id = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID").ok()?.trim().to_owned();
-        let client_secret = std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET").ok()?.trim().to_owned();
+    /// The OAuth desktop-client credentials: the runtime environment
+    /// (`MAIL_CLASSIFIER_GOOGLE_CLIENT_{ID,SECRET}`) wins, else the ones baked
+    /// into the binary. `None` when neither source has both, non-blank.
+    pub fn load() -> Option<Self> {
+        Self::from_pair(
+            std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_ID").ok().as_deref(),
+            std::env::var("MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET").ok().as_deref(),
+        )
+        .or_else(|| Self::from_pair(BUNDLED_CLIENT_ID, BUNDLED_CLIENT_SECRET))
+    }
+
+    fn from_pair(id: Option<&str>, secret: Option<&str>) -> Option<Self> {
+        let client_id = id?.trim();
+        let client_secret = secret?.trim();
         if client_id.is_empty() || client_secret.is_empty() {
             return None;
         }
         Some(Self {
-            client_id,
-            client_secret,
+            client_id: client_id.to_owned(),
+            client_secret: client_secret.to_owned(),
         })
     }
 }

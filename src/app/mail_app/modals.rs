@@ -331,7 +331,7 @@ impl MailApp {
         let group = self.group_threads;
         let preview = self.preview_lines;
         let rows = self.account_rows();
-        let gmail_configured = crate::provider::gmail::ClientConfig::from_env().is_some();
+        let gmail_configured = crate::provider::gmail::ClientConfig::load().is_some();
         let policy = self.policy.clone();
         let summaries = self.summaries_enabled;
         let orientation = self.panes.orientation();

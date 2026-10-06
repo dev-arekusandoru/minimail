@@ -50,7 +50,7 @@ impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
     pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
         self.cache = Some(cache);
-        let client = ClientConfig::from_env();
+        let client = ClientConfig::load();
         let accounts: Vec<Account> = self
             .mailbox
             .accounts()
@@ -423,7 +423,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(client) = ClientConfig::from_env() else {
+        let Some(client) = ClientConfig::load() else {
             self.show_toast(
                 "Set MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET".into(),
                 window,

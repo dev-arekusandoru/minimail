@@ -8,7 +8,7 @@ use gpui_kit::component::empty::{Empty, EmptyContent, EmptyDescription, EmptyHea
 impl MailApp {
     /// The list area before any account is linked: what to do next, and the one button to do it.
     fn render_onboarding(&self, cx: &Context<Self>) -> AnyElement {
-        let configured = crate::provider::gmail::ClientConfig::from_env().is_some();
+        let configured = crate::provider::gmail::ClientConfig::load().is_some();
         let muted = cx.theme().muted_foreground;
         Empty::new()
             .header(
