@@ -698,7 +698,9 @@ pub fn lru_victim<K>(candidates: impl Iterator<Item = (K, u64)>) -> Option<K> {
 /// The page we load: our default styling, then the message exactly as received. Written before
 /// the message so anything it sets itself wins — except the outer background, which belongs to
 /// the reader card and is neutralised here (the `html` colour) and in the isolated-world script
-/// ([`NEUTRALIZE_SCRIPT`] in `native.rs`, which also unwraps the top-level container chain).
+/// ([`NEUTRALIZE_SCRIPT`] in `native.rs`, which also unwraps the top-level container chain), and
+/// except the viewport reset, which must win so a mail's own `html,body{height:100%}` (TLDR and
+/// other templates ship it) cannot tie the document to the viewport the webview happens to have.
 fn document(html: &str, style: DocStyle) -> String {
     let scheme = if style.dark { "dark" } else { "light" };
     let mut out = String::with_capacity(html.len() + 420);
@@ -709,7 +711,7 @@ fn document(html: &str, style: DocStyle) -> String {
          html{{background:#{:06x}!important;color:#{:06x};font:13.5px/1.55 -apple-system,system-ui,sans-serif;\
          overflow-wrap:break-word}}\
          body{{margin:0;background:transparent!important}}img{{max-width:100%;height:auto}}\
-         html,body{{overflow:hidden!important;height:auto!important;min-height:0!important}}</style>",
+         :root, :root body{{overflow:hidden!important;height:auto!important;min-height:0!important}}</style>",
         style.bg, style.fg
     );
     out.push_str(html);
