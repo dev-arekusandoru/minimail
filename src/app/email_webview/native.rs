@@ -11,15 +11,16 @@ use std::rc::Rc;
 use block2::RcBlock;
 use gpui_kit::*;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool};
-use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSImage, NSView, NSWorkspace};
+use objc2::runtime::{AnyObject, Bool, NSObject, ProtocolObject};
+use objc2::{ClassType, DeclaredClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{NSEvent, NSImage, NSView, NSWorkspace};
 use objc2_foundation::{NSError, NSNumber, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL};
 #[allow(deprecated)]
 use objc2_web_kit::WKProcessPool;
 use objc2_web_kit::{
-    WKContentRuleList, WKContentRuleListStore, WKSnapshotConfiguration,
-    WKUserContentController, WKWebView, WKWebViewConfiguration, WKWebpagePreferences,
+    WKContentRuleList, WKContentRuleListStore, WKContentWorld, WKScriptMessage,
+    WKScriptMessageHandler, WKSnapshotConfiguration, WKUserContentController, WKUserScript,
+    WKUserScriptInjectionTime, WKWebView, WKWebViewConfiguration, WKWebpagePreferences,
     WKWebsiteDataStore,
 };
 use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -67,10 +68,87 @@ define_class!(
         fn become_first_responder(&self) -> Bool {
             Bool::NO
         }
+
+        /// The page never scrolls on its own: wheel events go up the responder chain to GPUI's
+        /// scroll container.
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            // SAFETY: forwarding the same event to the next responder.
+            unsafe {
+                if let Some(next) = self.nextResponder() {
+                    let _: () = msg_send![&*next, scrollWheel: event];
+                }
+            }
+        }
+
+        /// A click in the page is a click in the reader: tell the app, then let WebKit select.
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            // SAFETY: plain super call with the same event.
+            unsafe { let _: () = msg_send![super(self), mouseDown: event]; }
+            if let Some(handler) = CLICK.with(|c| c.borrow().clone()) {
+                handler();
+            }
+        }
     }
 
     unsafe impl NSObjectProtocol for KeylessWebView {}
 );
+
+thread_local! {
+    /// What a mouse-down inside any email view does (the app's "click in the reader").
+    static CLICK: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// Set what a click inside an email view does.
+pub fn set_click_handler(handler: Rc<dyn Fn()>) {
+    CLICK.with(|c| *c.borrow_mut() = Some(handler));
+}
+
+struct HeightIvars {
+    on_height: Box<dyn Fn(f64)>,
+}
+
+define_class!(
+    /// Receives the page's laid-out height from the measuring script.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = HeightIvars]
+    #[name = "MailEmailHeightHandler"]
+    struct HeightHandler;
+
+    unsafe impl NSObjectProtocol for HeightHandler {}
+
+    unsafe impl WKScriptMessageHandler for HeightHandler {
+        #[unsafe(method(userContentController:didReceiveScriptMessage:))]
+        fn did_receive(&self, _: &WKUserContentController, message: &WKScriptMessage) {
+            // SAFETY: reading the body of the message being delivered.
+            let body = unsafe { message.body() };
+            if let Some(number) = body.downcast_ref::<NSNumber>() {
+                (self.ivars().on_height)(number.doubleValue());
+            }
+        }
+    }
+);
+
+const HANDLER_NAME: &str = "mcHeight";
+const WORLD_NAME: &str = "mail-classifier.measure";
+/// Reports the document height whenever layout changes it (resize, images, fonts), from an
+/// isolated content world, so page scripts (which are off) are never involved.
+const MEASURE_SCRIPT: &str = r#"(function () {
+  var last = -1;
+  function send() {
+    var h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (h !== last) { last = h; window.webkit.messageHandlers.mcHeight.postMessage(h); }
+  }
+  function later() { setTimeout(send, 0); }
+  new ResizeObserver(send).observe(document.documentElement);
+  if (document.body) new ResizeObserver(send).observe(document.body);
+  document.addEventListener('load', later, true);
+  window.addEventListener('load', later);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+  send();
+})();"#;
 
 /// What every email view shares: one web process, one non-persistent data store, and the
 /// remote-content rule list once it has compiled.
@@ -158,6 +236,7 @@ pub struct Native {
     clip: Retained<ClipView>,
     parent: Retained<NSView>,
     content: Retained<WKUserContentController>,
+    world: Retained<WKContentWorld>,
     parent_flipped: bool,
     shown: Cell<bool>,
     /// Last applied `[clip x, y, w, h, view x, y, w, h, parent height]`.
@@ -174,8 +253,12 @@ pub enum Unavailable {
 pub struct Config<'a> {
     pub html: &'a str,
     pub rules: Option<Retained<WKContentRuleList>>,
-    /// Called when the page has finished loading.
-    pub on_finished: Box<dyn Fn(&WKWebView)>,
+    /// A navigation started (the old document's height no longer counts).
+    pub on_started: Box<dyn Fn()>,
+    /// The page has finished loading.
+    pub on_finished: Box<dyn Fn()>,
+    /// The laid-out document height changed.
+    pub on_height: Box<dyn Fn(f64)>,
 }
 
 /// Whether `window` is backed by a real `NSWindow` (the headless test platform is not).
@@ -228,18 +311,38 @@ impl Native {
             }
             (configuration, content)
         };
-
-        let slot: Rc<RefCell<Option<Retained<WryWebView>>>> = Rc::default();
-        let finished = {
-            let slot = slot.clone();
-            let on_finished = config.on_finished;
-            move |event: PageLoadEvent, _: String| {
-                if matches!(event, PageLoadEvent::Finished)
-                    && let Some(web) = slot.borrow().as_ref()
-                {
-                    on_finished(web);
-                }
+        // The measuring script and its handler live in their own content world, installed
+        // before the first navigation.
+        let (world, handler) = {
+            let world = unsafe { WKContentWorld::worldWithName(&NSString::from_str(WORLD_NAME), mtm) };
+            let handler: Retained<HeightHandler> = unsafe {
+                let this = HeightHandler::alloc(mtm).set_ivars(HeightIvars { on_height: config.on_height });
+                msg_send![super(this), init]
+            };
+            // SAFETY: main thread; the controller retains both until we remove them in `Drop`.
+            unsafe {
+                let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
+                    WKUserScript::alloc(mtm),
+                    &NSString::from_str(MEASURE_SCRIPT),
+                    WKUserScriptInjectionTime::AtDocumentEnd,
+                    true,
+                    &world,
+                );
+                content.addUserScript(&script);
+                content.addScriptMessageHandler_contentWorld_name(
+                    ProtocolObject::from_ref(&*handler),
+                    &world,
+                    &NSString::from_str(HANDLER_NAME),
+                );
             }
+            (world, handler)
+        };
+        drop(handler);
+
+        let (on_started, on_finished) = (config.on_started, config.on_finished);
+        let page_load = move |event: PageLoadEvent, _: String| match event {
+            PageLoadEvent::Started => on_started(),
+            PageLoadEvent::Finished => on_finished(),
         };
         let view = WebViewBuilder::new()
             .with_webview_configuration(configuration)
@@ -261,7 +364,7 @@ impl Native {
                 NewWindowResponse::Deny
             })
             .with_download_started_handler(|_, _| false)
-            .with_on_page_load_handler(finished)
+            .with_on_page_load_handler(page_load)
             .build_as_child(window)
             .map_err(|_| Unavailable::Failed)?;
 
@@ -277,7 +380,6 @@ impl Native {
                 KeylessWebView::class(),
             );
         }
-        *slot.borrow_mut() = Some(web.clone());
 
         // SAFETY: main thread; `addSubview` re-parents wry's view into the clip container.
         let (clip, parent_flipped) = unsafe {
@@ -299,6 +401,7 @@ impl Native {
             clip,
             parent,
             content,
+            world,
             parent_flipped,
             shown: Cell::new(false),
             frame: Cell::new([f32::NAN; 9]),
@@ -374,6 +477,11 @@ impl Native {
 
 impl Drop for Native {
     fn drop(&mut self) {
+        // SAFETY: main thread; breaks the controller's retain on the height handler.
+        unsafe {
+            self.content
+                .removeScriptMessageHandlerForName_contentWorld(&NSString::from_str(HANDLER_NAME), &self.world);
+        }
         self.release_first_responder();
         self.clip.removeFromSuperview();
     }
@@ -388,13 +496,6 @@ pub fn eval(web: &WKWebView, js: &str, done: impl Fn(*mut AnyObject) + 'static) 
     let block = RcBlock::new(move |value: *mut AnyObject, _: *mut NSError| done(value));
     // SAFETY: main thread; the block is copied by WebKit.
     unsafe { web.evaluateJavaScript_completionHandler(&NSString::from_str(js), Some(&block)) };
-}
-
-/// The result of [`eval`] as a number.
-pub fn as_f64(value: *mut AnyObject) -> Option<f64> {
-    // SAFETY: WebKit passes a valid object or null.
-    let object = unsafe { value.as_ref() }?;
-    object.downcast_ref::<NSNumber>().map(NSNumber::doubleValue)
 }
 
 /// The result of [`eval`] as a string.

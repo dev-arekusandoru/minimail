@@ -43,7 +43,7 @@ impl MailApp {
     }
 
     /// A click inside the active tab's content pins it.
-    pub(super) fn pin_active_tab(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn pin_active_tab(&mut self, cx: &mut Context<Self>) {
         if self.tabs.active().is_some_and(|t| !t.pinned) {
             self.tabs.pin_active();
             cx.notify();

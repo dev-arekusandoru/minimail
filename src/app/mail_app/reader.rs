@@ -149,10 +149,15 @@ impl MailApp {
             pane.scroll.clone()
         };
 
-        let column = |el: AnyElement| div().w_full().child(el);
-        pane.gap_3()
+        // The scroll container fills the whole pane, so the wheel works in its margins too: the
+        // pane's padding moves onto the content (side margins on each row, top and bottom on
+        // the first and last).
+        let column = |el: AnyElement| div().w_full().px_5().child(el);
+        let count = usize::from(summary.is_some()) + usize::from(title.is_some()) + rows.len();
+        let edges = move |el: Div, i: usize| el.when(i == 0, |d| d.pt_4()).when(i + 1 == count, |d| d.pb_4());
+        pane.p_0()
             .when_some(self.session.as_ref().filter(|_| triage), |d, s| {
-                d.child(SessionCard::new(s.index + 1, s.ids.len()))
+                d.child(div().px_5().pt_4().pb_3().child(SessionCard::new(s.index + 1, s.ids.len())))
             })
             .child(
                 div()
@@ -167,9 +172,23 @@ impl MailApp {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .when_some(summary, |d, s| d.child(column(SummaryCard::new(&s).into_any_element()).pb_3()))
-                    .when_some(title, |d, el| d.child(column(el).pb_3()))
-                    .children(rows.into_iter().map(column))
+                    .when(true, |d| {
+                        let mut i = 0;
+                        let mut d = d;
+                        if let Some(s) = summary {
+                            d = d.child(edges(column(SummaryCard::new(&s).into_any_element()), i).pb_3());
+                            i += 1;
+                        }
+                        if let Some(el) = title {
+                            d = d.child(edges(column(el), i).pb_3());
+                            i += 1;
+                        }
+                        for el in rows {
+                            d = d.child(edges(column(el), i));
+                            i += 1;
+                        }
+                        d
+                    })
                     .vertical_scrollbar(&scroll),
             )
             .into_any_element()

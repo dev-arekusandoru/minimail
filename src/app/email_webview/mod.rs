@@ -28,11 +28,9 @@ use std::hash::{Hash, Hasher};
 use std::panic::Location;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::*;
-use objc2::Message as _;
-use objc2_web_kit::WKWebView;
 
 use super::mail_app::MailApp;
 use crate::model::MessageId;
@@ -41,14 +39,14 @@ mod native;
 
 /// Live native views kept at once; the least recently shown beyond this are dropped.
 pub const MAX_LIVE: usize = 8;
-/// Height of a document until its first measurement.
-const DEFAULT_HEIGHT: f32 = 48.;
+/// Height of the loading placeholder, sized like a typical message body.
+const SKELETON_HEIGHT: f32 = 240.;
+/// Longest the native view stays hidden waiting for its document (slow remote images, say).
+const REVEAL_CAP: Duration = Duration::from_millis(1000);
+/// How long a view must sit still before it is snapshotted ahead of an overlay.
+const SNAP_IDLE: Duration = Duration::from_millis(200);
 /// Extra page above and below the viewport that a snapshot covers.
 const SNAP_MARGIN: f32 = 16.;
-/// Re-measure the document this long after it loads, for images that arrive late.
-const REMEASURE: [Duration; 2] = [Duration::from_millis(300), Duration::from_millis(1500)];
-/// The document's laid-out height.
-const MEASURE_JS: &str = "Math.ceil(document.documentElement.getBoundingClientRect().height)";
 
 /// One view per message per reader slot (the user's tab, or the Triage tab).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -138,9 +136,20 @@ struct Snap {
 /// State shared with the callbacks WebKit runs later.
 struct ViewState {
     height: Cell<f32>,
-    /// Width the document was last laid out at.
-    width: Cell<f32>,
     loaded: Cell<bool>,
+    /// The page has reported its height since this document started loading.
+    measured: Cell<bool>,
+    /// Loaded and measured (or out of patience): the native view may be shown.
+    ready: Cell<bool>,
+    /// Counts documents, so a reveal timer for an old one does nothing.
+    doc: Cell<u64>,
+    born: Instant,
+    /// A snapshot is wanted once the view has settled.
+    want_snapshot: Cell<bool>,
+    watching: Cell<bool>,
+    /// Geometry as of the last frame, and as of when the settle timer last looked.
+    geom: Cell<[f32; 8]>,
+    watched: Cell<[f32; 8]>,
     /// Bumped by anything that makes an in-flight snapshot stale; completions must match it.
     epoch: Cell<u64>,
     inflight: Cell<bool>,
@@ -153,9 +162,16 @@ struct ViewState {
 impl ViewState {
     fn new() -> Rc<Self> {
         Rc::new(Self {
-            height: Cell::new(DEFAULT_HEIGHT),
-            width: Cell::new(f32::NAN),
+            height: Cell::new(SKELETON_HEIGHT),
             loaded: Cell::new(false),
+            measured: Cell::new(false),
+            ready: Cell::new(false),
+            doc: Cell::new(0),
+            born: Instant::now(),
+            want_snapshot: Cell::new(false),
+            watching: Cell::new(false),
+            geom: Cell::new([0.; 8]),
+            watched: Cell::new([0.; 8]),
             epoch: Cell::new(0),
             inflight: Cell::new(false),
             snap: RefCell::new(None),
@@ -174,9 +190,27 @@ impl ViewState {
     /// A new document: forget everything measured or captured of the old one.
     fn reset(&self) {
         self.bump();
-        self.loaded.set(false);
-        self.width.set(f32::NAN);
+        self.navigation_started();
+        self.doc.set(self.doc.get() + 1);
         *self.snap.borrow_mut() = None;
+    }
+
+    /// A document began loading: it is neither loaded, measured nor ready.
+    fn navigation_started(&self) {
+        self.loaded.set(false);
+        self.measured.set(false);
+        self.ready.set(false);
+        self.want_snapshot.set(false);
+    }
+
+    /// Show the view once it is both loaded and measured.
+    fn settle_ready(&self) -> bool {
+        let ready = self.loaded.get() && self.measured.get();
+        if ready && !self.ready.replace(true) {
+            self.want_snapshot.set(false);
+            return true;
+        }
+        false
     }
 
     /// The cached snapshot, if it covers the `visible` part of a view still `size` big.
@@ -260,7 +294,7 @@ pub struct EmailWebViews(Rc<Inner>);
 
 impl EmailWebViews {
     pub fn new(cx: &mut Context<MailApp>) -> Self {
-        Self(Rc::new(Inner {
+        let views = Self(Rc::new(Inner {
             entries: RefCell::default(),
             passes: Default::default(),
             clock: Cell::new(0),
@@ -270,7 +304,14 @@ impl EmailWebViews {
             shared: RefCell::new(None),
             notifier: Notifier { app: cx.to_async(), target: cx.weak_entity() },
             loads: RefCell::default(),
-        }))
+        }));
+        // A click inside a page counts as a click in the reader (it pins a preview tab).
+        let notifier = views.0.notifier.clone();
+        native::set_click_handler(Rc::new(move || {
+            let mut app = notifier.app.clone();
+            let _ = notifier.target.update(&mut app, |this, cx| this.pin_active_tab(cx));
+        }));
+        views
     }
 
     /// The element for `html`, and how many remote images the policy blocks in it. Queues a new
@@ -381,7 +422,7 @@ impl EmailWebViews {
         bounds: Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Swap> {
+    ) -> Option<Paint> {
         let inner = &*self.0;
         let overlay = inner.overlay_now(cx);
         let mut entries = inner.entries.borrow_mut();
@@ -394,50 +435,75 @@ impl EmailWebViews {
         if e.phase == Phase::Pending {
             inner.realize(key, e, window, cx);
         }
-        let native = e.native.as_ref()?;
+        let style = e.sig.style;
+        let skeleton = Paint::Skeleton { bounds, fg: style.fg, bg: style.bg };
+        let Some(native) = e.native.as_ref() else {
+            // No view yet (waiting for the rules to compile): the placeholder holds the place.
+            return (e.phase == Phase::Pending).then(|| {
+                window.request_animation_frame();
+                skeleton
+            });
+        };
         let state = &e.state;
+        let ready = state.ready.get();
 
         // Placement: the clip container is the visible part, the page sits inside it at its
-        // full size. Every edge is rounded on its own so neighbours never gap or overlap.
+        // full size. Every edge is rounded on its own so neighbours never gap or overlap. While
+        // the document loads the clip is zero tall: the page lays out at its real width (so it
+        // can be measured, which a hidden view would not do) but shows nothing.
         let vis = bounds.intersect(&window.content_mask().bounds);
         let edge = |p: Pixels| f32::from(p).round();
         let (cl, ct, cr, cb) = (edge(vis.left()), edge(vis.top()), edge(vis.right()), edge(vis.bottom()));
         let (vl, vt, vr, vb) =
             (edge(bounds.left()), edge(bounds.top()), edge(bounds.right()), edge(bounds.bottom()));
-        native.place([cl, ct, cr - cl, cb - ct], [vl - cl, vt - ct, vr - vl, vb - vt]);
+        let clip_h = if ready { cb - ct } else { 0. };
+        native.place([cl, ct, cr - cl, clip_h], [vl - cl, vt - ct, vr - vl, vb - vt]);
         let visible = [cl - vl, ct - vt, cr - cl, cb - ct];
         state.visible.set(visible);
         state.size.set([vr - vl, vb - vt]);
-        if state.width.replace(vr - vl) != vr - vl && state.loaded.get() {
-            measure(native.web(), state, &inner.notifier);
-        }
 
         let showing = inner.slot_visible[usize::from(key.triage)].get() && visible[2] >= 1. && visible[3] >= 1.;
         if !showing {
             e.hide();
             return None;
         }
-        if overlay {
-            if let Some((data, rect)) = state.snapshot_for(visible) {
-                native.set_visible(false);
-                let at = |x: f32, y: f32, w: f32, h: f32| Bounds {
-                    origin: point(px(vl + x), px(vt + y)),
-                    size: size(px(w), px(h)),
-                };
-                return Some(Swap {
-                    data,
-                    visible: at(visible[0], visible[1], visible[2], visible[3]),
-                    image: at(rect[0], rect[1], rect[2], rect[3]),
-                });
-            }
-            // Not captured yet: stay native until the snapshot lands.
+        if !ready {
             native.set_visible(true);
-            if state.loaded.get() && !state.inflight.get() {
-                inner.snapshot(native, state, visible, cx);
-            }
-            return None;
+            window.request_animation_frame();
+            return Some(skeleton);
+        }
+        if overlay {
+            native.set_visible(false);
+            let Some((data, rect)) = state.snapshot_for(visible) else {
+                // No snapshot yet: never leave the native view on top; the page's background
+                // holds the place until the overlay closes.
+                return Some(Paint::Blank { bounds, bg: style.bg });
+            };
+            let at = |x: f32, y: f32, w: f32, h: f32| Bounds {
+                origin: point(px(vl + x), px(vt + y)),
+                size: size(px(w), px(h)),
+            };
+            return Some(Paint::Swap(Swap {
+                data,
+                visible: at(visible[0], visible[1], visible[2], visible[3]),
+                image: at(rect[0], rect[1], rect[2], rect[3]),
+            }));
         }
         native.set_visible(true);
+
+        // Pre-capture for the next overlay once the view has settled; only views on screen get
+        // one, and it is freed when the view is hidden.
+        let geom = [visible[0], visible[1], visible[2], visible[3], vr - vl, vb - vt, vl, vt];
+        let moved = state.geom.replace(geom) != geom;
+        let covered = state.snapshot_for(visible).is_some();
+        if !covered && !state.inflight.get() {
+            if state.want_snapshot.get() && !moved {
+                state.want_snapshot.set(false);
+                inner.snapshot(native, state, visible, cx);
+            } else if !state.want_snapshot.get() {
+                inner.watch(state);
+            }
+        }
         None
     }
 }
@@ -483,6 +549,7 @@ impl Inner {
         };
         if !native::available(window) {
             e.phase = Phase::Headless;
+            e.state.ready.set(true);
             self.loads.borrow_mut().push(LoadedDoc {
                 key,
                 style: e.sig.style,
@@ -509,25 +576,65 @@ impl Inner {
         match &e.native {
             Some(native) => native.load(&pending.document, rules.as_ref()),
             None => {
-                let (state, notifier) = (e.state.clone(), self.notifier.clone());
                 let config = native::Config {
                     html: &pending.document,
                     rules,
-                    on_finished: Box::new(move |web: &WKWebView| {
-                        state.loaded.set(true);
-                        remeasure(web, &state, &notifier);
-                    }),
+                    on_started: {
+                        let state = e.state.clone();
+                        Box::new(move || state.navigation_started())
+                    },
+                    on_finished: {
+                        let (state, notifier) = (e.state.clone(), self.notifier.clone());
+                        Box::new(move || {
+                            state.loaded.set(true);
+                            if state.settle_ready() {
+                                notifier.notify();
+                            }
+                        })
+                    },
+                    on_height: {
+                        let (state, notifier) = (e.state.clone(), self.notifier.clone());
+                        Box::new(move |height| {
+                            let height = (height as f32).max(1.);
+                            state.measured.set(true);
+                            let changed = (state.height.get() - height).abs() >= 0.5;
+                            if changed {
+                                state.height.set(height);
+                                state.bump();
+                            }
+                            if state.settle_ready() || changed {
+                                notifier.notify();
+                            }
+                        })
+                    },
                 };
                 match native::Native::new(window, cx, shared, config) {
                     Ok(native) => e.native = Some(native),
                     Err(_) => {
                         e.phase = Phase::Failed;
+                        e.state.ready.set(true);
                         return;
                     }
                 }
             }
         }
+        // Out of patience: show whatever has rendered by then.
+        let (state, doc, notifier) = (e.state.clone(), e.state.doc.get(), self.notifier.clone());
+        self.notifier.after(REVEAL_CAP, move || {
+            if state.doc.get() == doc && !state.ready.replace(true) {
+                notifier.notify();
+            }
+        });
         e.phase = Phase::Live;
+    }
+
+    /// Start waiting for the view to settle, unless a wait is already running.
+    fn watch(&self, state: &Rc<ViewState>) {
+        if state.watching.replace(true) {
+            return;
+        }
+        state.watched.set(state.geom.get());
+        idle_check(state.clone(), self.notifier.clone());
     }
 
     /// Capture the visible part of the page plus a small margin when an overlay needs it, decode it
@@ -569,28 +676,18 @@ impl Inner {
     }
 }
 
-/// Read the document height into the view state, waking the reader when it changed.
-fn measure(web: &WKWebView, state: &Rc<ViewState>, notifier: &Notifier) {
-    let (state, notifier) = (state.clone(), notifier.clone());
-    native::eval(web, MEASURE_JS, move |value| {
-        let Some(height) = native::as_f64(value).map(|h| h as f32).filter(|h| *h > 0.) else {
-            return;
-        };
-        if (state.height.get() - height).abs() >= 0.5 {
-            state.height.set(height);
-            state.bump();
-            notifier.notify();
+/// Wait for stillness, then flag the view for a snapshot (the next frame takes it).
+fn idle_check(state: Rc<ViewState>, notifier: Notifier) {
+    let wake = notifier.clone();
+    notifier.after(SNAP_IDLE, move || {
+        if state.geom.get() != state.watched.get() {
+            state.watched.set(state.geom.get());
+            return idle_check(state, wake);
         }
+        state.watching.set(false);
+        state.want_snapshot.set(true);
+        wake.notify();
     });
-}
-
-/// Measure now and again shortly after, for images that finish loading late.
-fn remeasure(web: &WKWebView, state: &Rc<ViewState>, notifier: &Notifier) {
-    measure(web, state, notifier);
-    for delay in REMEASURE {
-        let (web, state, again) = (web.retain(), state.clone(), notifier.clone());
-        notifier.after(delay, move || measure(&web, &state, &again));
-    }
 }
 
 /// The key to evict: the one shown least recently.
@@ -609,7 +706,8 @@ fn document(html: &str, style: DocStyle) -> String {
          :root{{color-scheme:{scheme}}}\
          html{{background:#{:06x};color:#{:06x};font:13.5px/1.55 -apple-system,system-ui,sans-serif;\
          overflow-wrap:break-word}}\
-         body{{margin:0}}img{{max-width:100%;height:auto}}</style>",
+         body{{margin:0}}img{{max-width:100%;height:auto}}\
+         html,body{{overflow:hidden!important;height:auto!important;min-height:0!important}}</style>",
         style.bg, style.fg
     );
     out.push_str(html);
@@ -636,6 +734,16 @@ pub struct Swap {
     image: Bounds<Pixels>,
 }
 
+/// What the element paints in place of (or under) the native view.
+pub enum Paint {
+    /// The loading placeholder.
+    Skeleton { bounds: Bounds<Pixels>, fg: u32, bg: u32 },
+    /// A snapshot standing in for the hidden native view during an overlay.
+    Swap(Swap),
+    /// The page background, when an overlay opened before any snapshot was ready.
+    Blank { bounds: Bounds<Pixels>, bg: u32 },
+}
+
 /// The element for one email view: as tall as its document, full width.
 pub struct EmailView {
     views: EmailWebViews,
@@ -653,7 +761,7 @@ impl IntoElement for EmailView {
 
 impl Element for EmailView {
     type RequestLayoutState = ();
-    type PrepaintState = Option<Swap>;
+    type PrepaintState = Option<Paint>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -672,7 +780,8 @@ impl Element for EmailView {
     ) -> (LayoutId, ()) {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
-        style.size.height = px(self.state.height.get()).into();
+        let height = if self.state.ready.get() { self.state.height.get() } else { SKELETON_HEIGHT };
+        style.size.height = px(height).into();
         (window.request_layout(style, [], cx), ())
     }
 
@@ -684,7 +793,7 @@ impl Element for EmailView {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Swap> {
+    ) -> Option<Paint> {
         let swap = self.views.prepaint(self.key, bounds, window, cx);
         // The native view takes the mouse; keep GPUI's hover and click targets off it too.
         window.insert_hitbox(bounds.intersect(&window.content_mask().bounds), HitboxBehavior::Normal);
@@ -697,12 +806,36 @@ impl Element for EmailView {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         _: &mut (),
-        swap: &mut Option<Swap>,
+        paint: &mut Option<Paint>,
         window: &mut Window,
         _: &mut App,
     ) {
-        if let Some(swap) = swap.take() {
-            let _ = window.paint_image(swap.visible, swap.image, Corners::default(), swap.data, 0, false);
+        match paint.take() {
+            Some(Paint::Swap(swap)) => {
+                let _ = window.paint_image(swap.visible, swap.image, Corners::default(), swap.data, 0, false);
+            }
+            Some(Paint::Blank { bounds, bg }) => {
+                window.paint_quad(fill(bounds, gpui_kit::gpui::rgb(bg)));
+            }
+            Some(Paint::Skeleton { bounds, fg, bg }) => {
+                let pulse = (self.state.born.elapsed().as_secs_f32() * 3.).sin() * 0.5 + 0.5;
+                let line = Rgba { a: 0.07 + 0.05 * pulse, ..gpui_kit::gpui::rgb(fg) };
+                window.paint_quad(fill(bounds, gpui_kit::gpui::rgb(bg)));
+                // A heading, then paragraph lines of uneven length.
+                let rows = [(0.45, 20.), (1.0, 12.), (0.96, 12.), (0.9, 12.), (0.62, 12.), (0., 0.), (1.0, 12.), (0.93, 12.), (0.7, 12.)];
+                let mut y = 8.;
+                for (fraction, h) in rows {
+                    if h > 0. {
+                        let line_bounds = Bounds {
+                            origin: point(bounds.left(), bounds.top() + px(y)),
+                            size: size(bounds.size.width * fraction, px(h)),
+                        };
+                        window.paint_quad(fill(line_bounds, line).corner_radii(px(4.)));
+                    }
+                    y += h + 12.;
+                }
+            }
+            None => {}
         }
     }
 }
