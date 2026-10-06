@@ -133,6 +133,64 @@ define_class!(
 
 const HANDLER_NAME: &str = "mcHeight";
 const WORLD_NAME: &str = "mail-classifier.measure";
+/// Strips the email's own outer background so it blends with the reader card instead of painting
+/// a differently-coloured box inside it. Runs in the same isolated world, before the measuring
+/// script, at document end (the view is still hidden waiting for its height, so there is no
+/// flash). An email may put a colour on `body`, on the outermost wrapper (typically a full-width
+/// `<table width="100%">`/`<center>`/`div`), or both; inner cards are narrower than the body and
+/// keep their background. The `html` colour set by our own stylesheet (the card colour) stays.
+const NEUTRALIZE_SCRIPT: &str = r#"(function () {
+  function clear(el) {
+    if (!el || el.nodeType !== 1) return;
+    if (el.style) {
+      el.style.setProperty('background-color', 'transparent', 'important');
+      el.style.setProperty('background-image', 'none', 'important');
+      el.style.setProperty('background', 'transparent', 'important');
+    }
+    el.removeAttribute('bgcolor');
+    el.removeAttribute('background');
+  }
+  function tag(el) { return el.tagName ? el.tagName.toUpperCase() : ''; }
+  // The single rendered element child, or null when there is none or more than one. Head
+  // furniture (style/script/link/meta) does not count as content.
+  function soleChild(el) {
+    var found = null, n = 0;
+    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+      var t = tag(c);
+      if (t === 'SCRIPT' || t === 'STYLE' || t === 'LINK' || t === 'META' || t === 'TITLE' ||
+          t === 'BASE' || t === 'HEAD') continue;
+      if (++n > 1) return null;
+      found = c;
+    }
+    return n === 1 ? found : null;
+  }
+  var html = document.documentElement, body = document.body;
+  if (!html || !body) return;
+  // Our stylesheet owns <html>; drop any inline colour an email put on it.
+  if (html.style) {
+    html.style.removeProperty('background');
+    html.style.removeProperty('background-color');
+    html.style.removeProperty('background-image');
+  }
+  html.removeAttribute('bgcolor');
+  html.removeAttribute('background');
+  clear(body);
+  // Walk the single full-width wrapper chain, clearing each element's background, and stop at
+  // the first node with siblings or one narrower than the width available to it (the inner
+  // card). The tolerance absorbs table border-spacing and rounding.
+  var node = body;
+  for (var guard = 0; node && guard < 32; guard++) {
+    var child = soleChild(node);
+    if (!child) return;
+    var cs = window.getComputedStyle(node);
+    var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    var avail = node.getBoundingClientRect().width - pad;
+    if (!(avail > 0)) return;
+    if (!(child.getBoundingClientRect().width >= avail - Math.max(8, avail * 0.02))) return;
+    clear(child);
+    node = child;
+  }
+})();"#;
 /// Reports the document height whenever layout changes it (resize, images, fonts), from an
 /// isolated content world, so page scripts (which are off) are never involved.
 const MEASURE_SCRIPT: &str = r#"(function () {
@@ -311,8 +369,8 @@ impl Native {
             }
             (configuration, content)
         };
-        // The measuring script and its handler live in their own content world, installed
-        // before the first navigation.
+        // The background neutraliser, the measuring script and its handler live in their own
+        // content world, installed before the first navigation.
         let (world, handler) = {
             let world = unsafe { WKContentWorld::worldWithName(&NSString::from_str(WORLD_NAME), mtm) };
             let handler: Retained<HeightHandler> = unsafe {
@@ -321,14 +379,16 @@ impl Native {
             };
             // SAFETY: main thread; the controller retains both until we remove them in `Drop`.
             unsafe {
-                let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
-                    WKUserScript::alloc(mtm),
-                    &NSString::from_str(MEASURE_SCRIPT),
-                    WKUserScriptInjectionTime::AtDocumentEnd,
-                    true,
-                    &world,
-                );
-                content.addUserScript(&script);
+                for source in [NEUTRALIZE_SCRIPT, MEASURE_SCRIPT] {
+                    let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly_inContentWorld(
+                        WKUserScript::alloc(mtm),
+                        &NSString::from_str(source),
+                        WKUserScriptInjectionTime::AtDocumentEnd,
+                        true,
+                        &world,
+                    );
+                    content.addUserScript(&script);
+                }
                 content.addScriptMessageHandler_contentWorld_name(
                     ProtocolObject::from_ref(&*handler),
                     &world,

@@ -696,7 +696,9 @@ pub fn lru_victim<K>(candidates: impl Iterator<Item = (K, u64)>) -> Option<K> {
 }
 
 /// The page we load: our default styling, then the message exactly as received. Written before
-/// the message so anything it sets itself wins.
+/// the message so anything it sets itself wins — except the outer background, which belongs to
+/// the reader card and is neutralised here (the `html` colour) and in the isolated-world script
+/// ([`NEUTRALIZE_SCRIPT`] in `native.rs`, which also unwraps the top-level container chain).
 fn document(html: &str, style: DocStyle) -> String {
     let scheme = if style.dark { "dark" } else { "light" };
     let mut out = String::with_capacity(html.len() + 420);
@@ -704,9 +706,9 @@ fn document(html: &str, style: DocStyle) -> String {
         out,
         "<!DOCTYPE html><meta charset=\"utf-8\"><style>\
          :root{{color-scheme:{scheme}}}\
-         html{{background:#{:06x};color:#{:06x};font:13.5px/1.55 -apple-system,system-ui,sans-serif;\
+         html{{background:#{:06x}!important;color:#{:06x};font:13.5px/1.55 -apple-system,system-ui,sans-serif;\
          overflow-wrap:break-word}}\
-         body{{margin:0}}img{{max-width:100%;height:auto}}\
+         body{{margin:0;background:transparent!important}}img{{max-width:100%;height:auto}}\
          html,body{{overflow:hidden!important;height:auto!important;min-height:0!important}}</style>",
         style.bg, style.fg
     );
