@@ -180,6 +180,11 @@ impl MailApp {
         if !matches!(store.legacy_judgements_present(), Ok(true)) {
             return;
         }
+        if self.mailbox.messages().is_empty() {
+            // No messages loaded (e.g. an unreadable cache): keep the legacy table, so the copy
+            // can still map rows on a later launch instead of losing them.
+            return;
+        }
         let (_, model) = self.jev_settings();
         let questions = triage_questions();
         let entries: Vec<(MessageId, String)> = self

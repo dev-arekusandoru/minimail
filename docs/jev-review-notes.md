@@ -50,7 +50,8 @@ decided, why, and how to flip it. Flip any you disagree with.
 - **`MIGRATION_4` parks the old hash-keyed rows in `judgements_legacy`.** On the first startup
   after the upgrade, `MailApp::carry_over_judgements` recomputes each message's old hash under
   the configured model (`jev-latest` by default), copies a hit onto the message id, and drops
-  the legacy table. A failure leaves it in place to retry next launch. *Limit:* a message whose
+  the legacy table. A failure, or an empty mailbox (an unreadable cache), leaves it in place to
+  retry next launch. *Limit:* a message whose
   model changed before the upgrade has no matching row and is billed once more; this is the
   smallest correct option (the hash cannot be inverted in SQL). *Flip:* keep the legacy table and
   a second model guess if that one re-bill matters.
