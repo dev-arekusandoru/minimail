@@ -37,18 +37,15 @@ impl Mailbox {
         self.pending = rest;
         dropped
     }
+    /// Apply a classifier label without pushing an undo step: background labels are not user
+    /// actions, so `u` never undoes one (see AGENTS.md invariants).
     pub fn apply_auto(&mut self, s: Suggestion, now: Timestamp) -> bool {
         if !self.index.contains_key(&s.message) {
             return false;
         }
-        let old = self.snapshot(s.message);
         let before = self.meta.get(&s.message).cloned().unwrap_or_default();
         self.apply(&s, now);
-        let changed = before != self.meta.get(&s.message).cloned().unwrap_or_default();
-        if changed {
-            self.push_undo(vec![old]);
-        }
-        changed
+        before != self.meta.get(&s.message).cloned().unwrap_or_default()
     }
     pub(super) fn apply(&mut self, s: &Suggestion, _now: Timestamp) {
         let id = s.message;
