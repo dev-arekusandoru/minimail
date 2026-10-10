@@ -160,8 +160,10 @@ impl MailApp {
                     }
                     ComposeEvent::Send { in_reply_to, body, .. } => {
                         let now = this.now();
-                        let expects_reply = crate::judge::expects_reply(&StubJudge, body);
-                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), expects_reply, now);
+                        // The reply goes now; the classifier tags the thread *Awaiting Reply* if
+                        // the answer says so, on the background worker (no key means no tag).
+                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), false, now);
+                        this.judge_reply(*in_reply_to, now, body.clone(), cx);
                         this.close_modals(window, cx);
                         this.open_post_send_dialog(*in_reply_to, window, cx);
                         this.show_toast(

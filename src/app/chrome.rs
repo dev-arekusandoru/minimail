@@ -5,6 +5,7 @@ use crate::app::actions::{HelpPageDown, HelpPageUp, SelectNext, SelectPrev, Togg
 use crate::app::ui::shortcut_chips;
 use crate::clock::Timestamp;
 use crate::hints::{fit_hints, HintContext, HintMode};
+use crate::judge::JudgeStatus;
 use crate::theme::ThemeColor;
 use crate::tz::{MONTHS, Now, WEEKDAYS};
 use gpui_kit::{
@@ -66,19 +67,34 @@ pub fn humanize_time(ts: Timestamp, now: &Now) -> String {
 #[derive(IntoElement)]
 pub struct HintBar {
     ctx: HintContext,
+    /// Classifier state drawn in the bar's center, if any.
+    status: Option<JudgeStatus>,
 }
 
 impl HintBar {
     pub fn new(ctx: HintContext) -> Self {
-        Self { ctx }
+        Self { ctx, status: None }
+    }
+
+    /// Show the classifier's state in the bar's center.
+    pub fn status(mut self, status: JudgeStatus) -> Self {
+        self.status = Some(status);
+        self
     }
 }
 
 /// Horizontal padding and inter-item gaps the [`StatusBar`] spends before hints get width:
-/// its `px_3` sides plus the two region gaps either side of the empty center.
+/// its `px_3` sides plus the two region gaps either side of the center.
 const BAR_PAD: f32 = 40.;
 /// Estimated width of the "N selected" label, in px.
 const SELECTED_LABEL_W: f32 = 80.;
+/// Prompt shown when no Jev key is configured.
+pub const NO_KEY_PROMPT: &str = "Add a Jev API key in Settings → Classifier";
+
+/// Estimated rendered width of the status bar's center text, in px.
+fn status_width(text: &str) -> f32 {
+    text.chars().count() as f32 * 6.5 + 16.
+}
 
 impl RenderOnce for HintBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -87,8 +103,17 @@ impl RenderOnce for HintBar {
             HintMode::Selection(n) => Some(n),
             _ => None,
         };
+        // Center text: a missing-key prompt, progress, or the last classifier error.
+        let center: Option<(String, Hsla)> = match &self.status {
+            Some(JudgeStatus::NoKey) => Some((NO_KEY_PROMPT.to_owned(), t.muted_foreground)),
+            Some(JudgeStatus::Working(n)) => Some((format!("Classifying {n}…"), t.muted_foreground)),
+            Some(JudgeStatus::Error(e)) => Some((format!("Classifier: {e}"), t.danger)),
+            // `Idle`, or no classifier at all: the center stays empty.
+            _ => None,
+        };
         let budget = f32::from(window.viewport_size().width) - BAR_PAD;
-        let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. };
+        let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. }
+            + center.as_ref().map_or(0., |(text, _)| status_width(text));
         let shown = fit_hints(&self.ctx, budget, reserved);
         let hints = div()
             .flex()
@@ -105,6 +130,9 @@ impl RenderOnce for HintBar {
             .border_color(t.border)
             .bg(t.sidebar)
             .left(hints)
+            .when_some(center, |bar, (text, color)| {
+                bar.child(div().min_w_0().overflow_hidden().text_xs().text_color(color).child(text))
+            })
             .when_some(selected, |bar, n| {
                 bar.right(div().text_xs().text_color(t.primary).child(format!("{n} selected")))
             })

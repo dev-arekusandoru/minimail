@@ -1,0 +1,284 @@
+//! The classifier's background worker: a serial queue draining one judge request at a time.
+//!
+//! `classify_visible` routes cached answers immediately and queues the rest; this module runs
+//! each queued request off-thread, stores the answers, and applies the routing back on the UI
+//! thread. One request is in flight at a time.
+
+use std::sync::Arc;
+
+use serde_json::{Value, json};
+
+use crate::app_settings::{JEV_BASE_URL, JEV_MODEL};
+use crate::judge::{
+    Answer, AnswerValue, Judge, JudgeError, JudgeStatus, JevJudge, Question, QuestionKey,
+    judgement_key, message_state, route, triage_questions,
+};
+use crate::prefs::Scope;
+use crate::provider::secrets::SecretStore;
+
+use super::*;
+
+/// Keychain entry holding the Jev API key. Accounts are named by their email, so it cannot collide.
+const JEV_SECRET: &str = "jev";
+
+/// One unit of classifier work.
+#[derive(Clone, Debug)]
+pub(super) enum JudgeJob {
+    /// Classify the Inbox message `id`.
+    Message(MessageId),
+    /// Judge the reply sent in answer to `in_reply_to`; `sent_at` is when it was queued.
+    Reply {
+        in_reply_to: MessageId,
+        sent_at: Timestamp,
+        body: String,
+    },
+}
+
+impl MailApp {
+    /// Replace the classifier. `None` means no key, so classification is off. Clears the queue
+    /// and the error and re-runs classification over the visible Inbox.
+    pub fn set_judge(&mut self, judge: Option<Arc<dyn Judge + Send + Sync>>, cx: &mut Context<Self>) {
+        self.judge = judge;
+        // Any request still in flight belongs to the old judge; its result is discarded.
+        self.judge_gen += 1;
+        self.judge_queue.clear();
+        self.judging = false;
+        self.judge_in_flight = None;
+        self.classify_visible(cx);
+        cx.notify();
+    }
+
+    /// Build the judge from the `"jev"` keychain secret plus the Jev preferences, then install it.
+    pub fn configure_jev(&mut self, secrets: &dyn SecretStore, cx: &mut Context<Self>) {
+        let judge = secrets.get(JEV_SECRET).map(|key| {
+            let (base, model) = self.jev_settings();
+            Arc::new(JevJudge::new(base, model, key)) as Arc<dyn Judge + Send + Sync>
+        });
+        self.set_judge(judge, cx);
+    }
+
+    /// The classifier's current state (status bar, settings).
+    pub fn judge_status(&self) -> &JudgeStatus {
+        &self.judge_status
+    }
+
+    /// The configured Jev endpoint and model, falling back to the shipped defaults.
+    fn jev_settings(&self) -> (String, String) {
+        let (default_base, default_model) = (
+            crate::judge::jev::DEFAULT_BASE_URL.to_owned(),
+            crate::judge::jev::DEFAULT_MODEL.to_owned(),
+        );
+        let Some(store) = &self.preferences else {
+            return (default_base, default_model);
+        };
+        let scope = Scope::Global;
+        let base = JEV_BASE_URL.get(store.as_ref(), &scope);
+        let model = JEV_MODEL.get(store.as_ref(), &scope);
+        let base = if base.is_empty() { default_base } else { base };
+        let model = if model.is_empty() { default_model } else { model };
+        (base, model)
+    }
+
+    /// Cached answers for `key`: memory first, then the store. `None` on a miss or a bad row.
+    pub(super) fn cached_answers(&mut self, key: &str) -> Option<Vec<(QuestionKey, Answer)>> {
+        if let Some(answers) = self.judgements.get(key) {
+            return Some(answers.clone());
+        }
+        let store = self.preferences.clone()?;
+        // A corrupt row is a cache miss: judging again overwrites it.
+        match store.judgement_get(key) {
+            Ok(Some(answers)) => {
+                self.judgements.insert(key.to_owned(), answers.clone());
+                Some(answers)
+            }
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    /// Route `answers` for `id` and apply them, if it is still a visible Inbox candidate.
+    pub(super) fn apply_answers(
+        &mut self,
+        id: MessageId,
+        answers: &[(QuestionKey, Answer)],
+    ) -> (usize, usize) {
+        let Some(message) = self.mailbox.get(id).cloned() else {
+            return (0, 0);
+        };
+        if message.state != TriageState::Inbox || !self.mailbox.pending(id).is_empty() {
+            return (0, 0);
+        }
+        let now = self.now();
+        let (mut auto, mut review) = (0, Vec::new());
+        for routed in route(&self.policy, &message, answers.to_vec()) {
+            match routed {
+                Routed::Auto(s) => {
+                    if self.mailbox.apply_auto(s, now) {
+                        auto += 1;
+                    }
+                }
+                Routed::Review(s) => review.push(s),
+                Routed::Drop => {}
+            }
+        }
+        let queued = review.len();
+        self.mailbox.add_suggestions(review);
+        (auto, queued)
+    }
+
+    /// Queue `job`, unless the same message is already waiting or in flight.
+    pub(super) fn enqueue_judge(&mut self, job: JudgeJob) {
+        if let JudgeJob::Message(id) = &job
+            && (self.judge_in_flight == Some(*id)
+                || self
+                    .judge_queue
+                    .iter()
+                    .any(|j| matches!(j, JudgeJob::Message(queued) if queued == id)))
+        {
+            return;
+        }
+        self.judge_queue.push_back(job);
+    }
+
+    /// Queue a background judge of the reply sent in answer to `in_reply_to`.
+    pub(super) fn judge_reply(
+        &mut self,
+        in_reply_to: MessageId,
+        sent_at: Timestamp,
+        body: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.judge.is_none() {
+            return;
+        }
+        self.enqueue_judge(JudgeJob::Reply { in_reply_to, sent_at, body });
+        self.drain_judge_queue(cx);
+    }
+
+    /// Start the next request if the worker is idle; one request runs at a time.
+    pub(super) fn drain_judge_queue(&mut self, cx: &mut Context<Self>) {
+        loop {
+            if self.judging {
+                return;
+            }
+            let Some(judge) = self.judge.clone() else {
+                break;
+            };
+            let Some(job) = self.judge_queue.pop_front() else {
+                break;
+            };
+            let model = judge.model().to_owned();
+            let Some((kind, key, state, questions)) = self.prepare_job(job, &model) else {
+                continue; // the message went away; try the next one
+            };
+            self.judging = true;
+            self.judge_in_flight = match &kind {
+                JudgeJob::Message(id) => Some(*id),
+                JudgeJob::Reply { .. } => None,
+            };
+            self.refresh_judge_status();
+            let generation = self.judge_gen;
+            let task = cx.background_spawn(async move { judge.judge(&state, &questions) });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                this.update(cx, |this, cx| this.finish_judge(generation, kind, key, result, cx)).ok();
+            })
+            .detach();
+            return;
+        }
+        self.refresh_judge_status();
+    }
+
+    /// The request body for `job`: its kind, cache key (empty for replies), state and questions.
+    #[allow(clippy::type_complexity)]
+    fn prepare_job(
+        &self,
+        job: JudgeJob,
+        model: &str,
+    ) -> Option<(JudgeJob, String, Value, Vec<(QuestionKey, Question)>)> {
+        match &job {
+            JudgeJob::Message(id) => {
+                let message = self.mailbox.get(*id).cloned()?;
+                let state = message_state(&message);
+                let questions = triage_questions();
+                let key = judgement_key(model, &state, &questions);
+                Some((job, key, state, questions))
+            }
+            JudgeJob::Reply { body, .. } => {
+                let state = json!({"sender": "", "subject": "", "body": body.trim()});
+                let questions = vec![(
+                    QuestionKey::ExpectsReply,
+                    Question::Bool {
+                        criteria: "Does this outgoing reply ask the recipient for a response?".into(),
+                    },
+                )];
+                Some((job, String::new(), state, questions))
+            }
+        }
+    }
+
+    /// A finished request: cache and apply it, or stop on error and show it.
+    fn finish_judge(
+        &mut self,
+        generation: u64,
+        kind: JudgeJob,
+        key: String,
+        result: Result<Vec<(QuestionKey, Answer)>, JudgeError>,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.judge_gen {
+            return; // the judge was replaced while this ran
+        }
+        self.judging = false;
+        self.judge_in_flight = None;
+        match result {
+            Err(e) => {
+                self.judge_queue.clear();
+                self.judge_status = JudgeStatus::Error(e.to_string());
+                cx.notify();
+                return;
+            }
+            Ok(answers) => match kind {
+                JudgeJob::Message(id) => {
+                    let now = self.now();
+                    self.store_answers(&key, &answers, now);
+                    self.apply_answers(id, &answers);
+                }
+                JudgeJob::Reply { in_reply_to, sent_at, .. } => {
+                    let expects = answers.iter().any(|(key, answer)| {
+                        *key == QuestionKey::ExpectsReply
+                            && answer.value == AnswerValue::Bool(true)
+                    });
+                    if expects {
+                        self.mailbox.mark_awaiting_reply(in_reply_to, sent_at);
+                    }
+                }
+            },
+        }
+        self.refresh_judge_status();
+        cx.notify();
+        self.drain_judge_queue(cx);
+    }
+
+    /// Cache `answers` in memory and, when a store exists, in SQLite.
+    fn store_answers(&mut self, key: &str, answers: &[(QuestionKey, Answer)], now: Timestamp) {
+        self.judgements.insert(key.to_owned(), answers.to_vec());
+        if let Some(store) = self.preferences.clone() {
+            // A cache write failure is not worth stopping classification over.
+            let _ = store.judgement_put(key, answers, now);
+        }
+    }
+
+    /// Recompute the status from the judge and the queue; a success clears any error.
+    pub(super) fn refresh_judge_status(&mut self) {
+        self.judge_status = if self.judge.is_none() {
+            JudgeStatus::NoKey
+        } else {
+            let waiting = self.judge_queue.len() + usize::from(self.judging);
+            if waiting == 0 {
+                JudgeStatus::Idle
+            } else {
+                JudgeStatus::Working(waiting)
+            }
+        };
+    }
+}

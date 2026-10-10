@@ -214,7 +214,7 @@ impl MailApp {
             Some(_) => {}
             None => self.sync_error = None,
         }
-        self.classify_visible();
+        self.classify_visible(cx);
         let bodies = self.body_targets();
         self.fetch_bodies(bodies, cx);
         self.refresh_account_rows(cx);
@@ -503,7 +503,7 @@ impl MailApp {
         self.wake_sync();
         self.show_toast(format!("Gmail connected: {label}"), window, cx);
         self.refresh_account_rows(cx);
-        self.classify_visible();
+        self.classify_visible(cx);
         cx.notify();
     }
 

@@ -1,12 +1,14 @@
 //! Headless keystroke tests for the v2 features, driving the real `MailApp` with a `FakeClock`.
 
 use std::rc::Rc;
+use std::sync::Arc;
 use gpui_kit::{AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds, WindowOptions, px, size};
 use gpui_kit::base::Root;
 use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::actions::{bind_keys};
 use mail_classifier::app::MailApp;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
+use mail_classifier::judge::{Judge, StubJudge};
 use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
 use mail_classifier::tz::Utc;
 
@@ -23,8 +25,13 @@ pub struct Harness<'a> {
     pub clock: Rc<FakeClock>,
 }
 
+/// The deterministic offline judge the harness installs by default.
+pub fn stub_judge() -> Arc<dyn Judge + Send + Sync> {
+    Arc::new(StubJudge)
+}
+
 pub fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
-    harness_inner(cx, mailbox, None)
+    harness_inner(cx, mailbox, None, Some(stub_judge()))
 }
 
 /// A harness whose app reads and writes preferences through `store`, as the real app does.
@@ -35,13 +42,39 @@ pub fn harness_with_prefs(
     mailbox: Mailbox,
     store: Rc<mail_classifier::contacts::ContactStore>,
 ) -> Harness<'_> {
-    harness_inner(cx, mailbox, Some(store))
+    harness_inner(cx, mailbox, Some(store), Some(stub_judge()))
+}
+
+/// A harness with no classifier at all, for the missing-key behavior.
+pub fn harness_no_judge(cx: &mut TestAppContext) -> Harness<'_> {
+    harness_inner(cx, Mailbox::load_default(), None, None)
+}
+
+/// A harness with an explicit judge (or none), for the classifier's own tests.
+pub fn harness_with_judge(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+) -> Harness<'_> {
+    harness_inner(cx, mailbox, None, judge)
+}
+
+/// A harness with both a preferences store and an explicit judge, e.g. to test the cache
+/// surviving a restart.
+pub fn harness_with_judge_prefs(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    store: Rc<mail_classifier::contacts::ContactStore>,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+) -> Harness<'_> {
+    harness_inner(cx, mailbox, Some(store), judge)
 }
 
 fn harness_inner(
     cx: &mut TestAppContext,
     mailbox: Mailbox,
     prefs: Option<Rc<mail_classifier::contacts::ContactStore>>,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
 ) -> Harness<'_> {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -65,6 +98,8 @@ fn harness_inner(
                     if let Some(store) = prefs {
                         app.load_preferences(store, window, cx);
                     }
+                    // The real app installs the judge from the keychain; tests inject a fake.
+                    app.set_judge(judge, cx);
                     app
                 });
                 window.focus(&view.focus_handle(cx), cx);
@@ -143,6 +178,11 @@ impl Harness<'_> {
     }
     pub fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
         self.cx.read_entity(&self.app, |a, _| f(a))
+    }
+    /// Install (or remove) the classifier and run it, as a key change would.
+    pub fn set_judge(&mut self, judge: Option<Arc<dyn Judge + Send + Sync>>) {
+        self.app.update(self.cx, |app, cx| app.set_judge(judge, cx));
+        self.cx.run_until_parked();
     }
     /// Advance the fake clock and run the app's tick.
     pub fn advance(&mut self, secs: Timestamp) {

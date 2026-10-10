@@ -229,8 +229,17 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Run the stub judge over the visible inbox. Returns `(auto-applied, queued for review)`.
-    pub(super) fn classify_visible(&mut self) -> (usize, usize) {
+    /// Route cached answers over the visible Inbox and queue the rest for the classifier.
+    /// Returns `(auto-applied, queued for review)`, counted from the cached answers only;
+    /// anything queued is judged in the background and applied when its answers land.
+    pub(super) fn classify_visible(&mut self, cx: &mut Context<Self>) -> (usize, usize) {
+        let Some(judge) = self.judge.clone() else {
+            // No key: classification is off, but the status bar must say so.
+            self.refresh_judge_status();
+            return (0, 0);
+        };
+        let model = judge.model().to_owned();
+        let questions = triage_questions();
         let inbox = self.mailbox.location_query(&Location::AllInboxes);
         let ids: Vec<MessageId> = self
             .mailbox
@@ -238,25 +247,24 @@ impl MailApp {
             .into_iter()
             .filter(|id| self.mailbox.pending(*id).is_empty())
             .collect();
-        let routed = {
-            let msgs: Vec<&Message> = ids.iter().filter_map(|id| self.mailbox.get(*id)).collect();
-            classify(&StubJudge, &self.policy, &msgs)
-        };
-        let now = self.now();
-        let (mut auto, mut review) = (0, Vec::new());
-        for r in routed {
-            match r {
-                Routed::Auto(s) => {
-                    self.mailbox.apply_auto(s, now);
-                    auto += 1;
-                }
-                Routed::Review(s) => review.push(s),
-                Routed::Drop => {}
+        let (mut auto, mut review) = (0, 0);
+        for id in ids {
+            let Some(message) = self.mailbox.get(id).cloned() else {
+                continue;
+            };
+            let state = message_state(&message);
+            let key = judgement_key(&model, &state, &questions);
+            if let Some(answers) = self.cached_answers(&key) {
+                let (a, r) = self.apply_answers(id, &answers);
+                auto += a;
+                review += r;
+            } else {
+                self.enqueue_judge(JudgeJob::Message(id));
             }
         }
-        let queued = review.len();
-        self.mailbox.add_suggestions(review);
-        (auto, queued)
+        self.refresh_judge_status();
+        self.drain_judge_queue(cx);
+        (auto, review)
     }
 
     pub(super) fn summarize(&mut self, window: &mut Window, cx: &mut Context<Self>) {

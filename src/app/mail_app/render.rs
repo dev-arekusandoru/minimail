@@ -214,8 +214,13 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
-                let (auto, review) = this.classify_visible();
-                this.show_toast(format!("{auto} auto-applied · {review} to review"), w, cx);
+                let (auto, review) = this.classify_visible(cx);
+                let text = match this.judge_status() {
+                    JudgeStatus::NoKey => "No Jev key · add one in Settings".to_owned(),
+                    JudgeStatus::Working(n) => format!("{auto} auto-applied · classifying {n}…"),
+                    _ => format!("{auto} auto-applied · {review} to review"),
+                };
+                this.show_toast(text, w, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
@@ -249,6 +254,6 @@ impl Render for MailApp {
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
-            .child(div().flex_none().child(HintBar::new(hint)))
+            .child(div().flex_none().child(HintBar::new(hint).status(self.judge_status().clone())))
     }
 }

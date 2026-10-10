@@ -64,6 +64,7 @@ fn main() {
                 let view = cx.new(|cx| {
                     let mut app = MailApp::new(mailbox, window, cx);
                     app.load_preferences(prefs, window, cx);
+                    app.configure_jev(&mail_classifier::provider::secrets::KeyringStore, cx);
                     app
                 });
                 if let Some(cache) = cache {

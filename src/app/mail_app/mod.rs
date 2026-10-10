@@ -3,8 +3,9 @@
 //! search and triage-session modes.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::theme;
@@ -28,7 +29,10 @@ use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
-use crate::judge::{JudgePolicy, Kind, QuestionKey, Routed, StubJudge, classify};
+use crate::judge::{
+    Answer, Judge, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, judgement_key,
+    message_state, triage_questions,
+};
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
 use crate::rules::{Rule, RuleBook};
@@ -41,6 +45,7 @@ use crate::list_tabs::ListTabs;
 
 use self::list_strip::{Pane, Slot};
 use self::list_view::ListView;
+use self::judging::JudgeJob;
 
 mod accessors;
 mod actions;
@@ -49,6 +54,7 @@ mod drag;
 mod filters;
 mod grouping;
 mod help;
+mod judging;
 mod list;
 mod menus;
 mod modals;
@@ -126,6 +132,20 @@ pub struct MailApp {
     menu_target: Option<Vec<MessageId>>,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
+    /// The classifier, when one is configured. `None` means no key: classification is off.
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+    /// The classifier's state, shown in the status bar.
+    judge_status: JudgeStatus,
+    /// Judge answers cached this session, keyed by [`judgement_key`].
+    judgements: HashMap<String, Vec<(QuestionKey, Answer)>>,
+    /// Messages and replies waiting to be judged, oldest first.
+    judge_queue: VecDeque<JudgeJob>,
+    /// A judge request is in flight; the worker is running.
+    judging: bool,
+    /// Message of the request in flight, so a second pass does not queue it again.
+    judge_in_flight: Option<MessageId>,
+    /// Bumped when the judge is replaced, so an in-flight result is discarded.
+    judge_gen: u64,
     clock: Rc<dyn Clock>,
     /// The zone every displayed date and every relative date is read in: the user's clock.
     zone: Rc<dyn Zone>,
@@ -256,6 +276,13 @@ impl MailApp {
             menu_target: None,
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
+            judge: None,
+            judge_status: JudgeStatus::NoKey,
+            judgements: HashMap::new(),
+            judge_queue: VecDeque::new(),
+            judging: false,
+            judge_in_flight: None,
+            judge_gen: 0,
             zone,
             clock,
             group_threads: false,
@@ -303,7 +330,7 @@ impl MailApp {
             sync_wake: None,
             pending_toast: None,
         };
-        app.classify_visible();
+        app.classify_visible(cx);
         app
     }
     pub fn load_preferences(
@@ -357,7 +384,7 @@ impl MailApp {
         self._theme_sub = Some(window.observe_window_appearance(move |_, cx| {
             weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
         }));
-        self.classify_visible();
+        self.classify_visible(cx);
         cx.notify();
     }
     fn refresh_theme(&self, cx: &mut App) {
