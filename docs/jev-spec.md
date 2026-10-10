@@ -1,6 +1,8 @@
 # Jev classifier (BYOK) — spec
 
-Status: approved. Branch `jev-classifier`.
+Status: implemented on branch `jev-classifier` — see `docs/jev-review-notes.md` for the
+decisions to review and what is still unverified (the provider has never been run against the
+live Jev API).
 
 ## Goal
 

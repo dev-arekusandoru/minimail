@@ -1,103 +1,131 @@
 # Jev classifier: decisions to review
 
-Assumptions and design calls made while building `docs/jev-spec.md` unattended. Each entry
-says what was decided and why. Flip any you disagree with.
+Design calls made while building `docs/jev-spec.md`, grouped by topic. Each says what was
+decided, why, and how to flip it. Flip any you disagree with.
 
-## Planning (orchestrator)
+## Unverified
 
-- **Cache key = content hash, not message id.** `MessageId` is a `u32` assigned at load, so
-  it may not be stable across restarts or syncs. Results are keyed by
-  `sha256(model + questions JSON + state JSON)`. Side effect: when a partial (snippet-only)
-  message's full body downloads, its state changes and it is classified again (billed twice).
-- **Background auto-applies keep today's undo behavior.** `Mailbox::apply_auto` already pushes
-  an undo step for each auto-applied label. The worker reuses it, so `u` can undo a label that
-  arrived in the background. The spec said "no undo step"; I kept existing behavior instead of
-  changing the model.
-- **Rejected suggestions can come back.** Same as with the stub today: `classify_visible`
-  re-routes every Inbox message that has no pending suggestion, so a rejected suggestion
-  reappears on the next pass (from the cache, with no new API call). Unchanged.
-- **`StubJudge` stays `pub`.** Integration tests in `tests/` can only see public items, so
-  "tests only" means the app never constructs it; tests inject it.
-- **Score levels are sent as `"1"`…`"5"`.** Our `Question::Score` has no per-level
-  descriptions; the criteria sentence carries the meaning.
-- **Judgement cache never prunes.** One small row per classified message.
+- **Never run against the live Jev API.** No key was available, so the wire mapping is only
+  tested against recorded JSON. **Do this first:** Settings → AI → **Test connection** with a
+  real key, then **Save**, and watch the status bar. If a request succeeds but answers look
+  wrong, the fix is in `parse_answers`/`parse_one` (`src/judge/jev.rs`) — check that a `noul`
+  answer reads `noul`, `choice` reads `choice`/`probabilities`, and `score` reads `score`
+  (0-based, +1 here).
+- **Request shape assumed, not confirmed** — one `POST {base}/systemone` with
+  `Authorization: Bearer <key>` and `{state, model, questions}` where each question key is the
+  `Debug` name of `QuestionKey` (e.g. `"Spam"`). If Jev names them differently, change
+  `request_body`/`parse_answers` together with `judgement_key`.
+- **Rate limits and long messages untested.** One request per message, serial, 30 s timeout,
+  body trimmed to 1500 chars. No batching or backoff beyond "stop the worker on an error".
+- **Local loopback `http://`** is allowed for a local proxy but has never been exercised.
+- Score levels are sent as `"1"`…`"5"` and choice criteria as `{option: option}`; no per-level
+  descriptions exist in `Question`.
+- The window did not open against the real keychain for this branch; the delete-failure path is
+  covered by a fake `SecretStore` in tests, not the real one.
 
-## Wave 1: core
+## Transport and secrets
 
-- **`route` is now a public function** in `src/judge/policy.rs`; `classify` delegates to it per
-  message. The routing rules were copied verbatim, so `classify`'s behavior is unchanged. Wave 2
-  (the worker) can replay cached answers without a judge call.
-- **`JevJudge` builds its `ureq::Agent` per request.** The contract fixes the struct fields to
-  `{base_url, model, key}`, so the agent is not stored; one request per message makes reuse moot.
-- **`judgement_key` hashes `model + "\n" + questions-JSON + "\n" + state-JSON`.** The questions
-  JSON is `request_body(...)["questions"]` (so it covers criteria/options), and the newlines keep
-  the three parts unambiguous under concatenation.
-- **Score probabilities are indexed `"0".."levels-1"` in order**, missing keys → 0, and the value
-  is `score + 1.0` (ours is 1-based). Confidence is passed through, not recomputed.
-- **noul confidence is `max(p, 1-p)`**, since Jev returns no confidence for noul answers.
-- **Corrupt stored JSON is `contacts::Error::Invalid`**, not a silent `None`: a row that cannot be
-  decoded is a bug worth surfacing, not a cache miss.
-- **`MIGRATION_3` required editing an existing contacts test.** `upgrading_schema_one_...` rolls a
-  fresh file back to v1 by dropping later tables; it now also drops `judgements`, otherwise the
-  replay fails with "table judgements already exists".
-- **`mod jev` is `pub`** so `crate::judge::jev::{request_body, parse_answers}` and the
-  `DEFAULT_*` constants are reachable by name, as the contract requires.
+- **HTTPS required, loopback `http://` allowed.** `jev::valid_base_url` accepts `https://`
+  anywhere, and `http://` only for `localhost`, `127.0.0.1`, `::1`. The agent sets
+  `https_only` accordingly and `max_redirects(0)`, so a response cannot downgrade the
+  transport. *Why:* the bearer key and message text must not go in the clear. *Flip:* loosen
+  `is_loopback`/`valid_base_url` in `src/judge/jev.rs` if you want plain HTTP elsewhere.
+- **Non-2xx failures are status-only.** `failure(status)` never echoes the server body, so an
+  endpoint that mirrors the request cannot smuggle the key into the status bar. *Flip:* only by
+  re-adding a body excerpt that is scrubbed of the key first (see the `Wave 4` note).
+- **Keys are redacted in `Debug`.** `JevJudge`'s manual `Debug` and the `JevKey` newtype on
+  `SettingsEvent` both print `<redacted>`. *Flip:* nothing to flip; this is a safety invariant.
 
-## Wave 2: app
+## Cache and persistence
 
-- **`JudgeStatus` lives in `src/judge/mod.rs`**, not the app: chrome.rs and the settings UI both
-  need it and must not depend on `mail_app`.
-- **The worker writes through to SQLite on every success, and reads the store only on an in-memory
-  miss.** The in-memory map makes a second `classify_visible` (sync, `c`) free; the store carries
-  it across restarts. A failed `judgement_put` is ignored: it is a cache, not the source of truth.
-- **`classify_visible` now takes `cx`** (it can start the worker). Every caller — `new_with_clock`,
-  `load_preferences`, `sync`, and the `c` action — passes it.
+- **Cache key = content hash, not message id.** `judgement_key` is `sha256(model +
+  questions JSON + state JSON)`; `MessageId` is a per-load `u32`, so it is not stable across
+  restarts. *Why:* answers must not be reused after a question or the message text changes.
+  *Flip:* change the hash inputs in `judge::judgement_key`.
+- **Table is `judgements(key, answers, judged_at)` in the contacts DB** (`src/contacts/`,
+  `MIGRATION_3`), not the `(message_id, questions_hash, model, …)` shape the spec sketched.
+  The key covers all of it, so one column suffices. *Flip:* a schema migration if you want the
+  parts queryable.
+- **The cache never prunes** — one small row per classified message. *Flip:* add a job if it
+  ever grows.
+- **A corrupt row is a cache miss**, not an error: judging again overwrites it.
+- **Thresholds/modes apply at read time**, so changing policy never re-bills.
+- **A message whose body downloads mid-request is re-classified, not applied.** After a
+  successful request the worker recomputes the current key; if it differs the stale answers are
+  dropped and the message is re-queued (this bills the full body once more). *Why:* a
+  snippet-based answer must not be applied to the full message, and a pending suggestion would
+  otherwise block the full-content pass. *Flip:* the check in `MailApp::message_changed`.
+
+## Worker and lifecycle
+
+- **One serial worker** (`judge_queue` + one in-flight request). Reply jobs cannot be rebuilt
+  from the mailbox, so they survive both a judge swap (`set_judge` keeps `Reply` jobs) and an
+  error (`finish_judge` keeps queued and failed reply jobs for the next explicit retry, while
+  message jobs are rebuilt by `classify_visible`).
+- **The in-flight slot stays occupied across a judge swap.** Changing the key, endpoint or model
+  bumps `judge_gen` but does not free the slot; the stale result is discarded when it lands and
+  the replacement's queue drains then. *Why:* repeated Saves must not create concurrent
+  requests or re-bill a message in flight. *Flip:* `set_judge`/`finish_judge` in
+  `src/app/mail_app/judging.rs`.
+- **Reply classification is per send, not per message.** `queue_reply_at` returns the outbox
+  sequence; the `JudgeJob::Reply` carries it, and `mark_awaiting_reply(original, seq, now)` tags
+  only while *that* send is still in the outbox or sent (`send_in_flight`). *Why:* an earlier
+  reply to the same message must not make a recalled later reply look in-flight.
+- **An error stops the worker and shows in the status bar**; the next `classify_visible`
+  (sync, `c`, settings change, relaunch) retries.
 - **`Working(n)` counts the queue plus the one in flight**, so the last message still reads
-  "Classifying 1…" while its request is out rather than jumping to `Idle`.
-- **An error clears the queue, stops the worker, and shows in the status bar.** The next
-  `classify_visible` (sync, `c`, settings change, relaunch) retries the un-cached messages; a
-  later success recomputes the status and so clears the error. Nothing extra is stored per
-  failure.
-- **A stale in-flight result is dropped by a generation counter** (`judge_gen`), bumped by
-  `set_judge`: replacing the judge while a request runs must not apply the old judge's answers.
-- **`StubJudge` is gone from production; the test harnesses install it.** Each `tests/` harness
-  now calls `set_judge(Some(Arc::new(StubJudge)))` (the shared `ui_ext` harness by default, with
-  `harness_no_judge` / `harness_with_judge` as opt-outs), so the existing suites keep their
-  labels while the real app no longer constructs the stub.
-- **`c`'s toast adapts to the queue**: with work queued it says "{n} auto-applied · classifying
-  {q}…", with no key "No Jev key · add one in Settings", otherwise the old
-  "{n} auto-applied · {r} to review" (the last now counts cache hits only).
-- **Status bar center is text-only.** The missing-key prompt ("Add a Jev API key in Settings →
-  Classifier") is not clickable: the settings panel owns its own page state, so wave 3 can wire
-  the click (and the AI page) when it lands. The center's estimated width is reserved from the
-  hint budget in `chrome.rs`, so hints drop before the status is clipped.
-- **`expects_reply` is judged on the same serial worker as an `JudgeJob::Reply`**, after the reply
-  is queued with `expects_reply = false`. If the answer is yes, `Mailbox::mark_awaiting_reply`
-  adds the tag **without its own undo step**: it does nothing unless a reply to that message is
-  still in the outbox or sent (`reply_in_flight`), which is exactly "the send was recalled or
-  undone in the meantime". Because the send's undo snapshot predates the tag, undoing the send
-  still removes the tag.
-- **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is part
-  of `judgement_key`, so answers are never shared between models.
+  "Classifying 1…" while its request is out.
+- **Background auto-applies keep the existing undo behavior** (`Mailbox::apply_auto` pushes a
+  step), so `u` can undo a label that arrived in the background — the spec said "no undo step";
+  the model's behavior was kept instead of changing it.
 
-## Wave 3: settings
+## Settings and UX
 
+- **Removing the key disables the judge immediately and only clears the panel's saved-key state
+  once the keychain confirms deletion**; a failed deletion shows inline and leaves the key
+  visible. *Why:* the user's removal must never leave mail being sent with the old key while the
+  UI says "No key". *Flip:* `MailApp::remove_jev_key` / `SettingsPanel::set_jev_removed`.
+- **Reset all rebuilds the judge** through `configure_jev`, so the worker stops using a custom
+  endpoint/model the reset just dropped.
 - **The Jev key status is the field's placeholder** ("No key" / "Key saved"): a row control only
-  gets the space left after the row's 60%-max text column, and a status label plus a 180px input
-  plus a button overflowed the window (the button's centre landed off-screen, so clicks missed).
-- **Secrets and the judge factory are injected on `MailApp`**: `secrets: Rc<dyn SecretStore>`
-  defaults to `MemorySecrets` and `judge_factory` to `JevJudge::new`, so `MailApp::new` never
-  touches the keychain and tests can swap a fake. `main` installs `KeyringStore`; `configure_jev`
-  takes only `cx` now.
-- **The settings window grew to 820×760**: the AI page is a virtual list, so four new rows pushed
-  the Tagging confidence row out of the viewport and its dropdown stopped being clickable. The AI
-  page groups are now Jev connection (0), Thread summaries (1), Tagging (2); the tests that click
-  by group index were renumbered.
-- **Test connection runs on the app, not the panel**: the panel emits the typed values; the app
-  builds a judge through the factory, sends one synthetic Bool request in the background, and
-  writes the result back with `SettingsPanel::set_jev_test`. Nothing is saved.
-- **The panel's Jev rows have no row ↺**: their values live in `InputState`, not panel fields, so a
-  reset condition cannot be read without `cx`; the page's reset and Reset all still put the endpoint
-  and model back through `reset_fields`.
-- **The no-key prompt opens Settings on the AI page**: `HintBar::on_status_click` carries a callback
-  (the bar stays free of `MailApp`), and `open_settings(page)` replaces the old `accounts` bool.
+  gets the space left after the 60%-max text column, and a status label plus input plus button
+  overflowed the window.
+- **The settings window grew to 820×760**: the AI page is a virtual list, so four new rows
+  pushed the Tagging confidence row out of the viewport. AI page groups are Jev connection (0),
+  Thread summaries (1), Tagging (2); tests that click by group index were renumbered.
+- **Test connection runs on the app**, not the panel: the panel emits the typed values, the app
+  builds a judge through the factory, sends one synthetic `Bool` request in the background, and
+  writes the result back. Nothing is saved.
+- **A blank key field on Save means "endpoint/model only"**; the key is never redisplayed.
+- **The panel's Jev rows have no row ↺** (their values live in `InputState`, unreadable without
+  `cx`); the page reset and Reset all still put the endpoint/model back.
+- **No-key prompt opens Settings on the AI page**: `HintBar::on_status_click` carries a callback
+  and `open_settings(page)` replaced the old `accounts` bool.
+
+## Mapping and policy
+
+- **`JevJudge` builds its `ureq::Agent` per request** (the struct fields are fixed to
+  `{base_url, model, key}`; one request per message makes reuse moot).
+- **Score answers are shifted to 1-based** (`score + 1.0`) and their probabilities indexed
+  `"0".."levels-1"`; missing keys read 0. **noul confidence is `max(p, 1-p)`** (Jev returns
+  none); choice/score confidence is passed through.
+- **`route` is a public function** in `src/judge/policy.rs`; `classify` delegates per message.
+- **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is part
+  of `judgement_key`, so answers never cross models.
+- **`StubJudge` stays `pub`** but production never constructs it (`main` installs `JevJudge`);
+  test harnesses inject it.
+- **Rejected suggestions can come back** — `classify_visible` re-routes every Inbox message with
+  no pending suggestion (from the cache, no new API call). Same as the stub's behavior.
+
+## Wave 4: review follow-ups
+
+The code review returned nine findings, all marked must-fix; all nine are addressed above. No
+unresolved must-fix or nice-to-have remains. Deliberately left for later:
+
+- **A re-classify command** and classifying non-Inbox mail are out of scope for v1 (spec).
+- **Error bodies are dropped entirely.** If a future provider needs the server's message, add it
+  through a scrubber that removes the key before it crosses the provider boundary.
+- **No paragraph-level tests for the worker races** (judge swap mid-flight, body download
+  mid-flight, reply-job retention): the model-level reply test exists, the rest are reasoned,
+  not exercised. Add a controllable (oneshot) fake judge in `tests/ui_ext/` if these need
+  coverage.

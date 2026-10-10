@@ -17,7 +17,7 @@ Built in Rust with [GPUI](https://www.gpui.rs/) and [gpui-kit](https://gpui-kit.
 Most mail apps hand you a pile and a mouse. **mail-classifier** gives every message exactly one state (**Inbox**, **Snoozed**, **Archived**, **Filed** or **Deleted**), lets you triage everything from the keyboard, and uses a fast "System 1" classifier to flag spam, replies you owe and urgent mail. Nothing is sorted away where you can't see it.
 
 > [!NOTE]
-> Early MVP. By default it runs on local mock data (`fixtures/`), and the AI providers are deterministic stubs. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
+> Early MVP. By default it runs on local mock data (`fixtures/`). The classifier is off until you add a TypeSafe Jev API key (Settings → AI → **Jev connection**), and thread summaries are still a stub. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
 
 ## ✨ Features
 
@@ -27,7 +27,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🖱️ **Mouse and keyboard driven** | Everything the keys do is one click away, and keys keep working after clicks. The titlebar holds search, **Triage**, the pane-layout toggle, a Settings gear and **More** (the global overflow: Commands, Undo, Classify, Rules, Settings, Shortcuts). Every expanded message in the reader has a **Reply** button and a **⋯** menu with Archive · Delete · Snooze (plus Inbox when it is not already there), Accept/Reject AI (only while a suggestion is pending), File, Mark spam, Select, Summarize, Mute, Unsubscribe and a **Sender actions** submenu that acts on every message from one sender at once; with two or more messages selected the list header gets the same **⋯** for the whole selection. Hover anything to see its shortcut. Click a row to open it, click its left edge (or cmd-click) to select, shift-click for a range, click a pending AI icon to accept it (right-click rejects), click sidebar locations, palette and snooze entries, click outside a menu or panel to close it, and press Escape to dismiss it. |
 | ✅ **Inbox as a to-do list** | Every message is in exactly one of Inbox, Snoozed, Archived, Filed or Deleted. Every action can be undone. |
 | 📦 **Batch triage** | Multi-select with `shift-j`/`shift-k` or `x`, or act on everything from one sender at once. |
-| 🧠 **System 1 classifier** | Labels possible spam, needs-reply, urgency and kind. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. The interface mirrors [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). |
+| 🧠 **System 1 classifier** | Labels possible spam, needs-reply, urgency and kind. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. Runs on [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) with your own API key (Settings → AI → **Jev connection**): new mail is judged one message at a time on a background worker, its state in the status bar, and the raw answers are cached in the contacts DB so changing a threshold never re-bills. With no key the classifier is off and nothing is labelled. |
 | 📝 **Thread summaries** | Opt-in. Shows the summary, action items and dates above the thread. |
 | ⏰ **Snooze with a return time** | Tonight, tomorrow, Monday or a custom time (`3h`, `2d`). The message returns to the Inbox tagged *Reminder* when it's due. |
 | 🔁 **Follow-ups that come back** | Send a reply that expects an answer and the thread is tagged *Awaiting Reply*. With no answer after the *Follow-up after* timeout (Settings, default 3 days) it returns to the Inbox tagged *Follow Up*. |
@@ -114,7 +114,7 @@ Nothing was dropped: every action is still reachable from the titlebar, the menu
 
 ### Settings
 
-Settings (`cmd-,` or the titlebar gear) is built on gpui-kit's `Settings` component: a sidebar of pages (Accounts, Appearance, Inbox, Reader, AI, Senders) with a search box, over grouped, described setting rows (switches, dropdowns, number inputs). Search matches titles, descriptions and keywords such as *avatar*, *stacked* or *unblock*. Settings are **mouse/Tab-driven**: click or Tab to a control and change it. The old settings shortcuts (`j`/`k` row cursor, Space/Enter, `=`/`-`, Ctrl-Tab sections, `/` search) were removed with the hand-built panel; the only settings key is **Esc**, which closes the panel. Controls cover per-question classifier handling (Auto/Review) and confidence threshold (0–100%, step 5; locked in Review), thread summaries, theme, pane layout, sender avatars in tabs, grouping, preview lines, **Follow-up after** (1–14 days) and the Blocked senders list (each with **Unblock**, plus the read-only unsubscribed list).
+Settings (`cmd-,` or the titlebar gear) is built on gpui-kit's `Settings` component: a sidebar of pages (Accounts, Appearance, Inbox, Reader, AI, Senders) with a search box, over grouped, described setting rows (switches, dropdowns, number inputs). Search matches titles, descriptions and keywords such as *avatar*, *stacked* or *unblock*. Settings are **mouse/Tab-driven**: click or Tab to a control and change it. The old settings shortcuts (`j`/`k` row cursor, Space/Enter, `=`/`-`, Ctrl-Tab sections, `/` search) were removed with the hand-built panel; the only settings key is **Esc**, which closes the panel. Controls cover the **Jev connection** on the AI page (the API key — masked, stored in the OS keychain and never shown again, with an explicit **Remove key** — the base URL and model, **Save** and **Test connection**, which sends one request and saves nothing), per-question classifier handling (Auto/Review) and confidence threshold (0–100%, step 5; locked in Review), thread summaries, theme, pane layout, sender avatars in tabs, grouping, preview lines, **Follow-up after** (1–14 days) and the Blocked senders list (each with **Unblock**, plus the read-only unsubscribed list).
 
 To add a setting, add a `SettingItem` (title, description, `.keywords(..)`, and a `SettingField` switch/dropdown/number input) to a page in `src/app/settings.rs`, connect its getter/setter to a `SettingsPanel` field through the captured `WeakEntity`, and emit the matching `SettingsEvent` for `MailApp` to consume.
 
@@ -155,9 +155,12 @@ The UI tests run headless. They drive the real views with simulated keystrokes a
 Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 `~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
 its directory) on first launch, migrated forward through `PRAGMA user_version`,
-and seeded once from `fixtures/contacts_seed.json`. Schema 2 (the scoped settings
-table) is supported, including databases previously opened by the settings
-branch; existing contacts and settings are preserved. Unknown newer schemas
+and seeded once from `fixtures/contacts_seed.json`. Schema 2 is the scoped
+settings table; schema 3 adds a `judgements` table caching the classifier's raw
+answers (keyed by a hash of the model, the questions and the message state, so
+editing a question or a message re-classifies it and nothing else re-bills).
+Databases previously opened by the settings or classifier branch are upgraded in
+place; existing contacts and settings are preserved. Unknown newer schemas
 are rejected with a diagnostic and exit status 1 before the UI starts.
 Afterwards the file is yours, so deleting it just re-seeds on the next start.
 Everything else the app tracks (rules, themes) still comes from the fixtures.
@@ -239,8 +242,8 @@ Not supported yet: sending from Gmail.
 ```
 src/
 ├── model/        # triage states, undo, snooze, outbox (pure logic; split by concern)
-├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding
-├── judge/        # System 1 classifier interface, stub provider, routing policy
+├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding, cached classifier answers
+├── judge/        # System 1 classifier interface, Jev provider + wire mapping, routing policy
 ├── summary.rs    # thread summarizer interface + stub
 ├── search.rs     # structured query: parse, display, edit, match
 ├── filters.rs    # what the filter pills and picker offer (fields, values, quick filters); pure
@@ -277,7 +280,8 @@ Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": 
 
 ## 🗺️ Roadmap
 
-- [ ] Real classifier providers: TypeSafe Jev, then Ollama and OpenAI-compatible APIs
+- [x] Real classifier provider: TypeSafe Jev (BYOK; key in the OS keychain, endpoint and model configurable)
+- [ ] More classifier providers: Ollama and OpenAI-compatible APIs
 - [ ] Bring-your-own provider for summaries
 - [ ] Review queue alongside the inline badges
 - [ ] Folders or streams driven by classifier labels
