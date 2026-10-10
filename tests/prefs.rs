@@ -30,10 +30,10 @@ fn migrating_a_v1_database_keeps_contacts_and_adds_settings() {
     {
         // Rewind the file to schema v1.
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE settings; DROP TABLE judgements; PRAGMA user_version = 1;").unwrap();
+        conn.execute_batch("DROP TABLE settings; DROP TABLE judgements; DROP TABLE judgements_legacy; PRAGMA user_version = 1;").unwrap();
     }
     let store = ContactStore::open(&path).expect("reopen migrates");
-    assert_eq!(store.schema_version().unwrap(), 3);
+    assert_eq!(store.schema_version().unwrap(), 4);
     assert!(store.get_by_email("ada@x.example").unwrap().is_some(), "contact survives");
     PAGE.set(&store, &Scope::Global, 5);
     assert_eq!(PAGE.get(&store, &Scope::Global), 5);
