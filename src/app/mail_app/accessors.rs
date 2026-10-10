@@ -202,6 +202,18 @@ impl MailApp {
         ids
     }
 
+    /// The sidebar's visible-location counts, memoized for one render pass like
+    /// [`Self::visible_in_frame`], so the mailbox is scanned once instead of once per
+    /// counted location.
+    pub(super) fn sidebar_counts(&self) -> Rc<crate::model::SidebarCounts> {
+        if let Some(counts) = self.sidebar_cache.borrow().as_ref() {
+            return counts.clone();
+        }
+        let counts = Rc::new(self.mailbox.sidebar_counts());
+        *self.sidebar_cache.borrow_mut() = Some(counts.clone());
+        counts
+    }
+
     pub fn now(&self) -> Timestamp {
         self.clock.now()
     }

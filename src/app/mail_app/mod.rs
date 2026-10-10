@@ -2,6 +2,7 @@
 //! command palette, reply composer, snooze picker, settings/rules panels,
 //! search and triage-session modes.
 
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
@@ -197,6 +198,8 @@ pub struct MailApp {
     /// Several parts of one frame ask for the same list; without this each rescans the whole
     /// mailbox.
     visible_cache: RefCell<Option<Rc<Vec<MessageId>>>>,
+    /// The sidebar's visible-location counts, memoized for the current render pass.
+    sidebar_cache: RefCell<Option<Rc<crate::model::SidebarCounts>>>,
     /// End of the list's visible range, from its scroll handler.
     list_visible_end: std::cell::Cell<usize>,
     help_scroll: ScrollHandle,
@@ -337,6 +340,7 @@ impl MailApp {
             list_state: ListState::new(0, ListAlignment::Top, px(200.)),
             list_shape: None,
             visible_cache: RefCell::new(None),
+            sidebar_cache: RefCell::new(None),
             list_visible_end: std::cell::Cell::new(0),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),

@@ -1,5 +1,26 @@
 use super::*;
 
+/// The sidebar's visible-location counts, computed in one pass over the mailbox.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SidebarCounts {
+    /// Visible messages in Inbox across every account (the All Inboxes row).
+    pub all_inboxes: usize,
+    /// Per account: `(inbox, snoozed)`.
+    per: std::collections::HashMap<AccountId, (usize, usize)>,
+}
+
+impl SidebarCounts {
+    /// The account's visible Inbox count.
+    pub fn inbox(&self, account: &str) -> usize {
+        self.per.get(account).map_or(0, |(inbox, _)| *inbox)
+    }
+
+    /// The account's visible Snoozed count.
+    pub fn snoozed(&self, account: &str) -> usize {
+        self.per.get(account).map_or(0, |(_, snoozed)| *snoozed)
+    }
+}
+
 impl Mailbox {
     pub(super) fn is_hidden_msg(&self, m: &Message) -> bool {
         self.muted.contains(&m.thread_id)
@@ -43,6 +64,26 @@ impl Mailbox {
             .iter()
             .filter(|m| m.state == state && self.is_visible_msg(m))
             .count()
+    }
+
+    /// The counts the sidebar shows, in one pass: All Inboxes plus each account's Inbox and
+    /// Snoozed. Every other location is displayed without a count, so no query is built for
+    /// it and the mailbox is scanned once per frame rather than once per location.
+    pub fn sidebar_counts(&self) -> SidebarCounts {
+        let mut counts = SidebarCounts::default();
+        for message in self.messages.iter().filter(|m| self.is_visible_msg(m)) {
+            match message.state {
+                TriageState::Inbox => {
+                    counts.all_inboxes += 1;
+                    counts.per.entry(message.account.clone()).or_default().0 += 1;
+                }
+                TriageState::Snoozed => {
+                    counts.per.entry(message.account.clone()).or_default().1 += 1;
+                }
+                _ => {}
+            }
+        }
+        counts
     }
     pub fn hidden_count(&self) -> usize {
         self.messages

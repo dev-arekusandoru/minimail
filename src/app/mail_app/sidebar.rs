@@ -205,9 +205,18 @@ impl MailApp {
         );
         // Drafts are not messages, so their count comes from the composer's durable state
         // rather than the mailbox the other locations are counted in.
-        let count = match &loc {
-            Location::Drafts(account) => self.account_draft_count(account),
-            _ => self.mailbox.count_at(&loc, &self.local_now()),
+        // Only the counted locations are queried at all: a count the sidebar never shows is
+        // a whole-mailbox scan per frame for nothing.
+        let count = if counted {
+            match &loc {
+                Location::Drafts(account) => self.account_draft_count(account),
+                Location::AllInboxes => self.sidebar_counts().all_inboxes,
+                Location::Inbox(account) => self.sidebar_counts().inbox(account),
+                Location::Snoozed(account) => self.sidebar_counts().snoozed(account),
+                _ => 0,
+            }
+        } else {
+            0
         };
         let mut item = SidebarMenuItem::new(location_name(&loc).to_owned())
             .icon(Icon::new(icon).text_color(color))

@@ -24,7 +24,7 @@ mod undo;
 mod visibility;
 
 pub use triage::Triage;
-pub use visibility::blocked_ago;
+pub use visibility::{SidebarCounts, blocked_ago};
 
 pub type MessageId = u32;
 
