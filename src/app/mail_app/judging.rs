@@ -10,11 +10,10 @@ use serde_json::{Value, json};
 
 use crate::app_settings::{JEV_BASE_URL, JEV_MODEL};
 use crate::judge::{
-    Answer, AnswerValue, Judge, JudgeError, JudgeStatus, JevJudge, Question, QuestionKey,
+    Answer, AnswerValue, Judge, JudgeError, JudgeStatus, Question, QuestionKey,
     judgement_key, message_state, route, triage_questions,
 };
 use crate::prefs::Scope;
-use crate::provider::secrets::SecretStore;
 
 use super::*;
 
@@ -48,13 +47,74 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Build the judge from the `"jev"` keychain secret plus the Jev preferences, then install it.
-    pub fn configure_jev(&mut self, secrets: &dyn SecretStore, cx: &mut Context<Self>) {
-        let judge = secrets.get(JEV_SECRET).map(|key| {
+    /// Build the judge from the `"jev"` secret plus the Jev preferences, then install it.
+    pub fn configure_jev(&mut self, cx: &mut Context<Self>) {
+        let judge = self.secrets.get(JEV_SECRET).map(|key| {
             let (base, model) = self.jev_settings();
-            Arc::new(JevJudge::new(base, model, key)) as Arc<dyn Judge + Send + Sync>
+            (self.judge_factory)(&base, &model, &key)
         });
         self.set_judge(judge, cx);
+    }
+
+    /// Replace the saved Jev key. An empty `key` leaves the saved one alone; a blank field on
+    /// Save means "I only changed the endpoint".
+    pub(super) fn save_jev_key(&mut self, key: &str) -> Result<(), String> {
+        if !key.is_empty() {
+            self.secrets.set(JEV_SECRET, key)?;
+        }
+        Ok(())
+    }
+
+    /// Forget the saved Jev key and turn classification off.
+    pub(super) fn remove_jev_key(&mut self, cx: &mut Context<Self>) {
+        let _ = self.secrets.delete(JEV_SECRET);
+        self.configure_jev(cx);
+    }
+
+    /// Whether a Jev key is saved (never the key itself).
+    pub(super) fn has_jev_key(&self) -> bool {
+        self.secrets.get(JEV_SECRET).is_some()
+    }
+
+    /// Send one synthetic request with the form's values and report the model or the error back
+    /// to the settings panel. Nothing is saved.
+    pub(super) fn test_jev(
+        &mut self,
+        key: &str,
+        base: &str,
+        model: &str,
+        panel: WeakEntity<SettingsPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        let key = if key.is_empty() {
+            self.secrets.get(JEV_SECRET).unwrap_or_default()
+        } else {
+            key.to_owned()
+        };
+        let judge = (self.judge_factory)(base, model, &key);
+        let model_name = judge.model().to_owned();
+        let task = cx.background_spawn(async move {
+            let state = json!({
+                "sender": "",
+                "subject": "Jev connection test",
+                "body": "A one-line request to check the key and endpoint."
+            });
+            let questions = vec![(
+                QuestionKey::NeedsReply,
+                Question::Bool {
+                    criteria: "Is this a test message?".into(),
+                },
+            )];
+            judge.judge(&state, &questions).map(|_| model_name)
+        });
+        cx.spawn(async move |_this, cx| {
+            let result = match task.await {
+                Ok(model) => Ok(model),
+                Err(e) => Err(e.to_string()),
+            };
+            panel.update(cx, |panel, cx| panel.set_jev_test(result, cx)).ok();
+        })
+        .detach();
     }
 
     /// The classifier's current state (status bar, settings).
@@ -63,7 +123,7 @@ impl MailApp {
     }
 
     /// The configured Jev endpoint and model, falling back to the shipped defaults.
-    fn jev_settings(&self) -> (String, String) {
+    pub(super) fn jev_settings(&self) -> (String, String) {
         let (default_base, default_model) = (
             crate::judge::jev::DEFAULT_BASE_URL.to_owned(),
             crate::judge::jev::DEFAULT_MODEL.to_owned(),

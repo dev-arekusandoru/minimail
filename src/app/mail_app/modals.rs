@@ -253,7 +253,12 @@ impl MailApp {
         }
     }
     pub(super) fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_settings(false, window, cx);
+        self.open_settings(crate::app::settings::ACCOUNTS_PAGE, window, cx);
+    }
+
+    /// Open Settings on the AI page, where the Jev key lives (the status bar's no-key prompt).
+    pub(super) fn open_settings_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(crate::app::settings::AI_PAGE, window, cx);
     }
 
     /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache.
@@ -317,8 +322,9 @@ impl MailApp {
         self.settings_window
     }
 
-    /// Open Settings in its own native window, reusing and activating the existing window.
-    pub(super) fn open_settings(&mut self, accounts: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Open Settings in its own native window on `page`, reusing and activating the existing
+    /// window.
+    pub(super) fn open_settings(&mut self, page: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
             if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
                 return;
@@ -345,9 +351,11 @@ impl MailApp {
         let blocked = self.mailbox.blocked();
         let now = self.local_now();
         let follow_up = self.mailbox.follow_up_timeout();
+        let (jev_base, jev_model) = self.jev_settings();
+        let jev_has_key = self.has_jev_key();
         let app = cx.weak_entity();
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(820.), px(650.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(820.), px(760.)), cx)),
             window_min_size: Some(size(px(620.), px(460.))),
             // The panel draws the kit `TitleBar` itself, so the bar owns dragging, the
             // double click and the window controls.
@@ -366,13 +374,14 @@ impl MailApp {
                 true
             });
             let panel = cx.new(|cx| {
-                let panel = SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
+                SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
                     .block_remote_images(block_remote_images)
                     .mailbox_state(blocked, now, follow_up)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
-                    .accounts(rows, gmail_configured);
-                if accounts { panel.on_accounts_page() } else { panel }
+                    .accounts(rows, gmail_configured)
+                    .on_page(page)
+                    .jev_connection(jev_base, jev_model, jev_has_key)
             });
             let focus = panel.read(cx).focus_handle(cx).clone();
             settings_window.focus(&focus, cx);
@@ -403,6 +412,8 @@ impl MailApp {
                         crate::app_settings::MODE_EXPECTS_REPLY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_URGENCY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
+                        crate::app_settings::JEV_BASE_URL.reset(store.as_ref(), &scope);
+                        crate::app_settings::JEV_MODEL.reset(store.as_ref(), &scope);
                     }
                     this.policy = JudgePolicy::default();
                     this.theme_mode = crate::theme::ThemeMode::System;
@@ -518,6 +529,22 @@ impl MailApp {
                     crate::sync_status::SyncAction::SignInAgain => this.sign_in_again(id, window, cx),
                     crate::sync_status::SyncAction::Retry => this.retry_sync(id, cx),
                 },
+                SettingsEvent::SaveJev { key, base, model } => {
+                    if let Err(e) = this.save_jev_key(key) {
+                        this.show_toast(format!("Could not save the Jev key: {e}"), window, cx);
+                    }
+                    this.save_setting(&crate::app_settings::JEV_BASE_URL, base.clone());
+                    this.save_setting(&crate::app_settings::JEV_MODEL, model.clone());
+                    this.configure_jev(cx);
+                    cx.notify();
+                }
+                SettingsEvent::RemoveJevKey => {
+                    this.remove_jev_key(cx);
+                    cx.notify();
+                }
+                SettingsEvent::TestJev { key, base, model } => {
+                    this.test_jev(key, base, model, panel_weak.clone(), cx);
+                }
                 SettingsEvent::Close => this.close_settings(window, cx),
             },
         ));

@@ -69,6 +69,14 @@ pub enum SettingsEvent {
     AccountStyle { id: String, icon: &'static str, color: String },
     /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
     AccountNickname { id: String, nickname: String },
+    /// Save the Jev connection. A non-empty `key` replaces the saved one; blank keeps it.
+    /// `base`/`model` are stored and the classifier is rebuilt (starting the Inbox backfill).
+    SaveJev { key: String, base: String, model: String },
+    /// Forget the saved Jev key; classification turns off.
+    RemoveJevKey,
+    /// Try the classifier with these values (blank `key` falls back to the saved one). Nothing
+    /// is saved; the result goes back to the panel.
+    TestJev { key: String, base: String, model: String },
     /// The user picked what the account's sync status allows.
     SyncAction { id: String, action: crate::sync_status::SyncAction },
     Close,
@@ -100,7 +108,9 @@ pub struct AccountRow {
 }
 
 /// Index of the Accounts page in [`SettingsPanel::pages`].
-const ACCOUNTS_PAGE: usize = 0;
+pub const ACCOUNTS_PAGE: usize = 0;
+/// Index of the AI (classifier) page, where the Jev connection lives.
+pub const AI_PAGE: usize = 4;
 
 const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
 const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
@@ -233,6 +243,34 @@ pub struct SettingsPanel {
     controls: HashMap<String, AccountControls>,
     /// Gmail OAuth client credentials are present in the environment.
     gmail_configured: bool,
+    /// Jev endpoint and model shown in the fields; the key itself is never held here.
+    jev_base: String,
+    jev_model: String,
+    /// Whether a key is saved (only ever "Key saved" / "No key" is shown).
+    jev_has_key: bool,
+    /// The masked API-key field.
+    jev_key_input: Entity<InputState>,
+    /// The endpoint and model fields.
+    jev_base_input: Entity<InputState>,
+    jev_model_input: Entity<InputState>,
+    /// Write the seeded endpoint/model into the fields on the next render.
+    jev_seed: bool,
+    /// Clear the key field on the next render (after Save).
+    jev_clear_key: bool,
+    /// The "no key / key saved" placeholder last written into the key field.
+    jev_placeholder: bool,
+    /// The connection-test result shown under the group.
+    jev_test: Option<JevTest>,
+    /// A save/test-time validation error (a bad URL), shown inline.
+    jev_error: Option<String>,
+}
+
+/// The result of a Jev connection test, as the panel shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JevTest {
+    Running,
+    Connected(String),
+    Failed(String),
 }
 
 impl SettingsPanel {
@@ -272,6 +310,15 @@ impl SettingsPanel {
                 this.set_filter(text, cx);
             }
         });
+        // The key is masked on screen; the endpoint and model start at their defaults.
+        let jev_key_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("No key").masked(true));
+        let jev_base_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(crate::judge::jev::DEFAULT_BASE_URL)
+        });
+        let jev_model_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(crate::judge::jev::DEFAULT_MODEL)
+        });
         Self {
             focus,
             search_anchor,
@@ -297,6 +344,17 @@ impl SettingsPanel {
             accounts: Vec::new(),
             controls: HashMap::new(),
             gmail_configured: false,
+            jev_base: crate::judge::jev::DEFAULT_BASE_URL.to_owned(),
+            jev_model: crate::judge::jev::DEFAULT_MODEL.to_owned(),
+            jev_has_key: false,
+            jev_key_input,
+            jev_base_input,
+            jev_model_input,
+            jev_seed: false,
+            jev_clear_key: false,
+            jev_placeholder: false,
+            jev_test: None,
+            jev_error: None,
             follow_up_days,
             follow_up,
             preview,
@@ -328,14 +386,34 @@ impl SettingsPanel {
         self
     }
 
+    /// Seed the Jev connection: the endpoint, the model, and whether a key is saved (never the
+    /// key itself).
+    pub fn jev_connection(mut self, base: String, model: String, has_key: bool) -> Self {
+        self.jev_base = base;
+        self.jev_model = model;
+        self.jev_has_key = has_key;
+        self.jev_seed = true;
+        self
+    }
+
+    /// The connection-test result the panel is showing, if any.
+    pub fn jev_test_result(&self) -> Option<&JevTest> {
+        self.jev_test.as_ref()
+    }
+
+    /// The save/test validation error the panel is showing, if any.
+    pub fn jev_error_text(&self) -> Option<&str> {
+        self.jev_error.as_deref()
+    }
+
     /// The page on screen, as the sidebar has it.
     pub fn page(&self) -> usize {
         self.page
     }
 
-    /// Open on the Accounts page.
-    pub fn on_accounts_page(mut self) -> Self {
-        self.page = ACCOUNTS_PAGE;
+    /// Open on `page`, e.g. the AI page when the status bar asks for a key.
+    pub fn on_page(mut self, page: usize) -> Self {
+        self.page = page;
         self
     }
 
@@ -490,6 +568,11 @@ impl SettingsPanel {
         self.follow_up_days = default_follow_up_days();
         self.follow_up.set(self.follow_up_days);
         self.preview.set(self.preview_lines);
+        self.jev_base = crate::judge::jev::DEFAULT_BASE_URL.to_owned();
+        self.jev_model = crate::judge::jev::DEFAULT_MODEL.to_owned();
+        self.jev_seed = true;
+        self.jev_test = None;
+        self.jev_error = None;
         cx.notify();
     }
 
@@ -574,6 +657,63 @@ impl SettingsPanel {
             self.summaries = on;
             self.changed(cx);
         }
+    }
+
+    /// Save the Jev connection: validate the endpoint, emit the values for the app to store and
+    /// apply, and clear the key field. A blank key leaves the saved one alone.
+    fn save_jev(&mut self, cx: &mut Context<Self>) {
+        let key = self.jev_key_input.read(cx).value().to_string();
+        let base = self.jev_base_input.read(cx).value().to_string();
+        let model = self.jev_model_input.read(cx).value().to_string();
+        if !valid_http_url(&base) {
+            self.jev_error = Some("Base URL must be http:// or https://".into());
+            cx.notify();
+            return;
+        }
+        self.jev_error = None;
+        self.jev_test = None;
+        self.jev_has_key = self.jev_has_key || !key.is_empty();
+        // The key is never displayed: clear the field now that it is saved.
+        self.jev_clear_key = true;
+        cx.emit(SettingsEvent::SaveJev { key, base, model });
+        cx.notify();
+    }
+
+    /// Send one test request with the field values; the app reports the result back through
+    /// [`Self::set_jev_test`]. Nothing is saved.
+    fn test_jev(&mut self, cx: &mut Context<Self>) {
+        let key = self.jev_key_input.read(cx).value().to_string();
+        let base = self.jev_base_input.read(cx).value().to_string();
+        let model = self.jev_model_input.read(cx).value().to_string();
+        if !valid_http_url(&base) {
+            self.jev_error = Some("Base URL must be http:// or https://".into());
+            cx.notify();
+            return;
+        }
+        self.jev_error = None;
+        self.jev_test = Some(JevTest::Running);
+        cx.emit(SettingsEvent::TestJev { key, base, model });
+        cx.notify();
+    }
+
+    /// Forget the key: the app deletes the secret and turns classification off.
+    fn remove_jev_key(&mut self, cx: &mut Context<Self>) {
+        if self.jev_has_key {
+            self.jev_has_key = false;
+            self.jev_test = None;
+            self.jev_clear_key = true;
+            cx.emit(SettingsEvent::RemoveJevKey);
+            cx.notify();
+        }
+    }
+
+    /// Show a connection-test result the app sent back.
+    pub fn set_jev_test(&mut self, result: Result<String, String>, cx: &mut Context<Self>) {
+        self.jev_test = Some(match result {
+            Ok(model) => JevTest::Connected(model),
+            Err(e) => JevTest::Failed(e),
+        });
+        cx.notify();
     }
 
     /// Narrow the Senders page to addresses containing `text`.
@@ -708,6 +848,11 @@ fn default_follow_up_days() -> u8 {
     (crate::model::DEFAULT_FOLLOW_UP_TIMEOUT / DAY)
         .clamp(i64::from(*FOLLOW_UP_DAYS.start()), i64::from(*FOLLOW_UP_DAYS.end()))
         as u8
+}
+
+/// Whether `base` parses as an http(s) URL, which is all the Jev endpoint needs.
+fn valid_http_url(base: &str) -> bool {
+    url::Url::parse(base).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
 }
 
 /// Reports whether one row differs from its default.
@@ -1015,6 +1160,22 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_controls(window, cx);
+        // A reset, a reseed or a Save writes into the fields here, once, so typing is not
+        // overwritten while a render is in flight.
+        if std::mem::take(&mut self.jev_seed) {
+            let (base, model) = (self.jev_base.clone(), self.jev_model.clone());
+            self.jev_base_input.update(cx, |input, cx| input.set_value(base, window, cx));
+            self.jev_model_input.update(cx, |input, cx| input.set_value(model, window, cx));
+        }
+        if std::mem::take(&mut self.jev_clear_key) {
+            self.jev_key_input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        // The key's status is its placeholder: there is nowhere else to show it without the key.
+        if self.jev_placeholder != self.jev_has_key {
+            self.jev_placeholder = self.jev_has_key;
+            let text = if self.jev_has_key { "Key saved" } else { "No key" };
+            self.jev_key_input.update(cx, |input, cx| input.set_placeholder(text, window, cx));
+        }
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);

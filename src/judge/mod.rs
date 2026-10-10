@@ -18,6 +18,8 @@
 //! `max(p, 1-p)` for noul (Jev returns none). See [`jev`] for the wire format.
 
 use std::fmt;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -174,6 +176,10 @@ pub trait Judge {
         "stub"
     }
 }
+
+/// Builds a judge from `(base_url, model, key)`. The app holds one so tests can swap the real
+/// [`JevJudge`] for a fake.
+pub type JudgeFactory = Rc<dyn Fn(&str, &str, &str) -> Arc<dyn Judge + Send + Sync>>;
 
 /// The classifier's state, for the status bar and the settings UI.
 #[derive(Clone, Debug, PartialEq, Eq)]

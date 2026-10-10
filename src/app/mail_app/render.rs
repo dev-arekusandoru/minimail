@@ -210,7 +210,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &SummarizeThread, w, cx| this.summarize(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSettings, w, cx| this.toggle_settings(w, cx)))
             .on_action(cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)))
-            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| this.open_settings(true, w, cx)))
+            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| {
+                this.open_settings(crate::app::settings::ACCOUNTS_PAGE, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
@@ -254,6 +256,10 @@ impl Render for MailApp {
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
-            .child(div().flex_none().child(HintBar::new(hint).status(self.judge_status().clone())))
+            .child(div().flex_none().child(
+                HintBar::new(hint)
+                    .status(self.judge_status().clone())
+                    .on_status_click(cx.listener(|this, _, window, cx| this.open_settings_ai(window, cx))),
+            ))
     }
 }

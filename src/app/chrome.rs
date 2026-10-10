@@ -64,21 +64,35 @@ pub fn humanize_time(ts: Timestamp, now: &Now) -> String {
     }
 }
 
+/// What a press on the status bar's center text does.
+pub type StatusClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 #[derive(IntoElement)]
 pub struct HintBar {
     ctx: HintContext,
     /// Classifier state drawn in the bar's center, if any.
     status: Option<JudgeStatus>,
+    /// What a press on the center status text does, when it does anything.
+    on_status_click: Option<StatusClick>,
 }
 
 impl HintBar {
     pub fn new(ctx: HintContext) -> Self {
-        Self { ctx, status: None }
+        Self { ctx, status: None, on_status_click: None }
     }
 
     /// Show the classifier's state in the bar's center.
     pub fn status(mut self, status: JudgeStatus) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Make the center status text clickable, e.g. to open the classifier's settings page.
+    pub fn on_status_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_status_click = Some(Box::new(handler));
         self
     }
 }
@@ -98,13 +112,14 @@ fn status_width(text: &str) -> f32 {
 
 impl RenderOnce for HintBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let HintBar { ctx, status, on_status_click } = self;
         let t = cx.theme();
-        let selected = match self.ctx.mode {
+        let selected = match ctx.mode {
             HintMode::Selection(n) => Some(n),
             _ => None,
         };
         // Center text: a missing-key prompt, progress, or the last classifier error.
-        let center: Option<(String, Hsla)> = match &self.status {
+        let center: Option<(String, Hsla)> = match &status {
             Some(JudgeStatus::NoKey) => Some((NO_KEY_PROMPT.to_owned(), t.muted_foreground)),
             Some(JudgeStatus::Working(n)) => Some((format!("Classifying {n}…"), t.muted_foreground)),
             Some(JudgeStatus::Error(e)) => Some((format!("Classifier: {e}"), t.danger)),
@@ -114,7 +129,7 @@ impl RenderOnce for HintBar {
         let budget = f32::from(window.viewport_size().width) - BAR_PAD;
         let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. }
             + center.as_ref().map_or(0., |(text, _)| status_width(text));
-        let shown = fit_hints(&self.ctx, budget, reserved);
+        let shown = fit_hints(&ctx, budget, reserved);
         let hints = div()
             .flex()
             .items_center()
@@ -131,7 +146,18 @@ impl RenderOnce for HintBar {
             .bg(t.sidebar)
             .left(hints)
             .when_some(center, |bar, (text, color)| {
-                bar.child(div().min_w_0().overflow_hidden().text_xs().text_color(color).child(text))
+                let text = div()
+                    .id("judge-status")
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_xs()
+                    .text_color(color)
+                    .child(text);
+                let text = match on_status_click {
+                    Some(handler) => text.cursor_pointer().on_click(handler),
+                    None => text,
+                };
+                bar.child(text)
             })
             .when_some(selected, |bar, n| {
                 bar.right(div().text_xs().text_color(t.primary).child(format!("{n} selected")))

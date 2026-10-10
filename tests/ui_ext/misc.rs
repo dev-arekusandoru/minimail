@@ -62,7 +62,7 @@ pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
     // Settings -> AI -> Tagging -> the Spam row -> Review (the second segment).
     h.open_settings();
     h.settings_click("0-4");
-    h.settings_click_in(1, 0, "ai-mode-Spam-1".to_owned());
+    h.settings_click_in(2, 0, "ai-mode-Spam-1".to_owned());
     h.settings_keys("escape");
     assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
     h.keys("c");
@@ -99,7 +99,7 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
 
     h.open_settings();
     h.settings_click("0-4");
-    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(1, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
     h.settings_keys("escape");
     assert!(!h.read(|a| a.settings_open()));

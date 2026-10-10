@@ -79,3 +79,25 @@ says what was decided and why. Flip any you disagree with.
   still removes the tag.
 - **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is part
   of `judgement_key`, so answers are never shared between models.
+
+## Wave 3: settings
+
+- **The Jev key status is the field's placeholder** ("No key" / "Key saved"): a row control only
+  gets the space left after the row's 60%-max text column, and a status label plus a 180px input
+  plus a button overflowed the window (the button's centre landed off-screen, so clicks missed).
+- **Secrets and the judge factory are injected on `MailApp`**: `secrets: Rc<dyn SecretStore>`
+  defaults to `MemorySecrets` and `judge_factory` to `JevJudge::new`, so `MailApp::new` never
+  touches the keychain and tests can swap a fake. `main` installs `KeyringStore`; `configure_jev`
+  takes only `cx` now.
+- **The settings window grew to 820×760**: the AI page is a virtual list, so four new rows pushed
+  the Tagging confidence row out of the viewport and its dropdown stopped being clickable. The AI
+  page groups are now Jev connection (0), Thread summaries (1), Tagging (2); the tests that click
+  by group index were renumbered.
+- **Test connection runs on the app, not the panel**: the panel emits the typed values; the app
+  builds a judge through the factory, sends one synthetic Bool request in the background, and
+  writes the result back with `SettingsPanel::set_jev_test`. Nothing is saved.
+- **The panel's Jev rows have no row ↺**: their values live in `InputState`, not panel fields, so a
+  reset condition cannot be read without `cx`; the page's reset and Reset all still put the endpoint
+  and model back through `reset_fields`.
+- **The no-key prompt opens Settings on the AI page**: `HintBar::on_status_click` carries a callback
+  (the bar stays free of `MailApp`), and `open_settings(page)` replaces the old `accounts` bool.

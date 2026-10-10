@@ -35,9 +35,9 @@ fn the_summaries_switch_enables_summaries_and_escape_closes(cx: &mut TestAppCont
     assert!(!h.read(|a| a.summaries_enabled));
     h.settings_open_page(AI);
     assert!(h.read(|a| a.settings_open()));
-    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(1, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
-    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(1, 0, "check");
     assert!(!h.read(|a| a.summaries_enabled));
     h.settings_keys("escape");
     assert!(!h.read(|a| a.settings_open()), "Esc closes the window");
@@ -93,7 +93,7 @@ fn a_changed_setting_survives_a_restart_through_the_shared_store(cx: &mut TestAp
     let store = prefs_store();
     let mut h = harness_with_prefs(cx, Mailbox::load_default_with(store.clone()), store.clone());
     h.settings_open_page(AI);
-    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(1, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
     drop(h);
 

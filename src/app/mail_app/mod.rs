@@ -30,11 +30,12 @@ use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{
-    Answer, Judge, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, judgement_key,
+    Answer, Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, judgement_key,
     message_state, triage_questions,
 };
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
+use crate::provider::secrets::{MemorySecrets, SecretStore};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
@@ -134,6 +135,10 @@ pub struct MailApp {
     pub rules: RuleBook,
     /// The classifier, when one is configured. `None` means no key: classification is off.
     judge: Option<Arc<dyn Judge + Send + Sync>>,
+    /// Builds the judge from the Jev key, endpoint and model; swapped for a fake in tests.
+    judge_factory: JudgeFactory,
+    /// Where the Jev key is kept; `MemorySecrets` by default, the keychain in the real app.
+    secrets: Rc<dyn SecretStore>,
     /// The classifier's state, shown in the status bar.
     judge_status: JudgeStatus,
     /// Judge answers cached this session, keyed by [`judgement_key`].
@@ -277,6 +282,8 @@ impl MailApp {
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
             judge: None,
+            judge_factory: default_judge_factory(),
+            secrets: Rc::new(MemorySecrets::default()),
             judge_status: JudgeStatus::NoKey,
             judgements: HashMap::new(),
             judge_queue: VecDeque::new(),
@@ -403,5 +410,21 @@ impl MailApp {
     pub fn focus_handle(&self) -> &FocusHandle {
         &self.focus_handle
     }
+
+    /// Use `secrets` for the Jev key instead of the default in-memory store. `main` installs the
+    /// keychain here; tests leave the default so nothing touches the real keychain.
+    pub fn set_secrets(&mut self, secrets: Rc<dyn SecretStore>) {
+        self.secrets = secrets;
+    }
+
+    /// Use `factory` to build the judge from the Jev settings, so tests can inject a fake.
+    pub fn set_judge_factory(&mut self, factory: JudgeFactory) {
+        self.judge_factory = factory;
+    }
+}
+
+/// The production judge factory: a [`JevJudge`] over the configured endpoint.
+fn default_judge_factory() -> JudgeFactory {
+    Rc::new(|base, model, key| Arc::new(crate::judge::JevJudge::new(base, model, key)))
 }
 

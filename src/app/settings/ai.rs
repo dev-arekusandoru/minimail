@@ -57,6 +57,113 @@ fn confidence_from_key(value: &str) -> Confidence {
 }
 
 impl SettingsPanel {
+    /// The "Jev connection" group: the API key (masked, never shown), the endpoint, the model,
+    /// and the Save / Test connection actions that apply them.
+    fn jev_group(&self, weak: &Weak) -> SettingGroup {
+        let keywords = ["jev", "api key", "base url", "model", "classifier", "endpoint", "connection"];
+        let key_input = self.jev_key_input.clone();
+        let key_weak = weak.clone();
+        let key_row = row(
+            "API key",
+            "Stored in the system keychain and never shown again.",
+            &keywords,
+            no_reset(weak),
+            Rc::new(move |_, _, cx| {
+                let has_key = key_weak.read_with(cx, |this, _| this.jev_has_key).unwrap_or(false);
+                let remove = key_weak.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Input::new(&key_input).id("jev-key").small().w(px(120.)))
+                    .when(has_key, |this| {
+                        this.child(
+                            Button::new("jev-remove-key")
+                                .label("Remove key")
+                                .small()
+                                .ghost()
+                                .on_click(move |_, _, cx| {
+                                    remove.update(cx, |this, cx| this.remove_jev_key(cx)).ok();
+                                }),
+                        )
+                    })
+                    .into_any_element()
+            }),
+        );
+
+        let base_input = self.jev_base_input.clone();
+        let base_row = row(
+            "Base URL",
+            "The Jev endpoint every request goes to.",
+            &keywords,
+            no_reset(weak),
+            Rc::new(move |_, _, _| {
+                Input::new(&base_input).id("jev-base").small().w(px(170.)).into_any_element()
+            }),
+        );
+
+        let model_input = self.jev_model_input.clone();
+        let model_row = row(
+            "Model",
+            "The Jev model alias to send with each request.",
+            &keywords,
+            no_reset(weak),
+            Rc::new(move |_, _, _| {
+                Input::new(&model_input).id("jev-model").small().w(px(140.)).into_any_element()
+            }),
+        );
+
+        let actions_weak = weak.clone();
+        let actions_row = row(
+            "Connection",
+            "Save applies all three settings and starts classifying. Test connection sends one request and saves nothing.",
+            &keywords,
+            no_reset(weak),
+            Rc::new(move |_, _, cx| {
+                let (error, test) = actions_weak
+                    .read_with(cx, |this, _| (this.jev_error.clone(), this.jev_test.clone()))
+                    .unwrap_or((None, None));
+                let (save, test_click) = (actions_weak.clone(), actions_weak.clone());
+                let t = cx.theme();
+                let message = jev_message(error, test, t);
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new("jev-save").label("Save").small().on_click(move |_, _, cx| {
+                                    save.update(cx, |this, cx| this.save_jev(cx)).ok();
+                                }),
+                            )
+                            .child(
+                                Button::new("jev-test")
+                                    .label("Test connection")
+                                    .small()
+                                    .outline()
+                                    .on_click(move |_, _, cx| {
+                                        test_click.update(cx, |this, cx| this.test_jev(cx)).ok();
+                                    }),
+                            ),
+                    )
+                    .children(message)
+                    .into_any_element()
+            }),
+        );
+
+        SettingGroup::new()
+            .title("Jev connection")
+            .item(key_row)
+            .item(base_row)
+            .item(model_row)
+            .item(actions_row)
+    }
+
     pub(super) fn classifier_page(&self, weak: &Weak) -> SettingPage {
         let summaries = SettingGroup::new().item(row(
             "Thread summaries",
@@ -120,8 +227,47 @@ impl SettingsPanel {
                 ));
             }
         }
-        SettingPage::new("AI").resettable(true).groups([summaries, tagging])
+        SettingPage::new("AI").resettable(true).groups([self.jev_group(weak), summaries, tagging])
     }
+}
+
+/// The inline message under the Connection row: a validation error, or the test result.
+fn jev_message(error: Option<String>, test: Option<JevTest>, theme: &gpui_kit::component::Theme) -> Option<AnyElement> {
+    if let Some(error) = error {
+        return Some(
+            div()
+                .id("jev-error")
+                .text_xs()
+                .text_color(theme.danger)
+                .child(Label::new(error))
+                .into_any_element(),
+        );
+    }
+    match test? {
+        JevTest::Running => {
+            Some(div().id("jev-test-status").text_xs().child(Label::new("Testing…")).into_any_element())
+        }
+        JevTest::Connected(model) => Some(
+            div()
+                .id("jev-test-status")
+                .text_xs()
+                .text_color(theme.primary)
+                .child(Label::new(format!("Connected (model {model})")))
+                .into_any_element(),
+        ),
+        JevTest::Failed(error) => Some(
+            div()
+                .id("jev-test-error")
+                .text_xs()
+                .text_color(theme.danger)
+                .child(Label::new(error))
+                .into_any_element(),
+        ),
+    }
+}
+/// No row ↺: the Jev rows are not values with a default the page reset puts back.
+fn no_reset(weak: &Weak) -> Undo {
+    Undo::of_panel(weak, |_| false, |_, _| {})
 }
 
 /// The confidence `question` ships with; what a reset puts back.
