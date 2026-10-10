@@ -499,7 +499,7 @@ impl Harness<'_> {
             a.composer
                 .drafts
                 .iter()
-                .filter(|d| d.queued.is_some())
+                .filter(|d| d.has_pending_write())
                 .count()
         })
     }

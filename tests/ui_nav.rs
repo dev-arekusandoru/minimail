@@ -194,7 +194,7 @@ impl Harness<'_> {
             !a.composer
                 .drafts
                 .iter()
-                .any(|d| d.in_flight || d.queued.is_some() || d.operation.is_some())
+                .any(|d| d.in_flight || d.has_pending_write() || d.operation.is_some())
         });
     }
     /// Whether a send hold is counting down for any draft.

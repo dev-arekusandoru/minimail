@@ -606,6 +606,18 @@ impl Composer {
         self.draft.clone()
     }
 
+    /// Only the fields the user edits, for the per-keystroke path: the owner copies these
+    /// into its in-memory record without cloning the attachment list or the store identity.
+    pub fn draft_fields(&self) -> (String, String, String, String, DraftBody) {
+        (
+            self.draft.to.clone(),
+            self.draft.cc.clone(),
+            self.draft.bcc.clone(),
+            self.draft.subject.clone(),
+            self.draft.body.clone(),
+        )
+    }
+
     /// Adopt a record the owner changed underneath us (a recovered hold, a sync result).
     /// The form follows; the user is not typing into it at this point.
     /// Widget updates are deferred into the owning window, never performed in render.

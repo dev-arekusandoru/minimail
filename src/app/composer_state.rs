@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use crate::clock::Timestamp;
+use crate::outgoing::body::DraftBody;
 use crate::outgoing::{DraftId, DraftRecord, DraftState, HoldProgress, PendingHold, hold_progress};
 
 /// How long after the last keystroke the *remote* mirror waits for a pause. Typing
@@ -66,6 +67,10 @@ pub struct OpenDraft {
     /// save is written when that save comes back instead of being lost. `None` means the
     /// store already holds everything the form says.
     pub queued: Option<DraftRecord>,
+    /// The editor changed but the snapshot has not been taken yet: the form's fields were
+    /// copied into `record` in place (no whole-record clone per keystroke), and `queued` is
+    /// filled from `record` once, when the debounce fires or an explicit save runs.
+    pub needs_snapshot: bool,
     /// The provider's copy is behind what is stored here. Tracked apart from the local save:
     /// acknowledging a local write must not make an unmirrored edit look mirrored.
     pub remote_dirty: bool,
@@ -97,6 +102,7 @@ impl OpenDraft {
             status: SaveStatus::Local,
             dirty_since,
             queued: None,
+            needs_snapshot: false,
             remote_dirty,
             urgent: false,
             in_flight: false,
@@ -172,6 +178,45 @@ impl OpenDraft {
         stale
     }
 
+    /// An edit landed in the form. The fields are copied into `record` in place — no
+    /// whole-record clone per keystroke, and the attachments and store-owned identity are
+    /// left alone — and `needs_snapshot` is set so the beat takes one snapshot when the
+    /// debounce fires.
+    pub fn edit_form(
+        &mut self,
+        to: String,
+        cc: String,
+        bcc: String,
+        subject: String,
+        body: DraftBody,
+        now: Timestamp,
+    ) {
+        self.status = SaveStatus::Dirty;
+        self.generation += 1;
+        self.remote_dirty = true;
+        self.dirty_since = Some(now);
+        let subject_changed = subject != self.record.subject;
+        self.record.to = to;
+        self.record.cc = cc;
+        self.record.bcc = bcc;
+        self.record.subject = subject;
+        self.record.body = body;
+        self.record.updated_at = now;
+        if subject_changed {
+            self.record.clear_threading();
+        }
+        self.needs_snapshot = true;
+    }
+
+    /// Take the pending snapshot from `record` into `queued`, once, so the write path sees a
+    /// stable copy. A no-op when nothing is pending.
+    pub fn snapshot_pending(&mut self) {
+        if self.needs_snapshot {
+            self.queued = Some(self.record.clone());
+            self.needs_snapshot = false;
+        }
+    }
+
     /// Mark an edit. `snapshot` is the newest form state: a local save follows
     /// immediately, because a draft has to survive a crash at any moment, while only
     /// the *remote* mirror waits out a pause in typing.
@@ -215,6 +260,7 @@ impl OpenDraft {
         }
         self.record = next.clone();
         self.queued = Some(next);
+        self.needs_snapshot = false;
     }
 
     /// Queue the content again because the answer to a save carried a snapshot from before
@@ -235,7 +281,7 @@ impl OpenDraft {
     /// urgent, or a save is already in flight for this draft.
     pub fn save_due(&self, now: Timestamp) -> bool {
         !self.in_flight
-            && self.queued.is_some()
+            && (self.queued.is_some() || self.needs_snapshot)
             && (self.urgent
                 || self
                     .dirty_since
@@ -245,9 +291,15 @@ impl OpenDraft {
     /// Mark the pending write as one the user asked for (Close, Send, quitting), so the beat
     /// writes it without waiting out the debounce.
     pub fn mark_urgent(&mut self) {
-        if self.queued.is_some() {
+        if self.queued.is_some() || self.needs_snapshot {
             self.urgent = true;
         }
+    }
+
+    /// Whether a local write is pending: a snapshot is queued, or the form has edits whose
+    /// snapshot has not been taken yet.
+    pub fn has_pending_write(&self) -> bool {
+        self.queued.is_some() || self.needs_snapshot
     }
 
     /// The snapshot a local save should write. Taken from the queue so the caller never
@@ -262,6 +314,7 @@ impl OpenDraft {
         !self.in_flight
             && self.operation.is_none()
             && self.queued.is_none()
+            && !self.needs_snapshot
             && matches!(
                 self.record.state,
                 DraftState::Editing | DraftState::Failed { .. }

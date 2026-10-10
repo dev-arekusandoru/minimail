@@ -224,7 +224,7 @@ impl MailApp {
             .composer
             .drafts
             .iter()
-            .filter(|d| d.queued.is_some())
+            .filter(|d| d.has_pending_write())
             .map(|d| d.record.id)
             .collect();
         for id in ids {
@@ -774,7 +774,7 @@ impl MailApp {
         open.absorb_metadata(draft.clone());
         open.operation = None;
         open.remote_dirty = open.in_flight
-            || open.queued.is_some()
+            || open.has_pending_write()
             || open.record.synced_content_revision != Some(open.record.content_revision);
         open.status = if open.remote_dirty {
             SaveStatus::Local
@@ -899,7 +899,7 @@ impl MailApp {
                 .composer
                 .drafts
                 .iter()
-                .any(|draft| draft.in_flight || draft.queued.is_some() || draft.operation.is_some())
+                .any(|draft| draft.in_flight || draft.has_pending_write() || draft.operation.is_some())
     }
 
     /// The draft whose send hold is counting down, if one is. `u` recalls it.
@@ -1162,11 +1162,30 @@ impl MailApp {
         let edited = matches!(event, ComposeEvent::Edited);
         match event {
             ComposeEvent::Edited => {
-                let Some(composer) = self.composers.get(&id).cloned() else {
+                let Some(entity) = self.composers.get(&id).cloned() else {
                     return;
                 };
-                let record = composer.read(cx).record();
-                self.queue_edit(id, record);
+                if self.hold_after_save.contains(&id) {
+                    return;
+                }
+                let now = self.now();
+                // Copy the form's text fields straight into the in-memory record. No whole
+                // record (or attachment list) is cloned here; the beat snapshots once when
+                // the debounce fires.
+                let (to, cc, bcc, subject, body) = entity.read(cx).draft_fields();
+                let Some(open) = self.composer.get_mut(id) else {
+                    return;
+                };
+                if matches!(
+                    open.record.state,
+                    DraftState::Held
+                        | DraftState::Sending
+                        | DraftState::Uncertain
+                        | DraftState::Sent { .. }
+                ) {
+                    return;
+                }
+                open.edit_form(to, cc, bcc, subject, body, now);
                 // The write itself is not started here: the beat writes the queued snapshot
                 // once typing pauses, so a keystroke never waits on a database transaction.
                 self.sync_composer_status(id, cx);
@@ -1308,6 +1327,8 @@ impl MailApp {
             // the write that follows the in-flight answer does not wait out the debounce.
             return;
         }
+        // One snapshot per debounce, taken here rather than at every keystroke.
+        open.snapshot_pending();
         let Some(record) = open.take_queued() else {
             return;
         };
@@ -1349,7 +1370,7 @@ impl MailApp {
             return;
         };
         if open.in_flight
-            || open.queued.is_some()
+            || open.has_pending_write()
             || open.operation.is_some()
             || !matches!(
                 open.record.state,
@@ -1437,7 +1458,7 @@ impl MailApp {
             return;
         }
         if open.in_flight
-            || open.queued.is_some()
+            || open.has_pending_write()
             || open.operation.is_some()
             || self.pending_attachment_ops.contains_key(&id)
         {
@@ -2305,7 +2326,7 @@ impl MailApp {
             return;
         };
         if open.in_flight
-            || open.queued.is_some()
+            || open.has_pending_write()
             || open.operation.is_some()
             || self.pending_attachment_ops.contains_key(&id)
         {
