@@ -188,8 +188,9 @@ pub enum JudgeStatus {
     NoKey,
     /// A key is configured and nothing is queued.
     Idle,
-    /// `n` messages are waiting to be judged, including the one in flight.
-    Working(usize),
+    /// The current batch of classifier work: `done` of `total` requests have finished. The
+    /// total grows if more work is queued mid-batch, and the batch resets when the queue drains.
+    Working { done: usize, total: usize },
     /// The last request failed; the next success clears it.
     Error(String),
 }
@@ -269,9 +270,10 @@ pub fn message_state(m: &Message) -> Value {
     })
 }
 
-/// Cache key for one message's answers: a hex SHA-256 over the model, the
-/// request's questions JSON, and the state JSON. Editing a question's criteria
-/// (or the state) changes the key, so stale answers are never reused.
+/// The **legacy** hash key for one message's answers: a hex SHA-256 over the model, the
+/// request's questions JSON, and the state JSON, exactly as the pre-`MIGRATION_4` cache keyed
+/// rows. Only the one-time carry-over ([`crate::app::MailApp::carry_over_judgements`]) still uses
+/// it, to look old rows up under their message id; new rows are keyed by message id alone.
 pub fn judgement_key(model: &str, state: &Value, questions: &[(QuestionKey, Question)]) -> String {
     let body = jev::request_body(model, state, questions);
     let mut hasher = Sha256::new();

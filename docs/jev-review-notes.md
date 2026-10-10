@@ -14,7 +14,7 @@ decided, why, and how to flip it. Flip any you disagree with.
 - **Request shape assumed, not confirmed** — one `POST {base}/systemone` with
   `Authorization: Bearer <key>` and `{state, model, questions}` where each question key is the
   `Debug` name of `QuestionKey` (e.g. `"Spam"`). If Jev names them differently, change
-  `request_body`/`parse_answers` together with `judgement_key`.
+  `request_body`/`parse_answers` together.
 - **Rate limits and long messages untested.** One request per message, serial, 30 s timeout,
   body trimmed to 1500 chars. No batching or backoff beyond "stop the worker on an error".
 - **Local loopback `http://`** is allowed for a local proxy but has never been exercised.
@@ -38,23 +38,30 @@ decided, why, and how to flip it. Flip any you disagree with.
 
 ## Cache and persistence
 
-- **Cache key = content hash, not message id.** `judgement_key` is `sha256(model +
-  questions JSON + state JSON)`; `MessageId` is a per-load `u32`, so it is not stable across
-  restarts. *Why:* answers must not be reused after a question or the message text changes.
-  *Flip:* change the hash inputs in `judge::judgement_key`.
-- **Table is `judgements(key, answers, judged_at)` in the contacts DB** (`src/contacts/`,
-  `MIGRATION_3`), not the `(message_id, questions_hash, model, …)` shape the spec sketched.
-  The key covers all of it, so one column suffices. *Flip:* a schema migration if you want the
-  parts queryable.
+- **Cache key = message id (resolved).** `judgements` is keyed by the mail cache's
+  `message_id INTEGER PRIMARY KEY` (`messages.id`, in `src/sync/cache.rs`), which is stable
+  across restarts, so a message is billed at most once — ever. Changing the model, the base URL
+  or the key, removing and re-adding the key, or a snippet becoming the full body all reuse the
+  stored result. *Why:* the old content-hash key re-billed a message whenever its text, model or
+  question text changed. *Flip:* back to a hash only if some other identity of a message should
+  invalidate its answers.
+- **Table is `judgements(message_id, answers, model, judged_at)`** in the contacts DB
+  (`src/contacts/`, `MIGRATION_4`). `model` is recorded for reference, never used for lookup.
+- **`MIGRATION_4` parks the old hash-keyed rows in `judgements_legacy`.** On the first startup
+  after the upgrade, `MailApp::carry_over_judgements` recomputes each message's old hash under
+  the configured model (`jev-latest` by default), copies a hit onto the message id, and drops
+  the legacy table. A failure leaves it in place to retry next launch. *Limit:* a message whose
+  model changed before the upgrade has no matching row and is billed once more; this is the
+  smallest correct option (the hash cannot be inverted in SQL). *Flip:* keep the legacy table and
+  a second model guess if that one re-bill matters.
+- **The in-flight content-change requeue is gone.** A partial body becoming full no longer
+  re-classifies: the message already has a stored answer, so the worker stores and applies once.
+  *Flip:* reinstate a body-completeness check in `MailApp::finish_judge` if a snippet answer must
+  never stand for the full message.
 - **The cache never prunes** — one small row per classified message. *Flip:* add a job if it
   ever grows.
 - **A corrupt row is a cache miss**, not an error: judging again overwrites it.
 - **Thresholds/modes apply at read time**, so changing policy never re-bills.
-- **A message whose body downloads mid-request is re-classified, not applied.** After a
-  successful request the worker recomputes the current key; if it differs the stale answers are
-  dropped and the message is re-queued (this bills the full body once more). *Why:* a
-  snippet-based answer must not be applied to the full message, and a pending suggestion would
-  otherwise block the full-content pass. *Flip:* the check in `MailApp::message_changed`.
 
 ## Worker and lifecycle
 
@@ -73,11 +80,15 @@ decided, why, and how to flip it. Flip any you disagree with.
   reply to the same message must not make a recalled later reply look in-flight.
 - **An error stops the worker and shows in the status bar**; the next `classify_visible`
   (sync, `c`, settings change, relaunch) retries.
-- **`Working(n)` counts the queue plus the one in flight**, so the last message still reads
-  "Classifying 1…" while its request is out.
-- **Background auto-applies keep the existing undo behavior** (`Mailbox::apply_auto` pushes a
-  step), so `u` can undo a label that arrived in the background — the spec said "no undo step";
-  the model's behavior was kept instead of changing it.
+- **The footer reads `Classifying X/Y`**: X requests finished, Y the current batch's total. A
+  batch starts when the queue goes from empty (nothing in flight) to non-empty, grows as more
+  work is queued mid-batch, and resets when the queue drains. Errors keep the status-bar error.
+- **Background auto-applies push no undo step** (resolved). `Mailbox::apply_auto` no longer
+  pushes undo, so classifier labels — worker results, cached results re-applied by
+  `classify_visible`, and the async Awaiting Reply tag (which never did) — never enter the undo
+  history. `u` undoes the user's previous action instead. User actions (accept/reject, triage)
+  are unchanged. *Why:* a background label is not the user's action. *Flip:* push a step in
+  `apply_auto` again if background labels should be undoable.
 
 ## Settings and UX
 
@@ -110,8 +121,8 @@ decided, why, and how to flip it. Flip any you disagree with.
   `"0".."levels-1"`; missing keys read 0. **noul confidence is `max(p, 1-p)`** (Jev returns
   none); choice/score confidence is passed through.
 - **`route` is a public function** in `src/judge/policy.rs`; `classify` delegates per message.
-- **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is part
-  of `judgement_key`, so answers never cross models.
+- **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is
+  recorded on each judgement but not used for lookup, so answers survive a model change.
 - **`StubJudge` stays `pub`** but production never constructs it (`main` installs `JevJudge`);
   test harnesses inject it.
 - **Rejected suggestions can come back** — `classify_visible` re-routes every Inbox message with

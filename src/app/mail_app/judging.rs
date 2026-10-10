@@ -153,20 +153,43 @@ impl MailApp {
         (base, model)
     }
 
-    /// Cached answers for `key`: memory first, then the store. `None` on a miss or a bad row.
-    pub(super) fn cached_answers(&mut self, key: &str) -> Option<Vec<(QuestionKey, Answer)>> {
-        if let Some(answers) = self.judgements.get(key) {
+    /// Cached answers for `id`: memory first, then the store. `None` on a miss or a bad row.
+    pub(super) fn cached_answers(&mut self, id: MessageId) -> Option<Vec<(QuestionKey, Answer)>> {
+        if let Some(answers) = self.judgements.get(&id) {
             return Some(answers.clone());
         }
         let store = self.preferences.clone()?;
         // A corrupt row is a cache miss: judging again overwrites it.
-        match store.judgement_get(key) {
+        match store.judgement_get(id) {
             Ok(Some(answers)) => {
-                self.judgements.insert(key.to_owned(), answers.clone());
+                self.judgements.insert(id, answers.clone());
                 Some(answers)
             }
             Ok(None) | Err(_) => None,
         }
+    }
+
+    /// One-time carry-over from the pre-`MIGRATION_4` hash-keyed judgements: for every message
+    /// with no id-keyed row, look its legacy hash up under the configured model and copy the
+    /// answer under the message id. Runs at startup, where the mailbox and the store meet; a
+    /// message whose model changed before the upgrade has no matching row and is judged again.
+    pub(super) fn carry_over_judgements(&mut self) {
+        let Some(store) = self.preferences.clone() else {
+            return;
+        };
+        if !matches!(store.legacy_judgements_present(), Ok(true)) {
+            return;
+        }
+        let (_, model) = self.jev_settings();
+        let questions = triage_questions();
+        let entries: Vec<(MessageId, String)> = self
+            .mailbox
+            .messages()
+            .iter()
+            .map(|m| (m.id, judgement_key(&model, &message_state(m), &questions)))
+            .collect();
+        // A failure leaves the legacy table in place, to retry on the next launch.
+        let _ = store.carry_over_judgements(&model, &entries);
     }
 
     /// Route `answers` for `id` and apply them, if it is still a visible Inbox candidate.
@@ -199,7 +222,9 @@ impl MailApp {
         (auto, queued)
     }
 
-    /// Queue `job`, unless the same message is already waiting or in flight.
+    /// Queue `job`, unless the same message is already waiting or in flight. Starting a batch
+    /// (queue empty, nothing in flight) resets the footer counters; anything queued later grows
+    /// the batch's total.
     pub(super) fn enqueue_judge(&mut self, job: JudgeJob) {
         if let JudgeJob::Message(id) = &job
             && (self.judge_in_flight == Some(*id)
@@ -210,6 +235,11 @@ impl MailApp {
         {
             return;
         }
+        if self.judge_queue.is_empty() && !self.judging {
+            self.judge_batch_done = 0;
+            self.judge_batch_total = 0;
+        }
+        self.judge_batch_total += 1;
         self.judge_queue.push_back(job);
     }
 
@@ -242,7 +272,7 @@ impl MailApp {
                 break;
             };
             let model = judge.model().to_owned();
-            let Some((kind, key, state, questions)) = self.prepare_job(job, &model) else {
+            let Some((kind, state, questions)) = self.prepare_job(job) else {
                 continue; // the message went away; try the next one
             };
             self.judging = true;
@@ -255,7 +285,7 @@ impl MailApp {
             let task = cx.background_spawn(async move { judge.judge(&state, &questions) });
             cx.spawn(async move |this, cx| {
                 let result = task.await;
-                this.update(cx, |this, cx| this.finish_judge(generation, kind, key, result, cx)).ok();
+                this.update(cx, |this, cx| this.finish_judge(generation, kind, model, result, cx)).ok();
             })
             .detach();
             return;
@@ -263,20 +293,18 @@ impl MailApp {
         self.refresh_judge_status();
     }
 
-    /// The request body for `job`: its kind, cache key (empty for replies), state and questions.
+    /// The request body for `job`: its kind, state and questions.
     #[allow(clippy::type_complexity)]
     fn prepare_job(
         &self,
         job: JudgeJob,
-        model: &str,
-    ) -> Option<(JudgeJob, String, Value, Vec<(QuestionKey, Question)>)> {
+    ) -> Option<(JudgeJob, Value, Vec<(QuestionKey, Question)>)> {
         match &job {
             JudgeJob::Message(id) => {
                 let message = self.mailbox.get(*id).cloned()?;
                 let state = message_state(&message);
                 let questions = triage_questions();
-                let key = judgement_key(model, &state, &questions);
-                Some((job, key, state, questions))
+                Some((job, state, questions))
             }
             JudgeJob::Reply { body, .. } => {
                 let state = json!({"sender": "", "subject": "", "body": body.trim()});
@@ -286,7 +314,7 @@ impl MailApp {
                         criteria: "Does this outgoing reply ask the recipient for a response?".into(),
                     },
                 )];
-                Some((job, String::new(), state, questions))
+                Some((job, state, questions))
             }
         }
     }
@@ -296,7 +324,7 @@ impl MailApp {
         &mut self,
         generation: u64,
         kind: JudgeJob,
-        key: String,
+        model: String,
         result: Result<Vec<(QuestionKey, Answer)>, JudgeError>,
         cx: &mut Context<Self>,
     ) {
@@ -304,6 +332,7 @@ impl MailApp {
         // Free the physical slot in every case; `set_judge` keeps it occupied across a swap.
         self.judging = false;
         self.judge_in_flight = None;
+        self.judge_batch_done += 1;
         if stale {
             // The judge was replaced while this ran: drop the result, then start whatever the
             // replacement's queue holds.
@@ -325,16 +354,9 @@ impl MailApp {
             }
             Ok(answers) => match kind {
                 JudgeJob::Message(id) => {
-                    if self.message_changed(id, &key) {
-                        // A body download changed the message while the request was out (a
-                        // snippet became the full body); classify the new content instead of
-                        // applying answers about the old one.
-                        self.enqueue_judge(JudgeJob::Message(id));
-                    } else {
-                        let now = self.now();
-                        self.store_answers(&key, &answers, now);
-                        self.apply_answers(id, &answers);
-                    }
+                    let now = self.now();
+                    self.store_answers(id, &model, &answers, now);
+                    self.apply_answers(id, &answers);
                 }
                 JudgeJob::Reply { in_reply_to, seq, sent_at, .. } => {
                     let expects = answers.iter().any(|(key, answer)| {
@@ -352,22 +374,18 @@ impl MailApp {
         self.drain_judge_queue(cx);
     }
 
-    /// Whether `id`'s current judgement key differs from `key`: its content changed in flight,
-    /// so the cached answers must not be applied to it.
-    fn message_changed(&self, id: MessageId, key: &str) -> bool {
-        let (Some(message), Some(judge)) = (self.mailbox.get(id), self.judge.as_ref()) else {
-            return true;
-        };
-        let state = message_state(message);
-        judgement_key(judge.model(), &state, &triage_questions()) != key
-    }
-
     /// Cache `answers` in memory and, when a store exists, in SQLite.
-    fn store_answers(&mut self, key: &str, answers: &[(QuestionKey, Answer)], now: Timestamp) {
-        self.judgements.insert(key.to_owned(), answers.to_vec());
+    fn store_answers(
+        &mut self,
+        id: MessageId,
+        model: &str,
+        answers: &[(QuestionKey, Answer)],
+        now: Timestamp,
+    ) {
+        self.judgements.insert(id, answers.to_vec());
         if let Some(store) = self.preferences.clone() {
             // A cache write failure is not worth stopping classification over.
-            let _ = store.judgement_put(key, answers, now);
+            let _ = store.judgement_put(id, model, answers, now);
         }
     }
 
@@ -378,9 +396,15 @@ impl MailApp {
         } else {
             let waiting = self.judge_queue.len() + usize::from(self.judging);
             if waiting == 0 {
+                // The batch drained: the next enqueue starts a fresh one.
+                self.judge_batch_done = 0;
+                self.judge_batch_total = 0;
                 JudgeStatus::Idle
             } else {
-                JudgeStatus::Working(waiting)
+                JudgeStatus::Working {
+                    done: self.judge_batch_done,
+                    total: self.judge_batch_total,
+                }
             }
         };
     }

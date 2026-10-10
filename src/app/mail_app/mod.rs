@@ -30,8 +30,7 @@ use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{
-    Answer, Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, judgement_key,
-    message_state, triage_questions,
+    Answer, Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed,
 };
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
@@ -141,10 +140,14 @@ pub struct MailApp {
     secrets: Rc<dyn SecretStore>,
     /// The classifier's state, shown in the status bar.
     judge_status: JudgeStatus,
-    /// Judge answers cached this session, keyed by [`judgement_key`].
-    judgements: HashMap<String, Vec<(QuestionKey, Answer)>>,
+    /// Judge answers cached this session, keyed by [`MessageId`].
+    judgements: HashMap<MessageId, Vec<(QuestionKey, Answer)>>,
     /// Messages and replies waiting to be judged, oldest first.
     judge_queue: VecDeque<JudgeJob>,
+    /// Completed requests in the current classifier batch (footer `Classifying X/Y`).
+    judge_batch_done: usize,
+    /// Total requests in the current classifier batch, grown as work is queued mid-batch.
+    judge_batch_total: usize,
     /// A judge request is in flight; the worker is running.
     judging: bool,
     /// Message of the request in flight, so a second pass does not queue it again.
@@ -287,6 +290,8 @@ impl MailApp {
             judge_status: JudgeStatus::NoKey,
             judgements: HashMap::new(),
             judge_queue: VecDeque::new(),
+            judge_batch_done: 0,
+            judge_batch_total: 0,
             judging: false,
             judge_in_flight: None,
             judge_gen: 0,
@@ -391,6 +396,9 @@ impl MailApp {
         self._theme_sub = Some(window.observe_window_appearance(move |_, cx| {
             weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
         }));
+        // Map any pre-MIGRATION_4 hash-keyed judgements onto their message ids before the first
+        // pass, so their answers are found and not re-billed.
+        self.carry_over_judgements();
         self.classify_visible(cx);
         cx.notify();
     }

@@ -21,7 +21,7 @@ configurable.
 | Trigger | New arrivals queued on arrival. First key added → one pass over **Inbox-state** messages without a stored result. |
 | Pacing | One request per message, serial, on one background worker. |
 | Failure | Message stays unlabeled; error shown in the status bar center; retried on next arrival/launch. |
-| Persistence | SQLite table of raw answers. Thresholds/modes are applied at read time, so changing policy never re-bills. |
+| Persistence | SQLite table of raw answers, keyed by `message_id`, so a message is billed at most once — ever. Thresholds/modes apply at read time, and a model, endpoint or key change reuses the stored result. |
 
 ## API mapping
 
@@ -42,9 +42,11 @@ module doc (which assumes per-type endpoints) is corrected.
 
 1. **`src/judge/jev.rs`** — `JevJudge { base_url, model, key }` implementing `Judge` with `ureq`.
    Pure request/response mapping is unit-tested against recorded JSON; no network in tests.
-2. **`src/judge/store.rs`** — table `judgements(message_id, questions_hash, model, answers_json,
-   judged_at)` in the existing contacts DB (new `user_version` migration). `questions_hash`
-   covers criteria text so editing a question invalidates old results.
+2. **`src/contacts/judgements.rs`** — table `judgements(message_id, answers, model, judged_at)`
+   in the existing contacts DB (`MIGRATION_4`). Keyed by the stable `message_id`, so nothing
+   about the message, the model or the questions causes a second bill. `MIGRATION_4` parks the
+   old hash-keyed rows in `judgements_legacy`; at startup `MailApp::carry_over_judgements` copies
+   the ones it can map (old hash under the configured model) and drops the legacy table.
 3. **Worker** — `classify_visible` stops calling the judge inline. It routes stored answers
    through `JudgePolicy` immediately and enqueues Inbox messages with no stored result. A
    background task drains the queue serially (gpui `background_executor`), writes the store,
@@ -52,7 +54,8 @@ module doc (which assumes per-type endpoints) is corrected.
 4. **Settings → Classifier** — key field (masked; blank keeps the saved key; explicit Remove),
    base URL, model, **Test connection** (one synthetic call). Saving a key triggers the Inbox backfill.
 5. **Status bar** — center region shows the classifier state: missing-key prompt,
-   "Classifying N…", or the last error (cleared on the next success).
+   `Classifying X/Y` (X completed, Y the current batch's total), or the last error (cleared on
+   the next success).
 
 ## Invariants kept
 

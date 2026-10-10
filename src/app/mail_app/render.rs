@@ -219,7 +219,9 @@ impl Render for MailApp {
                 let (auto, review) = this.classify_visible(cx);
                 let text = match this.judge_status() {
                     JudgeStatus::NoKey => "No Jev key · add one in Settings".to_owned(),
-                    JudgeStatus::Working(n) => format!("{auto} auto-applied · classifying {n}…"),
+                    JudgeStatus::Working { done, total } => {
+                        format!("{auto} auto-applied · Classifying {done}/{total}")
+                    }
                     _ => format!("{auto} auto-applied · {review} to review"),
                 };
                 this.show_toast(text, w, cx);

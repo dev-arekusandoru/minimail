@@ -233,13 +233,11 @@ impl MailApp {
     /// Returns `(auto-applied, queued for review)`, counted from the cached answers only;
     /// anything queued is judged in the background and applied when its answers land.
     pub(super) fn classify_visible(&mut self, cx: &mut Context<Self>) -> (usize, usize) {
-        let Some(judge) = self.judge.clone() else {
+        if self.judge.is_none() {
             // No key: classification is off, but the status bar must say so.
             self.refresh_judge_status();
             return (0, 0);
-        };
-        let model = judge.model().to_owned();
-        let questions = triage_questions();
+        }
         let inbox = self.mailbox.location_query(&Location::AllInboxes);
         let ids: Vec<MessageId> = self
             .mailbox
@@ -249,12 +247,7 @@ impl MailApp {
             .collect();
         let (mut auto, mut review) = (0, 0);
         for id in ids {
-            let Some(message) = self.mailbox.get(id).cloned() else {
-                continue;
-            };
-            let state = message_state(&message);
-            let key = judgement_key(&model, &state, &questions);
-            if let Some(answers) = self.cached_answers(&key) {
+            if let Some(answers) = self.cached_answers(id) {
                 let (a, r) = self.apply_answers(id, &answers);
                 auto += a;
                 review += r;

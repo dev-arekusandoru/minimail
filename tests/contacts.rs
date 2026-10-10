@@ -338,7 +338,7 @@ fn upgrading_schema_one_preserves_contacts_and_schema_two_settings() {
 
     // Recreate the version-one file from before scoped settings were added.
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute_batch("DROP TABLE settings; DROP TABLE judgements; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE settings; DROP TABLE judgements; DROP TABLE judgements_legacy; PRAGMA user_version = 1;").unwrap();
     drop(conn);
 
     let store = ContactStore::open(db.path()).expect("upgrade version one");
@@ -441,15 +441,15 @@ fn sample_answers() -> Vec<(QuestionKey, Answer)> {
 #[test]
 fn judgements_round_trip_and_upsert() {
     let store = store();
-    assert_eq!(store.judgement_get("missing").expect("get"), None);
+    assert_eq!(store.judgement_get(7).expect("get"), None);
 
     let answers = sample_answers();
-    store.judgement_put("k1", &answers, T0).expect("put");
-    assert_eq!(store.judgement_get("k1").expect("get"), Some(answers.clone()));
+    store.judgement_put(7, "jev-latest", &answers, T0).expect("put");
+    assert_eq!(store.judgement_get(7).expect("get"), Some(answers.clone()));
 
     // A second put overwrites in place instead of violating the primary key.
-    store.judgement_put("k1", &answers[..1], T0 + 60).expect("put again");
-    assert_eq!(store.judgement_get("k1").expect("get"), Some(answers[..1].to_vec()));
+    store.judgement_put(7, "jev-latest", &answers[..1], T0 + 60).expect("put again");
+    assert_eq!(store.judgement_get(7).expect("get"), Some(answers[..1].to_vec()));
 }
 
 #[test]
@@ -458,12 +458,37 @@ fn judgements_table_migrates_from_a_version_two_database() {
     ContactStore::open(db.path()).expect("open");
     // Roll the file back to the pre-judgements shape.
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute_batch("DROP TABLE judgements; PRAGMA user_version = 2;")
+    conn.execute_batch("DROP TABLE judgements; DROP TABLE judgements_legacy; PRAGMA user_version = 2;")
         .unwrap();
     drop(conn);
 
     let store = ContactStore::open(db.path()).expect("upgrade version two");
-    assert_eq!(store.schema_version().expect("version"), 3);
-    store.judgement_put("k", &sample_answers(), T0).expect("put");
-    assert!(store.judgement_get("k").expect("get").is_some());
+    assert_eq!(store.schema_version().expect("version"), 4);
+    store.judgement_put(7, "jev-latest", &sample_answers(), T0).expect("put");
+    assert!(store.judgement_get(7).expect("get").is_some());
+}
+
+#[test]
+fn carry_over_copies_legacy_hash_rows_and_drops_the_table() {
+    let db = TempDb::new("judgements-carry-over");
+    let store = ContactStore::open(db.path()).expect("open");
+    // The legacy table survives MIGRATION_4 with its hash-keyed rows intact.
+    assert!(store.legacy_judgements_present().expect("legacy present"));
+    let answers = sample_answers();
+    let json = serde_json::to_string(&answers).unwrap();
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.execute(
+        "INSERT INTO judgements_legacy (key, answers, judged_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params!["legacy-key", json, T0],
+    )
+    .unwrap();
+    drop(conn);
+
+    // Only messages without an id-keyed row are copied; a miss leaves nothing behind.
+    store
+        .carry_over_judgements("jev-latest", &[(7, "legacy-key".into()), (8, "no-such-key".into())])
+        .expect("carry over");
+    assert_eq!(store.judgement_get(7).expect("get"), Some(answers));
+    assert_eq!(store.judgement_get(8).expect("get"), None);
+    assert!(!store.legacy_judgements_present().expect("legacy dropped"));
 }

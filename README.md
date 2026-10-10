@@ -157,8 +157,12 @@ Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 its directory) on first launch, migrated forward through `PRAGMA user_version`,
 and seeded once from `fixtures/contacts_seed.json`. Schema 2 is the scoped
 settings table; schema 3 adds a `judgements` table caching the classifier's raw
-answers (keyed by a hash of the model, the questions and the message state, so
-editing a question or a message re-classifies it and nothing else re-bills).
+answers, and schema 4 re-keys it by `message_id` so each message is billed at
+most once — no model, endpoint or key change re-classifies anything. On the
+first launch after that migration, the old hash-keyed rows are copied onto their
+message ids (under the configured model, `jev-latest` by default) and the legacy
+table is dropped; a message whose model changed before the upgrade has no
+matching row and is judged once more.
 Databases previously opened by the settings or classifier branch are upgraded in
 place; existing contacts and settings are preserved. Unknown newer schemas
 are rejected with a diagnostic and exit status 1 before the UI starts.

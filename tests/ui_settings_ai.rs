@@ -178,7 +178,7 @@ fn saving_a_key_installs_a_judge_and_classifies_the_inbox(cx: &mut TestAppContex
     h.settings_click("jev-save");
 
     assert!(
-        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working(_)),
+        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working { .. }),
         "Save installs the judge the factory builds"
     );
     assert!(classified(&mut h), "and the Inbox backfill classifies");
@@ -216,7 +216,7 @@ fn a_blank_key_field_leaves_the_saved_key_alone(cx: &mut TestAppContext) {
     // Save again with the (cleared) key field blank: the endpoint is applied, the key stays.
     h.settings_click("jev-save");
     assert!(
-        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working(_)),
+        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working { .. }),
         "a blank field does not remove the key"
     );
     assert!(h.settings_has("jev-remove-key"));
@@ -347,7 +347,7 @@ fn a_failed_key_removal_stops_the_judge_but_keeps_the_key(cx: &mut TestAppContex
     fill(&mut h, "jev-key", "sk-test");
     h.settings_click("jev-save");
     assert!(
-        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working(_)),
+        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working { .. }),
         "Save installs the judge"
     );
 
