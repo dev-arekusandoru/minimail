@@ -16,6 +16,7 @@
 mod children;
 mod error;
 mod groups;
+mod judgements;
 mod model;
 mod read;
 mod schema;

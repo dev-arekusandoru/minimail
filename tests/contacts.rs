@@ -7,6 +7,7 @@ use mail_classifier::contacts::{
     ContactQuery, ContactSource, ContactStore, ContactUrl, EmailAddress, Error, Label,
     NewContact, PhoneNumber, PostalAddress, seed_if_empty,
 };
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey};
 
 const T0: i64 = 1_790_812_800;
 
@@ -337,7 +338,7 @@ fn upgrading_schema_one_preserves_contacts_and_schema_two_settings() {
 
     // Recreate the version-one file from before scoped settings were added.
     let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute_batch("DROP TABLE settings; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE settings; DROP TABLE judgements; PRAGMA user_version = 1;").unwrap();
     drop(conn);
 
     let store = ContactStore::open(db.path()).expect("upgrade version one");
@@ -414,4 +415,55 @@ fn seeding_is_idempotent() {
     let reopened = ContactStore::open(db.path()).expect("reopen");
     assert_eq!(seed_if_empty(&reopened).expect("seed after reopen"), 0);
     assert_eq!(reopened.known_addresses().expect("addresses").len(), seeded.len());
+}
+
+fn sample_answers() -> Vec<(QuestionKey, Answer)> {
+    vec![
+        (
+            QuestionKey::Spam,
+            Answer {
+                probabilities: vec![0.1, 0.9],
+                value: AnswerValue::Bool(true),
+                confidence: 0.9,
+            },
+        ),
+        (
+            QuestionKey::Kind,
+            Answer {
+                probabilities: vec![0.2, 0.8, 0.0, 0.0, 0.0],
+                value: AnswerValue::Choice(1),
+                confidence: 0.8,
+            },
+        ),
+    ]
+}
+
+#[test]
+fn judgements_round_trip_and_upsert() {
+    let store = store();
+    assert_eq!(store.judgement_get("missing").expect("get"), None);
+
+    let answers = sample_answers();
+    store.judgement_put("k1", &answers, T0).expect("put");
+    assert_eq!(store.judgement_get("k1").expect("get"), Some(answers.clone()));
+
+    // A second put overwrites in place instead of violating the primary key.
+    store.judgement_put("k1", &answers[..1], T0 + 60).expect("put again");
+    assert_eq!(store.judgement_get("k1").expect("get"), Some(answers[..1].to_vec()));
+}
+
+#[test]
+fn judgements_table_migrates_from_a_version_two_database() {
+    let db = TempDb::new("judgements-migration");
+    ContactStore::open(db.path()).expect("open");
+    // Roll the file back to the pre-judgements shape.
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.execute_batch("DROP TABLE judgements; PRAGMA user_version = 2;")
+        .unwrap();
+    drop(conn);
+
+    let store = ContactStore::open(db.path()).expect("upgrade version two");
+    assert_eq!(store.schema_version().expect("version"), 3);
+    store.judgement_put("k", &sample_answers(), T0).expect("put");
+    assert!(store.judgement_get("k").expect("get").is_some());
 }

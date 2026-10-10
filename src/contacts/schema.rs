@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use super::error::{Error, Result};
 
 /// Applied in order; index + 1 is the `user_version` that migration sets.
-const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2];
+const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2, MIGRATION_3];
 
 /// Provider-shaped contacts: people, child tables for their addresses, and
 /// groups for labels.
@@ -116,6 +116,17 @@ CREATE TABLE settings (
     key   TEXT NOT NULL,
     value TEXT NOT NULL,
     PRIMARY KEY (scope, key)
+) WITHOUT ROWID;
+"#;
+
+/// Cached judge answers, keyed by the content hash from
+/// [`crate::judge::judgement_key`]. Stored raw so threshold/mode changes never
+/// re-bill the API.
+const MIGRATION_3: &str = r#"
+CREATE TABLE judgements (
+    key       TEXT PRIMARY KEY,
+    answers   TEXT NOT NULL,
+    judged_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#;
 
