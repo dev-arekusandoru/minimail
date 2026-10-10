@@ -74,7 +74,7 @@ impl MailApp {
 
     pub fn new_senders_open(&self) -> bool {
         crate::known_senders::KNOWN_SENDERS_ENABLED
-            && self.triage.query.has(Field::Is, "new")
+            && self.triage().query.has(Field::Is, "new")
     }
 
     /// Titlebar / list-header label for the current location, e.g. `"Work · Archive"`.
@@ -97,12 +97,9 @@ impl MailApp {
     /// The message shown in the reader: the session's current one during a session, nothing
     /// on the session end card, otherwise the active tab's message.
     pub fn opened(&self) -> Option<MessageId> {
-        if self.session.is_some() {
-            self.session_current()
-        } else if self.session_end.is_some() {
-            None
-        } else {
-            self.tabs.opened()
+        match self.slot() {
+            Slot::Triage => self.session_current(),
+            Slot::Tab => self.tabs.opened(),
         }
     }
 
@@ -150,7 +147,7 @@ impl MailApp {
 
     /// Exactly the message ids the list shows, top to bottom.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        self.mailbox.ids_matching(&self.triage.query, &self.local_now())
+        self.mailbox.ids_matching(&self.triage().query, &self.local_now())
     }
 
     pub fn now(&self) -> Timestamp {
@@ -177,20 +174,22 @@ impl MailApp {
         if let Some(id) = self.menu_target.as_ref().and_then(|ids| ids.first()) {
             return Some(*id);
         }
-        if let Some(id) = self.session_current() {
+        if self.slot() == Slot::Triage
+            && let Some(id) = self.session_current()
+        {
             return Some(id);
         }
         if self.grouped() {
             return self.cursor_row().map(|r| r.primary());
         }
-        self.triage.cursor(&self.mailbox, &self.local_now())
+        self.triage().cursor(&self.mailbox, &self.local_now())
     }
 
     pub(super) fn cursor_ix(&self) -> usize {
         if self.grouped() {
             return self.row_cursor();
         }
-        self.triage.cursor_index()
+        self.triage().cursor_index()
     }
 
     /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
@@ -198,22 +197,25 @@ impl MailApp {
         if let Some(ids) = &self.menu_target {
             return ids.clone();
         }
-        if self.grouped() && self.triage.selected().is_empty() {
+        if self.grouped() && self.triage().selected().is_empty() {
             return self.cursor_row().map(|r| r.ids()).unwrap_or_default();
         }
         if self.in_session() {
             return self.cursor_id().into_iter().collect();
         }
-        self.triage.targets(&self.mailbox, &self.local_now())
+        self.triage().targets(&self.mailbox, &self.local_now())
     }
 
     pub(super) fn move_cursor(&mut self, delta: isize) {
         if self.grouped() {
             let len = self.rows().len();
             let max = len.saturating_sub(1) as isize;
-            self.row_cursor = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
+            let next = (self.row_cursor() as isize + delta).clamp(0, max) as usize;
+            self.view_mut().row_cursor = next;
         } else {
-            self.triage.move_cursor(&self.mailbox, &self.local_now(), delta);
+            let now = self.local_now();
+            let (view, mailbox) = self.view_and_mailbox();
+            view.triage.move_cursor(mailbox, &now, delta);
         }
     }
 
@@ -227,6 +229,11 @@ impl MailApp {
             || self.folder_picker.is_some()
     }
 
+    /// The documents the email views loaded without a native window (the headless platform).
+    pub fn webview_loads(&self) -> Vec<crate::app::email_webview::LoadedDoc> {
+        self.webviews.loads()
+    }
+
     /// Any modal (the composer or a dialog-hosted view) is open.
     pub fn modal_open(&self) -> bool {
         self.compose.is_some() || self.dialog_hosted()
@@ -235,6 +242,6 @@ impl MailApp {
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state
     /// works it out.
     pub(super) fn scroll_to_cursor(&self) {
-        self.list_state.scroll_to_reveal_item(self.cursor_ix());
+        self.view().list_state.scroll_to_reveal_item(self.cursor_ix());
     }
 }

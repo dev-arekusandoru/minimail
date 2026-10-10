@@ -122,6 +122,48 @@ impl Tabs {
         true
     }
 
+    /// Move the tab at `from` to index `to` (where it ends up), keeping the tab that was active
+    /// active. False when either index is out of range. Pin state travels with the tab.
+    pub fn reorder(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.tabs.len() || to >= self.tabs.len() {
+            return false;
+        }
+        let active = self.active().map(|t| t.thread);
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        if let Some(thread) = active
+            && let Some(ix) = self.index_of(thread)
+        {
+            self.active = ix;
+        }
+        true
+    }
+
+    /// Move the tabs into `order` (threads, left to right), keeping the tab that was active
+    /// active and every pin with its tab. False when `order` is not exactly the tabs it holds,
+    /// so an order from somewhere else can never drop or duplicate a tab.
+    pub fn reorder_to(&mut self, order: &[u32]) -> bool {
+        if order.len() != self.tabs.len() || order.iter().any(|thread| self.index_of(*thread).is_none()) {
+            return false;
+        }
+        let active = self.active().map(|t| t.thread);
+        let mut changed = false;
+        for (ix, thread) in order.iter().enumerate() {
+            let from = self.index_of(*thread).expect("checked above");
+            if from != ix {
+                self.reorder(from, ix);
+                changed = true;
+            }
+        }
+        // `reorder` keeps the active tab active; keep the field in step with its thread.
+        if let Some(thread) = active
+            && let Some(ix) = self.index_of(thread)
+        {
+            self.active = ix;
+        }
+        changed
+    }
+
     /// Close tab `ix`. The active tab falls to its right neighbour, else its left one.
     pub fn close(&mut self, ix: usize) -> Option<u32> {
         if ix >= self.tabs.len() {

@@ -20,6 +20,7 @@ use crate::app::row::{self, RowVisual};
 use crate::app::compose::{ComposeEvent, ComposeReply};
 use crate::draft::DraftKind;
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
+use crate::app::email_webview::EmailWebViews;
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
@@ -36,15 +37,24 @@ use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
 use crate::tabs::Tabs;
 use crate::app::ui::{button, icon_button, run};
 use crate::threads::Row;
+use crate::list_tabs::ListTabs;
+
+use self::list_strip::{Pane, Slot};
+use self::list_view::ListView;
 
 mod accessors;
 mod actions;
+mod dock;
+mod drag;
 mod filters;
 mod grouping;
 mod help;
 mod list;
 mod menus;
 mod modals;
+mod list_strip;
+mod list_tabbar;
+pub mod list_view;
 mod mouse;
 pub mod panes;
 mod reader;
@@ -78,10 +88,13 @@ struct Session {
 
 pub struct MailApp {
     pub mailbox: Mailbox,
-    pub triage: Triage,
-    /// The folder the sidebar last showed. Its `in:` (and `account:`) values are the query's
-    /// implicit part: hidden as pills until something else is applied.
-    folder: Location,
+    /// The open views of the mailbox, one tab each, and which one the list is showing.
+    pub list_tabs: ListTabs,
+    /// The state of every open list tab, in `list_tabs`' order (see [`MailApp::view`]): each
+    /// view's cursor, selection and scroll, so no tab can be left holding another's.
+    list_views: Vec<ListView>,
+    /// Which pane the tab keys act on.
+    pane_focus: Pane,
     /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
     /// (see [`MailApp::opened`]).
     pub tabs: Tabs,
@@ -104,9 +117,8 @@ pub struct MailApp {
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
-    /// The sidebar, list and reader layout and its resizable group states.
+    /// The sidebar, list and reader, as one dock.
     pub panes: Panes,
-    _pane_subs: Vec<Subscription>,
     /// Per-thread reader disclosure state (expanded messages, recipients, quoted text, reader mode).
     pub reader: ReaderView,
     /// Messages the next dispatched menu action applies to, instead of the cursor's. Set
@@ -121,11 +133,7 @@ pub struct MailApp {
     pub group_threads: bool,
     /// Threads whose messages are listed under their header.
     expanded: HashSet<u32>,
-    /// Cursor over grouped rows.
-    row_cursor: usize,
-    row_anchor: Option<usize>,
     snooze: Option<Entity<SnoozePicker>>,
-    /// Generic choice dialog (post-send, block, spam, sender-wide confirms).
     dialog: Option<Entity<ChoiceDialog>>,
     /// Folder picker (`f` and the dialogs' `File…`).
     folder_picker: Option<Entity<FolderPicker>>,
@@ -138,20 +146,23 @@ pub struct MailApp {
     pending_rule: Option<Rule>,
     session: Option<Session>,
     session_end: Option<(usize, i64)>,
+    /// The list a session works through: its own cursor, selection and scroll over the queue,
+    /// so a session never touches the user's list tabs. Present exactly while `session` or
+    /// `session_end` is (see [`MailApp::triage_open`]).
+    session_view: Option<ListView>,
+    /// Which list and reader the render in flight draws, when it is not the default
+    /// ([`MailApp::slot`]). Set only while a panel renders, so the user's own tabs and the
+    /// Triage tab can each draw their own state in the same frame.
+    drawing: std::cell::Cell<Option<Slot>>,
     summary: Option<(u32, ThreadSummary)>,
     toast_gen: u64,
     focus_handle: FocusHandle,
-    /// Variable-height message list: rows are measured, so thread headers can size to
-    /// their content.
-    list_state: ListState,
-    /// What `list_state` was last measured against, so a stale row height is re-measured.
-    list_shape: Option<list::ListShape>,
-    /// End of the list's visible range, from its scroll handler.
-    list_visible_end: std::cell::Cell<usize>,
     help_scroll: ScrollHandle,
     /// Scroll state of each tabbed thread's reader, so a tab switch keeps the position and the
     /// opened message can be scrolled into view.
     reader_panes: RefCell<HashMap<u32, reader::ReaderPane>>,
+    /// The native web views that draw HTML message bodies, kept per message while its tab lives.
+    webviews: EmailWebViews,
     /// Open find bars, by the thread of their tab.
     finds: HashMap<u32, reader_find::FindTab>,
     /// Layout of the text holding the current find match, from the frame numbered by the last
@@ -206,7 +217,7 @@ impl MailApp {
         mailbox: Mailbox,
         clock: Rc<dyn Clock>,
         zone: Rc<dyn Zone>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         // Real-time heartbeat wakes snoozed mail and flushes the outbox.
@@ -219,13 +230,14 @@ impl MailApp {
             }
         })
         .detach();
-        let panes = Panes::new(cx);
-        // Rows size themselves from the list pane, so a drag repaints the app as it moves.
-        let pane_subs = panes.states().into_iter().map(|state| cx.observe(state, |_, _, cx| cx.notify())).collect();
+        // A window opens on All Inboxes, and that tab can never be closed.
+        let all_inboxes = mailbox.location_query(&Location::AllInboxes);
+        let panes = Panes::new(&cx.weak_entity(), &all_inboxes, window, cx);
         let mut app = Self {
             mailbox,
-            triage: Triage::new(Query::parse("in:inbox")),
-            folder: Location::AllInboxes,
+            list_tabs: ListTabs::new(all_inboxes.clone()),
+            list_views: vec![ListView::new(all_inboxes, Location::AllInboxes)],
+            pane_focus: Pane::default(),
             tabs: Tabs::default(),
             tab_avatars: true,
             theme_mode: crate::theme::ThemeMode::System,
@@ -240,7 +252,6 @@ impl MailApp {
             preview_lines: crate::preview::DEFAULT_LINES,
             list_w: 0.,
             panes,
-            _pane_subs: pane_subs,
             reader: ReaderView::default(),
             menu_target: None,
             policy: JudgePolicy::default(),
@@ -249,9 +260,7 @@ impl MailApp {
             clock,
             group_threads: false,
             expanded: HashSet::new(),
-            row_cursor: 0,
             _theme_sub: None,
-            row_anchor: None,
             snooze: None,
             dialog: None,
             folder_picker: None,
@@ -262,14 +271,14 @@ impl MailApp {
             pending_rule: None,
             session: None,
             session_end: None,
+            session_view: None,
+            drawing: std::cell::Cell::new(None),
             summary: None,
             toast_gen: 0,
             focus_handle: cx.focus_handle(),
-            list_state: ListState::new(0, ListAlignment::Top, px(200.)),
-            list_shape: None,
-            list_visible_end: std::cell::Cell::new(0),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),
+            webviews: EmailWebViews::new(cx),
             finds: HashMap::new(),
             find_layout: RefCell::new(None),
             find_gen: std::cell::Cell::new(0),

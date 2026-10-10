@@ -1,4 +1,5 @@
-use gpui_kit::TestAppContext;
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, TestAppContext};
 use mail_classifier::model::Mailbox;
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness_with, mailbox, msg};
@@ -20,7 +21,16 @@ pub fn rules_box() -> Mailbox {
 /// The sender-wide keys confirm first, so `1` answers the dialog.
 pub fn repeat_sender_archive(h: &mut Harness<'_>) {
     h.keys("shift-e 1 g a i");
-    h.click(0usize);
+    click_all_inboxes(h);
+}
+
+/// The sidebar's All Inboxes row, by its own stable id.
+fn click_all_inboxes(h: &mut Harness<'_>) {
+    let window = h.window;
+    let cx = &mut *h.cx;
+    cx.update_window(window, |_, window, cx| window.click("sidebar-all-inboxes", cx))
+        .expect("window alive");
+    cx.run_until_parked();
 }
 
 #[gpui_kit::gpui::test]

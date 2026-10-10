@@ -74,11 +74,22 @@ impl MailApp {
 
     pub(super) fn mark(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.target_ids();
+        self.file_ids(&ids, state, window, cx);
+    }
+
+    /// Move `ids` to `state` as one undo step: clear the selection, toast, advance a session.
+    pub(super) fn file_ids(
+        &mut self,
+        ids: &[MessageId],
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if ids.is_empty() {
             return;
         }
-        let n = self.mailbox.set_state(&ids, state);
-        self.triage.clear_selection();
+        let n = self.mailbox.set_state(ids, state);
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {
                 TriageState::Inbox => format!("Moved {n} to inbox · u to undo"),
@@ -103,7 +114,7 @@ impl MailApp {
     ) {
         let (name, email) = (name.to_owned(), email.to_owned());
         let n = self.mailbox.set_state_for_sender(&email, from, state);
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = format!(
                 "Marked {n} from {name} {} · u to undo",
@@ -162,7 +173,7 @@ impl MailApp {
                 None => return,
             },
         };
-        self.show_location(location, cx);
+        self.show_location(location, false, cx);
     }
 
     /// `g s` / `g t` / `g a` / `g d`: the current account's location.
@@ -172,7 +183,7 @@ impl MailApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(account) = self.nav_account() {
-            self.show_location(location(account), cx);
+            self.show_location(location(account), false, cx);
         }
     }
 
@@ -192,9 +203,12 @@ impl MailApp {
         self.go_account_location(Location::Trash, cx);
     }
 
+    /// Close the Triage tab, whether the session is running or only its summary is up. The
+    /// dock removes the tab's group on its next sync; the user's tabs were never touched.
     pub(super) fn end_session(&mut self) {
         self.session = None;
         self.session_end = None;
+        self.session_view = None;
     }
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
@@ -203,8 +217,8 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        self.folder = Location::AllInboxes;
-        self.triage.set_query(query);
+        // The session's list is its own: the user's tabs, cursors and reader stay as they are.
+        self.session_view = Some(ListView::new(query, Location::AllInboxes));
         self.session_end = None;
         self.session = Some(Session {
             ids,

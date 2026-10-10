@@ -128,7 +128,7 @@ impl MailApp {
     /// Actions for the selected messages: only what makes sense for several at once.
     fn selection_items(&self) -> Vec<MenuItem> {
         let states: Vec<TriageState> = self
-            .triage
+            .triage()
             .selected()
             .iter()
             .filter_map(|id| self.mailbox.get(*id))
@@ -151,14 +151,14 @@ impl MailApp {
 
     /// Toggle `ids` in the selection: all selected already → deselect them, else select them.
     pub(super) fn toggle_select_ids(&mut self, ids: &[MessageId]) {
-        let mut selected = self.triage.selected();
+        let mut selected = self.triage().selected();
         if ids.iter().all(|id| selected.contains(id)) {
             selected.retain(|id| !ids.contains(id));
         } else {
             let fresh: Vec<MessageId> = ids.iter().copied().filter(|id| !selected.contains(id)).collect();
             selected.extend(fresh);
         }
-        self.triage.set_selection(selected);
+        self.triage_mut().set_selection(selected);
     }
 }
 

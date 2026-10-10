@@ -17,7 +17,7 @@ impl MailApp {
         } else if self.new_senders_open() {
             HintMode::NewSenders
         } else {
-            match self.triage.selected().len() {
+            match self.triage().selected().len() {
                 0 if self.opened().is_some() => HintMode::Reader,
                 0 => HintMode::List,
                 n => HintMode::Selection(n),
@@ -108,7 +108,7 @@ impl MailApp {
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
-            selected: self.triage.is_selected(id),
+            selected: self.triage().is_selected(id),
             partial: false,
             unread,
             urgent,
@@ -166,7 +166,11 @@ impl MailApp {
         } else {
             None
         };
-        row::frame(div().id(("row", ix_id)).h(px(self.message_row_h())), visual, t)
+        let row_ids = [msg.id];
+        let label = (SharedString::from(sender.clone()), SharedString::from(msg.subject.clone()));
+        let container = div().id(("row", ix_id)).h(px(self.message_row_h()));
+        let container = self.draggable(container, &row_ids, self.thread_of(msg.id), label);
+        row::frame(container, visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
                 div()

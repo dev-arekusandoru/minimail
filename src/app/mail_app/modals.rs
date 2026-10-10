@@ -198,7 +198,7 @@ impl MailApp {
             let now = self.local_now();
             if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
                 self.mailbox.snooze(&ids, until, now.at());
-                self.triage.clear_selection();
+                self.triage_mut().clear_selection();
                 self.session_advance();
             }
             cx.notify();
@@ -227,7 +227,7 @@ impl MailApp {
                 let ids = &ids;
                 let local = this.local_now();
                 let n = this.mailbox.snooze(ids, until, local.at());
-                this.triage.clear_selection();
+                this.triage_mut().clear_selection();
                 this.show_toast(
                     format!("Snoozed {n} until {} · u to undo", format_when(until, &local)),
                     window,
@@ -623,11 +623,13 @@ impl MailApp {
         } else if let Some(s) = self.session.take() {
             if s.handled > 0 {
                 self.session_end = Some((s.handled, self.now() - s.started));
+            } else {
+                self.session_view = None;
             }
         } else if self.session_end.is_some() {
             self.end_session();
         } else {
-            self.triage.clear_selection();
+            self.triage_mut().clear_selection();
         }
         cx.notify();
     }
@@ -891,7 +893,7 @@ impl MailApp {
                 }
             }),
         };
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         let text = match action {
             FileAction::BlockSender {
                 unsubscribe: true, ..
@@ -1077,7 +1079,7 @@ impl MailApp {
         cx: &mut Context<Self>,
     ) {
         let n = self.mailbox.mark_spam(ids, block, self.now());
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         let text = if block {
             format!("Marked {n} as spam and blocked the sender · u to undo")
         } else {

@@ -9,7 +9,7 @@ use crate::theme::ThemeColor;
 use crate::tz::{MONTHS, Now, WEEKDAYS};
 use gpui_kit::{
     assets::IconName,
-    component::{button::{Button, ButtonVariants as _}, label::Label, scroll::ScrollableElement as _, separator::Separator, status_bar::StatusBar, Sizable as _},
+    component::{button::{Button, ButtonVariants as _}, label::Label, scroll::Scrollbar, separator::Separator, status_bar::StatusBar, Sizable as _},
     prelude::FluentBuilder as _,
     *,
 };
@@ -228,20 +228,35 @@ impl Render for HelpPanel {
             )
             .child(div().flex_none().child(Separator::horizontal()))
             .child(
+                // The scrollbar is a sibling of the scrolled area: as a child it would ride the
+                // content's scroll offset and its thumb would read as stuck at the top.
                 div()
-                    .id("help-body")
+                    .relative()
                     .flex()
                     .flex_col()
-                    .gap_3()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .vertical_scrollbar(&self.scroll)
-                    .child(div().flex().gap_4().children(columns))
-                    .child(div().flex_none().child(Separator::horizontal()))
-                    .child(div().text_sm().text_color(t.primary).child("Icon legend"))
-                    .child(crate::app::icons::legend_view(t)),
+                    .child(
+                        div()
+                            .id("help-body")
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .child(div().flex().gap_4().children(columns))
+                            .child(div().flex_none().child(Separator::horizontal()))
+                            .child(div().text_sm().text_color(t.primary).child("Icon legend"))
+                            .child(crate::app::icons::legend_view(t)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .child(Scrollbar::vertical(&self.scroll).id("help-scrollbar").viewport_from_layout()),
+                    ),
             )
     }
 }

@@ -3,7 +3,7 @@ use mail_classifier::tz::{FixedZone, Now, Utc};
 use std::rc::Rc;
 use mail_classifier::reading::{
     Recipient, ReaderView, format_size, html_to_text, initials, parse_recipients, reader_text,
-    received_label, recipient_line, safe_html, split_quoted, thread_others, thread_position,
+    received_label, recipient_line, blocked_images, split_quoted, thread_others, thread_position,
 };
 
 fn msg(id: u32, thread_id: u32, received: &str) -> Message {
@@ -167,34 +167,24 @@ fn split_quoted_without_quote_returns_whole_body() {
 // ---------------------------------------------------------------------- HTML
 
 #[test]
-fn safe_html_blocks_remote_images_and_keeps_data_images() {
+fn remote_images_are_counted_and_data_images_are_not() {
     let html = r#"<p>Hi</p><img src="https://t.example.com/pixel.gif"><img src="data:image/png;base64,AAAA" alt="kept"><img src="cid:logo" alt="Logo &amp; Co">"#;
-    let safe = safe_html(html);
-    assert_eq!(safe.blocked_images, 2);
-    assert_eq!(
-        safe.html,
-        r#"<p>Hi</p><img src="data:image/png;base64,AAAA" alt="kept">Logo &amp; Co"#
-    );
+    assert_eq!(blocked_images(html), 2);
 }
 
 #[test]
-fn safe_html_tolerates_broken_markup() {
+fn image_counting_tolerates_broken_markup() {
     // Uppercase tag, unquoted src, single quotes, slash separators, no src.
     let html = "<IMG SRC=http://a.example/1.png ALT=one>\
                 <img src='http://a.example/2.png' alt='<b>two</b>'/>\
                 <img/src=http://a.example/3.png>\
                 <Img alt=\"nosrc\">\
                 <IMG SRC=DATA:image/gif;base64,R0lG>";
-    let safe = safe_html(html);
-    assert_eq!(safe.blocked_images, 4);
-    assert_eq!(
-        safe.html,
-        "one&lt;b&gt;two&lt;/b&gt;nosrc<IMG SRC=DATA:image/gif;base64,R0lG>"
-    );
+    assert_eq!(blocked_images(html), 4);
 }
 
 #[test]
-fn safe_html_ignores_img_text_that_is_not_an_element() {
+fn img_text_that_is_not_an_element_is_not_counted() {
     let html = concat!(
         r#"<a title="<img src=http://evil.example/x.png>" href=#>link</a>"#,
         "<!-- <img src=http://evil.example/c.png> -->",
@@ -202,33 +192,22 @@ fn safe_html_ignores_img_text_that_is_not_an_element() {
         "<style>/* <img src=x> */</style>",
         "<p>1 < 2 and 3 > 2</p>",
     );
-    let safe = safe_html(html);
-    assert_eq!(safe.blocked_images, 0);
-    assert_eq!(safe.html, html);
+    assert_eq!(blocked_images(html), 0);
 }
 
 #[test]
-fn safe_html_blocks_images_hidden_behind_unclosed_markup() {
-    // Unclosed quote: a browser would swallow the rest, so the tag is dropped.
-    let safe = safe_html(r#"<p>Hello</p><img src="http://a.example/x.png alt=broken <b>tail</b>"#);
-    assert_eq!(safe.blocked_images, 1);
-    assert_eq!(safe.html, "<p>Hello</p>");
-
-    // Unclosed <p> and <b> around an image: the image is still found, and the
-    // surrounding markup is not rewritten.
-    let safe = safe_html("<p>one<b>two<img src=http://a.example/y.png alt=Y>three");
-    assert_eq!(safe.blocked_images, 1);
-    assert_eq!(safe.html, "<p>one<b>twoYthree");
-
+fn images_behind_unclosed_markup_are_counted() {
+    // Unclosed quote: a browser would swallow the rest, so the tag still counts.
+    assert_eq!(blocked_images(r#"<p>Hello</p><img src="http://a.example/x.png alt=broken <b>tail</b>"#), 1);
+    // Unclosed <p> and <b> around an image: the image is still found.
+    assert_eq!(blocked_images("<p>one<b>two<img src=http://a.example/y.png alt=Y>three"), 1);
     // Entity-obfuscated data: prefix is decoded before the check.
-    let safe = safe_html(r#"<img src="&#100;ata:image/png;base64,AA">"#);
-    assert_eq!(safe.blocked_images, 0);
+    assert_eq!(blocked_images(r#"<img src="&#100;ata:image/png;base64,AA">"#), 0);
 }
 
 #[test]
-fn safe_html_without_images_is_identity() {
-    let html = "<table><tr><td>Total</td><td>$5</td></tr></table>é<br>";
-    assert_eq!(safe_html(html), mail_classifier::reading::SafeHtml { html: html.into(), blocked_images: 0 });
+fn a_document_without_images_has_nothing_to_block() {
+    assert_eq!(blocked_images("<table><tr><td>Total</td><td>$5</td></tr></table>é<br>"), 0);
 }
 
 #[test]

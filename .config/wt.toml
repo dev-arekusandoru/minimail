@@ -1,0 +1,5 @@
+[[post-create]]
+cp-envs = "cp ~/Programming/mail-classifier/.envrc ./"
+
+[[post-create]]
+env = "direnv allow"

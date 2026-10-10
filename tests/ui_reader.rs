@@ -188,8 +188,55 @@ fn v_toggles_reader_mode_only_for_an_html_message(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.reader_plain(1)), "v switches back");
 }
 
-/// The `Block remote images` setting changes what the reader renders: turning it on strips the
-/// remote image and reports the count, turning it off leaves the document alone.
+/// An HTML message renders into one web view per tab: it loads once, switching tabs or Reader mode
+/// never reloads it, and closing the tab frees it so the next open loads afresh.
+#[gpui_kit::gpui::test]
+fn an_html_message_loads_once_per_tab_and_again_after_the_tab_closes(cx: &mut TestAppContext) {
+    let page = |id: u32, subject: &str, body: &str| {
+        with_fields(
+            msg(id, id, "news@example.com", subject, id, "Inbox"),
+            serde_json::json!({ "html": body }),
+        )
+    };
+    let mut h = harness_with(
+        cx,
+        mailbox_of(&[page(1, "Digest", "<h1>Digest</h1>"), page(2, "Offer", "<p>Offer</p>")]),
+    );
+    let loads = |h: &mut Harness<'_>| h.read(|a| a.webview_loads());
+
+    // Newest first: message 2 is on top. `enter` twice opens and pins its tab.
+    h.goto(2);
+    h.keys("enter enter");
+    assert!(h.exists(("reader-html", 2usize)), "the HTML body is a web view element");
+    let first = loads(&mut h);
+    assert_eq!(first.len(), 1);
+    assert!(first[0].document.contains("<p>Offer</p>"), "the message is loaded as received");
+
+    h.goto(1);
+    h.keys("enter enter");
+    assert_eq!(loads(&mut h).len(), 2, "each tab has its own document");
+
+    h.keys("ctrl-tab");
+    assert_eq!(h.opened(), 2);
+    h.keys("ctrl-tab");
+    assert_eq!(h.opened(), 1);
+    assert_eq!(loads(&mut h).len(), 2, "switching tabs reloads nothing");
+
+    h.keys("v");
+    assert!(!h.exists(("reader-html", 1usize)), "Reader mode shows text instead of the web view");
+    h.keys("v");
+    assert!(h.exists(("reader-html", 1usize)));
+    assert_eq!(loads(&mut h).len(), 2, "leaving Reader mode reuses the loaded view");
+
+    h.keys("cmd-w");
+    h.goto(1);
+    h.keys("enter");
+    assert_eq!(loads(&mut h).len(), 3, "a closed tab's view is gone, so reopening loads again");
+}
+
+/// The `Block remote images` setting changes what the reader renders: turning it on blocks the
+/// remote image (the document reloads under the block policy) and reports the count, turning it
+/// off reloads without it.
 #[gpui_kit::gpui::test]
 fn the_remote_image_setting_switches_the_reader_policy(cx: &mut TestAppContext) {
     // A loopback pixel: with blocking off the engine's SSRF policy refuses it without a network
@@ -202,10 +249,10 @@ fn the_remote_image_setting_switches_the_reader_policy(cx: &mut TestAppContext) 
     );
     let mut h = harness_with(cx, mailbox_of(&[html]));
 
-    // Block remote images is the last row of the Inbox page (sidebar index 2).
+    // Block remote images is the Reader page's only row (sidebar index 3).
     let set_blocking = |h: &mut Harness<'_>, on: bool| {
-        h.settings_open_page(2);
-        h.settings_click_in(0, 3, "check");
+        h.settings_open_page(3);
+        h.settings_click_in(0, 0, "check");
         assert_eq!(h.read(|a| a.block_remote_images), on, "the switch sets the policy");
         h.settings_keys("escape");
         assert!(!h.read(|a| a.settings_open()));
@@ -215,10 +262,14 @@ fn the_remote_image_setting_switches_the_reader_policy(cx: &mut TestAppContext) 
     assert!(!h.exists("reader-images-blocked"), "images load by default, nothing is blocked");
 
     set_blocking(&mut h, true);
-    assert!(h.exists("reader-images-blocked"), "blocking strips the image and reports the count");
+    assert!(h.exists("reader-images-blocked"), "blocking reports the blocked image count");
+    let loaded = h.read(|a| a.webview_loads());
+    assert_eq!(loaded.len(), 2, "the policy change reloads the document once");
+    assert!(loaded[1].style.block && !loaded[0].style.block);
 
     set_blocking(&mut h, false);
     assert!(!h.exists("reader-images-blocked"), "unblocking stops reporting blocked images");
+    assert_eq!(h.read(|a| a.webview_loads()).len(), 3);
 }
 
 #[gpui_kit::gpui::test]

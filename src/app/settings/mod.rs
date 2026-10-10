@@ -696,6 +696,7 @@ impl SettingsPanel {
             self.accounts_page(weak),
             self.appearance_page(weak, cx),
             self.inbox_page(weak),
+            self.reader_page(weak),
             self.classifier_page(weak),
             self.blocked_page(weak),
         ]

@@ -1,16 +1,19 @@
-//! Pane geometry: the sidebar, the inbox list and the reader, laid out with gpui-kit's
-//! resizable panel groups.
+//! Pane layout: the sidebar, the inbox list and the reader.
 //!
-//! The sidebar sits in an outer horizontal group; the list and the reader share a nested
-//! group whose axis follows the [`Orientation`] — `SideBySide` puts the list left of the
-//! reader, `Stacked` puts it above. Every group owns a [`ResizableState`], and each
-//! orientation has its own, so each remembers its list size. Minimums are per-panel size
-//! ranges; the flex layout copes when a window is too small for all of them.
+//! The dock draws the centre — the list and the reader as two tab groups — and the
+//! sidebar is a resizable panel of ours beside it, in a group of its own. Keeping it out
+//! of the dock is what lets a tab group be zoomed over the whole centre later: the
+//! dock's zoom draws a group as the entire dock body, so a sidebar living in its left
+//! dock could never stay on screen through one.
+//!
+//! What lives here is what the dock cannot hold for us: whether the sidebar is on
+//! screen, how wide it is, and the size each orientation remembers for the list.
 use gpui_kit::component::ActiveTheme as _;
+use super::dock::{TabSets, Zoom};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel};
 
+use super::dock::Dock;
 use super::*;
-
-use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 
 /// Smallest list pane that still shows a sender, a subject and an icon cluster.
 pub const MIN_LIST_W: f32 = 320.;
@@ -22,7 +25,7 @@ pub const MIN_LIST_H: f32 = 180.;
 pub const MIN_READER_H: f32 = 220.;
 /// How much a grow / shrink action moves the divider.
 pub const STEP: f32 = 40.;
-/// Width of the double-click target centred on each divider.
+/// Width of the double-click target centred on the sidebar's edge.
 pub const DIVIDER_HIT: f32 = 7.;
 
 /// The sidebar's default width.
@@ -74,84 +77,88 @@ impl Orientation {
         }
     }
 
-    /// The size the list starts from, for `available` room along the stacking axis: the
-    /// classic 42% list, and 45% of the height when the panes are stacked.
-    fn default_list(self, available: f32) -> f32 {
+    /// Index of this orientation in the dock's remembered-size pair.
+    pub(crate) fn ix(self) -> usize {
         match self {
-            Self::SideBySide => crate::app::row::list_width(available),
-            Self::Stacked => available * 0.45,
-        }
-    }
-
-    /// `(list, reader)` minimums along the stacking axis.
-    fn minimums(self) -> (f32, f32) {
-        match self {
-            Self::SideBySide => (MIN_LIST_W, MIN_READER_W),
-            Self::Stacked => (MIN_LIST_H, MIN_READER_H),
+            Self::SideBySide => 0,
+            Self::Stacked => 1,
         }
     }
 }
 
-/// The pane layout: orientation, sidebar visibility and one [`ResizableState`] per group.
-/// Hiding the sidebar keeps its state, so the width comes back when it is shown again.
+/// The pane layout: the dock that draws the centre, the sidebar beside it in its own
+/// resizable group, and which way the centre splits.
 pub struct Panes {
-    orientation: Orientation,
+    dock: Dock,
+    /// `Sidebar | centre`. The one place the sidebar's width lives, shared by both
+    /// orientations.
+    sidebar: Entity<ResizableState>,
+    /// Whether the sidebar is on screen. Collapsing renders nothing at all, divider
+    /// band included; the group's state is untouched, so the width comes back with it.
     sidebar_visible: bool,
-    /// Sidebar | content.
-    main: Entity<ResizableState>,
-    /// List | reader when side by side.
-    side_by_side: Entity<ResizableState>,
-    /// List / reader when stacked.
-    stacked: Entity<ResizableState>,
+    /// Repaints the app when the sidebar's group moves: its width is read out of that
+    /// state, and the rows beside it size from it.
+    _subs: Vec<Subscription>,
 }
 
 impl Panes {
-    pub fn new(cx: &mut App) -> Self {
-        Self {
-            orientation: Orientation::default(),
-            sidebar_visible: true,
-            main: cx.new(|_| ResizableState::default()),
-            side_by_side: cx.new(|_| ResizableState::default()),
-            stacked: cx.new(|_| ResizableState::default()),
-        }
+    pub(super) fn new(
+        app: &WeakEntity<MailApp>,
+        initial: &Query,
+        window: &mut Window,
+        cx: &mut Context<MailApp>,
+    ) -> Self {
+        let sidebar = cx.new(|_| ResizableState::default());
+        let sub = cx.observe(&sidebar, |_, _, cx| cx.notify());
+        Self { dock: Dock::new(app, initial, window, cx), sidebar, sidebar_visible: true, _subs: vec![sub] }
     }
 
     pub fn orientation(&self) -> Orientation {
-        self.orientation
+        self.dock.orientation()
     }
 
+    /// Which way the centre splits from now on; the next sync re-lays it.
     pub(super) fn set_orientation(&mut self, orientation: Orientation) {
-        self.orientation = orientation;
+        self.dock.set_orientation(orientation);
     }
 
     pub fn sidebar_visible(&self) -> bool {
         self.sidebar_visible
     }
 
-    /// The state of the list / reader group in the current orientation.
-    fn list_state(&self) -> &Entity<ResizableState> {
-        match self.orientation {
-            Orientation::SideBySide => &self.side_by_side,
-            Orientation::Stacked => &self.stacked,
-        }
+    /// The sidebar group, for the one place that draws it.
+    fn sidebar_state(&self) -> &Entity<ResizableState> {
+        &self.sidebar
     }
 
-    /// Every group state, so the app can repaint when one of them moves.
-    pub fn states(&self) -> [&Entity<ResizableState>; 3] {
-        [&self.main, &self.side_by_side, &self.stacked]
-    }
-
-    /// The list pane as last laid out, along the stacking axis.
-    fn measured_list(&self, cx: &App) -> Option<f32> {
-        let state = self.list_state().read(cx);
-        (state.container_size() > px(0.)).then(|| state.sizes().first().map_or(0., |s| f32::from(*s)))
-    }
-
-    /// The sidebar as last laid out (or as it was when hidden).
+    /// The sidebar as last laid out, or as it was when hidden: the group keeps its own
+    /// state, so a collapsed sidebar still knows the width it will come back with.
     fn measured_sidebar(&self, cx: &App) -> f32 {
-        let state = self.main.read(cx);
-        state.sizes().first().filter(|_| state.container_size() > px(0.)).map_or(SIDEBAR_W, |s| f32::from(*s))
+        let state = self.sidebar.read(cx);
+        state
+            .sizes()
+            .first()
+            .filter(|_| state.container_size() > px(0.))
+            .map_or(SIDEBAR_W, |size| f32::from(*size))
     }
+
+    /// The width the sidebar takes off the centre: nothing at all while it is collapsed.
+    fn sidebar_room(&self, cx: &App) -> f32 {
+        if self.sidebar_visible { self.measured_sidebar(cx) } else { 0. }
+    }
+
+    pub(super) fn dock_mut(&mut self) -> &mut Dock {
+        &mut self.dock
+    }
+
+    pub(super) fn dock_ref(&self) -> &Dock {
+        &self.dock
+    }
+}
+
+/// The thread of the active tab, which is the one reader panel to display.
+fn active_thread(app: &MailApp) -> Option<u32> {
+    app.tabs.active().map(|tab| tab.thread)
 }
 
 impl MailApp {
@@ -162,7 +169,7 @@ impl MailApp {
 
     /// Size of the list pane as last laid out, in pixels along the stacking axis.
     pub fn list_pane_size(&self, cx: &App) -> f32 {
-        self.panes.measured_list(cx).unwrap_or(0.)
+        self.panes.dock_ref().list_pane_size(cx)
     }
 
     /// Whether the sidebar is shown.
@@ -176,13 +183,8 @@ impl MailApp {
     }
 
     /// Width the list rows get: the list pane side by side, the whole pane region when stacked.
-    pub(super) fn list_width(&self, viewport_w: f32, cx: &App) -> f32 {
-        let sidebar = if self.panes.sidebar_visible { self.panes.measured_sidebar(cx) } else { 0. };
-        let available = available_width(viewport_w, sidebar);
-        match self.panes.orientation {
-            Orientation::Stacked => available,
-            Orientation::SideBySide => self.panes.measured_list(cx).unwrap_or_else(|| Orientation::SideBySide.default_list(available)),
-        }
+    pub(super) fn list_width(&self) -> f32 {
+        self.panes.dock_ref().list_width()
     }
 
     pub(super) fn grow_list_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -193,137 +195,175 @@ impl MailApp {
         self.nudge_list_pane(-STEP, window, cx);
     }
 
-    /// Move the divider along the stacking axis; the panel ranges keep both panes usable.
+    /// Move the divider along the stacking axis. The dock has no centre divider of its own
+    /// to move, so this re-lays the centre around the new size; the range that keeps both
+    /// panes usable is applied here, since the dock's slots carry no minimum.
     pub(super) fn nudge_list_pane(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(size) = self.panes.measured_list(cx) else { return };
-        let state = self.panes.list_state().clone();
-        state.update(cx, |state, cx| state.resize_panel(0, px(size + delta), window, cx));
+        let size = self.list_pane_size(cx);
+        if size <= 0. {
+            return;
+        }
+        let tabs = self.tab_sets();
+        let sidebar = self.panes.sidebar_room(cx);
+        self.panes.dock_mut().place_list(size + delta, sidebar, &tabs, window, cx);
     }
 
     /// Back to the default sizes for both orientations.
     pub(super) fn reset_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for (orientation, state) in
-            [(Orientation::SideBySide, &self.panes.side_by_side), (Orientation::Stacked, &self.panes.stacked)]
-        {
-            let container = f32::from(state.read(cx).container_size());
-            if container > 0. {
-                let size = orientation.default_list(container);
-                state.clone().update(cx, |state, cx| state.resize_panel(0, px(size), window, cx));
-            }
-        }
+        let tabs = self.tab_sets();
+        let sidebar = self.panes.sidebar_room(cx);
+        self.panes.dock_mut().forget_sizes(sidebar, &tabs, window, cx);
         self.show_toast("Pane sizes reset".into(), window, cx);
     }
 
-    /// Back to the default sidebar width.
+    /// Back to the default sidebar width. The panel's own size range does the clamping.
     pub(super) fn reset_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let main = self.panes.main.clone();
-        main.update(cx, |state, cx| state.resize_panel(0, px(SIDEBAR_W), window, cx));
+        let sidebar = self.panes.sidebar_state().clone();
+        sidebar.update(cx, |state, cx| state.resize_panel(0, px(SIDEBAR_W), window, cx));
     }
 
     /// Stack the panes the other way round: list left, or list on top.
     pub(super) fn toggle_pane_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let next = self.panes.orientation.toggled();
+        let next = self.panes.orientation().toggled();
         self.set_pane_layout(next, window, cx);
     }
 
     pub(super) fn set_pane_layout(&mut self, orientation: Orientation, window: &mut Window, cx: &mut Context<Self>) {
-        self.panes.orientation = orientation;
+        if orientation == self.panes.orientation() {
+            return;
+        }
+        self.panes.dock_mut().set_orientation(orientation);
+        let tabs = self.tab_sets();
+        self.panes.dock_mut().rebuild_now(&tabs, window, cx);
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
-    /// Hide or show the sidebar. Its state outlives the panel, so the width is kept.
-    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. While the
+    /// Triage tab exists it is the group in focus — a session takes the keyboard — otherwise
+    /// it is the list or the reader, whichever the tab keys are acting on.
+    pub(super) fn toggle_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.modal_open() {
+            return;
+        }
+        let group = match (self.triage_open(), self.focused_pane()) {
+            (true, _) => Zoom::Triage,
+            (false, Pane::List) => Zoom::List,
+            (false, Pane::Reader) => Zoom::Reader,
+        };
+        self.panes.dock_mut().toggle_zoom(group, window, cx);
+        cx.notify();
+    }
+
+    /// The group filling the dock — `"list"`, `"reader"` or `"triage"` — if one does.
+    pub fn zoomed_group(&self, cx: &App) -> Option<&'static str> {
+        self.panes.dock_ref().zoomed(cx).map(Zoom::name)
+    }
+
+    /// How many tab groups the dock's centre holds.
+    pub fn dock_groups(&self, cx: &App) -> usize {
+        self.panes.dock_ref().group_count(cx)
+    }
+
+    /// Hide or show the sidebar. Collapsed draws nothing at all, divider band included;
+    /// the group's state is left alone, so the width comes back with it.
+    pub(super) fn toggle_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.panes.sidebar_visible = !self.panes.sidebar_visible;
         cx.notify();
     }
 
-    /// The invisible band over a divider that turns a double-click into a reset. The resize
-    /// handle underneath keeps the drag, the cursor and the highlight.
-    fn divider_target(
-        &self,
-        id: &'static str,
-        cx: &Context<Self>,
-        place: impl FnOnce(Div) -> Div,
-        reset: fn(&mut Self, &mut Window, &mut Context<Self>),
-    ) -> impl IntoElement {
-        place(div().absolute()).id(id).test_support().on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-            if ev.click_count() == 2 {
-                reset(this, window, cx);
+    /// Keep the dock's panel set in step with the app's: both strips' tabs, the tab each
+    /// one shows, and the orientation. A tab dragged in a strip is a dock edit the model
+    /// never saw, so the order it was left in goes back into `Tabs` and `ListTabs`.
+    pub(super) fn sync_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tabs = self.tab_sets();
+        let dragged = self.panes.dock_mut().sync(&tabs, window, cx);
+        if let Some(dragged) = dragged.readers {
+            self.tabs.reorder_to(&dragged.order);
+            if let Some(ix) = dragged.active.and_then(|thread| self.tabs.index_of(thread)) {
+                self.tabs.activate(ix);
+                self.focus_pane(Pane::Reader);
             }
-        }))
+        }
+        if let Some(dragged) = dragged.lists {
+            self.adopt_dragged_order(&dragged.order);
+            if let Some(ix) = dragged.active.and_then(|query| self.list_tabs.index_of(&query)) {
+                self.list_tabs.activate(ix);
+                self.follow_active_view();
+                self.focus_pane(Pane::List);
+            }
+        }
     }
 
-    /// The three panes: sidebar | list | reader in nested resizable groups, with the
-    /// double-click targets over their dividers. `list` is `None` during a triage session,
-    /// which leaves the reader alone.
-    pub(super) fn render_panes(
-        &self,
-        list: Option<AnyElement>,
-        reader: AnyElement,
-        window: &Window,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let t = cx.theme();
-        let orientation = self.panes.orientation;
-        let stacked = orientation == Orientation::Stacked;
-        let viewport = window.viewport_size();
-        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
-        let shown = self.panes.sidebar_visible;
+    /// What the dock should be holding: both strips' tabs and the one each is showing.
+    fn tab_sets(&self) -> TabSets {
+        TabSets {
+            readers: self.tabs.tabs().iter().map(|tab| tab.thread).collect(),
+            reader: active_thread(self),
+            triage: self.triage_open() && self.session_view.is_some(),
+            views: self.list_tabs.tabs().iter().map(|tab| tab.query.clone()).collect(),
+            list: self.list_tabs.active_index(),
+        }
+    }
+
+    /// The band over the sidebar's edge that turns a double-click back to its default
+    /// width. The resizable handle underneath keeps the drag, the cursor and the
+    /// highlight.
+    fn sidebar_divider_target(&self, sidebar_w: f32, cx: &Context<Self>) -> impl IntoElement {
+        let half = DIVIDER_HIT / 2.;
+        div()
+            .absolute()
+            .id("sidebar-divider")
+            .test_support()
+            .top_0()
+            .bottom_0()
+            .left(px(sidebar_w - half))
+            .w(px(DIVIDER_HIT))
+            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                if ev.click_count() == 2 {
+                    this.reset_sidebar(window, cx);
+                }
+            }))
+    }
+
+    /// The panes, in the slot they used to be laid out by hand: under the titlebar and
+    /// above the hint bar. The sidebar is a resizable panel beside the dock, and while it
+    /// is collapsed the dock gets the whole width and nothing at all is drawn for it —
+    /// divider band included.
+    pub(super) fn render_panes(&self, cx: &Context<Self>) -> AnyElement {
+        let shown = self.panes.sidebar_visible();
         let sidebar_w = self.panes.measured_sidebar(cx);
-        let reader = div().size_full().min_w_0().min_h_0().flex().flex_col().child(reader);
-
-        let content = match list {
-            None => reader.into_any_element(),
-            Some(list) => {
-                let available = if stacked { available_height(vh) } else { available_width(vw, if shown { sidebar_w } else { 0. }) };
-                let (min_list, min_reader) = orientation.minimums();
-                let group = if stacked { v_resizable("panes-stacked") } else { h_resizable("panes-side-by-side") };
-                group
-                    .with_state(self.panes.list_state())
-                    .child(resizable_panel().size(px(orientation.default_list(available))).size_range(px(min_list)..Pixels::MAX).child(list))
-                    .child(resizable_panel().size_range(px(min_reader)..Pixels::MAX).child(reader))
-                    .into_any_element()
-            }
-        };
-
-        let panes = if shown {
-            h_resizable("mail-main")
-                .with_state(&self.panes.main)
+        let dock = self.panes.dock_ref().view();
+        let body = if shown {
+            let bg = cx.theme().sidebar;
+            h_resizable("mail-sidebar")
+                .with_state(self.panes.sidebar_state())
                 .child(
                     resizable_panel()
                         .size(px(SIDEBAR_W))
                         .size_range(px(MIN_SIDEBAR_W)..px(MAX_SIDEBAR_W))
                         .flex_none()
-                        .bg(t.sidebar)
-                        .child(div().size_full().flex().flex_col().child(self.render_sidebar(cx))),
+                        .child(
+                            div()
+                                .size_full()
+                                .min_w_0()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .bg(bg)
+                                .child(self.render_sidebar(cx)),
+                        ),
                 )
-                .child(resizable_panel().size_range(px(MIN_LIST_W + MIN_READER_W)..Pixels::MAX).child(content))
+                .child(resizable_panel().size_range(px(MIN_LIST_W)..Pixels::MAX).child(dock))
                 .into_any_element()
         } else {
-            content
+            dock
         };
-
-        // Double-click targets sit over the dividers, at the boundaries the groups last laid out.
-        let body_w = f32::from(self.panes.main.read(cx).container_size());
-        let mut targets = Vec::new();
-        if body_w > 0. {
-            let half = DIVIDER_HIT / 2.;
-            if shown {
-                let place = |d: Div| d.top_0().bottom_0().left(px(sidebar_w - half)).w(px(DIVIDER_HIT));
-                targets.push(self.divider_target("sidebar-divider", cx, place, Self::reset_sidebar).into_any_element());
-            }
-            if let (Some(list), false) = (self.panes.measured_list(cx), self.in_session() || self.session_end.is_some()) {
-                let origin = if shown { sidebar_w } else { 0. };
-                let place = move |d: Div| {
-                    if stacked {
-                        d.left(px(origin)).right_0().top(px(list - half)).h(px(DIVIDER_HIT))
-                    } else {
-                        d.top_0().bottom_0().left(px(origin + list - half)).w(px(DIVIDER_HIT))
-                    }
-                };
-                targets.push(self.divider_target("pane-divider", cx, place, Self::reset_panes).into_any_element());
-            }
-        }
-        div().relative().flex_1().min_h_0().child(panes).children(targets).into_any_element()
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .child(body)
+            .when(shown, |d| d.child(self.sidebar_divider_target(sidebar_w, cx)))
+            .into_any_element()
     }
 }

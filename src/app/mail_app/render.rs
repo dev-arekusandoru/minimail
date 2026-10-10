@@ -10,11 +10,11 @@ impl Focusable for MailApp {
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.reconcile_tabs();
+        self.sync_webviews(cx);
         self.sync_settings_blocked(cx);
         self.place_find_match(window, cx);
         self.refresh_find();
         let hint = self.hint_context();
-        let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
             // The opened message and the next couple of rows get their bodies.
@@ -25,14 +25,9 @@ impl Render for MailApp {
             self.show_toast(text, window, cx);
         }
         self.settle_fetch_toast(window, cx);
-        // Rows size themselves from the real pane: the list pane side by side, the whole
-        // region when the panes are stacked.
-        self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);
-        let list = (!in_session).then(|| self.render_list(cx));
-        let reader = match &self.compose {
-            Some(compose) => div().flex_1().min_w_0().min_h_0().child(compose.clone()).into_any_element(),
-            None => self.render_reader(cx),
-        };
+        // The dock's panel set follows the tab model, and the reader it shows follows the
+        // active tab; the list is the panel that sizes the rows.
+        self.sync_dock(window, cx);
         if self.find_placement_pending() {
             window.request_animation_frame();
         }
@@ -48,8 +43,17 @@ impl Render for MailApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    // A click that reaches GPUI is outside every email view: drop their selections.
+                    this.webviews.clear_selections();
                     // Clicking never steals key focus from the list (or a modal's input).
                     if !this.modal_open() {
+                        // The dock's groups focus their active panel on mouse-down before
+                        // this runs, so the focused handle says which pane was clicked —
+                        // the tab keys follow the pane the user was last in, wherever in
+                        // it they clicked.
+                        if let Some(pane) = this.panes.dock_ref().focused_pane(window, cx) {
+                            this.focus_pane(pane);
+                        }
                         window.focus(&this.focus_handle, cx);
                     }
                 }),
@@ -123,6 +127,13 @@ impl Render for MailApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Undo, window, cx| this.undo(window, cx)))
+            // `cmd-c` is the kit's `Copy`, bound at its root. GPUI text copies as before; an email
+            // view's selection lives in WebKit, so ask it.
+            .on_action(cx.listener(|this, _: &gpui_kit::base::input::Copy, window, cx| {
+                if !gpui_kit::base::TextSelection::selected_text(window, cx).is_empty() || !this.webviews.copy_selection() {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 if this.palette.is_some() {
                     this.close_modals(window, cx);
@@ -146,9 +157,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &Forward, window, cx| {
                 this.open_compose_kind(crate::draft::DraftKind::Forward, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)))
-            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
-            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_focused_tab(window, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_focused_tab(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_focused_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &OpenFind, window, cx| this.open_find(window, cx)))
             .on_action(cx.listener(|this, _: &CloseFind, window, cx| this.close_find(window, cx)))
             .on_action(cx.listener(|this, _: &FindNext, _, cx| this.find_step(1, cx)))
@@ -168,7 +179,6 @@ impl Render for MailApp {
                 }
             }))
             // Sidebar navigation and the list header's filter pills.
-            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| this.show_location(ev.location.clone(), cx)))
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))
@@ -232,9 +242,10 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
             .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, w, cx| this.toggle_sidebar(w, cx)))
+            .on_action(cx.listener(|this, _: &ZoomGroup, w, cx| this.toggle_zoom(w, cx)))
             .child(self.render_titlebar(window, cx))
-            .child(self.render_panes(list, reader, window, cx))
+            .child(self.render_panes(cx))
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })

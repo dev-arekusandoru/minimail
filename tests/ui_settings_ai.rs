@@ -9,9 +9,9 @@ use mail_classifier::judge::{Confidence, Mode, QuestionKey};
 mod harness;
 use harness::{Harness, harness_with, mailbox, msg};
 
-/// Sidebar page indexes: Accounts, Appearance, Inbox, AI, Senders.
-const AI: usize = 3;
-const SENDERS: usize = 4;
+/// Sidebar page indexes: Accounts, Appearance, Inbox, Reader, AI, Senders.
+const AI: usize = 4;
+const SENDERS: usize = 5;
 
 fn spam(h: &mut Harness<'_>) -> Mode {
     h.read(|a| a.policy.mode(QuestionKey::Spam))

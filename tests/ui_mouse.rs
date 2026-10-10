@@ -107,10 +107,10 @@ impl Harness<'_> {
         self.read(|a| a.visible_ids())
     }
     fn index(&mut self) -> usize {
-        self.read(|a| a.triage.cursor_index())
+        self.read(|a| a.triage().cursor_index())
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
+        self.read(|a| a.triage().cursor(&a.mailbox, &a.local_now()))
     }
     fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -143,10 +143,10 @@ fn left_edge_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
     let ids = h.ids();
     h.click(("row-select", 0usize));
     h.click(("row-select", 1usize));
-    assert_eq!(h.read(|a| a.triage.selected()), vec![ids[0], ids[1]]);
+    assert_eq!(h.read(|a| a.triage().selected()), vec![ids[0], ids[1]]);
     assert_eq!(h.read(|a| a.opened()), None);
     h.click(("row-select", 0usize));
-    assert_eq!(h.read(|a| a.triage.selected()), vec![ids[1]]);
+    assert_eq!(h.read(|a| a.triage().selected()), vec![ids[1]]);
 }
 
 #[gpui_kit::gpui::test]
@@ -291,7 +291,7 @@ fn escape_dismisses_a_menu_without_running_a_row(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.menu_open()));
     assert_eq!(h.state_of(ids[0]), Inbox, "dismissing ran no menu row");
     assert_eq!(
-        h.read(|a| a.triage.selected()),
+        h.read(|a| a.triage().selected()),
         vec![ids[0]],
         "escape went to the menu, not on to clearing the selection"
     );
