@@ -95,3 +95,27 @@ fn undo_after_the_flush_reverts_a_reply_filed_by_post_send() {
     assert_eq!(mb.state_of(1), Some(State::Inbox));
     assert_eq!(mb.state_of(sent), Some(State::Inbox));
 }
+
+#[test]
+fn mark_awaiting_reply_tags_without_its_own_undo_step() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), false, T0);
+    assert!(mb.mark_awaiting_reply(1, T0));
+    assert!(mb.tags(1).contains(&Tag::AwaitingReply));
+    assert_eq!(mb.awaiting_since(1), Some(T0));
+
+    // The send's own step is the only one; undoing it also drops the late tag.
+    assert!(mb.undo());
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+    assert!(mb.outbox().is_empty());
+}
+
+#[test]
+fn mark_awaiting_reply_does_nothing_once_the_send_is_recalled() {
+    let mut mb = sample();
+    mb.send_reply_at(1, "reply".into(), false, T0);
+    assert!(mb.recall_last(T0).is_some());
+    assert!(!mb.mark_awaiting_reply(1, T0));
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+    assert_eq!(mb.awaiting_since(1), None);
+}

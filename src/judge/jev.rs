@@ -50,6 +50,10 @@ impl fmt::Debug for JevJudge {
 }
 
 impl Judge for JevJudge {
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     fn judge(
         &self,
         state: &Value,

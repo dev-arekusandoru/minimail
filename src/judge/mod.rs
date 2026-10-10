@@ -168,6 +168,24 @@ pub trait Judge {
         state: &Value,
         questions: &[(QuestionKey, Question)],
     ) -> Result<Vec<(QuestionKey, Answer)>, JudgeError>;
+
+    /// The model this judge uses; part of the judgement cache key.
+    fn model(&self) -> &str {
+        "stub"
+    }
+}
+
+/// The classifier's state, for the status bar and the settings UI.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JudgeStatus {
+    /// No API key is configured: classification is off.
+    NoKey,
+    /// A key is configured and nothing is queued.
+    Idle,
+    /// `n` messages are waiting to be judged, including the one in flight.
+    Working(usize),
+    /// The last request failed; the next success clears it.
+    Error(String),
 }
 
 /// The five triage questions with literal one-sentence criteria.

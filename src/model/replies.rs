@@ -108,6 +108,27 @@ impl Mailbox {
     pub fn outbox(&self) -> &[Outgoing] {
         &self.outbox
     }
+    /// Whether a reply to `original` is still queued or sent: false once it was recalled or undone.
+    pub fn reply_in_flight(&self, original: MessageId) -> bool {
+        self.outbox.iter().any(|o| o.reply.in_reply_to == original)
+            || self.sent.iter().any(|r| r.in_reply_to == original)
+    }
+    /// Tag `original`'s thread *Awaiting Reply* as `send_reply_at(.., true, ..)` would, but
+    /// without pushing an undo step: the send that queued it already pushed one (whose snapshot
+    /// predates this tag, so undoing the send removes it). Does nothing once the send is gone.
+    pub fn mark_awaiting_reply(&mut self, original: MessageId, now: Timestamp) -> bool {
+        if !self.reply_in_flight(original) {
+            return false;
+        }
+        let Some(meta) = self.meta.get_mut(&original) else {
+            return false;
+        };
+        if !meta.tags.contains(&Tag::AwaitingReply) {
+            meta.tags.push(Tag::AwaitingReply);
+        }
+        meta.awaiting_since = Some(now);
+        true
+    }
     pub fn recall_last(&mut self, _now: Timestamp) -> Option<Reply> {
         let seq = self.outbox.last()?.seq;
         let pos = self.undo.iter().rposition(|s| {
