@@ -130,26 +130,31 @@ pub fn classify(judge: &dyn Judge, policy: &JudgePolicy, msgs: &[&Message]) -> V
     let questions = triage_questions();
     let mut out = Vec::with_capacity(msgs.len() * questions.len());
     for m in msgs {
-        let answers = match judge.judge(&message_state(m), &questions) {
-            Ok(a) => a,
-            Err(_) => {
-                out.extend(questions.iter().map(|_| Routed::Drop));
-                continue;
-            }
-        };
-        for (key, answer) in answers {
+        match judge.judge(&message_state(m), &questions) {
+            Ok(answers) => out.extend(route(policy, m, answers)),
+            Err(_) => out.extend(questions.iter().map(|_| Routed::Drop)),
+        }
+    }
+    out
+}
+
+/// Routes already-fetched answers for one message, in answer order. Used both
+/// by [`classify`] and when replaying cached answers at read time.
+pub fn route(policy: &JudgePolicy, m: &Message, answers: Vec<(QuestionKey, Answer)>) -> Vec<Routed> {
+    answers
+        .into_iter()
+        .map(|(key, answer)| {
             let s = Suggestion {
                 message: m.id,
                 key,
                 answer,
             };
-            out.push(match policy.mode(key) {
+            match policy.mode(key) {
                 _ if is_noop(m, &s) => Routed::Drop,
                 Mode::Off => Routed::Drop,
                 Mode::Auto(c) if s.answer.confidence >= c.threshold() => Routed::Auto(s),
                 Mode::Auto(_) | Mode::Review => Routed::Review(s),
-            });
-        }
-    }
-    out
+            }
+        })
+        .collect()
 }

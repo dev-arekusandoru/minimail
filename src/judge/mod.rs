@@ -1,33 +1,34 @@
-//! System 1 classifier interface, shaped after the TypeSafe AI "Jev" API, plus
-//! a deterministic offline [`StubJudge`].
+//! System 1 classifier interface: one judge call per message, backed by a
+//! provider, plus a deterministic offline [`StubJudge`].
 //!
-//! # Mapping to TypeSafe Jev (for the future real provider)
+//! # Mapping to TypeSafe Jev
 //!
-//! Jev answers natural-language *criteria* about a JSON `state`, returning
-//! per-option probabilities rather than free text. Our [`Question`] variants
-//! map one-to-one onto its endpoints:
+//! [`JevJudge`] sends every question for a message in one `POST
+//! {base_url}/systemone` request whose `state` is [`message_state`] and whose
+//! `questions` map is keyed by the stable `Debug` name of each
+//! [`QuestionKey`] (e.g. `"Spam"`). Our [`Question`] variants map as:
 //!
-//! | here                | Jev endpoint | request                          | response used                          |
-//! |---------------------|--------------|----------------------------------|----------------------------------------|
-//! | `Question::Bool`    | `noul`       | `state`, `criteria`              | `[p_no, p_yes]`, argmax -> `Bool`      |
-//! | `Question::Choice`  | `choice`     | `state`, `criteria`, `options`   | one probability per option, argmax     |
-//! | `Question::Score`   | `score`      | `state`, `criteria`, `levels`    | one probability per level; `Score` is  |
-//! |                     |              |                                  | the probability-weighted level (1-based)|
+//! | here               | Jev `type` | request `criteria`            | answer → [`Answer`]                    |
+//! |--------------------|------------|-------------------------------|----------------------------------------|
+//! | `Question::Bool`   | `noul`     | —                             | `p = noul`; `Bool(p > 0.5)`; conf `max(p, 1-p)` |
+//! | `Question::Choice` | `choice`   | `{option: option}`            | `Choice(index of returned choice)`     |
+//! | `Question::Score`  | `score`    | `["1", .., "levels"]`         | `Score(score + 1.0)` (Jev is 0-based)  |
 //!
-//! `Answer::confidence` is the probability of the winning option (for scores:
-//! of the most likely level). A real provider implements [`Judge`] by sending
-//! [`message_state`] as `state` and each question's `criteria`; nothing else in
-//! the app changes. Batching all questions for a message in one `judge` call
-//! lets a provider share the state upload.
+//! `Answer::confidence` is Jev's `confidence` for choice/score answers, and
+//! `max(p, 1-p)` for noul (Jev returns none). See [`jev`] for the wire format.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
+/// Jev wire format: the `/systemone` request/response mapping.
+pub mod jev;
 mod policy;
 mod stub;
 
+pub use jev::JevJudge;
 pub use policy::*;
 pub use stub::StubJudge;
 
@@ -60,7 +61,7 @@ impl Question {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AnswerValue {
     Bool(bool),
     /// Index into the question's options.
@@ -69,7 +70,7 @@ pub enum AnswerValue {
     Score(f32),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Answer {
     /// Bool = `[p_no, p_yes]`; Choice = per option; Score = per level (level 1 first).
     pub probabilities: Vec<f32>,
@@ -242,4 +243,18 @@ pub fn message_state(m: &Message) -> Value {
         "subject": m.subject,
         "body": body,
     })
+}
+
+/// Cache key for one message's answers: a hex SHA-256 over the model, the
+/// request's questions JSON, and the state JSON. Editing a question's criteria
+/// (or the state) changes the key, so stale answers are never reused.
+pub fn judgement_key(model: &str, state: &Value, questions: &[(QuestionKey, Question)]) -> String {
+    let body = jev::request_body(model, state, questions);
+    let mut hasher = Sha256::new();
+    hasher.update(model.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(body["questions"].to_string().as_bytes());
+    hasher.update(b"\n");
+    hasher.update(state.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
 }
