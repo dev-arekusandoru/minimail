@@ -617,6 +617,50 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
     );
 }
 
+/// A search narrows the Drafts pane to the drafts it matches (subject/recipients/body) while
+/// staying in the folder; clearing the filter restores every draft.
+#[gpui_kit::gpui::test]
+pub fn a_search_narrows_the_drafts_pane_and_clearing_restores_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("1-0");
+    h.new_draft();
+    h.type_text("budget notes");
+    h.settle();
+    let first = h.read(|a| a.tabs.active_draft().expect("first draft tab"));
+    h.close_draft_tab(first);
+    h.advance(60);
+    h.click("1-0");
+    h.new_draft();
+    h.type_text("lunch plans");
+    h.settle();
+    let second = h.read(|a| a.tabs.active_draft().expect("second draft tab"));
+    h.close_draft_tab(second);
+
+    h.click("1-2");
+    h.tick();
+    assert_eq!(h.draft_rows().len(), 2, "both drafts are listed");
+
+    // Searching from the pane keeps the folder and adds the term as a filter.
+    h.keys("/");
+    h.type_text("budget");
+    h.keys("enter");
+    h.tick();
+    assert_eq!(
+        h.location(),
+        Some(Location::Drafts("personal".into())),
+        "the search stays in the Drafts folder"
+    );
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1, "the query narrows the list");
+    assert!(rows[0].3.contains("budget notes"), "{rows:?}");
+
+    // Clearing the filter (quick-filter Clear) brings every draft back.
+    h.keys("1");
+    h.tick();
+    assert_eq!(h.draft_rows().len(), 2, "clearing restores every draft");
+    assert_eq!(h.location(), Some(Location::Drafts("personal".into())));
+}
+
 /// The Drafts pane shows the account's drafts newest edit first, and deleting the cursor one
 /// through the same confirmation the composer uses removes it from the list.
 #[gpui_kit::gpui::test]

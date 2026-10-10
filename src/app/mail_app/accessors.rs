@@ -253,7 +253,8 @@ impl MailApp {
         matches!(self.location(), Some(Location::Drafts(_)))
     }
 
-    /// The drafts `account` still has to finish, newest edit first.
+    /// The drafts `account` still has to finish that the active query matches, newest edit
+    /// first. Filtering is the pane's; the sidebar badge counts the unfiltered set.
     pub(super) fn account_drafts(
         &self,
         account: &str,
@@ -261,6 +262,7 @@ impl MailApp {
         crate::app::compose::drafts::rows(
             self.composer.drafts.iter().map(|d| &d.record),
             account,
+            self.query(),
         )
     }
 
