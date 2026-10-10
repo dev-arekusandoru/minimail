@@ -93,7 +93,7 @@ impl MailApp {
                 .when(!stacked, |d| d.h_full())
                 .when(stacked, |d| d.w_full())
                 .child(self.tab_bar(&Look::new(cx), cx))
-                .child(composer)
+                .child(cached_composer(composer))
                 .into_any_element(),
         )
     }
@@ -115,7 +115,7 @@ impl MailApp {
                 .overflow_hidden()
                 .border_1()
                 .border_color(cx.theme().border)
-                .child(composer)
+                .child(cached_composer(composer))
                 .into_any_element(),
         )
     }
@@ -263,4 +263,17 @@ pub(super) fn format_when(ts: Timestamp, now: &Now) -> String {
         MONTHS[(month - 1) as usize],
         now.hhmm(ts)
     )
+}
+
+/// The composer as a cached view boundary. GPUI reuses its rendered subtree when the
+/// composer entity itself is clean, so a change that only dirties an input entity (which is
+/// its own boundary) does not rebuild the composer's toolbar, headers and attachment cards.
+/// NOTE: the app root embeds `MailApp` uncached, so a keystroke still re-runs
+/// `MailApp::render`; the win is skipping the composer subtree, not the whole app. Everything
+/// that changes what the composer draws must still notify the composer entity: an adopted
+/// record, a setting/theme change, the toolbar's measured width.
+fn cached_composer(composer: Entity<crate::app::compose::Composer>) -> AnyElement {
+    composer
+        .cached(StyleRefinement::default().flex_1().min_w_0().min_h_0())
+        .into_any_element()
 }

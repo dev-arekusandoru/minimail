@@ -434,7 +434,11 @@ impl MailApp {
         self.refresh_theme(cx);
         let weak = cx.weak_entity();
         self._theme_sub = Some(window.observe_window_appearance(move |_, cx| {
-            weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
+            weak.update(cx, |this, cx| {
+                this.refresh_theme(cx);
+                cx.notify();
+            })
+            .ok();
         }));
         self.classify_visible();
         cx.notify();
@@ -451,6 +455,11 @@ impl MailApp {
             dark,
         );
         crate::theme::apply(cx, name);
+        // A composer is a cached view, so a theme change has to notify it (and every other
+        // cached surface) to repaint with the new tokens.
+        for composer in self.composers.values() {
+            composer.update(cx, |_, cx| cx.notify());
+        }
     }
 
     /// Advance time-based mailbox behavior: snoozed mail comes back.
