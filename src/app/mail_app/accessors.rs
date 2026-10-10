@@ -189,6 +189,18 @@ impl MailApp {
         self.mailbox.ids_matching(&self.triage.query, &self.local_now())
     }
 
+    /// [`Self::visible_ids`] memoized for the current render pass. [`Self::render`] clears the
+    /// memo before it starts, so every reader within one frame sees the same list without
+    /// rescanning the mailbox; calls from outside a render must keep using `visible_ids`.
+    pub(super) fn visible_in_frame(&self) -> Rc<Vec<MessageId>> {
+        if let Some(ids) = self.visible_cache.borrow().as_ref() {
+            return ids.clone();
+        }
+        let ids = Rc::new(self.visible_ids());
+        *self.visible_cache.borrow_mut() = Some(ids.clone());
+        ids
+    }
+
     pub fn now(&self) -> Timestamp {
         self.clock.now()
     }

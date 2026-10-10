@@ -103,3 +103,77 @@ pub fn a_reply_with_cc_shows_the_field_automatically(cx: &mut TestAppContext) {
         "there is nothing to reveal for a field already shown"
     );
 }
+
+/// The footer offers Save & Close instead of Close; it flushes the draft and closes, keeping
+/// the draft (a close never deletes).
+#[gpui_kit::gpui::test]
+pub fn save_and_close_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("keep me");
+    h.settle();
+    assert!(h.has("compose-save-close"), "the footer offers Save & Close");
+    assert!(!h.has("compose-close"), "the old Close button is gone");
+
+    h.click("compose-save-close");
+    h.settle();
+    assert!(!h.read(|a| a.compose_open()), "the composer closed");
+    assert_eq!(
+        h.read(|a| a.composer.drafts.len()),
+        1,
+        "the draft was kept, not deleted"
+    );
+}
+
+/// Closing a draft tab with its x asks Send / Save & Close / Discard, and the choice acts.
+#[gpui_kit::gpui::test]
+pub fn closing_a_draft_tab_asks_send_save_or_discard(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("draft body");
+    h.settle();
+    let close = ("reader-tab-close", u32::MAX as usize);
+    assert!(h.has(close), "the draft tab has a close control");
+
+    h.click(close);
+    assert!(h.read(|a| a.dialog_open()), "closing a draft tab asks first");
+    let options = h.app.read_with(h.cx, |a, cx| a.dialog_options(cx));
+    assert_eq!(
+        options,
+        vec![
+            "Send".to_owned(),
+            "Save & Close".to_owned(),
+            "Discard".to_owned()
+        ],
+        "exactly the three choices"
+    );
+
+    // `2` chooses Save & Close.
+    h.keys("2");
+    h.settle();
+    assert!(!h.read(|a| a.compose_open()), "the choice closed the tab");
+    assert_eq!(
+        h.read(|a| a.composer.drafts.len()),
+        1,
+        "Save & Close kept the draft"
+    );
+}
+
+/// `cmd-shift-backspace` discards: it asks first, then deletes and closes.
+#[gpui_kit::gpui::test]
+pub fn the_discard_shortcut_asks_and_deletes(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("throwaway");
+    h.settle();
+
+    h.keys("cmd-shift-backspace");
+    h.tick();
+    assert!(
+        h.read(|a| a.dialog_open()),
+        "the shortcut asks before deleting"
+    );
+    h.keys("1");
+    h.await_composer("the draft is deleted", |a| a.composer.drafts.is_empty());
+    assert!(!h.read(|a| a.compose_open()), "the composer closed");
+}

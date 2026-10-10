@@ -11,11 +11,16 @@ pub mod recipients;
 pub mod toolbar;
 
 use gpui_kit::component::Disableable as _;
+use gpui_kit::component::attachment::{
+    Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentMedia,
+    AttachmentTitle,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _, WindowExt as _, scroll::ScrollableElement as _,
+    ActiveTheme as _, Icon, Selectable as _, Size, Sizable as _, WindowExt as _,
+    scroll::ScrollableElement as _,
 };
 use std::rc::Rc;
 
@@ -27,8 +32,7 @@ use crate::app::compose::recipients::{Field, RecipientEvent, Recipients};
 use crate::outgoing::body::{BodyMode, ConversionWarning, DraftBody};
 use crate::outgoing::markdown::{BlockFormat, InlineFormat};
 use crate::outgoing::{
-    AttachmentId, Clipboard, DraftId, DraftKind, DraftRecord, DraftState, ManagedAttachment,
-    markdown,
+    AttachmentId, Clipboard, DraftId, DraftKind, DraftRecord, DraftState, markdown,
 };
 
 /// Where the composer is shown, which changes the controls around it.
@@ -1177,7 +1181,16 @@ impl Composer {
                     .text_color(t.muted_foreground)
                     .child(label),
             )
-            .child(div().flex_1().min_w_0().child(field))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .rounded_md()
+                    .bg(t.muted)
+                    .px_2()
+                    .py(px(3.))
+                    .child(field),
+            )
             .when_some(trailing, |d, el| d.child(el))
             .into_any_element()
     }
@@ -1236,6 +1249,9 @@ impl Composer {
                         Input::new(&self.subject)
                             .h(px(22.))
                             .bordered(false)
+                            .rounded_md()
+                            .bg(t.muted)
+                            .px_2()
                             .disabled(self.frozen()),
                     ),
             )
@@ -1357,6 +1373,7 @@ impl Composer {
         // be available.
         let locked = self.body_locked() || self.mode == BodyMode::Preview;
         let previewing = self.mode == BodyMode::Preview;
+        let active = self.active_tools(cx);
         let visible = match self.toolbar_width {
             Some(width) => toolbar::visible_tools(width, toolbar::TOOLS.len()),
             // Not laid out yet: show everything rather than guessing a narrower row.
@@ -1371,10 +1388,10 @@ impl Composer {
             Button::new("compose-more-format")
                 .icon(gpui_kit::assets::IconName::Ellipsis)
                 .ghost()
-                .xsmall()
-                .h(px(22.))
-                .w(px(24.))
+                .h(px(36.))
+                .w(px(36.))
                 .px_0()
+                .rounded_md()
                 .text_color(cx.theme().foreground)
                 .tooltip("More formatting")
                 .disabled(locked)
@@ -1404,37 +1421,50 @@ impl Composer {
                 })
                 .into_any_element()
         });
-        // Preview and Attach move into the toolbar, at its right end.
+        // Preview and Attach move into the toolbar, at its right end. They are the same
+        // 36px rounded controls the format buttons are.
         let trailing = vec![
-            crate::app::ui::icon_button(
-                "compose-attach",
-                gpui_kit::assets::IconName::Paperclip,
+            crate::app::ui::key_tooltip(
+                Button::new("compose-attach")
+                    .icon(gpui_kit::assets::IconName::Paperclip)
+                    .ghost()
+                    .h(px(36.))
+                    .w(px(36.))
+                    .px_0()
+                    .rounded_md()
+                    .text_color(cx.theme().foreground),
                 "Attach files",
                 "cmd-shift-a",
-                cx,
             )
             .disabled(self.frozen() || self.attachments_busy)
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Attach)))
             .into_any_element(),
-            crate::app::ui::icon_button(
-                "compose-preview",
-                if previewing {
-                    gpui_kit::assets::IconName::FileText
-                } else {
-                    gpui_kit::assets::IconName::Eye
-                },
+            crate::app::ui::key_tooltip(
+                Button::new("compose-preview")
+                    .icon(if previewing {
+                        gpui_kit::assets::IconName::FileText
+                    } else {
+                        gpui_kit::assets::IconName::Eye
+                    })
+                    .ghost()
+                    .h(px(36.))
+                    .w(px(36.))
+                    .px_0()
+                    .rounded_md()
+                    .text_color(cx.theme().foreground)
+                    .selected(previewing)
+                    .toggled(previewing),
                 if previewing {
                     "Edit the Markdown source"
                 } else {
                     "Preview the outgoing message"
                 },
                 "cmd-shift-v",
-                cx,
             )
             .on_click(cx.listener(|this, _, window, cx| this.toggle_preview(window, cx)))
             .into_any_element(),
         ];
-        let bar = toolbar::bar(visible, locked, overflow, trailing, cx);
+        let bar = toolbar::bar(visible, locked, &active, overflow, trailing, cx);
         // The width the bar is laid out at decides how many tools stay inline; measuring it
         // after layout is the only way to know, and a redraw is only asked for on a change.
         let view = cx.weak_entity();
@@ -1442,6 +1472,8 @@ impl Composer {
             .flex()
             .flex_none()
             .w_full()
+            .px_3()
+            .py_2()
             .on_children_prepainted(move |bounds, _, cx| {
                 let Some(width) = bounds.first().map(|b| f32::from(b.size.width)) else {
                     return;
@@ -1457,6 +1489,37 @@ impl Composer {
                 });
             })
             .child(bar)
+    }
+
+    /// The format tools already applied at the caret, for the toolbar's filled active state.
+    fn active_tools(&self, cx: &App) -> Vec<&'static str> {
+        if self.body_locked() || self.mode == BodyMode::Preview {
+            return Vec::new();
+        }
+        let source = self.draft.body.source.as_str();
+        let sel = self.body.read(cx).selected_range();
+        let mut active = Vec::new();
+        for (id, format) in [
+            ("compose-bold", InlineFormat::Bold),
+            ("compose-italic", InlineFormat::Italic),
+            ("compose-strike", InlineFormat::Strike),
+        ] {
+            if markdown::inline_active(source, sel.clone(), format) {
+                active.push(id);
+            }
+        }
+        for (id, format) in [
+            ("compose-heading", BlockFormat::Heading(2)),
+            ("compose-quote", BlockFormat::Quote),
+            ("compose-code", BlockFormat::CodeBlock),
+            ("compose-bullet-list", BlockFormat::BulletList),
+            ("compose-numbered-list", BlockFormat::NumberedList),
+        ] {
+            if markdown::block_active(source, sel.clone(), format) {
+                active.push(id);
+            }
+        }
+        active
     }
 
     /// The banner shown while an imported rich body has unapproved, lossy Markdown.
@@ -1556,47 +1619,49 @@ impl Composer {
         if self.draft.attachments.is_empty() {
             return None;
         }
-        // The chip's own remove handler needs the context mutably, so the border colour is
-        // copied out rather than borrowed from the theme for the length of the map.
         let border = cx.theme().border;
+        let muted = cx.theme().muted_foreground;
         let frozen = self.frozen() || self.attachments_busy;
-        let attachments = &self.draft.attachments;
-        let chips = attachments.iter().map(|a: &ManagedAttachment| {
-            let id = a.id.clone();
-            div()
-                .flex()
-                .flex_none()
-                .max_w(px(240.))
-                .h(px(20.))
-                .pl_2()
-                .pr_1()
-                .gap_1()
-                .items_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(border)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .text_size(px(11.))
-                        .child(format!("{} · {}", a.file_name, size_label(a.size))),
-                )
-                .child(
-                    Button::new("compose-attachment-remove")
-                        .icon(gpui_kit::assets::IconName::Close)
-                        .ghost()
-                        .xsmall()
-                        .w(px(14.))
-                        .h(px(14.))
-                        .px_0()
-                        .disabled(frozen)
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.emit(ComposeEvent::RemoveAttachment(id.clone()))
-                        })),
-                )
-        });
+        let cards = self
+            .draft
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(ix, a)| {
+                let id = a.id.clone();
+                let remove = Button::new(("compose-attachment-remove", ix))
+                    .icon(gpui_kit::assets::IconName::Close)
+                    .ghost()
+                    .xsmall()
+                    .w(px(18.))
+                    .h(px(18.))
+                    .px_0()
+                    .disabled(frozen)
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(ComposeEvent::RemoveAttachment(id.clone()))
+                    }));
+                Attachment::new()
+                    .id(("compose-attachment", ix))
+                    .with_size(Size::XSmall)
+                    .media(
+                        AttachmentMedia::new().child(
+                            Icon::new(file_icon_name(&a.file_name, &a.content_type))
+                                .with_size(px(16.))
+                                .text_color(muted),
+                        ),
+                    )
+                    .content(
+                        AttachmentContent::new()
+                            .title(AttachmentTitle::new(a.file_name.clone()))
+                            .description(AttachmentDescription::new(attachment_detail(
+                                &a.file_name,
+                                &a.content_type,
+                                a.size,
+                            ))),
+                    )
+                    .actions(AttachmentActions::new().child(remove))
+                    .into_any_element()
+            });
         let bar = div()
             .id("compose-attachments")
             .test_support()
@@ -1604,12 +1669,12 @@ impl Composer {
             .flex()
             .flex_wrap()
             .items_center()
-            .gap_1()
+            .gap_2()
             .px_3()
-            .py_1()
+            .py_2()
             .border_t(px(1.))
             .border_color(border)
-            .children(chips)
+            .children(cards)
             .into_any_element();
         Some(bar)
     }
@@ -1714,9 +1779,9 @@ impl Composer {
             )
             .child(
                 crate::app::ui::button(
-                    "compose-close",
-                    "Close",
-                    "Close the composer; the draft is kept",
+                    "compose-save-close",
+                    "Save & Close",
+                    "Save the draft now and close the composer",
                     "escape",
                     cx,
                 )
@@ -1825,6 +1890,80 @@ fn size_label(bytes: u64) -> String {
         b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / (1 << 20) as f64),
         b if b >= 1 << 10 => format!("{} KB", b >> 10),
         b => format!("{b} B"),
+    }
+}
+
+/// The file name's extension, lowercased, or empty.
+fn extension(file_name: &str) -> String {
+    file_name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// A short kind label for an attachment card: `PDF`, `IMAGE`, `ZIP`, … The declared MIME
+/// subtype is preferred, falling back to the name's extension when there is none.
+fn file_type_label(file_name: &str, content_type: &str) -> String {
+    let ext = extension(file_name);
+    let subtype = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let token = if ext.is_empty() { subtype } else { ext };
+    match token.as_str() {
+        "" | "octet-stream" => "File".to_owned(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "heic" | "bmp" | "tiff" => {
+            "Image".to_owned()
+        }
+        "mp4" | "mov" | "mkv" | "webm" | "avi" | "quicktime" => "Video".to_owned(),
+        "mp3" | "wav" | "m4a" | "flac" | "ogg" | "mpeg" => "Audio".to_owned(),
+        "zip" | "tar" | "gz" | "rar" | "7z" | "x-rar-compressed" | "x-7z-compressed" => {
+            "Archive".to_owned()
+        }
+        "msword" | "vnd.openxmlformats-officedocument.wordprocessingml.document" => "DOC".to_owned(),
+        "vnd.ms-excel" | "vnd.openxmlformats-officedocument.spreadsheetml.sheet" | "csv" => {
+            "XLS".to_owned()
+        }
+        "vnd.ms-powerpoint"
+        | "vnd.openxmlformats-officedocument.presentationml.presentation" => "PPT".to_owned(),
+        other => other.to_ascii_uppercase(),
+    }
+}
+
+/// `<type> · <size>`, the card's muted second line.
+fn attachment_detail(file_name: &str, content_type: &str, size: u64) -> String {
+    format!("{} · {}", file_type_label(file_name, content_type), size_label(size))
+}
+
+/// A file-type glyph for the card's icon tile. Both variants ship in gpui-kit's default
+/// asset bundle, so no extra SVG has to be embedded.
+fn file_icon_name(file_name: &str, content_type: &str) -> gpui_kit::assets::IconName {
+    let ext = extension(file_name);
+    let text = content_type.starts_with("text/")
+        || matches!(
+            ext.as_str(),
+            "pdf"
+                | "doc"
+                | "docx"
+                | "txt"
+                | "md"
+                | "rtf"
+                | "odt"
+                | "csv"
+                | "xls"
+                | "xlsx"
+                | "ppt"
+                | "pptx"
+        );
+    if text {
+        gpui_kit::assets::IconName::FileText
+    } else {
+        gpui_kit::assets::IconName::File
     }
 }
 

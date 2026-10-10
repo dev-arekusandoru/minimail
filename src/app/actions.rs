@@ -267,6 +267,8 @@ pub fn bind_keys(cx: &mut App) {
         // inline or in a tab.
         KeyBinding::new("cmd-enter", SendDraft, c),
         KeyBinding::new("escape", CloseComposer, c),
+        // Discard deletes the draft, so it is a modifier chord and asks first (the dialog).
+        KeyBinding::new("cmd-shift-backspace", DiscardDraft, c),
         KeyBinding::new("cmd-b", ComposeBold, c),
         KeyBinding::new("cmd-i", ComposeItalic, c),
         KeyBinding::new("cmd-k", ComposeLink, c),
@@ -387,7 +389,7 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Triage, "New message", "cmd-n", NewMail),
         cmd!(Triage, "Send draft", "cmd-enter", SendDraft),
         cmd!(Triage, "Close composer", "escape", CloseComposer),
-        cmd!(Triage, "Discard draft", "", DiscardDraft),
+        cmd!(Triage, "Discard draft", "cmd-shift-backspace", DiscardDraft),
         cmd!(View, "Expand composer to a tab", "", ExpandComposer),
         cmd!(
             View,

@@ -334,7 +334,7 @@ impl MailApp {
     /// The opened message and the next few rows of the list.
     pub(super) fn body_targets(&self) -> Vec<MessageId> {
         let opened = self.opened();
-        let visible = self.visible_ids();
+        let visible = self.visible_in_frame();
         let start = opened
             .and_then(|id| visible.iter().position(|v| *v == id))
             .unwrap_or(0);

@@ -126,7 +126,8 @@ fn ranked(ctx: &HintContext) -> Vec<Ranked> {
         }
         HintMode::Compose => {
             v.push(h("cmd-enter", "send", 0));
-            v.push(ESC_CANCEL);
+            v.push(h("escape", "save & close", 0));
+            v.push(h("cmd-shift-backspace", "discard", 9));
         }
         HintMode::Palette => {
             v.push(h("enter", "run", 0));

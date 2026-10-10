@@ -81,6 +81,9 @@ pub(super) enum AttachmentOp {
     Detach(AttachmentId),
     Forward { account: String, message: RemoteId },
 }
+/// Whether closing a draft tab (its x, or `cmd-w`) asks Send / Save & Close / Discard first.
+/// One switch, so the behaviour is a single line to change.
+pub(super) const CONFIRM_DRAFT_TAB_CLOSE: bool = true;
 /// Work a decision has taken that can only be carried out where there is a window.
 pub(super) enum PendingUi {
     /// Build the composer over a durable record and put it where it was asked for.
@@ -1156,6 +1159,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let edited = matches!(event, ComposeEvent::Edited);
         match event {
             ComposeEvent::Edited => {
                 let Some(composer) = self.composers.get(&id).cloned() else {
@@ -1189,7 +1193,12 @@ impl MailApp {
             }
             ComposeEvent::SetAccount(account) => self.switch_account(id, account, cx),
         }
-        cx.notify();
+        // An edit already scheduled its frame through the input's own notify, and the
+        // composer repaints its own status; notifying MailApp again would only mark it dirty
+        // a second time for the same frame. Every other event changes what MailApp draws.
+        if !edited {
+            cx.notify();
+        }
     }
 
     /// Send this draft from a different account.
@@ -2021,6 +2030,59 @@ impl MailApp {
         if let Some(ix) = self.tabs_index_of_draft(id) {
             self.tabs.close(ix);
         }
+    }
+
+    /// Ask what to do with a draft tab that is being closed by its x (or `cmd-w`): Send it,
+    /// save and close it, or discard it. The dialog is the confirmation, so any choice acts
+    /// at once.
+    pub(super) fn confirm_draft_tab_close(
+        &mut self,
+        id: DraftId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let subject = self
+            .composer
+            .record(id)
+            .map(|r| r.subject.clone())
+            .unwrap_or_default();
+        let title = if subject.trim().is_empty() {
+            "Close this draft?".to_owned()
+        } else {
+            format!("Close “{}”?", tabs::title(&subject, 40))
+        };
+        let options = vec![
+            DialogOption::new(
+                "1",
+                "Send",
+                "Send it now; held ten seconds so it can be recalled",
+            ),
+            DialogOption::new(
+                "2",
+                "Save & Close",
+                "Save the draft now and close the composer",
+            ),
+            DialogOption::new(
+                "3",
+                "Discard",
+                "Delete the draft, attachments included",
+            ),
+        ];
+        self.open_dialog(
+            DialogSpec::new(
+                title,
+                "The draft is open in a tab.".to_owned(),
+                options,
+                1,
+            ),
+            move |this, ix, window, cx| match ix {
+                0 => this.request_send(id, window, cx),
+                1 => this.close_composer(id),
+                _ => this.discard_draft(id, cx),
+            },
+            window,
+            cx,
+        );
     }
 
     /// Ask first, so this runs where there is a window to ask in.

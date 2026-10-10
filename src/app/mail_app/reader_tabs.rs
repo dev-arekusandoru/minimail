@@ -96,6 +96,14 @@ impl MailApp {
     }
 
     pub(super) fn close_tab(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // A draft tab asks what to do with the draft first; the switch that gates this is a
+        // single constant, so turning the prompt off is a one-line change.
+        if super::composer::CONFIRM_DRAFT_TAB_CLOSE
+            && let Some(draft) = self.tabs.tabs().get(ix).and_then(|tab| tab.draft_id())
+        {
+            self.confirm_draft_tab_close(draft, window, cx);
+            return;
+        }
         if let Some(closed) = self.tabs.close(ix) {
             // Closing a draft tab keeps the draft; closing a thread tab forgets the reader
             // state that thread owned.

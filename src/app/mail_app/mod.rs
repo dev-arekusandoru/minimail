@@ -193,6 +193,10 @@ pub struct MailApp {
     list_state: ListState,
     /// What `list_state` was last measured against, so a stale row height is re-measured.
     list_shape: Option<list::ListShape>,
+    /// `visible_ids` memoized for the current render pass, cleared at the top of `render`.
+    /// Several parts of one frame ask for the same list; without this each rescans the whole
+    /// mailbox.
+    visible_cache: RefCell<Option<Rc<Vec<MessageId>>>>,
     /// End of the list's visible range, from its scroll handler.
     list_visible_end: std::cell::Cell<usize>,
     help_scroll: ScrollHandle,
@@ -333,6 +337,7 @@ impl MailApp {
             focus_handle: cx.focus_handle(),
             list_state: ListState::new(0, ListAlignment::Top, px(200.)),
             list_shape: None,
+            visible_cache: RefCell::new(None),
             list_visible_end: std::cell::Cell::new(0),
             help_scroll: ScrollHandle::new(),
             reader_panes: RefCell::new(HashMap::new()),

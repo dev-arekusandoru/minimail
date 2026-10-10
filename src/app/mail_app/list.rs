@@ -39,7 +39,7 @@ impl MailApp {
     }
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let count = self.visible_ids().len();
+        let count = self.visible_in_frame().len();
         let row_count = if self.grouped() {
             self.rows().len()
         } else {

@@ -992,6 +992,41 @@ fn is_heading(line: &str) -> bool {
     (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
 }
 
+/// Whether `format` is already applied at the selection — the toggle would take it off.
+///
+/// The mirror of the wrapping check in [`toggle_inline`], for the toolbar's active state.
+pub fn inline_active(src: &str, sel: Range<usize>, format: InlineFormat) -> bool {
+    let (start, end) = clamp(src, sel);
+    let marker = format.markers();
+    if start == end {
+        return src[..start].ends_with(marker) && src[end..].starts_with(marker);
+    }
+    if src[..start].ends_with(marker) && src[end..].starts_with(marker) {
+        return true;
+    }
+    let selected = &src[start..end];
+    let trimmed = selected.trim();
+    trimmed.len() >= 2 * marker.len()
+        && trimmed.starts_with(marker)
+        && trimmed.ends_with(marker)
+}
+
+/// Whether every line the selection touches already carries `format`'s block prefix, so the
+/// toolbar can show it as on.
+pub fn block_active(src: &str, sel: Range<usize>, format: BlockFormat) -> bool {
+    let (start, end) = clamp(src, sel);
+    let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = src[end..].find('\n').map_or(src.len(), |i| end + i);
+    let lines: Vec<&str> = src[line_start..line_end].split('\n').collect();
+    match format {
+        BlockFormat::CodeBlock => lines.iter().any(|l| is_fence(l)),
+        BlockFormat::Heading(_) => !lines.is_empty() && lines.iter().all(|l| is_heading(l)),
+        BlockFormat::BulletList => !lines.is_empty() && lines.iter().all(|l| is_bullet(l)),
+        BlockFormat::NumberedList => !lines.is_empty() && lines.iter().all(|l| is_numbered(l)),
+        BlockFormat::Quote => !lines.is_empty() && lines.iter().all(|l| is_quote(l)),
+    }
+}
+
 fn is_bullet(line: &str) -> bool {
     ["- ", "* ", "+ "].iter().any(|p| line.starts_with(p))
 }
@@ -1032,6 +1067,29 @@ mod tests {
 
     fn sel(a: usize, b: usize) -> Range<usize> {
         a..b
+    }
+
+    /// The active-state mirror of the toggles: what the toolbar shows as on is exactly what
+    /// a second click would turn off.
+    #[test]
+    fn active_matches_what_a_toggle_would_remove() {
+        // Inline: markers wrapping the selection.
+        assert!(inline_active("**bold**", sel(2, 6), InlineFormat::Bold));
+        assert!(!inline_active("plain", sel(0, 5), InlineFormat::Bold));
+        // With no selection, the caret between the markers counts as active.
+        assert!(inline_active("****", sel(2, 2), InlineFormat::Bold));
+        assert!(!inline_active("word", sel(2, 2), InlineFormat::Bold));
+        // A selection that brought its own markers is active.
+        assert!(inline_active("**bold**", sel(0, 8), InlineFormat::Bold));
+        assert!(!inline_active("*italic*", sel(1, 7), InlineFormat::Bold));
+
+        // Blocks: every line the selection touches carries the prefix.
+        assert!(block_active("# Title", sel(2, 2), BlockFormat::Heading(2)));
+        assert!(!block_active("# Title", sel(2, 2), BlockFormat::Quote));
+        assert!(block_active("- one\n- two", sel(0, 11), BlockFormat::BulletList));
+        assert!(!block_active("- one\ntwo", sel(0, 10), BlockFormat::BulletList));
+        assert!(block_active("> quoted", sel(3, 3), BlockFormat::Quote));
+        assert!(block_active("```\nx\n```", sel(0, 9), BlockFormat::CodeBlock));
     }
 
     #[test]
