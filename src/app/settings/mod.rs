@@ -38,6 +38,26 @@ mod inbox;
 mod ai;
 mod senders;
 
+/// A Jev API key carried in a [`SettingsEvent`]. Its `Debug` never prints the key, so a log
+/// line that formats an event cannot leak it.
+#[derive(Clone)]
+pub struct JevKey(String);
+
+impl JevKey {
+    pub fn new(key: String) -> Self {
+        JevKey(key)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for JevKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
 
@@ -71,12 +91,12 @@ pub enum SettingsEvent {
     AccountNickname { id: String, nickname: String },
     /// Save the Jev connection. A non-empty `key` replaces the saved one; blank keeps it.
     /// `base`/`model` are stored and the classifier is rebuilt (starting the Inbox backfill).
-    SaveJev { key: String, base: String, model: String },
+    SaveJev { key: JevKey, base: String, model: String },
     /// Forget the saved Jev key; classification turns off.
     RemoveJevKey,
     /// Try the classifier with these values (blank `key` falls back to the saved one). Nothing
     /// is saved; the result goes back to the panel.
-    TestJev { key: String, base: String, model: String },
+    TestJev { key: JevKey, base: String, model: String },
     /// The user picked what the account's sync status allows.
     SyncAction { id: String, action: crate::sync_status::SyncAction },
     Close,
@@ -665,8 +685,8 @@ impl SettingsPanel {
         let key = self.jev_key_input.read(cx).value().to_string();
         let base = self.jev_base_input.read(cx).value().to_string();
         let model = self.jev_model_input.read(cx).value().to_string();
-        if !valid_http_url(&base) {
-            self.jev_error = Some("Base URL must be http:// or https://".into());
+        if !crate::judge::jev::valid_base_url(&base) {
+            self.jev_error = Some(BAD_BASE_URL.into());
             cx.notify();
             return;
         }
@@ -675,7 +695,7 @@ impl SettingsPanel {
         self.jev_has_key = self.jev_has_key || !key.is_empty();
         // The key is never displayed: clear the field now that it is saved.
         self.jev_clear_key = true;
-        cx.emit(SettingsEvent::SaveJev { key, base, model });
+        cx.emit(SettingsEvent::SaveJev { key: JevKey::new(key), base, model });
         cx.notify();
     }
 
@@ -685,26 +705,38 @@ impl SettingsPanel {
         let key = self.jev_key_input.read(cx).value().to_string();
         let base = self.jev_base_input.read(cx).value().to_string();
         let model = self.jev_model_input.read(cx).value().to_string();
-        if !valid_http_url(&base) {
-            self.jev_error = Some("Base URL must be http:// or https://".into());
+        if !crate::judge::jev::valid_base_url(&base) {
+            self.jev_error = Some(BAD_BASE_URL.into());
             cx.notify();
             return;
         }
         self.jev_error = None;
         self.jev_test = Some(JevTest::Running);
-        cx.emit(SettingsEvent::TestJev { key, base, model });
+        cx.emit(SettingsEvent::TestJev { key: JevKey::new(key), base, model });
         cx.notify();
     }
 
-    /// Forget the key: the app deletes the secret and turns classification off.
+    /// Forget the key: the app deletes the secret and turns classification off. The panel keeps
+    /// showing the key as saved until the app confirms the deletion ([`Self::set_jev_removed`]).
     fn remove_jev_key(&mut self, cx: &mut Context<Self>) {
         if self.jev_has_key {
-            self.jev_has_key = false;
             self.jev_test = None;
-            self.jev_clear_key = true;
             cx.emit(SettingsEvent::RemoveJevKey);
             cx.notify();
         }
+    }
+
+    /// The result of removing the saved key: only a confirmed deletion clears the panel's state.
+    pub fn set_jev_removed(&mut self, result: Result<(), String>, cx: &mut Context<Self>) {
+        match result {
+            Ok(()) => {
+                self.jev_has_key = false;
+                self.jev_clear_key = true;
+                self.jev_error = None;
+            }
+            Err(e) => self.jev_error = Some(format!("Could not remove the Jev key: {e}")),
+        }
+        cx.notify();
     }
 
     /// Show a connection-test result the app sent back.
@@ -850,10 +882,8 @@ fn default_follow_up_days() -> u8 {
         as u8
 }
 
-/// Whether `base` parses as an http(s) URL, which is all the Jev endpoint needs.
-fn valid_http_url(base: &str) -> bool {
-    url::Url::parse(base).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
-}
+/// Shown when the endpoint is not HTTPS (or plain HTTP on loopback).
+const BAD_BASE_URL: &str = "Base URL must be https:// (http:// is allowed only on localhost)";
 
 /// Reports whether one row differs from its default.
 type IsDirty = Rc<dyn Fn(&App) -> bool>;

@@ -1,10 +1,12 @@
 //! The AI and Senders settings pages, driven through the real settings window.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::TestAppContext;
 use mail_classifier::clock::DAY;
+use mail_classifier::contacts::ContactStore;
 use mail_classifier::judge::{
     Answer, Confidence, Judge, JudgeError, JudgeStatus, Mode, Question, QuestionKey, StubJudge,
 };
@@ -13,7 +15,7 @@ use serde_json::Value;
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
 mod harness;
-use harness::{Harness, harness_with, harness_with_judge, mailbox, msg};
+use harness::{Harness, harness_with, harness_with_judge, harness_with_judge_prefs, mailbox, msg};
 
 /// Sidebar page indexes: Accounts, Appearance, Inbox, Reader, AI, Senders.
 const AI: usize = 4;
@@ -276,5 +278,129 @@ fn a_failing_test_connection_shows_the_error_and_saves_nothing(cx: &mut TestAppC
         h.read(|a| a.judge_status().clone()),
         JudgeStatus::NoKey,
         "a failing test saves nothing"
+    );
+}
+
+#[test]
+fn settings_events_never_debug_the_jev_key() {
+    use mail_classifier::app::settings::{JevKey, SettingsEvent};
+    let events = [
+        SettingsEvent::SaveJev {
+            key: JevKey::new("sk-live-secret".into()),
+            base: "https://api.typesafe.ai/v1".into(),
+            model: "jev-latest".into(),
+        },
+        SettingsEvent::TestJev {
+            key: JevKey::new("sk-live-secret".into()),
+            base: "https://api.typesafe.ai/v1".into(),
+            model: "jev-latest".into(),
+        },
+    ];
+    for event in events {
+        let debug = format!("{event:?}");
+        assert!(!debug.contains("sk-live-secret"), "the key leaked: {debug}");
+        assert!(debug.contains("<redacted>"), "the key is not marked: {debug}");
+    }
+}
+
+#[gpui_kit::gpui::test]
+fn a_plain_http_remote_base_url_is_rejected(cx: &mut TestAppContext) {
+    let mut h = unclassified(cx, judge_factory(Arc::new(StubJudge)));
+    h.settings_open_page(AI);
+    fill(&mut h, "jev-key", "sk-test");
+    fill(&mut h, "jev-base", "http://api.typesafe.ai/v1");
+    h.settings_click("jev-save");
+
+    let (error, _) = panel_jev(&mut h);
+    assert!(
+        error.as_deref().is_some_and(|e| e.contains("Base URL")),
+        "plain HTTP to a remote host is rejected: {error:?}"
+    );
+    assert_eq!(
+        h.read(|a| a.judge_status().clone()),
+        JudgeStatus::NoKey,
+        "an insecure endpoint saves nothing"
+    );
+}
+
+/// A key store whose deletion always fails, to exercise the Remove key failure path.
+struct NoDeleteSecrets;
+impl mail_classifier::provider::secrets::SecretStore for NoDeleteSecrets {
+    fn get(&self, _: &str) -> Option<String> {
+        Some("sk-test".into())
+    }
+    fn set(&self, _: &str, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> Result<(), String> {
+        Err("keychain busy".into())
+    }
+}
+
+#[gpui_kit::gpui::test]
+fn a_failed_key_removal_stops_the_judge_but_keeps_the_key(cx: &mut TestAppContext) {
+    let mut h = unclassified(cx, judge_factory(Arc::new(StubJudge)));
+    h.app.update(h.cx, |a, _| {
+        a.set_secrets(Rc::new(NoDeleteSecrets));
+    });
+    h.settings_open_page(AI);
+    fill(&mut h, "jev-key", "sk-test");
+    h.settings_click("jev-save");
+    assert!(
+        matches!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle | JudgeStatus::Working(_)),
+        "Save installs the judge"
+    );
+
+    h.settings_click("jev-remove-key");
+    assert_eq!(
+        h.read(|a| a.judge_status().clone()),
+        JudgeStatus::NoKey,
+        "removal stops classification even if the keychain refuses"
+    );
+    let (error, _) = panel_jev(&mut h);
+    assert!(
+        error.as_deref().is_some_and(|e| e.contains("Could not remove")),
+        "the failed deletion is reported: {error:?}"
+    );
+    assert!(
+        h.settings_has("jev-remove-key"),
+        "the panel still shows the key as saved after a failed deletion"
+    );
+}
+
+/// A factory that records the endpoint and model it was built with.
+fn recording_factory(seen: Rc<RefCell<Vec<(String, String)>>>) -> mail_classifier::judge::JudgeFactory {
+    Rc::new(move |base, model, _key| {
+        seen.borrow_mut().push((base.to_owned(), model.to_owned()));
+        Arc::new(StubJudge)
+    })
+}
+
+#[gpui_kit::gpui::test]
+fn reset_all_rebuilds_the_judge_with_the_default_endpoint(cx: &mut TestAppContext) {
+    use mail_classifier::judge::jev::{DEFAULT_BASE_URL, DEFAULT_MODEL};
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory address book"));
+    let mut h = harness_with_judge_prefs(cx, spam_mailbox(), store, None);
+    h.app.update(h.cx, |a, _| {
+        a.set_judge_factory(recording_factory(seen.clone()));
+    });
+    h.settings_open_page(AI);
+    fill(&mut h, "jev-key", "sk-test");
+    fill(&mut h, "jev-base", "https://example.test/v1");
+    fill(&mut h, "jev-model", "custom-1");
+    h.settings_click("jev-save");
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&("https://example.test/v1".to_owned(), "custom-1".to_owned())),
+        "Save builds the judge from the fields"
+    );
+
+    h.settings_click("settings-reset-all");
+    h.settings_click("ok");
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&(DEFAULT_BASE_URL.to_owned(), DEFAULT_MODEL.to_owned())),
+        "Reset all rebuilds the judge on the shipped defaults"
     );
 }

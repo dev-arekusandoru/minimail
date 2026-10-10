@@ -162,8 +162,11 @@ impl MailApp {
                         let now = this.now();
                         // The reply goes now; the classifier tags the thread *Awaiting Reply* if
                         // the answer says so, on the background worker (no key means no tag).
-                        this.mailbox.send_reply_at(*in_reply_to, body.clone(), false, now);
-                        this.judge_reply(*in_reply_to, now, body.clone(), cx);
+                        if let Some(seq) =
+                            this.mailbox.queue_reply_at(*in_reply_to, body.clone(), false, now)
+                        {
+                            this.judge_reply(*in_reply_to, seq, now, body.clone(), cx);
+                        }
                         this.close_modals(window, cx);
                         this.open_post_send_dialog(*in_reply_to, window, cx);
                         this.show_toast(
@@ -441,6 +444,9 @@ impl MailApp {
                         system_is_dark,
                     );
                     crate::theme::apply(cx, name);
+                    // The endpoint and model are back at their defaults: rebuild the judge so
+                    // the worker stops using the old ones.
+                    this.configure_jev(cx);
                     panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
                     cx.notify();
                 }
@@ -530,7 +536,7 @@ impl MailApp {
                     crate::sync_status::SyncAction::Retry => this.retry_sync(id, cx),
                 },
                 SettingsEvent::SaveJev { key, base, model } => {
-                    if let Err(e) = this.save_jev_key(key) {
+                    if let Err(e) = this.save_jev_key(key.as_str()) {
                         this.show_toast(format!("Could not save the Jev key: {e}"), window, cx);
                     }
                     this.save_setting(&crate::app_settings::JEV_BASE_URL, base.clone());
@@ -539,11 +545,11 @@ impl MailApp {
                     cx.notify();
                 }
                 SettingsEvent::RemoveJevKey => {
-                    this.remove_jev_key(cx);
+                    this.remove_jev_key(panel_weak.clone(), cx);
                     cx.notify();
                 }
                 SettingsEvent::TestJev { key, base, model } => {
-                    this.test_jev(key, base, model, panel_weak.clone(), cx);
+                    this.test_jev(key.as_str(), base, model, panel_weak.clone(), cx);
                 }
                 SettingsEvent::Close => this.close_settings(window, cx),
             },

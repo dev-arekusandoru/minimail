@@ -25,9 +25,11 @@ const JEV_SECRET: &str = "jev";
 pub(super) enum JudgeJob {
     /// Classify the Inbox message `id`.
     Message(MessageId),
-    /// Judge the reply sent in answer to `in_reply_to`; `sent_at` is when it was queued.
+    /// Judge the reply sent in answer to `in_reply_to`; `seq` is its outbox sequence and
+    /// `sent_at` is when it was queued.
     Reply {
         in_reply_to: MessageId,
+        seq: u64,
         sent_at: Timestamp,
         body: String,
     },
@@ -38,10 +40,11 @@ impl MailApp {
     /// and the error and re-runs classification over the visible Inbox.
     pub fn set_judge(&mut self, judge: Option<Arc<dyn Judge + Send + Sync>>, cx: &mut Context<Self>) {
         self.judge = judge;
-        // Any request still in flight belongs to the old judge; its result is discarded.
+        // Any request still in flight belongs to the old judge; its result is discarded when it
+        // lands, but the physical slot stays occupied until then, so requests stay serial. The
+        // message jobs are rebuilt by `classify_visible`; reply jobs cannot be, so they stay.
         self.judge_gen += 1;
-        self.judge_queue.clear();
-        self.judging = false;
+        self.judge_queue.retain(|j| matches!(j, JudgeJob::Reply { .. }));
         self.judge_in_flight = None;
         self.classify_visible(cx);
         cx.notify();
@@ -65,10 +68,21 @@ impl MailApp {
         Ok(())
     }
 
-    /// Forget the saved Jev key and turn classification off.
-    pub(super) fn remove_jev_key(&mut self, cx: &mut Context<Self>) {
-        let _ = self.secrets.delete(JEV_SECRET);
-        self.configure_jev(cx);
+    /// Forget the saved Jev key and turn classification off. The keychain outcome goes back to
+    /// the panel, which only stops claiming a saved key once the deletion is confirmed.
+    pub(super) fn remove_jev_key(
+        &mut self,
+        panel: WeakEntity<SettingsPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        // Stop sending immediately, even if the keychain then refuses to delete the key.
+        self.set_judge(None, cx);
+        let result = self.secrets.delete(JEV_SECRET);
+        // Report on the next tick: the panel owns the click that got us here.
+        cx.spawn(async move |_this, cx| {
+            panel.update(cx, |panel, cx| panel.set_jev_removed(result, cx)).ok();
+        })
+        .detach();
     }
 
     /// Whether a Jev key is saved (never the key itself).
@@ -203,6 +217,7 @@ impl MailApp {
     pub(super) fn judge_reply(
         &mut self,
         in_reply_to: MessageId,
+        seq: u64,
         sent_at: Timestamp,
         body: String,
         cx: &mut Context<Self>,
@@ -210,7 +225,7 @@ impl MailApp {
         if self.judge.is_none() {
             return;
         }
-        self.enqueue_judge(JudgeJob::Reply { in_reply_to, sent_at, body });
+        self.enqueue_judge(JudgeJob::Reply { in_reply_to, seq, sent_at, body });
         self.drain_judge_queue(cx);
     }
 
@@ -285,31 +300,49 @@ impl MailApp {
         result: Result<Vec<(QuestionKey, Answer)>, JudgeError>,
         cx: &mut Context<Self>,
     ) {
-        if generation != self.judge_gen {
-            return; // the judge was replaced while this ran
-        }
+        let stale = generation != self.judge_gen;
+        // Free the physical slot in every case; `set_judge` keeps it occupied across a swap.
         self.judging = false;
         self.judge_in_flight = None;
+        if stale {
+            // The judge was replaced while this ran: drop the result, then start whatever the
+            // replacement's queue holds.
+            self.drain_judge_queue(cx);
+            cx.notify();
+            return;
+        }
         match result {
             Err(e) => {
-                self.judge_queue.clear();
+                // Stop the worker, but keep reply jobs: unlike messages, `classify_visible`
+                // cannot rebuild them, and the user's send still waits on its classification.
+                self.judge_queue.retain(|j| matches!(j, JudgeJob::Reply { .. }));
+                if matches!(kind, JudgeJob::Reply { .. }) {
+                    self.judge_queue.push_front(kind);
+                }
                 self.judge_status = JudgeStatus::Error(e.to_string());
                 cx.notify();
                 return;
             }
             Ok(answers) => match kind {
                 JudgeJob::Message(id) => {
-                    let now = self.now();
-                    self.store_answers(&key, &answers, now);
-                    self.apply_answers(id, &answers);
+                    if self.message_changed(id, &key) {
+                        // A body download changed the message while the request was out (a
+                        // snippet became the full body); classify the new content instead of
+                        // applying answers about the old one.
+                        self.enqueue_judge(JudgeJob::Message(id));
+                    } else {
+                        let now = self.now();
+                        self.store_answers(&key, &answers, now);
+                        self.apply_answers(id, &answers);
+                    }
                 }
-                JudgeJob::Reply { in_reply_to, sent_at, .. } => {
+                JudgeJob::Reply { in_reply_to, seq, sent_at, .. } => {
                     let expects = answers.iter().any(|(key, answer)| {
                         *key == QuestionKey::ExpectsReply
                             && answer.value == AnswerValue::Bool(true)
                     });
                     if expects {
-                        self.mailbox.mark_awaiting_reply(in_reply_to, sent_at);
+                        self.mailbox.mark_awaiting_reply(in_reply_to, seq, sent_at);
                     }
                 }
             },
@@ -317,6 +350,16 @@ impl MailApp {
         self.refresh_judge_status();
         cx.notify();
         self.drain_judge_queue(cx);
+    }
+
+    /// Whether `id`'s current judgement key differs from `key`: its content changed in flight,
+    /// so the cached answers must not be applied to it.
+    fn message_changed(&self, id: MessageId, key: &str) -> bool {
+        let (Some(message), Some(judge)) = (self.mailbox.get(id), self.judge.as_ref()) else {
+            return true;
+        };
+        let state = message_state(message);
+        judgement_key(judge.model(), &state, &triage_questions()) != key
     }
 
     /// Cache `answers` in memory and, when a store exists, in SQLite.

@@ -8,6 +8,7 @@ use std::fmt;
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
+use url::{Host, Url};
 
 use super::{Answer, AnswerValue, Judge, JudgeError, Question, QuestionKey};
 
@@ -15,6 +16,27 @@ use super::{Answer, AnswerValue, Judge, JudgeError, Question, QuestionKey};
 pub const DEFAULT_BASE_URL: &str = "https://api.typesafe.ai/v1";
 /// Model alias; the API resolves it to a pinned version.
 pub const DEFAULT_MODEL: &str = "jev-latest";
+
+/// Whether `base` is an acceptable Jev endpoint: HTTPS anywhere, or plain HTTP on loopback
+/// (`localhost`, `127.0.0.1`, `::1`) only, for a local proxy. Anything else would send the
+/// bearer key and message text in the clear.
+pub fn valid_base_url(base: &str) -> bool {
+    Url::parse(base).is_ok_and(|url| url.scheme() == "https" || is_loopback_http(&url))
+}
+
+fn is_loopback_http(url: &Url) -> bool {
+    url.scheme() == "http" && is_loopback(url)
+}
+
+/// Exact loopback hosts, not the whole `127.0.0.0/8` range.
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain("localhost")) => true,
+        Some(Host::Ipv4(ip)) => ip == std::net::Ipv4Addr::LOCALHOST,
+        Some(Host::Ipv6(ip)) => ip == std::net::Ipv6Addr::LOCALHOST,
+        _ => false,
+    }
+}
 
 /// One request's worth of answers, per the Jev API.
 pub struct JevJudge {
@@ -60,8 +82,13 @@ impl Judge for JevJudge {
         questions: &[(QuestionKey, Question)],
     ) -> Result<Vec<(QuestionKey, Answer)>, JudgeError> {
         let url = format!("{}/systemone", self.base_url.trim_end_matches('/'));
+        // Plain HTTP is only ever the loopback case the validator allows; every other host is
+        // pinned to HTTPS, and redirects are off so a response cannot downgrade the transport.
+        let https_only = !Url::parse(&self.base_url).is_ok_and(|u| is_loopback_http(&u));
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            .https_only(https_only)
+            .max_redirects(0)
             .timeout_global(Some(Duration::from_secs(30)))
             .build()
             .into();
@@ -71,32 +98,26 @@ impl Judge for JevJudge {
             .send_json(request_body(&self.model, state, questions))
             .map_err(|e| JudgeError::Unavailable(e.to_string()))?;
         let status = res.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(JudgeError::Unavailable(failure(status)));
+        }
         let text = res
             .body_mut()
             .read_to_string()
             .map_err(|e| JudgeError::Unavailable(e.to_string()))?;
-        if !(200..300).contains(&status) {
-            return Err(JudgeError::Unavailable(failure(status, &text)));
-        }
         let body: Value = serde_json::from_str(&text)
             .map_err(|_| JudgeError::Malformed("response is not JSON".into()))?;
         parse_answers(&body, questions)
     }
 }
 
-/// A human-readable reason for a non-2xx response; never includes the key.
-fn failure(status: u16, body: &str) -> String {
+/// A human-readable reason for a non-2xx response. Status-only: the server's body is never
+/// echoed, so an endpoint that mirrors the request cannot leak the key into the UI.
+fn failure(status: u16) -> String {
     match status {
         401 | 403 => "invalid API key".to_owned(),
         429 => "rate limited".to_owned(),
-        _ => {
-            let excerpt: String = body.trim().chars().take(200).collect();
-            if excerpt.is_empty() {
-                format!("Jev returned HTTP {status}")
-            } else {
-                format!("Jev returned HTTP {status}: {excerpt}")
-            }
-        }
+        _ => format!("Jev returned HTTP {status}"),
     }
 }
 
@@ -216,4 +237,37 @@ fn number(raw: &Value, field: &str) -> Result<f32, String> {
 /// A probability that may be absent (Jev omits zero-probability options).
 fn opt_number(map: &Map<String, Value>, key: &str) -> f32 {
     map.get(key).and_then(Value::as_f64).unwrap_or(0.0) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_requires_https_except_loopback() {
+        for ok in [
+            "https://api.typesafe.ai/v1",
+            "http://localhost:8080",
+            "http://127.0.0.1:11434/v1",
+            "http://[::1]:8080",
+        ] {
+            assert!(valid_base_url(ok), "{ok} should be accepted");
+        }
+        for bad in [
+            "http://api.typesafe.ai/v1",
+            "http://192.168.1.10:8080",
+            "http://[::2]:8080",
+            "ftp://localhost",
+            "not a url",
+        ] {
+            assert!(!valid_base_url(bad), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn failure_is_status_only() {
+        assert_eq!(failure(500), "Jev returned HTTP 500");
+        assert_eq!(failure(401), "invalid API key");
+        assert_eq!(failure(429), "rate limited");
+    }
 }
