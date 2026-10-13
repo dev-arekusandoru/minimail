@@ -230,6 +230,13 @@ pub struct MailApp {
     older_in_flight: HashSet<AccountId>,
     /// Messages whose body is being downloaded.
     bodies_in_flight: HashSet<MessageId>,
+    /// Bodies waiting to be downloaded, front first: the opened/visible rows, then the rest of
+    /// the Inbox newest first.
+    body_queue: VecDeque<MessageId>,
+    /// Bodies that failed this session; not retried until reopened or re-classified.
+    body_failed: HashSet<MessageId>,
+    /// Body prefetch paused after a rate limit; a timer resumes it.
+    bodies_paused: bool,
     /// Wakes the sync loop when work is queued.
     sync_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
     /// Toast text queued from a background task, shown on the next frame.
@@ -339,6 +346,9 @@ impl MailApp {
             older_queue: HashMap::new(),
             older_in_flight: HashSet::new(),
             bodies_in_flight: HashSet::new(),
+            body_queue: VecDeque::new(),
+            body_failed: HashSet::new(),
+            bodies_paused: false,
             sync_wake: None,
             pending_toast: None,
         };
