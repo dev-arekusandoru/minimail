@@ -135,8 +135,7 @@ pub fn request_body(model: &str, state: &Value, questions: &[(QuestionKey, Quest
                 json!({"type": "choice", "instructions": criteria, "criteria": rubric})
             }
             Question::Score { criteria, levels } => {
-                let rubric: Vec<String> = (1..=*levels).map(|i| i.to_string()).collect();
-                json!({"type": "score", "instructions": criteria, "criteria": rubric})
+                json!({"type": "score", "instructions": criteria, "criteria": levels})
             }
         };
         map.insert(format!("{key:?}"), entry);
@@ -209,7 +208,7 @@ fn parse_one(raw: &Value, question: &Question) -> Result<Answer, String> {
                 .and_then(Value::as_object)
                 .ok_or("score answer has no `probabilities`")?;
             Ok(Answer {
-                probabilities: (0..*levels)
+                probabilities: (0..levels.len())
                     .map(|i| opt_number(probabilities, &i.to_string()))
                     .collect(),
                 // Jev scores are 0-based; ours start at 1.

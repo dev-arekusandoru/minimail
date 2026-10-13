@@ -1,17 +1,22 @@
 //! The classifier's background worker: a serial queue draining one judge request at a time.
 //!
-//! `classify_visible` routes cached answers immediately and queues the rest; this module runs
-//! each queued request off-thread, stores the answers, and applies the routing back on the UI
-//! thread. One request is in flight at a time.
+//! `classify_visible` routes cached answers immediately and, when automatic classification is
+//! on, queues the rest; this module runs each queued request off-thread, stores the answers, and
+//! applies the routing back on the UI thread. One request is in flight at a time. A message is
+//! only sent once its full body has landed (see [`MailApp::body_ready`] / [`MailApp::classify_message`]).
 
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::app_settings::{JEV_BASE_URL, JEV_MODEL};
+use crate::app_settings::{
+    AUTO_CLASSIFY, JEV_BASE_URL, JEV_MODEL, MODE_EXPECTS_REPLY, MODE_FOLDER, MODE_KIND,
+    MODE_NEEDS_REPLY, MODE_SPAM, MODE_URGENCY, SPAM_COLD_OUTREACH,
+};
 use crate::judge::{
-    Answer, AnswerValue, Judge, JudgeError, JudgeStatus, Question, QuestionKey,
-    judgement_key, message_state, route, triage_questions,
+    Answer, AnswerValue, ClassifyState, Judge, JudgeError, JudgeStatus, Question, QuestionKey,
+    QuestionSpec, StoredAnswer, incoming_questions, legacy_judgement_key, message_state,
+    questions_to_ask, reply_question, route,
 };
 use crate::prefs::Scope;
 
@@ -23,8 +28,9 @@ const JEV_SECRET: &str = "jev";
 /// One unit of classifier work.
 #[derive(Clone, Debug)]
 pub(super) enum JudgeJob {
-    /// Classify the Inbox message `id`.
-    Message(MessageId),
+    /// Classify the Inbox message `id`. `force` re-asks every enabled question (a manual
+    /// "Classify this message") instead of only the missing or stale-version ones.
+    Message { id: MessageId, force: bool },
     /// Judge the reply sent in answer to `in_reply_to`; `seq` is its outbox sequence and
     /// `sent_at` is when it was queued.
     Reply {
@@ -136,6 +142,11 @@ impl MailApp {
         &self.judge_status
     }
 
+    /// Whether automatic classification is on (`AUTO_CLASSIFY`).
+    pub(super) fn auto_classify(&self) -> bool {
+        self.auto_classify
+    }
+
     /// The configured Jev endpoint and model, falling back to the shipped defaults.
     pub(super) fn jev_settings(&self) -> (String, String) {
         let (default_base, default_model) = (
@@ -153,19 +164,19 @@ impl MailApp {
         (base, model)
     }
 
-    /// Cached answers for `id`: memory first, then the store. `None` on a miss or a bad row.
-    pub(super) fn cached_answers(&mut self, id: MessageId) -> Option<Vec<(QuestionKey, Answer)>> {
-        if let Some(answers) = self.judgements.get(&id) {
-            return Some(answers.clone());
-        }
-        let store = self.preferences.clone()?;
-        // A corrupt row is a cache miss: judging again overwrites it.
-        match store.judgement_get(id) {
-            Ok(Some(answers)) => {
-                self.judgements.insert(id, answers.clone());
-                Some(answers)
-            }
-            Ok(None) | Err(_) => None,
+    /// The stored answers for `id`, from the cache preloaded at startup. `None` on a miss.
+    pub(super) fn cached_answers(&self, id: MessageId) -> Option<&[StoredAnswer]> {
+        self.judgements.get(&id).map(Vec::as_slice)
+    }
+
+    /// Load every stored judgement into memory (once, at startup), so [`Self::cached_answers`]
+    /// is a cheap map lookup per rendered row.
+    pub(super) fn preload_judgements(&mut self) {
+        let Some(store) = self.preferences.clone() else {
+            return;
+        };
+        if let Ok(rows) = store.judgements_all() {
+            self.judgements = rows.into_iter().collect();
         }
     }
 
@@ -186,23 +197,155 @@ impl MailApp {
             return;
         }
         let (_, model) = self.jev_settings();
-        let questions = triage_questions();
         let entries: Vec<(MessageId, String)> = self
             .mailbox
             .messages()
             .iter()
-            .map(|m| (m.id, judgement_key(&model, &message_state(m), &questions)))
+            .map(|m| (m.id, legacy_judgement_key(&model, m)))
             .collect();
         // A failure leaves the legacy table in place, to retry on the next launch.
         let _ = store.carry_over_judgements(&model, &entries);
     }
 
+    /// The enabled incoming questions for an account, each with its version.
+    fn classify_specs(&self, account: &str) -> Vec<QuestionSpec> {
+        incoming_questions(
+            &self.policy,
+            self.spam_cold_outreach,
+            &self.mailbox.folder_options(account),
+        )
+    }
+
+    /// The enabled questions for `id` whose stored answer is missing or stale.
+    pub(super) fn missing_questions(&self, id: MessageId) -> Vec<(QuestionKey, Question)> {
+        let Some(m) = self.mailbox.get(id) else {
+            return Vec::new();
+        };
+        if m.outgoing || m.state != TriageState::Inbox {
+            return Vec::new();
+        }
+        let specs = self.classify_specs(&m.account);
+        let stored = self.judgements.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+        questions_to_ask(&specs, stored)
+    }
+
+    /// Whether `id` has enabled questions to ask and its full body is in hand.
+    pub(super) fn needs_questions(&self, id: MessageId) -> bool {
+        let Some(m) = self.mailbox.get(id) else {
+            return false;
+        };
+        !m.partial && !self.missing_questions(id).is_empty()
+    }
+
+    /// The list row / reader status icon for `id`. `None` means nothing to show: outgoing or
+    /// non-Inbox mail, or every enabled question answered at the current version.
+    pub(super) fn classification_state(&self, id: MessageId) -> Option<ClassifyState> {
+        let m = self.mailbox.get(id)?;
+        if m.outgoing || m.state != TriageState::Inbox {
+            return None;
+        }
+        if self.classify_failed.contains(&id) {
+            return Some(ClassifyState::Failed);
+        }
+        if self.pending_classify.contains_key(&id)
+            || self.judge_in_flight == Some(id)
+            || self
+                .judge_queue
+                .iter()
+                .any(|j| matches!(j, JudgeJob::Message { id: queued, .. } if *queued == id))
+        {
+            return Some(ClassifyState::InProgress);
+        }
+        (!self.missing_questions(id).is_empty()).then_some(ClassifyState::NotClassified)
+    }
+
+    /// Re-ask every enabled question for `id` now (manual "Classify this message"). Works with
+    /// automatic classification off, and jumps the queue. A partial message is downloaded first
+    /// and sent when its body lands.
+    pub(super) fn classify_message(&mut self, id: MessageId, cx: &mut Context<Self>) {
+        if self.judge.is_none() {
+            return;
+        }
+        let Some(m) = self.mailbox.get(id) else {
+            return;
+        };
+        if m.outgoing {
+            return;
+        }
+        let (partial, account) = (m.partial, m.account.clone());
+        if self.classify_specs(&account).is_empty() {
+            return;
+        }
+        if partial {
+            self.pending_classify.insert(id, true);
+            self.prioritize_body(id, cx);
+            return;
+        }
+        self.classify_failed.remove(&id);
+        self.enqueue_judge_front(JudgeJob::Message { id, force: true });
+        self.drain_judge_queue(cx);
+        cx.notify();
+    }
+
+    /// A full body landed for `id` (called by the body downloader). Sends the message to Jev
+    /// when it was requested while partial, or when automatic classification is on and questions
+    /// are due.
+    pub(super) fn body_ready(&mut self, id: MessageId, cx: &mut Context<Self>) {
+        if self.judge.is_none() {
+            return;
+        }
+        let Some(m) = self.mailbox.get(id) else {
+            return;
+        };
+        if m.partial || m.outgoing || m.state != TriageState::Inbox {
+            return;
+        }
+        let account = m.account.clone();
+        let pending = self.pending_classify.remove(&id);
+        if pending.is_none() && !self.auto_classify {
+            return;
+        }
+        if self.classify_specs(&account).is_empty() {
+            return;
+        }
+        let force = pending.unwrap_or(false);
+        if !force && self.missing_questions(id).is_empty() {
+            return;
+        }
+        let job = JudgeJob::Message { id, force };
+        if pending.is_some() {
+            self.enqueue_judge_front(job);
+        } else {
+            self.enqueue_judge(job);
+        }
+        self.drain_judge_queue(cx);
+    }
+
+    /// Re-read the classifier settings from preferences into the app: automatic classification,
+    /// the cold-outreach checkbox, and every question's mode. Drops pending suggestions for
+    /// questions that are now Off, then re-routes cached answers and enqueues what is due.
+    pub(super) fn apply_classifier_settings(&mut self, cx: &mut Context<Self>) {
+        // With no store, keep the in-memory policy/auto state the settings UI just wrote.
+        if let Some(store) = self.preferences.clone() {
+            let scope = Scope::Global;
+            self.auto_classify = AUTO_CLASSIFY.get(store.as_ref(), &scope);
+            self.spam_cold_outreach = SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
+            self.policy.set_mode(QuestionKey::Spam, MODE_SPAM.get(store.as_ref(), &scope));
+            self.policy
+                .set_mode(QuestionKey::NeedsReply, MODE_NEEDS_REPLY.get(store.as_ref(), &scope));
+            self.policy.set_mode(QuestionKey::Urgency, MODE_URGENCY.get(store.as_ref(), &scope));
+            self.policy.set_mode(QuestionKey::Kind, MODE_KIND.get(store.as_ref(), &scope));
+            self.policy
+                .set_mode(QuestionKey::ExpectsReply, MODE_EXPECTS_REPLY.get(store.as_ref(), &scope));
+            self.policy.set_mode(QuestionKey::Folder, MODE_FOLDER.get(store.as_ref(), &scope));
+        }
+        self.mailbox.drop_suggestions_off(&self.policy);
+        self.classify_visible(cx);
+        cx.notify();
+    }
+
     /// Route `answers` for `id` and apply them, if it is still a visible Inbox candidate.
-    pub(super) fn apply_answers(
-        &mut self,
-        id: MessageId,
-        answers: &[(QuestionKey, Answer)],
-    ) -> (usize, usize) {
+    pub(super) fn apply_answers(&mut self, id: MessageId, answers: &[StoredAnswer]) -> (usize, usize) {
         let Some(message) = self.mailbox.get(id).cloned() else {
             return (0, 0);
         };
@@ -210,8 +353,16 @@ impl MailApp {
             return (0, 0);
         }
         let now = self.now();
+        // A Folder answer indexes the folder list it was asked with; after a folder change the
+        // index may point elsewhere, so only a current-version Folder answer is routed.
+        let folders = crate::judge::folder_question_version(&self.mailbox.folder_options(&message.account));
+        let pairs: Vec<(QuestionKey, Answer)> = answers
+            .iter()
+            .filter(|a| a.key != QuestionKey::Folder || a.version == folders)
+            .map(|a| (a.key, a.answer.clone()))
+            .collect();
         let (mut auto, mut review) = (0, Vec::new());
-        for routed in route(&self.policy, &message, answers.to_vec()) {
+        for routed in route(&self.policy, &message, pairs) {
             match routed {
                 Routed::Auto(s) => {
                     if self.mailbox.apply_auto(s, now) {
@@ -227,16 +378,60 @@ impl MailApp {
         (auto, queued)
     }
 
+    /// Attach the current version to each fresh answer, merge it into the stored set per key,
+    /// keep the memory cache and SQLite in step, and return the merged set.
+    fn merge_and_store(
+        &mut self,
+        id: MessageId,
+        model: &str,
+        answers: &[(QuestionKey, Answer)],
+        now: Timestamp,
+    ) -> Vec<StoredAnswer> {
+        let account = self.mailbox.get(id).map(|m| m.account.clone()).unwrap_or_default();
+        let specs = self.classify_specs(&account);
+        let mut merged = self.judgements.get(&id).cloned().unwrap_or_default();
+        for (key, answer) in answers {
+            let version = specs
+                .iter()
+                .find(|s| s.key == *key)
+                .map(|s| s.version.clone())
+                .unwrap_or_else(|| "1".to_owned());
+            merged.retain(|a| a.key != *key);
+            merged.push(StoredAnswer {
+                key: *key,
+                version,
+                answer: answer.clone(),
+            });
+        }
+        merged.sort_by_key(|a| QuestionKey::ALL.iter().position(|k| *k == a.key).unwrap_or(usize::MAX));
+        self.judgements.insert(id, merged.clone());
+        if let Some(store) = self.preferences.clone() {
+            // A cache write failure is not worth stopping classification over.
+            let _ = store.judgement_put(id, model, &merged, now);
+        }
+        merged
+    }
+
+    /// Queue `job` at the back, unless the same message is already waiting or in flight.
+    pub(super) fn enqueue_judge(&mut self, job: JudgeJob) {
+        self.enqueue_judge_at(job, false);
+    }
+
+    /// Queue `job` at the front (an open or a manual classify jumps the queue).
+    pub(super) fn enqueue_judge_front(&mut self, job: JudgeJob) {
+        self.enqueue_judge_at(job, true);
+    }
+
     /// Queue `job`, unless the same message is already waiting or in flight. Starting a batch
     /// (queue empty, nothing in flight) resets the footer counters; anything queued later grows
     /// the batch's total.
-    pub(super) fn enqueue_judge(&mut self, job: JudgeJob) {
-        if let JudgeJob::Message(id) = &job
+    fn enqueue_judge_at(&mut self, job: JudgeJob, front: bool) {
+        if let JudgeJob::Message { id, .. } = &job
             && (self.judge_in_flight == Some(*id)
                 || self
                     .judge_queue
                     .iter()
-                    .any(|j| matches!(j, JudgeJob::Message(queued) if queued == id)))
+                    .any(|j| matches!(j, JudgeJob::Message { id: queued, .. } if queued == id)))
         {
             return;
         }
@@ -245,10 +440,15 @@ impl MailApp {
             self.judge_batch_total = 0;
         }
         self.judge_batch_total += 1;
-        self.judge_queue.push_back(job);
+        if front {
+            self.judge_queue.push_front(job);
+        } else {
+            self.judge_queue.push_back(job);
+        }
     }
 
-    /// Queue a background judge of the reply sent in answer to `in_reply_to`.
+    /// Queue a background judge of the reply sent in answer to `in_reply_to`. Only when
+    /// automatic classification is on; with it off, no reply is judged.
     pub(super) fn judge_reply(
         &mut self,
         in_reply_to: MessageId,
@@ -257,7 +457,7 @@ impl MailApp {
         body: String,
         cx: &mut Context<Self>,
     ) {
-        if self.judge.is_none() {
+        if self.judge.is_none() || !self.auto_classify {
             return;
         }
         self.enqueue_judge(JudgeJob::Reply { in_reply_to, seq, sent_at, body });
@@ -278,11 +478,11 @@ impl MailApp {
             };
             let model = judge.model().to_owned();
             let Some((kind, state, questions)) = self.prepare_job(job) else {
-                continue; // the message went away; try the next one
+                continue; // nothing to ask (or the message went away); try the next one
             };
             self.judging = true;
             self.judge_in_flight = match &kind {
-                JudgeJob::Message(id) => Some(*id),
+                JudgeJob::Message { id, .. } => Some(*id),
                 JudgeJob::Reply { .. } => None,
             };
             self.refresh_judge_status();
@@ -305,21 +505,32 @@ impl MailApp {
         job: JudgeJob,
     ) -> Option<(JudgeJob, Value, Vec<(QuestionKey, Question)>)> {
         match &job {
-            JudgeJob::Message(id) => {
+            JudgeJob::Message { id, force } => {
                 let message = self.mailbox.get(*id).cloned()?;
-                let state = message_state(&message);
-                let questions = triage_questions();
-                Some((job, state, questions))
+                // Never send a partial message: `body_ready` sends it once the body lands.
+                if message.partial {
+                    return None;
+                }
+                let specs = self.classify_specs(&message.account);
+                let stored = self.judgements.get(id).map(Vec::as_slice).unwrap_or(&[]);
+                let questions: Vec<(QuestionKey, Question)> = if *force {
+                    specs.iter().map(|s| (s.key, s.question.clone())).collect()
+                } else {
+                    questions_to_ask(&specs, stored)
+                };
+                if questions.is_empty() {
+                    return None;
+                }
+                let me = self
+                    .mailbox
+                    .account(&message.account)
+                    .map(|a| a.email.clone())
+                    .unwrap_or_default();
+                Some((job, message_state(&message, &me), questions))
             }
             JudgeJob::Reply { body, .. } => {
                 let state = json!({"sender": "", "subject": "", "body": body.trim()});
-                let questions = vec![(
-                    QuestionKey::ExpectsReply,
-                    Question::Bool {
-                        criteria: "Does this outgoing reply ask the recipient for a response?".into(),
-                    },
-                )];
-                Some((job, state, questions))
+                Some((job, state, vec![reply_question()]))
             }
         }
     }
@@ -347,6 +558,9 @@ impl MailApp {
         }
         match result {
             Err(e) => {
+                if let JudgeJob::Message { id, .. } = &kind {
+                    self.classify_failed.insert(*id);
+                }
                 // Stop the worker, but keep reply jobs: unlike messages, `classify_visible`
                 // cannot rebuild them, and the user's send still waits on its classification.
                 self.judge_queue.retain(|j| matches!(j, JudgeJob::Reply { .. }));
@@ -358,10 +572,11 @@ impl MailApp {
                 return;
             }
             Ok(answers) => match kind {
-                JudgeJob::Message(id) => {
+                JudgeJob::Message { id, .. } => {
+                    self.classify_failed.remove(&id);
                     let now = self.now();
-                    self.store_answers(id, &model, &answers, now);
-                    self.apply_answers(id, &answers);
+                    let stored = self.merge_and_store(id, &model, &answers, now);
+                    self.apply_answers(id, &stored);
                 }
                 JudgeJob::Reply { in_reply_to, seq, sent_at, .. } => {
                     let expects = answers.iter().any(|(key, answer)| {
@@ -377,21 +592,6 @@ impl MailApp {
         self.refresh_judge_status();
         cx.notify();
         self.drain_judge_queue(cx);
-    }
-
-    /// Cache `answers` in memory and, when a store exists, in SQLite.
-    fn store_answers(
-        &mut self,
-        id: MessageId,
-        model: &str,
-        answers: &[(QuestionKey, Answer)],
-        now: Timestamp,
-    ) {
-        self.judgements.insert(id, answers.to_vec());
-        if let Some(store) = self.preferences.clone() {
-            // A cache write failure is not worth stopping classification over.
-            let _ = store.judgement_put(id, model, answers, now);
-        }
     }
 
     /// Recompute the status from the judge and the queue; a success clears any error.

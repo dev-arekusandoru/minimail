@@ -119,9 +119,9 @@ CREATE TABLE settings (
 ) WITHOUT ROWID;
 "#;
 
-/// Cached judge answers, keyed by the content hash from
-/// [`crate::judge::judgement_key`]. Stored raw so threshold/mode changes never
-/// re-bill the API.
+/// Cached judge answers, keyed by message id; each answer is a versioned `StoredAnswer`.
+/// Stored raw so threshold/mode changes never re-bill the API, and a wording change (version
+/// bump) re-asks only the affected question.
 const MIGRATION_3: &str = r#"
 CREATE TABLE judgements (
     key       TEXT PRIMARY KEY,

@@ -356,6 +356,16 @@ impl MailApp {
         let follow_up = self.mailbox.follow_up_timeout();
         let (jev_base, jev_model) = self.jev_settings();
         let jev_has_key = self.has_jev_key();
+        // The switches show the stored preference (both off by default), not the running
+        // state, which a no-preferences session starts true.
+        let scope = crate::prefs::Scope::Global;
+        let (auto_classify, spam_cold_outreach) = match &self.preferences {
+            Some(store) => (
+                crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope),
+                crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope),
+            ),
+            None => (false, false),
+        };
         let app = cx.weak_entity();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(820.), px(760.)), cx)),
@@ -383,6 +393,7 @@ impl MailApp {
                     .mailbox_state(blocked, now, follow_up)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured)
+                    .classifier_switches(auto_classify, spam_cold_outreach)
                     .on_page(page)
                     .jev_connection(jev_base, jev_model, jev_has_key)
             });
@@ -415,6 +426,9 @@ impl MailApp {
                         crate::app_settings::MODE_EXPECTS_REPLY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_URGENCY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_FOLDER.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_CLASSIFY.reset(store.as_ref(), &scope);
+                        crate::app_settings::SPAM_COLD_OUTREACH.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_BASE_URL.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_MODEL.reset(store.as_ref(), &scope);
                     }
@@ -447,13 +461,16 @@ impl MailApp {
                     // The endpoint and model are back at their defaults: rebuild the judge so
                     // the worker stops using the old ones.
                     this.configure_jev(cx);
+                    this.apply_classifier_settings(cx);
                     panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
                     cx.notify();
                 }
-                SettingsEvent::Changed(policy, summaries) => {
+                SettingsEvent::Changed { policy, summaries, auto_classify, spam_cold_outreach } => {
                     this.policy = policy.clone();
                     this.summaries_enabled = *summaries;
                     this.save_setting(&crate::app_settings::SUMMARIES, *summaries);
+                    this.save_setting(&crate::app_settings::AUTO_CLASSIFY, *auto_classify);
+                    this.save_setting(&crate::app_settings::SPAM_COLD_OUTREACH, *spam_cold_outreach);
                     for question in QuestionKey::ALL {
                         let setting = match question {
                             QuestionKey::Spam => &crate::app_settings::MODE_SPAM,
@@ -461,9 +478,12 @@ impl MailApp {
                             QuestionKey::ExpectsReply => &crate::app_settings::MODE_EXPECTS_REPLY,
                             QuestionKey::Urgency => &crate::app_settings::MODE_URGENCY,
                             QuestionKey::Kind => &crate::app_settings::MODE_KIND,
+                            QuestionKey::Folder => &crate::app_settings::MODE_FOLDER,
                         };
                         this.save_setting(setting, policy.mode(question));
                     }
+                    // The switches and modes take effect now: re-route and re-queue.
+                    this.apply_classifier_settings(cx);
                     cx.notify();
                 }
                 SettingsEvent::Theme { mode, light, dark } => {

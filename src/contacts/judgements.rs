@@ -9,12 +9,30 @@ use rusqlite::{OptionalExtension, params};
 use super::ContactStore;
 use super::error::{Error, Result};
 use crate::clock::Timestamp;
-use crate::judge::{Answer, QuestionKey};
+use crate::judge::{Answer, QuestionKey, StoredAnswer};
 use crate::model::MessageId;
+
+/// Decode a stored answers cell: the current `StoredAnswer` JSON, or the pre-version
+/// `[key, answer]` pairs, which read as version "1".
+fn decode_answers(json: &str) -> Result<Vec<StoredAnswer>> {
+    if let Ok(rows) = serde_json::from_str::<Vec<StoredAnswer>>(json) {
+        return Ok(rows);
+    }
+    let legacy: Vec<(QuestionKey, Answer)> = serde_json::from_str(json)
+        .map_err(|e| Error::Invalid(format!("stored judgement is not JSON: {e}")))?;
+    Ok(legacy
+        .into_iter()
+        .map(|(key, answer)| StoredAnswer {
+            key,
+            version: "1".to_owned(),
+            answer,
+        })
+        .collect())
+}
 
 impl ContactStore {
     /// The cached answers for `message_id`, or `None` if never judged.
-    pub fn judgement_get(&self, message_id: MessageId) -> Result<Option<Vec<(QuestionKey, Answer)>>> {
+    pub fn judgement_get(&self, message_id: MessageId) -> Result<Option<Vec<StoredAnswer>>> {
         let json: Option<String> = self
             .conn()
             .query_row(
@@ -26,9 +44,25 @@ impl ContactStore {
         let Some(json) = json else {
             return Ok(None);
         };
-        let answers = serde_json::from_str(&json)
-            .map_err(|e| Error::Invalid(format!("stored judgement is not JSON: {e}")))?;
-        Ok(Some(answers))
+        Ok(Some(decode_answers(&json)?))
+    }
+
+    /// Every stored judgement, for the in-memory cache at startup. Unreadable rows are skipped.
+    pub fn judgements_all(&self) -> Result<Vec<(MessageId, Vec<StoredAnswer>)>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT message_id, answers FROM judgements")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)? as MessageId, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, json) = row?;
+            if let Ok(answers) = decode_answers(&json) {
+                out.push((id, answers));
+            }
+        }
+        Ok(out)
     }
 
     /// Insert or replace `message_id`'s answers, recording `model` and `now` as `judged_at`.
@@ -37,7 +71,7 @@ impl ContactStore {
         &self,
         message_id: MessageId,
         model: &str,
-        answers: &[(QuestionKey, Answer)],
+        answers: &[StoredAnswer],
         now: Timestamp,
     ) -> Result<()> {
         let json = serde_json::to_string(answers)

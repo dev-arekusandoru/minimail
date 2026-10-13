@@ -346,6 +346,17 @@ impl MailApp {
         self.pump_bodies(cx);
     }
 
+    /// Fetch `id`'s body next, ahead of the rest of the queue. No-op unless the message is
+    /// partial. Reopening or manually classifying clears a previous failure so it is retried.
+    pub(super) fn prioritize_body(&mut self, id: MessageId, cx: &mut Context<Self>) {
+        if self.mailbox.get(id).is_none_or(|m| !m.partial) {
+            return;
+        }
+        self.body_failed.remove(&id);
+        self.body_queue.retain(|q| *q != id);
+        self.body_queue.push_front(id);
+        self.pump_bodies(cx);
+    }
 
     /// Partial messages of the Inbox views, newest first.
     fn inbox_partials(&self) -> Vec<MessageId> {
@@ -418,6 +429,7 @@ impl MailApp {
                 if let Err(e) = sync::apply_body(&mut self.mailbox, cache, &req, body) {
                     self.toast_sync_error(e);
                 }
+                self.body_ready(req.id, cx);
             }
             // Transient failures self-heal: requeue and pause the prefetch instead of hammering.
             Err(ProviderError::RateLimited | ProviderError::Network(_)) => {

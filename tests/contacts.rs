@@ -7,7 +7,7 @@ use mail_classifier::contacts::{
     ContactQuery, ContactSource, ContactStore, ContactUrl, EmailAddress, Error, Label,
     NewContact, PhoneNumber, PostalAddress, seed_if_empty,
 };
-use mail_classifier::judge::{Answer, AnswerValue, QuestionKey};
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, StoredAnswer};
 
 const T0: i64 = 1_790_812_800;
 
@@ -417,7 +417,19 @@ fn seeding_is_idempotent() {
     assert_eq!(reopened.known_addresses().expect("addresses").len(), seeded.len());
 }
 
-fn sample_answers() -> Vec<(QuestionKey, Answer)> {
+fn sample_answers() -> Vec<StoredAnswer> {
+    legacy_pairs()
+        .into_iter()
+        .map(|(key, answer)| StoredAnswer {
+            key,
+            version: "1".into(),
+            answer,
+        })
+        .collect()
+}
+
+/// The pre-version `[key, answer]` shape a legacy row holds.
+fn legacy_pairs() -> Vec<(QuestionKey, Answer)> {
     vec![
         (
             QuestionKey::Spam,
@@ -474,8 +486,8 @@ fn carry_over_copies_legacy_hash_rows_and_drops_the_table() {
     let store = ContactStore::open(db.path()).expect("open");
     // The legacy table survives MIGRATION_4 with its hash-keyed rows intact.
     assert!(store.legacy_judgements_present().expect("legacy present"));
-    let answers = sample_answers();
-    let json = serde_json::to_string(&answers).unwrap();
+    // A legacy row holds the old `[key, answer]` pairs, which read back as version "1".
+    let json = serde_json::to_string(&legacy_pairs()).unwrap();
     let conn = rusqlite::Connection::open(db.path()).unwrap();
     conn.execute(
         "INSERT INTO judgements_legacy (key, answers, judged_at) VALUES (?1, ?2, ?3)",
@@ -488,7 +500,7 @@ fn carry_over_copies_legacy_hash_rows_and_drops_the_table() {
     store
         .carry_over_judgements("jev-latest", &[(7, "legacy-key".into()), (8, "no-such-key".into())])
         .expect("carry over");
-    assert_eq!(store.judgement_get(7).expect("get"), Some(answers));
+    assert_eq!(store.judgement_get(7).expect("get"), Some(sample_answers()));
     assert_eq!(store.judgement_get(8).expect("get"), None);
     assert!(!store.legacy_judgements_present().expect("legacy dropped"));
 }

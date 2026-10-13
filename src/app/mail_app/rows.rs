@@ -267,6 +267,14 @@ impl MailApp {
                                     }),
                                 )
                             })
+                            .when_some(self.classification_state(msg.id), |d, state| {
+                                d.child(icons::classification_badge(
+                                    ("row-classify", ix_id),
+                                    state,
+                                    t,
+                                    12.,
+                                ))
+                            })
                             .child(icons::cluster(&shown, &hidden, &hint, t, ix_id)),
                     ),
             )

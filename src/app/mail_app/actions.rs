@@ -229,9 +229,11 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Route cached answers over the visible Inbox and queue the rest for the classifier.
-    /// Returns `(auto-applied, queued for review)`, counted from the cached answers only;
-    /// anything queued is judged in the background and applied when its answers land.
+    /// Re-route cached answers over the visible Inbox and, when automatic classification is on,
+    /// queue the messages with due questions. Returns `(auto-applied, queued for review)`,
+    /// counted from the cached answers only; anything queued is judged in the background and
+    /// applied when its answers land. With automatic classification off, only cached answers are
+    /// re-routed (nothing goes to Jev).
     pub(super) fn classify_visible(&mut self, cx: &mut Context<Self>) -> (usize, usize) {
         if self.judge.is_none() {
             // No key: classification is off, but the status bar must say so.
@@ -247,12 +249,16 @@ impl MailApp {
             .collect();
         let (mut auto, mut review) = (0, 0);
         for id in ids {
-            if let Some(answers) = self.cached_answers(id) {
-                let (a, r) = self.apply_answers(id, &answers);
+            // Re-route whatever answers are cached, whether or not new requests are allowed.
+            if let Some(stored) = self.cached_answers(id).map(|s| s.to_vec())
+                && !stored.is_empty()
+            {
+                let (a, r) = self.apply_answers(id, &stored);
                 auto += a;
                 review += r;
-            } else {
-                self.enqueue_judge(JudgeJob::Message(id));
+            }
+            if self.auto_classify() && self.needs_questions(id) {
+                self.enqueue_judge(JudgeJob::Message { id, force: false });
             }
         }
         self.refresh_judge_status();

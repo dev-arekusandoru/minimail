@@ -8,6 +8,11 @@ impl Mailbox {
             self.pending.push(s);
         }
     }
+    /// Drop pending suggestions whose question is Off in `policy` (mode changes apply at once).
+    pub fn drop_suggestions_off(&mut self, policy: &crate::judge::JudgePolicy) {
+        self.pending
+            .retain(|s| policy.mode(s.key) != crate::judge::Mode::Off);
+    }
     pub fn pending(&self, id: MessageId) -> Vec<&Suggestion> {
         self.pending.iter().filter(|s| s.message == id).collect()
     }
@@ -17,13 +22,16 @@ impl Mailbox {
         if mine.is_empty() {
             return 0;
         }
-        self.pending = rest;
         let mut changes = vec![Change::Pending(before), self.snapshot(id)];
-        for s in &mine {
-            self.apply(s, now);
-        }
         changes.reverse();
-        self.push_undo(changes);
+        // A Folder suggestion files the message via `set_state`; fold that into this one step.
+        self.grouped(|mb| {
+            mb.pending = rest;
+            for s in &mine {
+                mb.apply(s, now);
+            }
+            mb.push_undo(changes);
+        });
         mine.len()
     }
     pub fn reject_suggestions(&mut self, id: MessageId) -> usize {
@@ -72,6 +80,12 @@ impl Mailbox {
                         .tags
                         .retain(|t| !matches!(t, Tag::Kind(_)));
                     self.add_tag(id, Tag::Kind(kind));
+                }
+            }
+            // "None"/no folder is a no-op; a real folder files the message like manual filing.
+            (QuestionKey::Folder, AnswerValue::Choice(_)) => {
+                if let Some(folder) = self.suggested_folder(s) {
+                    self.set_state(&[id], TriageState::Filed(folder));
                 }
             }
             _ => {}

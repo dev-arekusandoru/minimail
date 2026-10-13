@@ -3,17 +3,26 @@
 
 use mail_classifier::judge::jev::{self, DEFAULT_BASE_URL, DEFAULT_MODEL, JevJudge};
 use mail_classifier::judge::{
-    Answer, AnswerValue, Judge, JudgeError, Question, QuestionKey, judgement_key,
-    triage_questions,
+    Answer, AnswerValue, Judge, JudgeError, JudgePolicy, Question, QuestionKey, incoming_questions,
+    legacy_judgement_key,
 };
+use mail_classifier::model::{Message, TriageState};
 use serde_json::{Value, json};
 
 fn close(a: f32, b: f32) -> bool {
     (a - b).abs() < 1e-6
 }
 
+/// The default incoming questions, with no account folders.
+fn questions() -> Vec<(QuestionKey, Question)> {
+    incoming_questions(&JudgePolicy::default(), false, &[])
+        .into_iter()
+        .map(|s| (s.key, s.question))
+        .collect()
+}
+
 fn answers(body: Value) -> Result<Vec<(QuestionKey, Answer)>, JudgeError> {
-    jev::parse_answers(&body, &triage_questions())
+    jev::parse_answers(&body, &questions())
 }
 
 fn get(a: &[(QuestionKey, Answer)], k: QuestionKey) -> &Answer {
@@ -30,9 +39,33 @@ fn choice_question() -> Question {
     }
 }
 
+fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
+    Message {
+        id,
+        thread_id: id,
+        from_name: "N".into(),
+        from_email: email.into(),
+        to: "me@x.io".into(),
+        subject: subject.into(),
+        body: body.into(),
+        received: "2026-09-28T08:00:00Z".into(),
+        state: TriageState::Inbox,
+        account: "personal".into(),
+        outgoing: false,
+        snooze: None,
+        cc: String::new(),
+        bcc: String::new(),
+        html: None,
+        attachments: Vec::new(),
+        read: false,
+        partial: false,
+        bulk: false,
+    }
+}
+
 #[test]
 fn request_body_shapes_each_question_type() {
-    let questions = triage_questions();
+    let questions = questions();
     let body = jev::request_body("jev-latest", &json!({"sender": "a@b.c"}), &questions);
 
     assert_eq!(body["model"], "jev-latest");
@@ -53,7 +86,10 @@ fn request_body_shapes_each_question_type() {
     assert_eq!(q["Kind"]["criteria"].as_object().unwrap().len(), 5);
 
     assert_eq!(q["Urgency"]["type"], "score");
-    assert_eq!(q["Urgency"]["criteria"], json!(["1", "2", "3", "4", "5"]));
+    // The five level descriptions go as the criteria list, not "1".."5".
+    let levels = q["Urgency"]["criteria"].as_array().unwrap();
+    assert_eq!(levels.len(), 5);
+    assert_eq!(levels[0], "No action or time pressure.");
 }
 
 #[test]
@@ -100,7 +136,7 @@ fn choice_answer_indexes_options_with_missing_options_at_zero() {
 fn score_answer_is_shifted_to_one_based() {
     let question = Question::Score {
         criteria: "How urgent?".into(),
-        levels: 3,
+        levels: vec!["calm".into(), "frustrated".into(), "angry".into()],
     };
     let body = json!({"answers": {"Urgency": {
         "type": "score",
@@ -135,22 +171,13 @@ fn malformed_responses_are_rejected() {
 }
 
 #[test]
-fn judgement_key_is_stable_and_sensitive_to_inputs() {
-    let questions = triage_questions();
-    let state = json!({"sender": "a@b.c", "subject": "hi", "body": "hello"});
-
-    let key = judgement_key("jev-latest", &state, &questions);
-    assert_eq!(key, judgement_key("jev-latest", &state, &questions));
+fn legacy_judgement_key_is_stable_and_sensitive_to_inputs() {
+    let m = msg(1, "a@b.c", "hi", "hello");
+    let key = legacy_judgement_key("jev-latest", &m);
+    assert_eq!(key, legacy_judgement_key("jev-latest", &m));
     assert_eq!(key.len(), 64);
-
-    assert_ne!(key, judgement_key("other-model", &state, &questions));
-    assert_ne!(key, judgement_key("jev-latest", &json!({"body": "different"}), &questions));
-
-    let mut edited = questions.clone();
-    edited[0].1 = Question::Bool {
-        criteria: "Reworded criteria.".into(),
-    };
-    assert_ne!(key, judgement_key("jev-latest", &state, &edited));
+    assert_ne!(key, legacy_judgement_key("other-model", &m));
+    assert_ne!(key, legacy_judgement_key("jev-latest", &msg(1, "a@b.c", "hi", "different")));
 }
 
 #[test]

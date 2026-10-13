@@ -1,6 +1,6 @@
 use crate::helpers::{T0, sample, sug};
 use mail_classifier::judge::{AnswerValue, Kind, QuestionKey};
-use mail_classifier::model::Tag;
+use mail_classifier::model::{Tag, TriageState};
 #[test]
 fn suggestions_apply_tags_without_state_changes() {
     let mut mb = sample();
@@ -41,4 +41,20 @@ fn urgency_and_kind_replace_prior_tag() {
     mb.apply_auto(sug(1, QuestionKey::Urgency, AnswerValue::Score(8.0)), T0);
     assert!(mb.tags(1).contains(&Tag::Urgent(8)));
     assert!(!mb.tags(1).contains(&Tag::Urgent(2)));
+}
+
+#[test]
+fn accepting_a_folder_suggestion_files_the_message() {
+    let mut mb = sample();
+    let options = mb.folder_options("personal");
+    assert!(!options.is_empty(), "the fixture account has folders");
+    let target = options[0].0;
+    let mut s = sug(1, QuestionKey::Folder, AnswerValue::Choice(0));
+    s.answer.probabilities = vec![1.0; options.len() + 1];
+    mb.add_suggestions(vec![s]);
+    assert_eq!(mb.accept_suggestions(1, T0), 1);
+    assert_eq!(mb.state_of(1), Some(TriageState::Filed(target)));
+    // One undo step reverts the filing.
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(TriageState::Inbox));
 }

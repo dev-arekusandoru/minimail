@@ -17,6 +17,7 @@ impl Render for MailApp {
         let hint = self.hint_context();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
+            self.note_opened(id, cx);
             // The opened message and the next couple of rows get their bodies.
             let targets = self.body_targets();
             self.fetch_bodies(targets, cx);
@@ -225,6 +226,11 @@ impl Render for MailApp {
                     _ => format!("{auto} auto-applied · {review} to review"),
                 };
                 this.show_toast(text, w, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ClassifyMessage, _, cx| {
+                if let Some(id) = this.opened().or_else(|| this.cursor_id()) {
+                    this.classify_message(id, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {

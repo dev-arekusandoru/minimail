@@ -3,6 +3,7 @@
 //! No network and no keychain: the harness injects a judge (or none), and the fake judges
 //! answer from the offline [`StubJudge`] while counting their calls.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -10,35 +11,41 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use gpui_kit::TestAppContext;
 use mail_classifier::contacts::ContactStore;
 use mail_classifier::judge::{
-    Answer, Judge, JudgeError, JudgeStatus, Question, QuestionKey, StubJudge,
-    judgement_key, message_state, triage_questions,
+    Answer, Judge, JudgeError, JudgePolicy, JudgeStatus, Question, QuestionKey, StubJudge,
+    incoming_questions, legacy_judgement_key, message_state,
 };
 use mail_classifier::model::Tag;
+use parking_lot::Mutex;
 use serde_json::Value;
 
 use crate::harness::{
     Harness, harness, harness_no_judge, harness_with_judge, harness_with_judge_prefs, mailbox, msg,
 };
 
-/// A [`StubJudge`] that counts its calls and can be made to fail on demand.
+/// A [`StubJudge`] that counts its calls, records the questions asked, and can be made to fail
+/// on demand.
 struct FakeJudge {
     inner: StubJudge,
     model: String,
     calls: Arc<AtomicUsize>,
     fail: Arc<AtomicBool>,
+    seen: Arc<Mutex<HashSet<QuestionKey>>>,
 }
 
 impl FakeJudge {
-    fn new(model: &str) -> (Self, Arc<AtomicUsize>, Arc<AtomicBool>) {
+    #[allow(clippy::type_complexity)]
+    fn new(model: &str) -> (Self, Arc<AtomicUsize>, Arc<AtomicBool>, Arc<Mutex<HashSet<QuestionKey>>>) {
         let calls = Arc::new(AtomicUsize::new(0));
         let fail = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(Mutex::new(HashSet::new()));
         let judge = FakeJudge {
             inner: StubJudge,
             model: model.to_owned(),
             calls: calls.clone(),
             fail: fail.clone(),
+            seen: seen.clone(),
         };
-        (judge, calls, fail)
+        (judge, calls, fail, seen)
     }
 }
 
@@ -49,6 +56,7 @@ impl Judge for FakeJudge {
         questions: &[(QuestionKey, Question)],
     ) -> Result<Vec<(QuestionKey, Answer)>, JudgeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.seen.lock().extend(questions.iter().map(|(k, _)| *k));
         if self.fail.load(Ordering::SeqCst) {
             return Err(JudgeError::Unavailable("boom".into()));
         }
@@ -83,7 +91,7 @@ fn no_key_means_no_labels_and_the_status_asks_for_one(cx: &mut TestAppContext) {
 
 #[gpui_kit::gpui::test]
 fn installing_a_judge_classifies_once_and_the_second_pass_hits_the_cache(cx: &mut TestAppContext) {
-    let (judge, calls, _fail) = FakeJudge::new("counting");
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1, "one request for the one Inbox message");
     assert!(classified(&mut h), "the answers were routed and applied");
@@ -96,7 +104,7 @@ fn installing_a_judge_classifies_once_and_the_second_pass_hits_the_cache(cx: &mu
 
 #[gpui_kit::gpui::test]
 fn a_failure_shows_in_the_status_and_the_next_success_clears_it(cx: &mut TestAppContext) {
-    let (judge, _calls, fail) = FakeJudge::new("counting");
+    let (judge, _calls, fail, _seen) = FakeJudge::new("counting");
     fail.store(true, Ordering::SeqCst);
     let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
     assert!(
@@ -118,13 +126,13 @@ fn a_failure_shows_in_the_status_and_the_next_success_clears_it(cx: &mut TestApp
 #[gpui_kit::gpui::test]
 fn judgements_are_cached_in_sqlite_across_a_restart(cx: &mut TestAppContext) {
     let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
-    let (judge, calls, _fail) = FakeJudge::new("counting");
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let h = harness_with_judge_prefs(cx, spam_message(), store.clone(), Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     drop(h);
 
     // A second app over the same database: the stored answers are read back, not re-fetched.
-    let (judge, calls, _fail) = FakeJudge::new("counting");
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge_prefs(cx, spam_message(), store, Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 0, "the stored judgement is reused");
     assert!(h.has_tag(1, Tag::PossibleSpam));
@@ -133,12 +141,12 @@ fn judgements_are_cached_in_sqlite_across_a_restart(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_stored_result_survives_a_model_change(cx: &mut TestAppContext) {
     let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
-    let (judge, calls, _fail) = FakeJudge::new("model-a");
+    let (judge, calls, _fail, _seen) = FakeJudge::new("model-a");
     let mut h = harness_with_judge_prefs(cx, spam_message(), store, Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
     // A different model must not re-bill a message that already has a stored result.
-    let (judge, calls_b, _fail) = FakeJudge::new("model-b");
+    let (judge, calls_b, _fail, _seen) = FakeJudge::new("model-b");
     h.set_judge(Some(Arc::new(judge)));
     assert_eq!(calls_b.load(Ordering::SeqCst), 0, "a model change never re-bills");
     assert!(h.has_tag(1, Tag::PossibleSpam));
@@ -147,14 +155,14 @@ fn a_stored_result_survives_a_model_change(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_stored_result_survives_removing_and_re_adding_the_key(cx: &mut TestAppContext) {
     let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
-    let (judge, calls, _fail) = FakeJudge::new("counting");
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge_prefs(cx, spam_message(), store, Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
     h.set_judge(None); // key removed
     assert_eq!(h.read(|a| a.judge_status().clone()), JudgeStatus::NoKey);
 
-    let (judge, calls_b, _fail) = FakeJudge::new("counting");
+    let (judge, calls_b, _fail, _seen) = FakeJudge::new("counting");
     h.set_judge(Some(Arc::new(judge))); // key re-added
     assert_eq!(calls_b.load(Ordering::SeqCst), 0, "a re-added key never re-bills");
     assert!(h.has_tag(1, Tag::PossibleSpam));
@@ -176,10 +184,12 @@ fn a_legacy_hash_row_is_carried_over_to_the_message_id(cx: &mut TestAppContext) 
     let store = Rc::new(ContactStore::open(&path).expect("contacts store"));
     // Seed a legacy row keyed by the old content hash, exactly as the pre-MIGRATION_4 code did.
     let message = spam_message().get(1).cloned().expect("message 1");
-    let state = message_state(&message);
-    let questions = triage_questions();
-    let key = judgement_key("jev-latest", &state, &questions);
-    let answers = StubJudge.judge(&state, &questions).expect("stub answers");
+    let key = legacy_judgement_key("jev-latest", &message);
+    let questions: Vec<(QuestionKey, Question)> = incoming_questions(&JudgePolicy::default(), false, &[])
+        .into_iter()
+        .map(|s| (s.key, s.question))
+        .collect();
+    let answers = StubJudge.judge(&message_state(&message, ""), &questions).expect("stub answers");
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute(
         "INSERT INTO judgements_legacy (key, answers, judged_at) VALUES (?1, ?2, ?3)",
@@ -188,10 +198,16 @@ fn a_legacy_hash_row_is_carried_over_to_the_message_id(cx: &mut TestAppContext) 
     .unwrap();
     drop(conn);
 
-    // The app copies it onto message 1 at startup and never calls the API for it.
-    let (judge, calls, _fail) = FakeJudge::new("counting");
+    // The app copies it onto message 1 at startup and re-asks only the changed questions.
+    let (judge, calls, _fail, seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge_prefs(cx, spam_message(), store, Some(Arc::new(judge)));
-    assert_eq!(calls.load(Ordering::SeqCst), 0, "the carried-over result is reused");
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "one request fills the stale/missing questions");
+    let seen = seen.lock().clone();
+    assert!(seen.contains(&QuestionKey::Spam), "the reworded Spam question is re-asked");
+    assert!(
+        !seen.contains(&QuestionKey::NeedsReply) && !seen.contains(&QuestionKey::Kind),
+        "the carried-over NeedsReply/Kind answers are reused"
+    );
     assert!(h.has_tag(1, Tag::PossibleSpam), "the legacy answer was routed");
 
     for suffix in ["", "-wal", "-shm"] {

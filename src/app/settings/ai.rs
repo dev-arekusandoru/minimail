@@ -15,6 +15,7 @@ fn tag_line(question: QuestionKey) -> &'static str {
         QuestionKey::NeedsReply => "Applies the Needs reply tag.",
         QuestionKey::Urgency => "Applies the Urgent tag with its level.",
         QuestionKey::Kind => "Applies the Kind tag (person, receipt, and the rest).",
+        QuestionKey::Folder => "Suggests a folder to move the message to.",
         QuestionKey::ExpectsReply => "Applies the Awaiting reply tag.",
     }
 }
@@ -227,6 +228,46 @@ impl SettingsPanel {
                 ));
             }
         }
+        // The Folder question is suggestion-only (never auto-applied): Off / Review only.
+        tagging = tagging.item(row(
+            QuestionKey::Folder.label(),
+            "Suggests a folder to move the message to.",
+            &["classifier", "folder", "tagging"],
+            Undo::of_panel(
+                weak,
+                move |this| this.policy.mode(QuestionKey::Folder) != default_mode(QuestionKey::Folder),
+                move |this, cx| this.set_mode(QuestionKey::Folder, default_mode(QuestionKey::Folder), cx),
+            ),
+            segmented(
+                "ai-mode-group-Folder".to_owned(),
+                vec![
+                    ("ai-mode-Folder-off".to_owned(), "Off".to_owned()),
+                    ("ai-mode-Folder-review".to_owned(), "Review".to_owned()),
+                ],
+                weak,
+                move |this| usize::from(!matches!(this.policy.mode(QuestionKey::Folder), Mode::Off)),
+                move |this, index, cx| {
+                    let mode = if index == 0 { Mode::Off } else { Mode::Review };
+                    this.set_mode(QuestionKey::Folder, mode, cx);
+                },
+            ),
+        ));
+        // The classifier switches. Both are off by default.
+        tagging = tagging
+            .item(row(
+                "Classify new mail automatically",
+                "Ask the classifier about incoming mail as it arrives.",
+                &["classifier", "automatic", "auto classify", "tagging"],
+                switch_undo(weak, |this| this.auto_classify, false, SettingsPanel::set_auto_classify),
+                switch(weak, |this| this.auto_classify, SettingsPanel::set_auto_classify),
+            ))
+            .item(row(
+                "Count cold outreach as spam",
+                "Treat recruiters' and sales cold outreach as spam.",
+                &["classifier", "spam", "cold outreach", "tagging"],
+                switch_undo(weak, |this| this.spam_cold_outreach, false, SettingsPanel::set_spam_cold_outreach),
+                switch(weak, |this| this.spam_cold_outreach, SettingsPanel::set_spam_cold_outreach),
+            ));
         SettingPage::new("AI").resettable(true).groups([self.jev_group(weak), summaries, tagging])
     }
 }

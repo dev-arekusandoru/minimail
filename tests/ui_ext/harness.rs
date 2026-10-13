@@ -96,6 +96,10 @@ fn harness_inner(
                 let view = cx.new(|cx| {
                     let mut app = MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx);
                     if let Some(store) = prefs {
+                        // Automatic classification is off by default (the product setting);
+                        // headless tests exercise the automatic path, so opt in here.
+                        mail_classifier::app_settings::AUTO_CLASSIFY
+                            .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, true);
                         app.load_preferences(store, window, cx);
                     }
                     // The real app installs the judge from the keychain; tests inject a fake.
@@ -369,6 +373,29 @@ impl Harness<'_> {
                     .within(format!("group-{group}"))
                     .within(format!("item-{item}"))
                     .click(target, cx)
+            })
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Scroll the settings page by `dy` pixels (negative scrolls down) with the pointer over
+    /// `target`, an on-screen element inside item `item` of group `group`.
+    pub fn settings_scroll(
+        &mut self,
+        group: usize,
+        item: usize,
+        target: impl Into<gpui_kit::ElementId>,
+        dy: f32,
+    ) {
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.within(format!("group-{group}")).within(format!("item-{item}")).scroll(
+                    target,
+                    gpui_kit::ScrollDelta::Pixels(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(dy))),
+                    cx,
+                )
             })
             .expect("settings window alive");
         self.cx.run_until_parked();

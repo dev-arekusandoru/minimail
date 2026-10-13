@@ -69,7 +69,14 @@ pub const SETTINGS_SCOPE: &str = "SettingsPanel && !PopupMenu";
 
 #[derive(Clone, Debug)]
 pub enum SettingsEvent {
-    Changed(JudgePolicy, bool),
+    /// Classifier settings changed. The whole snapshot travels together so the app re-applies
+    /// routing once (see `MailApp::apply_classifier_settings`).
+    Changed {
+        policy: JudgePolicy,
+        summaries: bool,
+        auto_classify: bool,
+        spam_cold_outreach: bool,
+    },
     Grouping(bool),
     TabAvatars(bool),
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
@@ -233,6 +240,10 @@ pub struct SettingsPanel {
     page_gen: u32,
     policy: JudgePolicy,
     summaries: bool,
+    /// Classify new mail automatically as it arrives (opt in; off by default).
+    auto_classify: bool,
+    /// Count recruiters' and sales cold outreach as spam (`SPAM_COLD_OUTREACH`).
+    spam_cold_outreach: bool,
     group: bool,
     tab_avatars: bool,
     /// Block remote images in the reader (opt in; images load by default).
@@ -348,6 +359,8 @@ impl SettingsPanel {
             page_gen: 0,
             policy,
             summaries,
+            auto_classify: false,
+            spam_cold_outreach: false,
             group,
             tab_avatars: true,
             block_remote_images: false,
@@ -390,6 +403,13 @@ impl SettingsPanel {
     /// Whether the reader blocks remote images (the switch's initial value).
     pub fn block_remote_images(mut self, on: bool) -> Self {
         self.block_remote_images = on;
+        self
+    }
+
+    /// The classifier switches' initial values (both off by default).
+    pub fn classifier_switches(mut self, auto_classify: bool, spam_cold_outreach: bool) -> Self {
+        self.auto_classify = auto_classify;
+        self.spam_cold_outreach = spam_cold_outreach;
         self
     }
     pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
@@ -533,7 +553,12 @@ impl SettingsPanel {
     }
 
     fn changed(&self, cx: &mut Context<Self>) {
-        cx.emit(SettingsEvent::Changed(self.policy.clone(), self.summaries));
+        cx.emit(SettingsEvent::Changed {
+            policy: self.policy.clone(),
+            summaries: self.summaries,
+            auto_classify: self.auto_classify,
+            spam_cold_outreach: self.spam_cold_outreach,
+        });
         cx.notify();
     }
 
@@ -577,6 +602,8 @@ impl SettingsPanel {
     pub(super) fn reset_fields(&mut self, cx: &mut Context<Self>) {
         self.policy = JudgePolicy::default();
         self.summaries = false;
+        self.auto_classify = false;
+        self.spam_cold_outreach = false;
         self.group = false;
         self.tab_avatars = true;
         self.block_remote_images = false;
@@ -675,6 +702,20 @@ impl SettingsPanel {
     fn set_summaries(&mut self, on: bool, cx: &mut Context<Self>) {
         if on != self.summaries {
             self.summaries = on;
+            self.changed(cx);
+        }
+    }
+
+    fn set_auto_classify(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_classify {
+            self.auto_classify = on;
+            self.changed(cx);
+        }
+    }
+
+    fn set_spam_cold_outreach(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.spam_cold_outreach {
+            self.spam_cold_outreach = on;
             self.changed(cx);
         }
     }

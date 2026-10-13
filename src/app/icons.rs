@@ -7,7 +7,7 @@
 //! To add a concept: add a [`Glyph`] variant, list it in [`Glyph::ALL`], add its arm in
 //! [`Glyph::spec`] (and the SVG to `icon_assets!` when it is new).
 
-use crate::judge::{Kind, QuestionKey, Suggestion};
+use crate::judge::{ClassifyState, Kind, QuestionKey, Suggestion};
 use crate::model::Tag;
 use crate::theme::{self, ThemeColor};
 use gpui_kit::assets::{Assets, IconName};
@@ -25,7 +25,9 @@ gpui_kit::assets::icon_assets!(
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
-        ReplyAll, Forward, Regex, WholeWord
+        ReplyAll, Forward, Regex, WholeWord,
+        // Per-message classification state (not classified / in progress / failed).
+        CircleDashed, LoaderCircle, CircleAlert
     ]
 );
 
@@ -292,6 +294,7 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
             QuestionKey::ExpectsReply => "expects reply?".to_owned(),
             QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
             QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
+            QuestionKey::Folder => "folder?".to_owned(),
         })
         .collect();
     parts.join(", ")
@@ -301,6 +304,33 @@ pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
 pub fn icon(glyph: Glyph, t: &ThemeColor, size: f32) -> Icon {
     let spec = glyph.spec();
     Icon::new(spec.icon).with_size(px(size)).text_color(spec.token.color(t))
+}
+
+/// The icon, tint and tooltip of a message's classification state (`None` states render nothing).
+pub fn classification(state: ClassifyState, t: &ThemeColor) -> (IconName, Hsla, &'static str) {
+    match state {
+        ClassifyState::NotClassified => {
+            (IconName::CircleDashed, t.muted_foreground, "Not classified")
+        }
+        ClassifyState::InProgress => (IconName::LoaderCircle, t.primary, "Classifying…"),
+        ClassifyState::Failed => (IconName::CircleAlert, t.danger, "Classification failed"),
+    }
+}
+
+/// The classification-state badge of a list row or reader header: one icon with its tooltip.
+/// `id` must be unique per message surface.
+pub fn classification_badge(
+    id: impl Into<ElementId>,
+    state: ClassifyState,
+    t: &ThemeColor,
+    size: f32,
+) -> Stateful<Div> {
+    let (name, color, label) = classification(state, t);
+    div()
+        .id(id)
+        .flex_none()
+        .child(Icon::new(name).with_size(px(size)).text_color(color))
+        .tooltip(tip(label.to_owned()))
 }
 
 /// The Lucide icon for an [`crate::account_style::ICONS`] key; `None` for an unknown key.

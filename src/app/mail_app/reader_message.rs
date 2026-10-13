@@ -6,7 +6,7 @@ use super::parts::{selectable_verbatim, stamp, Look, Role};
 use crate::app::chrome::humanize_time;
 use crate::app::email_webview::{luminance, rgb, DocStyle, ViewKey};
 use crate::find::Segment;
-use crate::judge::QuestionKey;
+use crate::judge::{AnswerValue, QuestionKey, Routed, Suggestion};
 use crate::reading;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
@@ -90,6 +90,15 @@ impl MailApp {
                     .text_color(t.muted_foreground)
                     .child(SelectableText::new(("reader-sel-stamp", id), reading::received_label(&m.received, &self.local_now())))
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            })
+            .when_some(self.classification_state(m.id), |d, state| {
+                d.child(icons::classification_badge(("reader-classify", id), state, t, 13.))
+            })
+            .when(opened && !m.outgoing, |d| {
+                d.child(
+                    icon_button(("btn-classify", id), IconName::Sparkles, "Classify this message", "", cx)
+                        .on_click(cx.listener(move |this, _, _, cx| this.classify_message(mid, cx))),
+                )
             })
             .child(self.message_buttons(m.id, cx));
 
@@ -195,6 +204,7 @@ impl MailApp {
             .child(self.labels_row(m, look).ml(px(52.)));
 
         let strip = if opened { self.suggestion_strip(m, look, cx) } else { None };
+        let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
 
         div()
             .flex()
@@ -210,6 +220,7 @@ impl MailApp {
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
+            .when_some(dev, |d, el| d.child(el))
             .child(self.message_body(m, role, look, cx))
             .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
             // A message synced from headers only still holds just its snippet.
@@ -386,6 +397,10 @@ impl MailApp {
                     QuestionKey::Kind => s.kind().map_or("Kind".to_owned(), |k| {
                         Glyph::of_kind(k).spec().label.to_owned()
                     }),
+                    QuestionKey::Folder => self.mailbox.suggested_folder(s).map_or_else(
+                        || "No folder".to_owned(),
+                        |f| format!("Move to {}?", self.mailbox.folder_path(f)),
+                    ),
                 };
                 format!("{label} {}%", (s.answer.confidence * 100.).round() as u32)
             })
@@ -439,6 +454,69 @@ impl MailApp {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Debug-only: every stored classifier answer of `m`, with its version, value, confidence,
+    /// probabilities and the routing the current policy gives it. `None` when nothing is cached.
+    fn dev_answers(&self, m: &Message, look: &Look<'_>) -> Option<AnyElement> {
+        let answers = self.cached_answers(m.id)?;
+        let t = &look.t;
+        let mut column = div()
+            .id("reader-dev-answers")
+            .test_support()
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .px_2()
+            .py_1()
+            .rounded_sm()
+            .border_1()
+            .border_color(t.border)
+            .font_family(look.mono.clone())
+            .text_size(px(10.5))
+            .text_color(t.muted_foreground)
+            .child("CLASSIFIER ANSWERS (DEV)");
+        for a in answers {
+            let routing = match crate::judge::route(&self.policy, m, vec![(a.key, a.answer.clone())])
+                .into_iter()
+                .next()
+            {
+                Some(Routed::Auto(_)) => "Auto",
+                Some(Routed::Review(_)) => "Review",
+                _ => "Drop",
+            };
+            let value = match &a.answer.value {
+                AnswerValue::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
+                AnswerValue::Choice(i) => match a.key {
+                    QuestionKey::Kind => Kind::from_index(*i)
+                        .map_or_else(|| format!("#{i}"), |k| k.label().to_owned()),
+                    QuestionKey::Folder => self
+                        .mailbox
+                        .suggested_folder(&Suggestion {
+                            message: m.id,
+                            key: a.key,
+                            answer: a.answer.clone(),
+                        })
+                        .map_or_else(|| "none".to_owned(), |f| self.mailbox.folder_path(f)),
+                    _ => format!("#{i}"),
+                },
+                AnswerValue::Score(s) => format!("{s:.1}"),
+            };
+            let probs = a
+                .answer
+                .probabilities
+                .iter()
+                .map(|p| format!("{p:.2}"))
+                .collect::<Vec<_>>()
+                .join("/");
+            column = column.child(format!(
+                "{} v{}: {value} · conf {:.2} · [{probs}] · {routing}",
+                a.key.label(),
+                a.version,
+                a.answer.confidence,
+            ));
+        }
+        Some(column.into_any_element())
     }
 
     /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text

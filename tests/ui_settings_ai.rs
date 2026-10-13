@@ -15,7 +15,7 @@ use serde_json::Value;
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
 mod harness;
-use harness::{Harness, harness_with, harness_with_judge, harness_with_judge_prefs, mailbox, msg};
+use harness::{Harness, harness_with, harness_with_judge, harness_with_judge_prefs, harness_with_prefs, mailbox, msg};
 
 /// Sidebar page indexes: Accounts, Appearance, Inbox, Reader, AI, Senders.
 const AI: usize = 4;
@@ -29,6 +29,42 @@ fn spam(h: &mut Harness<'_>) -> Mode {
 fn set_spam_mode(h: &mut Harness<'_>, segment: usize) {
     // Group 2 is "Tagging"; its first row is Spam.
     h.settings_click_in(2, 0, format!("ai-mode-Spam-{segment}"));
+}
+
+#[gpui_kit::gpui::test]
+fn toggling_auto_classify_reaches_the_app_and_is_stored(cx: &mut TestAppContext) {
+    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory address book"));
+    let scope = mail_classifier::prefs::Scope::Global;
+    let mut h = harness_with_prefs(
+        cx,
+        mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]),
+        store.clone(),
+    );
+    h.settings_open_page(AI);
+    let before = mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
+
+    // Tagging's switches follow the question rows: item 9 is "Classify new mail automatically".
+    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_click_in(2, 9, "check");
+    assert_eq!(
+        mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope),
+        !before,
+        "the switch reaches the app and is stored without a restart"
+    );
+}
+
+#[gpui_kit::gpui::test]
+fn the_folder_row_offers_only_off_and_review(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]));
+    h.settings_open_page(AI);
+    assert!(h.settings_has("ai-mode-Folder-off"), "the Folder row offers Off");
+    assert!(h.settings_has("ai-mode-Folder-review"), "and Review");
+    assert!(!h.settings_has("ai-mode-Folder-auto"), "never Auto");
+
+    // The Folder row is item 8 of Tagging; clicking Off turns the question off.
+    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_click_in(2, 8, "ai-mode-Folder-off");
+    assert_eq!(h.read(|a| a.policy.mode(QuestionKey::Folder)), Mode::Off);
 }
 
 #[gpui_kit::gpui::test]

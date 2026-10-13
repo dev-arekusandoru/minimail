@@ -30,7 +30,7 @@ use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{
-    Answer, Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed,
+    Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, StoredAnswer,
 };
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
@@ -140,8 +140,8 @@ pub struct MailApp {
     secrets: Rc<dyn SecretStore>,
     /// The classifier's state, shown in the status bar.
     judge_status: JudgeStatus,
-    /// Judge answers cached this session, keyed by [`MessageId`].
-    judgements: HashMap<MessageId, Vec<(QuestionKey, Answer)>>,
+    /// Judge answers cached this session, keyed by [`MessageId`]; preloaded at startup.
+    judgements: HashMap<MessageId, Vec<StoredAnswer>>,
     /// Messages and replies waiting to be judged, oldest first.
     judge_queue: VecDeque<JudgeJob>,
     /// Completed requests in the current classifier batch (footer `Classifying X/Y`).
@@ -154,6 +154,16 @@ pub struct MailApp {
     judge_in_flight: Option<MessageId>,
     /// Bumped when the judge is replaced, so an in-flight result is discarded.
     judge_gen: u64,
+    /// Messages whose last classification failed (cleared on success); `ClassifyState::Failed`.
+    classify_failed: HashSet<MessageId>,
+    /// Automatic classification (`AUTO_CLASSIFY`); false means Jev runs only on demand.
+    auto_classify: bool,
+    /// The cold-outreach checkbox (`SPAM_COLD_OUTREACH`); part of the Spam version.
+    spam_cold_outreach: bool,
+    /// Messages classified before their body downloaded: id → force every enabled question.
+    pending_classify: HashMap<MessageId, bool>,
+    /// The opened message the frame loop last saw, so the open hook fires once per change.
+    last_opened: Option<MessageId>,
     clock: Rc<dyn Clock>,
     /// The zone every displayed date and every relative date is read in: the user's clock.
     zone: Rc<dyn Zone>,
@@ -302,6 +312,13 @@ impl MailApp {
             judging: false,
             judge_in_flight: None,
             judge_gen: 0,
+            classify_failed: HashSet::new(),
+            // Overridden from `AUTO_CLASSIFY` by `load_preferences` at startup; the constructor
+            // default keeps headless tests that never load preferences classifying.
+            auto_classify: true,
+            spam_cold_outreach: false,
+            pending_classify: HashMap::new(),
+            last_opened: None,
             zone,
             clock,
             group_threads: false,
@@ -395,6 +412,13 @@ impl MailApp {
             QuestionKey::ExpectsReply,
             crate::app_settings::MODE_EXPECTS_REPLY.get(store.as_ref(), &scope),
         );
+        self.policy.set_mode(
+            QuestionKey::Folder,
+            crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
+        );
+        self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
+        self.spam_cold_outreach =
+            crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
         self.preferences = Some(store);
         cx.set_window_appearance(match self.theme_mode {
             crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
@@ -407,8 +431,9 @@ impl MailApp {
             weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
         }));
         // Map any pre-MIGRATION_4 hash-keyed judgements onto their message ids before the first
-        // pass, so their answers are found and not re-billed.
+        // pass, so their answers are found and not re-billed, then load every cached answer.
         self.carry_over_judgements();
+        self.preload_judgements();
         self.classify_visible(cx);
         cx.notify();
     }
