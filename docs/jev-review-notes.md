@@ -16,10 +16,10 @@ decided, why, and how to flip it. Flip any you disagree with.
   `Debug` name of `QuestionKey` (e.g. `"Spam"`). If Jev names them differently, change
   `request_body`/`parse_answers` together.
 - **Rate limits and long messages untested.** One request per message, serial, 30 s timeout,
-  body trimmed to 1500 chars. No batching or backoff beyond "stop the worker on an error".
+  body trimmed to 8000 chars (quoted replies kept, cut from the end). No batching or backoff
+  beyond "stop the worker on an error".
 - **Local loopback `http://`** is allowed for a local proxy but has never been exercised.
-- Score levels are sent as `"1"`…`"5"` and choice criteria as `{option: option}`; no per-level
-  descriptions exist in `Question`.
+- Score levels are sent as their five descriptions and choice criteria as `{option: option}`.
 - The window did not open against the real keychain for this branch; the delete-failure path is
   covered by a fake `SecretStore` in tests, not the real one.
 
@@ -40,25 +40,30 @@ decided, why, and how to flip it. Flip any you disagree with.
 
 - **Cache key = message id (resolved).** `judgements` is keyed by the mail cache's
   `message_id INTEGER PRIMARY KEY` (`messages.id`, in `src/sync/cache.rs`), which is stable
-  across restarts, so a message is billed at most once — ever. Changing the model, the base URL
-  or the key, removing and re-adding the key, or a snippet becoming the full body all reuse the
-  stored result. *Why:* the old content-hash key re-billed a message whenever its text, model or
-  question text changed. *Flip:* back to a hash only if some other identity of a message should
-  invalidate its answers.
+  across restarts, so a model, base URL or key change never re-bills. *Why:* the old
+  content-hash key re-billed a message whenever its text, model or question text changed.
+  *Flip:* back to a hash only if some other identity of a message should invalidate its answers.
+- **One `StoredAnswer { key, version, answer }` per (message, question).** Writes merge per key
+  (overwrite), and a question is only asked when it is enabled and its stored answer is missing
+  or at a different version. Versions are manual constants (`incoming_questions`): Spam `"2"`
+  (`"2c"` with cold outreach) and Urgency `"2"` changed wording; NeedsReply/Kind `"1"`; Folder is
+  a fingerprint of the account's folder list. Legacy `[key, answer]` rows read as version `"1"`,
+  so a carried-over row is re-asked only for the questions whose wording changed. *Flip:* the
+  `VERSION_*` constants and `folder_question_version` in `src/judge/mod.rs`.
 - **Table is `judgements(message_id, answers, model, judged_at)`** in the contacts DB
   (`src/contacts/`, `MIGRATION_4`). `model` is recorded for reference, never used for lookup.
 - **`MIGRATION_4` parks the old hash-keyed rows in `judgements_legacy`.** On the first startup
   after the upgrade, `MailApp::carry_over_judgements` recomputes each message's old hash under
-  the configured model (`jev-latest` by default), copies a hit onto the message id, and drops
-  the legacy table. A failure, or an empty mailbox (an unreadable cache), leaves it in place to
-  retry next launch. *Limit:* a message whose
-  model changed before the upgrade has no matching row and is billed once more; this is the
-  smallest correct option (the hash cannot be inverted in SQL). *Flip:* keep the legacy table and
-  a second model guess if that one re-bill matters.
-- **The in-flight content-change requeue is gone.** A partial body becoming full no longer
-  re-classifies: the message already has a stored answer, so the worker stores and applies once.
-  *Flip:* reinstate a body-completeness check in `MailApp::finish_judge` if a snippet answer must
-  never stand for the full message.
+  the configured model (`jev-latest` by default) via the frozen `legacy_judgement_key` (old
+  1500-char state + old question wording), copies a hit onto the message id, and drops the legacy
+  table. A failure, or an empty mailbox (an unreadable cache), leaves it in place to retry next
+  launch. *Limit:* a message whose model changed before the upgrade has no matching row and is
+  billed once more; this is the smallest correct option (the hash cannot be inverted in SQL).
+  *Flip:* keep the legacy table and a second model guess if that one re-bill matters.
+- **A message is only sent once its full body is in hand.** A partial message is queued on open /
+  manual classify and sent from `body_ready` when the body lands; the worker never sends a
+  snippet. *Flip:* `prepare_job` returns `None` for a partial message in
+  `src/app/mail_app/judging.rs`.
 - **The cache never prunes** — one small row per classified message. *Flip:* add a job if it
   ever grows.
 - **A corrupt row is a cache miss**, not an error: judging again overwrites it.
@@ -70,6 +75,15 @@ decided, why, and how to flip it. Flip any you disagree with.
   from the mailbox, so they survive both a judge swap (`set_judge` keeps `Reply` jobs) and an
   error (`finish_judge` keeps queued and failed reply jobs for the next explicit retry, while
   message jobs are rebuilt by `classify_visible`).
+- **Automatic classification is `AUTO_CLASSIFY` (default off).** `classify_visible`, `body_ready`,
+  the message-open hook (`note_opened`) and reply judging all respect it; with it off, `c`
+  re-routes cached answers only. The manual **Classify this message** (`classify_message`, palette
+  + reader) always works, re-asks every enabled incoming question, and pushes to the front of the
+  queue. The constructor default is `true` so headless tests that never load preferences classify;
+  `load_preferences` overrides it from the setting, so the product default is off.
+- **A per-message status icon** (`classification_state`): `None` for outgoing/non-Inbox mail or a
+  message with every enabled question answered at the current version, else not-classified /
+  in-progress / failed (`classify_failed`, cleared on success).
 - **The in-flight slot stays occupied across a judge swap.** Changing the key, endpoint or model
   bumps `judge_gen` but does not free the slot; the stale result is discarded when it lands and
   the replacement's queue drains then. *Why:* repeated Saves must not create concurrent
@@ -122,6 +136,15 @@ decided, why, and how to flip it. Flip any you disagree with.
   `"0".."levels-1"`; missing keys read 0. **noul confidence is `max(p, 1-p)`** (Jev returns
   none); choice/score confidence is passed through.
 - **`route` is a public function** in `src/judge/policy.rs`; `classify` delegates per message.
+- **Incoming mail never asks ExpectsReply.** `incoming_questions` builds Spam, NeedsReply,
+  Urgency, Kind and (when the account has folders) Folder; the reply path uses the single
+  `reply_question` definition, which `expects_reply` also uses.
+- **Folder is a suggestion, never auto-applied.** `route` forces it to `Review` unless the mode is
+  Off; `is_noop` drops the trailing "none" option. Accepting one calls `Mailbox::suggested_folder`
+  and files the message via `set_state(Filed(folder))` — the same path as manual filing, so synced
+  accounts push the remote move through `sync::pending_moves`.
+- **`message_state` carries context**: sender, `to`, `cc`, `recipient_role`, subject, received,
+  `bulk`, and the body (quoted replies kept, 8000-char cap).
 - **`Judge::model` defaults to `"stub"`** and `JevJudge` overrides it with its alias; it is
   recorded on each judgement but not used for lookup, so answers survive a model change.
 - **`StubJudge` stays `pub`** but production never constructs it (`main` installs `JevJudge`);
