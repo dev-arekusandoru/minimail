@@ -1015,6 +1015,7 @@ fn apply_message(
         snooze,
         cc: remote.cc.clone(),
         bcc: remote.bcc.clone(),
+        bulk: remote.bulk,
         html,
         attachments,
         read,

@@ -94,6 +94,9 @@ pub struct Message {
     /// the full body is downloaded when the message is opened.
     #[serde(default)]
     pub partial: bool,
+    /// Carries a mailing-list header (`List-Unsubscribe` or `List-Id`).
+    #[serde(default)]
+    pub bulk: bool,
 }
 
 impl Message {

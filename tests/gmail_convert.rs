@@ -82,6 +82,21 @@ fn metadata_message_parses_headers_flags_timestamp_and_entities() {
 }
 
 #[test]
+fn bulk_mail_is_flagged_from_list_headers() {
+    let with = |name: &str| {
+        let mut raw = sample_message(&["INBOX"]);
+        raw["payload"]["headers"]
+            .as_array_mut()
+            .expect("headers")
+            .push(json!({"name": name, "value": "x"}));
+        message(&raw, &set(&[])).expect("message").bulk
+    };
+    assert!(!message(&sample_message(&["INBOX"]), &set(&[])).expect("message").bulk);
+    assert!(with("List-Unsubscribe"));
+    assert!(with("List-Id"));
+}
+
+#[test]
 fn body_conversion_decodes_multipart_content_and_attachments() {
     let raw = json!({"payload":{"mimeType":"multipart/mixed","parts":[
         {"mimeType":"multipart/alternative","parts":[
