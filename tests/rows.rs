@@ -55,6 +55,12 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     h
 }
 
+/// The cursor / open / selected cues of `id`, apart from the labels the classifier applied.
+fn cues(h: &mut Harness<'_>, id: MessageId) -> (bool, bool, bool) {
+    let v = h.read(|a| a.row_visual(id));
+    (v.cursor, v.open, v.selected)
+}
+
 impl Harness<'_> {
     fn keys(&mut self, keys: &str) {
         if !keys.is_empty() {
@@ -223,11 +229,7 @@ fn open_and_cursor_states_are_independent_and_combine(cx: &mut TestAppContext) {
     let ids = h.ids();
     let (first, second) = (ids[0], ids[1]);
     h.keys("enter");
-    assert_eq!(
-        h.read(|a| a.row_visual(first)),
-        RowVisual { cursor: true, open: true, selected: false, ..RowVisual::default() },
-        "cursor on the open row combines both cues"
-    );
+    assert_eq!(cues(&mut h, first), (true, true, false), "cursor on the open row combines both cues");
     assert!(h.read(|a| a.row_visual(first).combined()));
 
     h.keys("j");
@@ -249,8 +251,7 @@ fn selected_state_is_separate_from_cursor_and_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     h.keys("enter x j");
-    let v = h.read(|a| a.row_visual(ids[0]));
-    assert_eq!(v, RowVisual { cursor: false, open: true, selected: true, ..RowVisual::default() });
+    assert_eq!(cues(&mut h, ids[0]), (false, true, true));
 }
 
 #[gpui_kit::gpui::test]

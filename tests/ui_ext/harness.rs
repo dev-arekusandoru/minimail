@@ -279,6 +279,11 @@ impl Harness<'_> {
             .update_window(self.window, |_, window, _| window.try_find(id).is_some())
             .unwrap_or(false)
     }
+
+    /// Whether the open popup menu has a row labelled `label`.
+    pub fn has_row(&mut self, label: &str) -> bool {
+        menu::has_row(self.cx, self.window, label)
+    }
 }
 
 // ---------------------------------------------------------------- Settings window

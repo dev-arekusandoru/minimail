@@ -69,23 +69,6 @@ impl MailApp {
         }
     }
 
-    /// Click (`accept`) or right-click (reject) on the badges of row `ix`.
-    pub(super) fn suggestions_at(
-        &mut self,
-        ix: usize,
-        accept: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.cursor_to(ix);
-        if accept {
-            self.accept_suggestions(cx);
-        } else {
-            self.reject_suggestions(cx);
-        }
-        window.focus(&self.focus_handle, cx);
-    }
-
     /// Full-height selection hit target at the row's left edge.
     pub(super) fn row_selection_target(&self, ix: usize, cx: &Context<Self>) -> crate::app::ui::Observable {
         let t = cx.theme();

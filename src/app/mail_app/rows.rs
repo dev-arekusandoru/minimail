@@ -1,4 +1,7 @@
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::menu::PopupMenu;
 use super::*;
 
 impl MailApp {
@@ -174,6 +177,13 @@ impl MailApp {
         let label = (SharedString::from(sender.clone()), SharedString::from(msg.subject.clone()));
         let container = div().id(("row", ix_id)).h(px(self.message_row_h()));
         let container = self.draggable(container, &row_ids, self.thread_of(msg.id), label);
+        // Right-clicking the row's body opens the same classifier menu as its icons.
+        let owner = cx.weak_entity();
+        let menu_id = msg.id;
+        let classifier_menu =
+            move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| -> PopupMenu {
+                Self::populate_menu(owner.clone(), MenuKind::Classifier(menu_id), menu, window, cx)
+            };
         row::frame(container, visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
@@ -187,6 +197,7 @@ impl MailApp {
                     .justify_center()
                     .overflow_hidden()
                     .on_click(Self::row_click(ix, cx))
+                    .context_menu(classifier_menu)
                     .child(
                         div()
                             .h(px(18.))
@@ -260,17 +271,6 @@ impl MailApp {
                             .h(px(18.))
                             .flex()
                             .items_center()
-                            .when(!pending.is_empty(), |d| {
-                                d.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                                    this.suggestions_at(ix, true, w, cx)
-                                }))
-                                .on_mouse_down(
-                                    MouseButton::Right,
-                                    cx.listener(move |this, _: &MouseDownEvent, w, cx| {
-                                        this.suggestions_at(ix, false, w, cx)
-                                    }),
-                                )
-                            })
                             .when_some(self.classification_state(msg.id), |d, state| {
                                 d.child(icons::classification_badge(
                                     ("row-classify", ix_id),
@@ -279,7 +279,24 @@ impl MailApp {
                                     12.,
                                 ))
                             })
-                            .child(icons::cluster(&shown, &hidden, folder_hint.as_deref(), t, ix_id)),
+                            // Any icon of the cluster opens the classifier menu: clicking one no
+                            // longer accepts a suggestion directly, the menu is where the user
+                            // accepts or rejects, and where a label is corrected.
+                            .child(self.menu_trigger(
+                                MenuKind::Classifier(msg.id),
+                                Button::new(("row-menu", ix_id))
+                                    .ghost()
+                                    .h(px(18.))
+                                    .px_0()
+                                    .child(icons::cluster(
+                                        &shown,
+                                        &hidden,
+                                        folder_hint.as_deref(),
+                                        t,
+                                        ix_id,
+                                    )),
+                                cx,
+                            )),
                     ),
             )
     }

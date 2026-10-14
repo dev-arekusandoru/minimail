@@ -26,6 +26,8 @@ pub enum MenuItem {
         checked: bool,
         action: ActionFn,
     },
+    /// A non-interactive section header.
+    Label(SharedString),
     /// Opens a nested menu.
     Submenu { label: SharedString, items: Vec<MenuItem> },
     Separator,
@@ -43,6 +45,11 @@ impl MenuItem {
         action: impl Fn() -> Box<dyn Action> + 'static,
     ) -> Self {
         MenuItem::Action { label: label.into(), checked: false, action: Rc::new(action) }
+    }
+
+    /// A non-interactive header for the rows under it.
+    pub fn header(label: impl Into<SharedString>) -> Self {
+        MenuItem::Label(label.into())
     }
 
     /// Mark an action row as the active choice.
@@ -65,7 +72,9 @@ impl MenuItem {
     /// The row's label, if it has one.
     pub fn label(&self) -> Option<&SharedString> {
         match self {
-            MenuItem::Action { label, .. } | MenuItem::Submenu { label, .. } => Some(label),
+            MenuItem::Action { label, .. }
+            | MenuItem::Label(label)
+            | MenuItem::Submenu { label, .. } => Some(label),
             MenuItem::Separator => None,
         }
     }
@@ -81,6 +90,7 @@ pub fn populate(
 ) -> PopupMenu {
     items.iter().fold(menu, |menu, item| match item {
         MenuItem::Separator => menu.separator(),
+        MenuItem::Label(label) => menu.label(label.clone()),
         MenuItem::Action { label, checked, action } => {
             let (run, build) = (run.clone(), action.clone());
             // The click handler replaces the kit's own dispatch, so the owner can scope the

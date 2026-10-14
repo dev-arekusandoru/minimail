@@ -73,12 +73,25 @@ re-asks only Folder, only for Inbox mail. Legacy `[key, answer]` rows read as ve
 ## Invariants kept
 
 - Routing still one undo step per user action (accepting a Folder suggestion files the message
-  and reverts as a whole); background auto-applies push no undo step (same as `tick`).
+  and reverts as a whole, and so does setting or resetting a label); background auto-applies push
+  no undo step (same as `tick`).
 - No system clock in logic: `judged_at` takes `now`.
 - Tests use `MemorySecrets` and a fake `Judge`; never the network.
 
 ## Resolved
 
+- **Only a folder move is reviewed.** Every other answer (Spam, NeedsReply, Urgency, Kind) is
+  applied straight away, whatever its confidence: `route` returns `Auto` for them and `Review`
+  only for Folder, which files the message. The per-question mode is therefore Off / Auto for a
+  label question, and Off / Review for Folder. `y`/`n` and the reader strip now only ever act on
+  a folder suggestion.
+- **Hand-set labels stick.** The row's classifier menu (`SetKind` / `SetUrgency` / `SetSpam`, one
+  `PopupMenu` opened by any row icon or a right-click) stores the value as a user override on the
+  message (`Meta::overrides`); `Mailbox::apply` skips an overridden question, so no later
+  classification overwrites it. Overrides look exactly like classifier values. "Reset Kind/Urgency
+  to suggestion" clears the override and puts the classifier's stored answer back; spam has no
+  reset row. Every one of these actions is one undo step. The same actions are palette commands
+  (`Classify`) with no key bindings.
 - `expects_reply` on send: the reply sends immediately; with `auto_classify` on, Jev judges it on
   the worker and tags the thread *Awaiting Reply* when the answer arrives (no undo step; no key or
   auto off → no tag). Reply requests contain only the ExpectsReply question.
