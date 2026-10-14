@@ -103,6 +103,16 @@ fn installing_a_judge_classifies_once_and_the_second_pass_hits_the_cache(cx: &mu
 }
 
 #[gpui_kit::gpui::test]
+fn shift_c_re_asks_jev_about_the_message_even_when_cached(cx: &mut TestAppContext) {
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
+    let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    h.keys("shift-c");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "manual classify skips the cache");
+}
+
+#[gpui_kit::gpui::test]
 fn a_failure_shows_in_the_status_and_the_next_success_clears_it(cx: &mut TestAppContext) {
     let (judge, _calls, fail, _seen) = FakeJudge::new("counting");
     fail.store(true, Ordering::SeqCst);
