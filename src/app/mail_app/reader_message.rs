@@ -96,7 +96,7 @@ impl MailApp {
             })
             .when(opened && !m.outgoing, |d| {
                 d.child(
-                    icon_button(("btn-classify", id), IconName::Sparkles, "Classify this message", "", cx)
+                    icon_button(("btn-classify", id), IconName::ScanSearch, "Classify this message", "", cx)
                         .on_click(cx.listener(move |this, _, _, cx| this.classify_message(mid, cx))),
                 )
             })

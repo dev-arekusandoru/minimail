@@ -26,7 +26,7 @@ gpui_kit::assets::icon_assets!(
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
-        ReplyAll, Forward, Regex, WholeWord,
+        ReplyAll, Forward, Regex, WholeWord, ScanSearch,
         // Per-message classification state (not classified / in progress / failed).
         CircleDashed, LoaderCircle, CircleAlert
     ]

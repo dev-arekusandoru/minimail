@@ -136,7 +136,7 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 | Paperclip | Subject or opening lines mention an attachment | muted |
 | User / Receipt / Newspaper / Bell / Tag | Kind: person / receipt / newsletter / notification / other (other only in `+N`) | kind |
 
-To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`.
+To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`. The reader's **Classify** button and the global *Classify* command use the `ScanSearch` icon.
 
 ## 🛠️ Development
 
