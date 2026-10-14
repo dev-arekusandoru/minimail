@@ -75,12 +75,14 @@ decided, why, and how to flip it. Flip any you disagree with.
   from the mailbox, so they survive both a judge swap (`set_judge` keeps `Reply` jobs) and an
   error (`finish_judge` keeps queued and failed reply jobs for the next explicit retry, while
   message jobs are rebuilt by `classify_visible`).
-- **Automatic classification is `AUTO_CLASSIFY` (default off).** `classify_visible`, `body_ready`,
-  the message-open hook (`note_opened`) and reply judging all respect it; with it off, `c`
-  re-routes cached answers only. The manual **Classify this message** (`classify_message`, palette
-  + reader) always works, re-asks every enabled incoming question, and pushes to the front of the
-  queue. The constructor default is `true` so headless tests that never load preferences classify;
-  `load_preferences` overrides it from the setting, so the product default is off.
+- **Automatic classification is `AUTO_CLASSIFY` (default off).** `classify_visible` (settings
+  changes, sync), `body_ready`, the message-open hook (`note_opened`) and reply judging all respect
+  it; with it off they only re-route cached answers. Manual classification (`classify_message`)
+  always works, re-asks every enabled incoming question, and pushes to the front of the queue:
+  `c` / the reader button for the selected message(s), `shift-c` for every incoming message the
+  current list shows, behind a Confirm/Cancel dialog. The constructor default is `true` so
+  headless tests that never load preferences classify; `load_preferences` overrides it from the
+  setting, so the product default is off.
 - **A per-message status icon** (`classification_state`): `None` for outgoing/non-Inbox mail or a
   message with every enabled question answered at the current version, else not-classified /
   in-progress / failed (`classify_failed`, cleared on success).

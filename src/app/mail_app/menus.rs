@@ -186,7 +186,7 @@ fn global_items() -> Vec<MenuItem> {
         MenuItem::action("Commands…", || Box::new(ToggleCommandPalette)),
         MenuItem::separator(),
         MenuItem::action("Undo", || Box::new(Undo)),
-        MenuItem::action("Classify visible mail", || Box::new(ClassifyVisible)),
+        MenuItem::action("Classify every message in this list…", || Box::new(ClassifyVisible)),
         MenuItem::separator(),
         MenuItem::action("Sender rules…", || Box::new(ToggleRules)),
         MenuItem::action("Settings…", || Box::new(ToggleSettings)),

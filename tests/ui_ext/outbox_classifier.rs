@@ -79,15 +79,12 @@ pub fn goto_pending(h: &mut Harness<'_>) -> MessageId {
 }
 
 #[gpui_kit::gpui::test]
-pub fn classifier_runs_on_startup_and_c_reruns(cx: &mut TestAppContext) {
+pub fn classifier_runs_on_startup(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert!(
         tag_total(&mut h) + pending_total(&mut h) > 0,
         "startup classification produces badges"
     );
-    h.keys("c");
-    assert!(h.toast().contains("auto-applied"), "toast was {:?}", h.toast());
-    assert!(h.toast().contains("to review"));
     h.assert_invariant("classify");
 }
 

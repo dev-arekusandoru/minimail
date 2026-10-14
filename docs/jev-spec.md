@@ -18,7 +18,7 @@ configurable.
 | Provider | Jev only. Configurable base URL (default `https://api.typesafe.ai/v1`) and model (default `jev-latest`). |
 | Key | OS keychain via existing `SecretStore` (`src/provider/secrets.rs`), entry `jev`. |
 | No key | Classifier off: no labels. Status bar prompts "Add a Jev key in Settings → Classifier". |
-| Trigger | Automatic classification is the `auto_classify` setting (default **off**): when on, new arrivals, startup/backfill and opening a message queue work; when off, nothing is sent unless the user runs **Classify this message** (`shift-c`, reader button, palette), which works with auto off and jumps the queue. |
+| Trigger | Automatic classification is the `auto_classify` setting (default **off**): when on, new arrivals, startup/backfill and opening a message queue work; when off, nothing is sent unless the user asks. Manual classification works with auto off, re-asks every enabled question and jumps the queue: `c` (or the reader button) for the selected message(s), `shift-c` for every incoming message in the current list after a Confirm/Cancel dialog. |
 | Pacing | One request per message, serial, on one background worker. A message is only sent once its full body is downloaded. |
 | Failure | Message stays unlabeled; error shown in the status bar center; retried on next arrival/launch. |
 | Persistence | SQLite table of raw answers, keyed by `message_id`. Each question's answer is stored once as a `StoredAnswer { key, version, answer }`; a question is re-asked only when its version changes — so wording changes re-bill only the affected question, never a model/endpoint/key change. |

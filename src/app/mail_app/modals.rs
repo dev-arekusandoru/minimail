@@ -1213,6 +1213,26 @@ impl MailApp {
         );
     }
 
+    /// Ask before re-asking Jev about every incoming message the list shows.
+    pub(super) fn confirm_classify_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: Vec<MessageId> = self
+            .visible_ids()
+            .into_iter()
+            .filter(|id| self.mailbox.get(*id).is_some_and(|m| !m.outgoing))
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let n = ids.len();
+        let title = format!("Classify {n} message{} with Jev?", if n == 1 { "" } else { "s" });
+        self.confirm(
+            title,
+            move |this, _, cx| this.classify_messages(&ids, cx),
+            window,
+            cx,
+        );
+    }
+
     /// Confirm/Cancel dialog; `on_confirm` runs when Confirm is chosen.
     fn confirm(
         &mut self,

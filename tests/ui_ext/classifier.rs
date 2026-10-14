@@ -90,26 +90,41 @@ fn no_key_means_no_labels_and_the_status_asks_for_one(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn installing_a_judge_classifies_once_and_the_second_pass_hits_the_cache(cx: &mut TestAppContext) {
+fn installing_a_judge_classifies_each_inbox_message_once(cx: &mut TestAppContext) {
     let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1, "one request for the one Inbox message");
     assert!(classified(&mut h), "the answers were routed and applied");
     assert!(h.has_tag(1, Tag::PossibleSpam), "the spam label auto-applied");
-
-    h.keys("c");
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "the second pass replays the cache");
-    assert_eq!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle);
 }
 
 #[gpui_kit::gpui::test]
-fn shift_c_re_asks_jev_about_the_message_even_when_cached(cx: &mut TestAppContext) {
+fn c_re_asks_jev_about_the_selected_message_even_when_cached(cx: &mut TestAppContext) {
     let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-    h.keys("shift-c");
+    h.keys("c");
     assert_eq!(calls.load(Ordering::SeqCst), 2, "manual classify skips the cache");
+}
+
+#[gpui_kit::gpui::test]
+fn shift_c_asks_first_then_re_asks_every_message_in_the_list(cx: &mut TestAppContext) {
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
+    let two = mailbox(&[
+        msg(1, 1, "deals@talentloop.com", "Is this a fit?", 1, "Inbox"),
+        msg(2, 2, "alice@example.com", "Lunch?", 2, "Inbox"),
+    ]);
+    let mut h = harness_with_judge(cx, two, Some(Arc::new(judge)));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    h.keys("shift-c");
+    h.keys("2");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "Cancel sends nothing");
+
+    h.keys("shift-c");
+    h.keys("enter");
+    assert_eq!(calls.load(Ordering::SeqCst), 4, "Confirm re-asks both messages");
 }
 
 #[gpui_kit::gpui::test]

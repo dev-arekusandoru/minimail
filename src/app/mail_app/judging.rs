@@ -287,6 +287,13 @@ impl MailApp {
         cx.notify();
     }
 
+    /// [`Self::classify_message`] for each of `ids`, keeping their order at the queue front.
+    pub(super) fn classify_messages(&mut self, ids: &[MessageId], cx: &mut Context<Self>) {
+        for id in ids.iter().rev() {
+            self.classify_message(*id, cx);
+        }
+    }
+
     /// A full body landed for `id` (called by the body downloader). Sends the message to Jev
     /// when it was requested while partial, or when automatic classification is on and questions
     /// are due.

@@ -217,20 +217,22 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
-                let (auto, review) = this.classify_visible(cx);
-                let text = match this.judge_status() {
-                    JudgeStatus::NoKey => "No Jev key · add one in Settings".to_owned(),
-                    JudgeStatus::Working { done, total } => {
-                        format!("{auto} auto-applied · Classifying {done}/{total}")
-                    }
-                    _ => format!("{auto} auto-applied · {review} to review"),
-                };
-                this.show_toast(text, w, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ClassifyMessage, _, cx| {
-                if let Some(id) = this.opened().or_else(|| this.cursor_id()) {
-                    this.classify_message(id, cx);
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                } else {
+                    this.confirm_classify_list(w, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &ClassifyMessage, w, cx| {
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                    return;
+                }
+                let mut ids = this.target_ids();
+                if ids.is_empty() {
+                    ids.extend(this.opened());
+                }
+                this.classify_messages(&ids, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
