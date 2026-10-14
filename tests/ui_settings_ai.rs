@@ -433,7 +433,7 @@ fn reset_all_rebuilds_the_judge_with_the_default_endpoint(cx: &mut TestAppContex
     );
 
     h.settings_click("settings-reset-all");
-    h.settings_click("ok");
+    h.settings_keys("enter");
     assert_eq!(
         seen.borrow().last(),
         Some(&(DEFAULT_BASE_URL.to_owned(), DEFAULT_MODEL.to_owned())),
