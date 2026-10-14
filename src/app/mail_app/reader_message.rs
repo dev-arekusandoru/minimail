@@ -461,29 +461,45 @@ impl MailApp {
     fn dev_answers(&self, m: &Message, look: &Look<'_>) -> Option<AnyElement> {
         let answers = self.cached_answers(m.id)?;
         let t = &look.t;
-        let mut column = div()
+        let mut table = div()
             .id("reader-dev-answers")
             .test_support()
             .flex()
             .flex_col()
-            .gap_0p5()
-            .px_2()
-            .py_1()
-            .rounded_sm()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
             .border_1()
             .border_color(t.border)
             .font_family(look.mono.clone())
-            .text_size(px(10.5))
-            .text_color(t.muted_foreground)
-            .child("CLASSIFIER ANSWERS (DEV)");
+            .text_size(px(11.5))
+            .text_color(t.foreground);
+        // Fixed column widths keep the rows aligned like a table.
+        let row = |cells: [AnyElement; 5]| {
+            let [q, value, conf, route, probs] = cells;
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(div().w(px(120.)).flex_none().child(q))
+                .child(div().w(px(150.)).flex_none().truncate().child(value))
+                .child(div().w(px(48.)).flex_none().text_right().child(conf))
+                .child(div().w(px(64.)).flex_none().child(route))
+                .child(div().flex_1().min_w_0().truncate().child(probs))
+        };
+        let muted = |s: &str| div().text_color(t.muted_foreground).child(s.to_owned()).into_any_element();
+        table = table
+            .child(div().text_xs().text_color(t.muted_foreground).child("Classifier answers · dev"))
+            .child(row(["Question", "Answer", "Conf", "Routing", "Probabilities"].map(muted)));
         for a in answers {
             let routing = match crate::judge::route(&self.policy, m, vec![(a.key, a.answer.clone())])
                 .into_iter()
                 .next()
             {
-                Some(Routed::Auto(_)) => "Auto",
-                Some(Routed::Review(_)) => "Review",
-                _ => "Drop",
+                Some(Routed::Auto(_)) => ("Auto", t.success),
+                Some(Routed::Review(_)) => ("Review", t.warning),
+                _ => ("Drop", t.muted_foreground),
             };
             let value = match &a.answer.value {
                 AnswerValue::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
@@ -500,7 +516,7 @@ impl MailApp {
                         .map_or_else(|| "none".to_owned(), |f| self.mailbox.folder_path(f)),
                     _ => format!("#{i}"),
                 },
-                AnswerValue::Score(s) => format!("{s:.1}"),
+                AnswerValue::Score(s) => format!("{s:.0} / 5"),
             };
             let probs = a
                 .answer
@@ -508,15 +524,23 @@ impl MailApp {
                 .iter()
                 .map(|p| format!("{p:.2}"))
                 .collect::<Vec<_>>()
-                .join("/");
-            column = column.child(format!(
-                "{} v{}: {value} · conf {:.2} · [{probs}] · {routing}",
-                a.key.label(),
-                a.version,
-                a.answer.confidence,
-            ));
+                .join("  ");
+            // Folder's version is a long folder-list fingerprint; its head is enough to compare.
+            let version: String = a.version.chars().take(6).collect();
+            table = table.child(row([
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(a.key.label())
+                    .child(div().text_color(t.muted_foreground).child(format!("v{version}")))
+                    .into_any_element(),
+                div().child(value).into_any_element(),
+                div().child(format!("{:.0}%", a.answer.confidence * 100.)).into_any_element(),
+                div().text_color(routing.1).child(routing.0).into_any_element(),
+                div().text_color(t.muted_foreground).child(probs).into_any_element(),
+            ]));
         }
-        Some(column.into_any_element())
+        Some(table.into_any_element())
     }
 
     /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text
