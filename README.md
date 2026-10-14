@@ -131,7 +131,7 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 | CornerUpRight | Follow up (the await passed the timeout) | follow_up |
 | AlarmClock | Reminder (a snooze woke the message) | reminder |
 | Clock | Snoozed (wake time shown as text on the row) | state_snoozed |
-| Siren / Flame / Zap | Urgency 4–5 / 3 / 1–2 (1–2 only in `+N`) | urgent / muted |
+| Siren / Flame | Urgency 5 (very urgent) / 4 (urgent); levels 1–3 show no row icon | urgent |
 | BellOff | Muted thread | muted |
 | Paperclip | Subject or opening lines mention an attachment | muted |
 | User / Receipt / Newspaper / Bell / Tag | Kind: person / receipt / newsletter / notification / other (other only in `+N`) | kind |

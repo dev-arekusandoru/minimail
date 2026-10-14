@@ -123,7 +123,6 @@ fn overflow_keeps_top_priority_icons_and_lists_the_rest() {
     assert_eq!(glyphs[0], Glyph::PossibleSpam, "most important first");
     let (shown, hidden) = split_overflow(&glyphs, 3);
     assert_eq!(shown, [Glyph::PossibleSpam, Glyph::UrgentHigh, Glyph::NeedsReply]);
-    assert!(hidden.contains(&Glyph::UrgentLow), "low-signal glyphs only appear in +N");
     assert!(hidden.contains(&Glyph::KindReceipt));
     assert_eq!(shown.len() + hidden.len(), glyphs.len());
 }
@@ -136,11 +135,27 @@ fn narrower_panels_show_fewer_icons() {
 
 #[test]
 fn suggestion_is_first_and_low_signal_never_takes_a_slot() {
-    let glyphs = [Glyph::UrgentLow, Glyph::KindOther, Glyph::PossibleSpam];
+    let glyphs = [Glyph::KindOther, Glyph::PossibleSpam];
     let (shown, hidden) = split_overflow(&glyphs, 4);
     assert_eq!(shown, [Glyph::PossibleSpam]);
-    assert_eq!(hidden, [Glyph::UrgentLow, Glyph::KindOther]);
+    assert_eq!(hidden, [Glyph::KindOther]);
     assert_eq!(Glyph::Suggestion.spec().priority, 0);
+}
+
+#[test]
+fn urgency_below_four_shows_no_row_icon() {
+    for level in [1, 2, 3] {
+        let tag = Tag::Urgent(level);
+        let glyphs = glyphs_for(&GlyphInputs {
+            tags: std::slice::from_ref(&tag),
+            pending: &[],
+            muted: false,
+            new_sender: false,
+            snoozed: false,
+            attachment: false,
+        });
+        assert!(glyphs.is_empty(), "urgency {level} shows no row icon");
+    }
 }
 
 #[test]
@@ -244,7 +259,7 @@ fn every_triage_tag_picks_its_own_badge() {
         (Tag::Reminder, Glyph::Reminder),
         (Tag::PossibleSpam, Glyph::PossibleSpam),
         (Tag::Urgent(5), Glyph::UrgentHigh),
-        (Tag::Urgent(3), Glyph::UrgentMid),
+        (Tag::Urgent(4), Glyph::UrgentMid),
         (Tag::Kind(Kind::Receipt), Glyph::KindReceipt),
     ];
     for (tag, expected) in cases {

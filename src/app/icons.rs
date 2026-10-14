@@ -17,7 +17,7 @@ use gpui_kit::*;
 gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
-        ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
+        ShieldAlert, Reply, Siren, Flame, User, Receipt, Newspaper, Bell, Tag, Sparkles,
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
@@ -104,10 +104,8 @@ pub enum Glyph {
     KindReceipt,
     KindNewsletter,
     KindNotification,
-    UrgentLow,
     KindOther,
 }
-
 
 /// Everything the UI needs to draw and explain a [`Glyph`].
 #[derive(Clone, Copy, Debug)]
@@ -139,7 +137,7 @@ const fn spec(
 }
 
 impl Glyph {
-    pub const ALL: [Glyph; 18] = [
+    pub const ALL: [Glyph; 17] = [
         Glyph::Suggestion,
         Glyph::PossibleSpam,
         Glyph::UrgentHigh,
@@ -156,7 +154,6 @@ impl Glyph {
         Glyph::KindReceipt,
         Glyph::KindNewsletter,
         Glyph::KindNotification,
-        Glyph::UrgentLow,
         Glyph::KindOther,
     ];
 
@@ -166,21 +163,20 @@ impl Glyph {
         match self {
             Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
             Glyph::PossibleSpam => spec(IconName::ShieldAlert, PossibleSpam, "Possible spam", "Classified as possible spam.", "Classifier labels", 1, false),
-            Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
+            Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 5 out of 5.", "Urgency", 2, false),
             Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
             Glyph::AwaitingReply => spec(IconName::Hourglass, AwaitingReply, "Awaiting reply", "A reply has been sent and an answer is expected.", "Reply status", 4, false),
             Glyph::FollowUp => spec(IconName::CornerUpRight, FollowUp, "Follow up", "A reply is overdue: follow up with this thread.", "Reply status", 5, false),
             Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A snoozed message woke back up in the inbox.", "Reply status", 6, false),
             Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
             Glyph::Snoozed => spec(IconName::Clock, Snoozed, "Snoozed", "Hidden until the wake time shown on the row.", "Mail state", 8, false),
-            Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 3 out of 5.", "Urgency", 7, false),
+            Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 4 out of 5.", "Urgency", 2, false),
             Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
             Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),
             Glyph::KindPerson => spec(IconName::User, Kind, "Person", "Written by a person.", "Kind", 10, false),
             Glyph::KindReceipt => spec(IconName::Receipt, Kind, "Receipt", "A receipt or statement.", "Kind", 10, false),
             Glyph::KindNewsletter => spec(IconName::Newspaper, Kind, "Newsletter", "A newsletter or bulk mailing.", "Kind", 10, false),
             Glyph::KindNotification => spec(IconName::Bell, Kind, "Notification", "An automatic notification.", "Kind", 10, false),
-            Glyph::UrgentLow => spec(IconName::Zap, Muted, "Low urgency", "Urgency 1 or 2 out of 5 (low signal, folded into +N).", "Urgency", 11, true),
             Glyph::KindOther => spec(IconName::Tag, Muted, "Other", "Uncategorised (low signal, folded into +N).", "Kind", 12, true),
         }
     }
@@ -195,11 +191,12 @@ impl Glyph {
         }
     }
 
-    pub fn of_urgency(level: u8) -> Glyph {
+    /// The urgency glyph for `level`, or `None` when levels 1–3 show no row icon.
+    pub fn of_urgency(level: u8) -> Option<Glyph> {
         match level {
-            4.. => Glyph::UrgentHigh,
-            3 => Glyph::UrgentMid,
-            _ => Glyph::UrgentLow,
+            5.. => Some(Glyph::UrgentHigh),
+            4 => Some(Glyph::UrgentMid),
+            _ => None,
         }
     }
 }
@@ -237,15 +234,15 @@ pub fn glyphs_for(input: &GlyphInputs) -> Vec<Glyph> {
         out.push(Glyph::Suggestion);
     }
     for tag in input.tags {
-        out.push(match tag {
-            Tag::NeedsReply => Glyph::NeedsReply,
-            Tag::AwaitingReply => Glyph::AwaitingReply,
-            Tag::FollowUp => Glyph::FollowUp,
-            Tag::Reminder => Glyph::Reminder,
-            Tag::PossibleSpam => Glyph::PossibleSpam,
-            Tag::Urgent(n) => Glyph::of_urgency(*n),
-            Tag::Kind(k) => Glyph::of_kind(*k),
-        });
+        match tag {
+            Tag::NeedsReply => out.push(Glyph::NeedsReply),
+            Tag::AwaitingReply => out.push(Glyph::AwaitingReply),
+            Tag::FollowUp => out.push(Glyph::FollowUp),
+            Tag::Reminder => out.push(Glyph::Reminder),
+            Tag::PossibleSpam => out.push(Glyph::PossibleSpam),
+            Tag::Urgent(n) => out.extend(Glyph::of_urgency(*n)),
+            Tag::Kind(k) => out.push(Glyph::of_kind(*k)),
+        }
     }
     let flags = [
         (input.muted, Glyph::Muted),
