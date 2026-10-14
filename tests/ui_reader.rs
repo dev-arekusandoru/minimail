@@ -323,3 +323,63 @@ fn reader_labels_show_classifier_chips(cx: &mut TestAppContext) {
     assert_eq!(h.label(("reader-chip-kind", 1u64)).as_deref(), Some("Other"));
     assert!(!h.label(("reader-chip-urgency", 1u64)).unwrap().contains('/'), "no N/5 form");
 }
+
+/// `mb` with a pending Folder suggestion on message 1 pointing at its first folder; returns the
+/// target folder.
+fn with_folder_suggestion(mb: &mut Mailbox) -> mail_classifier::model::FolderId {
+    let options = mb.folder_options("personal");
+    assert!(!options.is_empty(), "the fixture account has folders");
+    mb.add_suggestions(vec![Suggestion {
+        message: 1,
+        key: QuestionKey::Folder,
+        answer: Answer {
+            probabilities: vec![1.0; options.len() + 1],
+            value: AnswerValue::Choice(0),
+            confidence: 0.9,
+        },
+    }]);
+    options[0].0
+}
+
+/// A pending non-folder suggestion is not a folder suggestion: the strip stays away.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_needs_a_folder_suggestion(cx: &mut TestAppContext) {
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.add_suggestions(vec![Suggestion {
+        message: 1,
+        key: QuestionKey::NeedsReply,
+        answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
+    }]);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(!h.exists("reader-folder-suggestion"));
+}
+
+/// `y` on the folder strip (the Move button) files the message into the suggested folder.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_move_files_the_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    let target = with_folder_suggestion(&mut mb);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.exists("reader-folder-suggestion"));
+    h.keys("y");
+    assert_eq!(h.state_of(1), TriageState::Filed(target));
+    assert!(!h.exists("reader-folder-suggestion"), "accepting clears the strip");
+}
+
+/// `n` on the folder strip (the Dismiss button) drops the suggestion without filing.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_dismiss_keeps_the_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    with_folder_suggestion(&mut mb);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.exists("reader-folder-suggestion"));
+    h.keys("n");
+    assert!(h.read(|a| a.mailbox.pending(1).is_empty()), "Dismiss drops the suggestion");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    assert!(!h.exists("reader-folder-suggestion"));
+}

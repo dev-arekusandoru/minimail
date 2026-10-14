@@ -12,6 +12,7 @@ use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::separator::Separator;
@@ -203,7 +204,7 @@ impl MailApp {
             .child(sender)
             .child(self.labels_row(m, look).ml(px(52.)));
 
-        let strip = if opened { self.suggestion_strip(m, look, cx) } else { None };
+        let strip = if opened { self.folder_strip(m, look, cx) } else { None };
         let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
 
         div()
@@ -377,58 +378,40 @@ impl MailApp {
         out
     }
 
-    /// `Suggested: Needs reply 87% · Newsletter 92%` with Accept / Reject buttons (`y` / `n`).
-    /// `None` when nothing is pending.
-    fn suggestion_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
+    /// The slim folder-only strip under the labels row: the pending Folder suggestion's target,
+    /// with `Move` (`y`, accepts) and `Dismiss` (`n`, rejects). `None` when no folder suggestion
+    /// is pending.
+    fn folder_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
         let t = &look.t;
-        let pending = self.mailbox.pending(m.id);
-        if pending.is_empty() {
-            return None;
-        }
-        let parts: Vec<String> = pending
-            .iter()
-            .map(|s| {
-                let label = match s.key {
-                    QuestionKey::Spam => "Possible spam".to_owned(),
-                    QuestionKey::NeedsReply => "Needs reply".to_owned(),
-                    QuestionKey::ExpectsReply => "Expects reply".to_owned(),
-                    QuestionKey::Urgency => {
-                        s.urgency().map_or("Urgent".to_owned(), |n| format!("Urgent {n}"))
-                    }
-                    QuestionKey::Kind => s.kind().map_or("Kind".to_owned(), |k| {
-                        Glyph::of_kind(k).spec().label.to_owned()
-                    }),
-                    QuestionKey::Folder => self.mailbox.suggested_folder(s).map_or_else(
-                        || "No folder".to_owned(),
-                        |f| format!("Move to {}?", self.mailbox.folder_path(f)),
-                    ),
-                };
-                format!("{label} {}%", (s.answer.confidence * 100.).round() as u32)
-            })
-            .collect();
+        let s = self.mailbox.pending(m.id).into_iter().find(|s| s.key == QuestionKey::Folder)?;
+        let folder = self.mailbox.suggested_folder(s)?;
+        let accent = Glyph::FolderSuggestion.spec().token.color(t);
         Some(
             div()
-                .id("reader-suggestions")
+                .id("reader-folder-suggestion")
                 .test_support()
                 .flex_none()
                 .flex()
                 .items_center()
-                .gap_3()
+                .gap_2()
                 .px_3()
-                .py_2()
-                .rounded_sm()
+                .py_1()
+                .min_h(px(30.))
+                .rounded_md()
                 .border_1()
-                .border_color(t.primary.opacity(0.4))
-                .bg(t.primary.opacity(0.08))
-                .child(icons::icon(Glyph::FolderSuggestion, t, 12.))
+                .border_dashed()
+                .border_color(accent.opacity(0.5))
+                .bg(accent.opacity(0.08))
+                .child(icons::icon(Glyph::FolderSuggestion, t, 14.))
+                .child(div().text_size(px(12.5)).text_color(t.muted_foreground).child("Suggested folder"))
                 .child(
-                    look.mono_selectable(
-                        ("reader-sel-suggestions", u64::from(m.id)),
-                        format!("Suggested: {}", parts.join(" · ")),
-                        t.foreground,
-                    )
-                    .flex_1()
-                    .min_w_0(),
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(13.))
+                        .text_color(t.foreground)
+                        .child(self.mailbox.folder_path(folder)),
                 )
                 .child(
                     div()
@@ -436,22 +419,28 @@ impl MailApp {
                         .flex_none()
                         .items_center()
                         .gap_2()
-                        .child(look.action_button(
-                            "btn-suggest-accept",
-                            "Accept",
-                            "Accept the suggestions",
-                            "y",
-                            AcceptSuggestions,
-                            cx,
-                        ))
-                        .child(look.action_button(
-                            "btn-suggest-reject",
-                            "Reject",
-                            "Reject the suggestions",
-                            "n",
-                            RejectSuggestions,
-                            cx,
-                        )),
+                        .child(
+                            look.action_button(
+                                "btn-folder-move",
+                                "Move",
+                                "Move the message to the suggested folder",
+                                "y",
+                                AcceptSuggestions,
+                                cx,
+                            )
+                            .primary(),
+                        )
+                        .child(
+                            look.action_button(
+                                "btn-folder-dismiss",
+                                "Dismiss",
+                                "Dismiss the suggested folder",
+                                "n",
+                                RejectSuggestions,
+                                cx,
+                            )
+                            .ghost(),
+                        ),
                 )
                 .into_any_element(),
         )
