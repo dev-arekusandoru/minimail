@@ -13,7 +13,7 @@ use mail_classifier::app::row::{
     shows_account_icon, thread_preview_lines, thread_row_height,
 };
 use mail_classifier::app::MailApp;
-use mail_classifier::judge::Kind;
+use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
 use mail_classifier::model::{Location, Mailbox, MessageId, Tag};
 
 struct Harness<'a> {
@@ -134,12 +134,43 @@ fn narrower_panels_show_fewer_icons() {
 }
 
 #[test]
-fn suggestion_is_first_and_low_signal_never_takes_a_slot() {
+fn folder_suggestion_is_first_and_low_signal_never_takes_a_slot() {
     let glyphs = [Glyph::KindOther, Glyph::PossibleSpam];
     let (shown, hidden) = split_overflow(&glyphs, 4);
     assert_eq!(shown, [Glyph::PossibleSpam]);
     assert_eq!(hidden, [Glyph::KindOther]);
-    assert_eq!(Glyph::Suggestion.spec().priority, 0);
+    assert_eq!(Glyph::FolderSuggestion.spec().priority, 0);
+}
+
+#[test]
+fn pending_suggestions_use_their_own_row_glyphs() {
+    let spam = Suggestion {
+        message: 1,
+        key: QuestionKey::Spam,
+        answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
+    };
+    let folder = Suggestion {
+        message: 1,
+        key: QuestionKey::Folder,
+        answer: Answer { probabilities: vec![0.3, 0.7], value: AnswerValue::Choice(1), confidence: 0.7 },
+    };
+    let low_urgency = Suggestion {
+        message: 1,
+        key: QuestionKey::Urgency,
+        answer: Answer { probabilities: vec![0.6, 0.4], value: AnswerValue::Score(2.0), confidence: 0.6 },
+    };
+    let pending = vec![&spam, &folder, &low_urgency];
+    let glyphs = glyphs_for(&GlyphInputs {
+        tags: &[],
+        pending: &pending,
+        muted: false,
+        new_sender: false,
+        snoozed: false,
+        attachment: false,
+    });
+    assert!(glyphs.contains(&Glyph::PossibleSpam), "spam suggestion keeps its icon");
+    assert!(glyphs.contains(&Glyph::FolderSuggestion), "a folder suggestion gets its own glyph");
+    assert_eq!(glyphs.len(), 2, "an urgency-2 suggestion adds no row icon");
 }
 
 #[test]

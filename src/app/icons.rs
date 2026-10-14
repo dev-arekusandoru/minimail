@@ -12,12 +12,13 @@ use crate::model::Tag;
 use crate::theme::{self, ThemeColor};
 use gpui_kit::assets::{Assets, IconName};
 use gpui_kit::component::{Icon, Sizable as _, tooltip::Tooltip};
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
-        ShieldAlert, Reply, Siren, Flame, User, Receipt, Newspaper, Bell, Tag, Sparkles,
+        ShieldAlert, Reply, Siren, Flame, User, Receipt, Newspaper, Bell, Tag, FolderInput,
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
@@ -88,7 +89,7 @@ impl Token {
 /// One concept of the icon language.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Glyph {
-    Suggestion,
+    FolderSuggestion,
     PossibleSpam,
     UrgentHigh,
     NeedsReply,
@@ -138,7 +139,7 @@ const fn spec(
 
 impl Glyph {
     pub const ALL: [Glyph; 17] = [
-        Glyph::Suggestion,
+        Glyph::FolderSuggestion,
         Glyph::PossibleSpam,
         Glyph::UrgentHigh,
         Glyph::NeedsReply,
@@ -161,7 +162,7 @@ impl Glyph {
     pub const fn spec(self) -> Spec {
         use Token::*;
         match self {
-            Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
+            Glyph::FolderSuggestion => spec(IconName::FolderInput, Accent, "Suggested folder", "A folder the classifier proposes; y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
             Glyph::PossibleSpam => spec(IconName::ShieldAlert, PossibleSpam, "Possible spam", "Classified as possible spam.", "Classifier labels", 1, false),
             Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 5 out of 5.", "Urgency", 2, false),
             Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
@@ -199,6 +200,19 @@ impl Glyph {
             _ => None,
         }
     }
+
+    /// The row glyph for one pending classifier answer, or `None` when it has no row icon
+    /// (urgency 1–3; Kind "Other" folds into `+N` through its low-signal spec).
+    pub fn of_suggestion(s: &Suggestion) -> Option<Glyph> {
+        Some(match s.key {
+            QuestionKey::Spam => Glyph::PossibleSpam,
+            QuestionKey::NeedsReply => Glyph::NeedsReply,
+            QuestionKey::ExpectsReply => Glyph::AwaitingReply,
+            QuestionKey::Urgency => Glyph::of_urgency(s.urgency()?)?,
+            QuestionKey::Kind => Glyph::of_kind(s.kind()?),
+            QuestionKey::Folder => Glyph::FolderSuggestion,
+        })
+    }
 }
 
 /// Legend sections in display order: `(group, glyphs)`.
@@ -230,9 +244,7 @@ pub struct GlyphInputs<'a> {
 /// Cluster glyphs of a message, most important first, without duplicates.
 pub fn glyphs_for(input: &GlyphInputs) -> Vec<Glyph> {
     let mut out = Vec::new();
-    if !input.pending.is_empty() {
-        out.push(Glyph::Suggestion);
-    }
+    out.extend(input.pending.iter().filter_map(|s| Glyph::of_suggestion(s)));
     for tag in input.tags {
         match tag {
             Tag::NeedsReply => out.push(Glyph::NeedsReply),
@@ -279,22 +291,6 @@ pub fn max_icons(width: f32) -> usize {
         w if w >= 370. => 2,
         _ => 1,
     }
-}
-
-/// One-line description of a message's pending suggestions, e.g. `spam?, urgent 4?`.
-pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
-    let parts: Vec<String> = pending
-        .iter()
-        .map(|s| match s.key {
-            QuestionKey::Spam => "spam?".to_owned(),
-            QuestionKey::NeedsReply => "needs reply?".to_owned(),
-            QuestionKey::ExpectsReply => "expects reply?".to_owned(),
-            QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
-            QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
-            QuestionKey::Folder => "folder?".to_owned(),
-        })
-        .collect();
-    parts.join(", ")
 }
 
 /// The themed icon of a glyph at `size` pixels.
@@ -365,25 +361,29 @@ fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
 }
 
 /// The right-aligned icon cluster: `shown` icons with tooltips plus a `+N` chip whose tooltip
-/// lists `hidden`. `suggestion_hint` is the tooltip of the suggestion icon. `id` must be unique
-/// per row.
+/// lists `hidden`. `folder_hint` is the name of the folder a pending Folder suggestion points at;
+/// its glyph gets a dashed "pending" outline and the `Suggested Folder: <name>` tooltip. `id` must
+/// be unique per row.
 pub fn cluster(
     shown: &[Glyph],
     hidden: &[Glyph],
-    suggestion_hint: &str,
+    folder_hint: Option<&str>,
     t: &ThemeColor,
     id: usize,
 ) -> Div {
     let icons = shown.iter().enumerate().map(|(i, &g)| {
         let label = match g {
-            Glyph::Suggestion => format!(
-                "AI suggestion: {suggestion_hint}. y / click accepts, n / right-click rejects"
-            ),
+            Glyph::FolderSuggestion => folder_hint
+                .map(|name| format!("Suggested Folder: {name}"))
+                .unwrap_or_else(|| g.spec().label.to_owned()),
             _ => g.spec().label.to_owned(),
         };
         div()
             .id(("glyph", id * 32 + i))
             .flex_none()
+            .when(g == Glyph::FolderSuggestion, |d| {
+                d.p(px(1.)).rounded_sm().border_1().border_dashed().border_color(g.spec().token.color(t).opacity(0.7))
+            })
             .child(icon(g, t, 13.))
             .tooltip(tip(label))
     });

@@ -419,7 +419,7 @@ impl MailApp {
                 .border_1()
                 .border_color(t.primary.opacity(0.4))
                 .bg(t.primary.opacity(0.08))
-                .child(icons::icon(Glyph::Suggestion, t, 12.))
+                .child(icons::icon(Glyph::FolderSuggestion, t, 12.))
                 .child(
                     look.mono_selectable(
                         ("reader-sel-suggestions", u64::from(m.id)),

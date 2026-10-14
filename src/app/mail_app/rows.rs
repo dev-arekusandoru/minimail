@@ -156,7 +156,11 @@ impl MailApp {
         let pending = self.mailbox.pending(msg.id);
         let emphasis = if unread || visual.open { FontWeight::SEMIBOLD } else { FontWeight::NORMAL };
         let lines = self.preview_lines;
-        let hint = icons::suggestion_summary(&pending);
+        let folder_hint = pending
+            .iter()
+            .find(|s| s.key == QuestionKey::Folder)
+            .and_then(|s| self.mailbox.suggested_folder(s))
+            .map(|f| self.mailbox.folder_path(f));
         let ix_id = msg.id as usize;
         let sender = row::sender_label(msg);
         let account_icon = if row::shows_account_icon(&self.location().unwrap_or(Location::AllInboxes)) {
@@ -275,7 +279,7 @@ impl MailApp {
                                     12.,
                                 ))
                             })
-                            .child(icons::cluster(&shown, &hidden, &hint, t, ix_id)),
+                            .child(icons::cluster(&shown, &hidden, folder_hint.as_deref(), t, ix_id)),
                     ),
             )
     }
