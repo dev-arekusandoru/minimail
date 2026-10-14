@@ -256,21 +256,22 @@ impl MailApp {
             .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
-            let inputs = icons::GlyphInputs {
-                tags: std::slice::from_ref(tag),
-                pending: &[],
-                muted: false,
-                new_sender: false,
-                snoozed: false,
-                attachment: false,
+            let (label, glyph, key) = match tag {
+                Tag::Urgent(level) => (urgency_word(*level), urgency_glyph(*level), "reader-chip-urgency"),
+                Tag::Kind(kind) => (Glyph::of_kind(*kind).spec().label, Glyph::of_kind(*kind), "reader-chip-kind"),
+                Tag::PossibleSpam => ("Possible spam", Glyph::PossibleSpam, "reader-chip-spam"),
+                Tag::NeedsReply => ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply"),
+                Tag::AwaitingReply => ("Awaiting reply", Glyph::AwaitingReply, "reader-chip-awaiting-reply"),
+                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up"),
+                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder"),
             };
-            let Some(&glyph) = icons::glyphs_for(&inputs).first() else { continue };
-            let label = match tag {
-                Tag::Urgent(n) => format!("Urgent {n}"),
-                Tag::Kind(Kind::Other) => continue,
-                _ => glyph.spec().label.to_owned(),
-            };
-            row = row.child(look.badge(label, glyph.spec().token.color(t), Some(glyph)));
+            row = row.child(
+                div()
+                    .id((key, u64::from(m.id)))
+                    .test_support()
+                    .aria_label(label)
+                    .child(look.badge(label, glyph.spec().token.color(t), Some(glyph))),
+            );
         }
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             let spec = Glyph::NewSender.spec();
@@ -710,4 +711,24 @@ impl MailApp {
 /// them; the token keeps light and dark in step.
 fn message_card_bg(t: &ThemeColor) -> Hsla {
     t.secondary
+}
+
+/// The reader chip word for urgency `level`; the raw `n/5` is never shown.
+fn urgency_word(level: u8) -> &'static str {
+    match level {
+        2 => "Low",
+        3 => "Normal",
+        4 => "Urgent",
+        5.. => "Very urgent",
+        _ => "None",
+    }
+}
+
+/// The reader chip icon for urgency `level`: Siren/Flame for 4–5, a muted Gauge for 1–3.
+fn urgency_glyph(level: u8) -> Glyph {
+    match level {
+        5.. => Glyph::UrgentHigh,
+        4 => Glyph::UrgentMid,
+        _ => Glyph::UrgencyLow,
+    }
 }

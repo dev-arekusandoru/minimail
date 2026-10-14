@@ -144,8 +144,9 @@ pub fn classify(judge: &dyn Judge, policy: &JudgePolicy, msgs: &[&Message]) -> V
 }
 
 /// Routes already-fetched answers for one message, in answer order. Used both
-/// by [`classify`] and when replaying cached answers at read time. Folder is always routed to
-/// `Review` (never auto-applied) unless it is Off.
+/// by [`classify`] and when replaying cached answers at read time. Only a Folder suggestion is
+/// queued for review — it moves the message — while every other label is applied straight away
+/// (the row menu is where the user corrects one). Folder is `Review` unless it is Off.
 pub fn route(policy: &JudgePolicy, m: &Message, answers: Vec<(QuestionKey, Answer)>) -> Vec<Routed> {
     answers
         .into_iter()
@@ -158,12 +159,8 @@ pub fn route(policy: &JudgePolicy, m: &Message, answers: Vec<(QuestionKey, Answe
             match policy.mode(key) {
                 _ if is_noop(m, &s) => Routed::Drop,
                 Mode::Off => Routed::Drop,
-                Mode::Auto(c)
-                    if key != QuestionKey::Folder && s.answer.confidence >= c.threshold() =>
-                {
-                    Routed::Auto(s)
-                }
-                Mode::Auto(_) | Mode::Review => Routed::Review(s),
+                _ if key == QuestionKey::Folder => Routed::Review(s),
+                _ => Routed::Auto(s),
             }
         })
         .collect()

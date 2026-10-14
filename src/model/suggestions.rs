@@ -57,7 +57,7 @@ impl Mailbox {
     }
     pub(super) fn apply(&mut self, s: &Suggestion, _now: Timestamp) {
         let id = s.message;
-        if !self.index.contains_key(&id) {
+        if !self.index.contains_key(&id) || self.is_overridden(id, s.key) {
             return;
         }
         match (s.key, &s.answer.value) {
@@ -96,5 +96,61 @@ impl Mailbox {
         if !tags.contains(&tag) {
             tags.push(tag);
         }
+    }
+
+    /// Whether the user set `key`'s label by hand: reclassification leaves it alone until
+    /// [`Self::reset_label`].
+    pub fn is_overridden(&self, id: MessageId, key: QuestionKey) -> bool {
+        self.meta.get(&id).is_some_and(|m| m.overrides.contains(&key))
+    }
+
+    /// Set `key`'s label from the user: the tag becomes `tag` (or is cleared) and sticks, so a
+    /// later classification never overwrites it. One undo step.
+    pub fn set_label(&mut self, id: MessageId, key: QuestionKey, tag: Option<Tag>) -> bool {
+        if !self.index.contains_key(&id) {
+            return false;
+        }
+        let before = self.meta.get(&id).cloned().unwrap_or_default();
+        let meta = self.meta.entry(id).or_default();
+        if !meta.overrides.contains(&key) {
+            meta.overrides.push(key);
+        }
+        replace_tag(&mut meta.tags, key, tag);
+        self.label_undo(id, before)
+    }
+
+    /// Drop the user's override on `key` and put the classifier's `tag` back. One undo step;
+    /// false when the key was never set by hand.
+    pub fn reset_label(&mut self, id: MessageId, key: QuestionKey, tag: Option<Tag>) -> bool {
+        if !self.is_overridden(id, key) {
+            return false;
+        }
+        let before = self.meta.get(&id).cloned().unwrap_or_default();
+        let meta = self.meta.entry(id).or_default();
+        meta.overrides.retain(|k| *k != key);
+        replace_tag(&mut meta.tags, key, tag);
+        self.label_undo(id, before)
+    }
+
+    /// One undo step for a label change on `id`; false when the tags did not move.
+    fn label_undo(&mut self, id: MessageId, before: Meta) -> bool {
+        if before == self.meta.get(&id).cloned().unwrap_or_default() {
+            return false;
+        }
+        self.push_undo(vec![Change::Msg(id, self.state_of(id).unwrap_or_default(), before)]);
+        true
+    }
+}
+
+/// Replace `key`'s tag with `tag` (`None` clears it); every other tag is left alone.
+fn replace_tag(tags: &mut Vec<Tag>, key: QuestionKey, tag: Option<Tag>) {
+    tags.retain(|t| !matches!(
+        (key, t),
+        (QuestionKey::Spam, Tag::PossibleSpam)
+            | (QuestionKey::Urgency, Tag::Urgent(_))
+            | (QuestionKey::Kind, Tag::Kind(_))
+    ));
+    if let Some(tag) = tag {
+        tags.push(tag);
     }
 }

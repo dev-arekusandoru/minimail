@@ -168,6 +168,18 @@ impl Kind {
     }
 }
 
+/// The name of an Urgency level (1..=5): the words the row menu and the palette use. Level 1 is
+/// "None": it carries no label.
+pub fn urgency_label(level: u8) -> &'static str {
+    match level {
+        1 => "None",
+        2 => "Low",
+        3 => "Normal",
+        4 => "Urgent",
+        _ => "Very urgent",
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JudgeError {
     /// The provider could not be reached or failed.

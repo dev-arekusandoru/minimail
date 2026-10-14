@@ -18,7 +18,7 @@ use gpui_kit::*;
 gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
-        ShieldAlert, Reply, Siren, Flame, User, Receipt, Newspaper, Bell, Tag, FolderInput,
+        ShieldAlert, Reply, Siren, Flame, Gauge, User, Receipt, Newspaper, Bell, Tag, FolderInput,
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
@@ -99,6 +99,8 @@ pub enum Glyph {
     NewSender,
     Snoozed,
     UrgentMid,
+    /// Urgency 1–3: shown only as a reader chip, never in a row cluster.
+    UrgencyLow,
     Muted,
     Attachment,
     KindPerson,
@@ -138,7 +140,7 @@ const fn spec(
 }
 
 impl Glyph {
-    pub const ALL: [Glyph; 17] = [
+    pub const ALL: [Glyph; 18] = [
         Glyph::FolderSuggestion,
         Glyph::PossibleSpam,
         Glyph::UrgentHigh,
@@ -149,6 +151,7 @@ impl Glyph {
         Glyph::NewSender,
         Glyph::Snoozed,
         Glyph::UrgentMid,
+        Glyph::UrgencyLow,
         Glyph::Muted,
         Glyph::Attachment,
         Glyph::KindPerson,
@@ -172,6 +175,7 @@ impl Glyph {
             Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
             Glyph::Snoozed => spec(IconName::Clock, Snoozed, "Snoozed", "Hidden until the wake time shown on the row.", "Mail state", 8, false),
             Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 4 out of 5.", "Urgency", 2, false),
+            Glyph::UrgencyLow => spec(IconName::Gauge, Muted, "Urgency", "Urgency 1 to 3; shown in reader chips only, rows show nothing.", "Urgency", 3, false),
             Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
             Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),
             Glyph::KindPerson => spec(IconName::User, Kind, "Person", "Written by a person.", "Kind", 10, false),

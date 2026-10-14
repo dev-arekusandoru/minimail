@@ -1,7 +1,7 @@
 use mail_classifier::judge::{
     Answer, AnswerValue, Confidence, Judge, JudgeError, JudgePolicy, Kind, Mode, Question,
     QuestionKey, Routed, StoredAnswer, StubJudge, classify, expects_reply, incoming_questions,
-    message_state, questions_to_ask, reply_question,
+    message_state, questions_to_ask, reply_question, route,
 };
 use mail_classifier::model::{Message, TriageState};
 use mail_classifier::summary::{StubSummarizer, Summarizer, SummaryError};
@@ -140,14 +140,17 @@ fn fixture_yields_realistic_mix() {
 }
 
 #[test]
-fn classify_produces_all_routes_on_fixture() {
+fn classify_applies_labels_and_drops_noops_on_fixture() {
     let all = fixture();
     let refs: Vec<&Message> = all.iter().collect();
     let routed = classify(&StubJudge, &JudgePolicy::default(), &refs);
     assert_eq!(routed.len(), all.len() * 4);
     assert!(routed.iter().any(|r| matches!(r, Routed::Auto(_))));
-    assert!(routed.iter().any(|r| matches!(r, Routed::Review(_))));
     assert!(routed.iter().any(|r| matches!(r, Routed::Drop)));
+    assert!(
+        !routed.iter().any(|r| matches!(r, Routed::Review(_))),
+        "the fixture has no folders, so nothing is queued for review"
+    );
 }
 
 #[test]
@@ -171,18 +174,16 @@ fn spam_route(spam_yes: f32, policy: &JudgePolicy) -> Vec<Routed> {
 }
 
 #[test]
-fn each_confidence_preset_gates_auto_against_review_inclusively() {
+fn a_non_folder_label_is_applied_however_it_routed() {
     let mut p = JudgePolicy::default();
     for c in Confidence::ALL {
         p.set_mode(QuestionKey::Spam, Mode::Auto(c));
-        // Spam is the first question.
-        assert!(matches!(spam_route(c.threshold(), &p)[0], Routed::Auto(_)), "{c:?} at threshold");
-        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Review(_)), "{c:?} below");
+        // Spam is the first question; a low-confidence answer is applied just the same.
+        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Auto(_)), "{c:?} below");
     }
-    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::Low));
-    assert!(matches!(spam_route(0.65, &p)[0], Routed::Auto(_)));
-    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::High));
-    assert!(matches!(spam_route(0.65, &p)[0], Routed::Review(_)));
+    // Review applies too: the row menu replaces the y/n prompt for a non-folder label.
+    p.set_mode(QuestionKey::Spam, Mode::Review);
+    assert!(matches!(spam_route(0.51, &p)[0], Routed::Auto(_)));
 }
 
 #[test]
@@ -193,12 +194,28 @@ fn off_suggests_nothing_even_for_a_certain_answer() {
 }
 
 #[test]
-fn review_mode_never_auto_applies() {
-    let mut p = JudgePolicy::default();
-    p.set_mode(QuestionKey::Spam, Mode::Review);
-    match &spam_route(1.0, &p)[0] {
-        Routed::Review(s) => assert_eq!(s.key, QuestionKey::Spam),
-        other => panic!("{other:?}"),
+fn only_a_folder_suggestion_is_queued_for_review() {
+    let p = JudgePolicy::default();
+    let m = msg(1, "a@b.io", "s", "b");
+    let folder = Answer {
+        probabilities: vec![0.9, 0.1],
+        value: AnswerValue::Choice(0),
+        confidence: 0.9,
+    };
+    let spam_yes = Answer {
+        probabilities: vec![0.01, 0.99],
+        value: AnswerValue::Bool(true),
+        confidence: 0.99,
+    };
+    let routed = route(
+        &p,
+        &m,
+        vec![(QuestionKey::Spam, spam_yes), (QuestionKey::Folder, folder)],
+    );
+    assert!(matches!(routed[0], Routed::Auto(_)), "the spam label applies at once");
+    match &routed[1] {
+        Routed::Review(s) => assert_eq!(s.key, QuestionKey::Folder),
+        other => panic!("a folder suggestion is reviewed, not {other:?}"),
     }
 }
 

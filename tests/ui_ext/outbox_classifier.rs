@@ -1,4 +1,5 @@
 use gpui_kit::{TestAppContext};
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{MessageId, Tag};
 use mail_classifier::model::TriageState::*;
 use crate::harness::{Harness, harness, harness_with};
@@ -65,19 +66,6 @@ pub fn pending_total(h: &mut Harness<'_>) -> usize {
     h.read(|a| a.mailbox.messages().iter().map(|m| a.mailbox.pending(m.id).len()).sum())
 }
 
-/// Move the cursor down the current view until a message with pending suggestions is found.
-pub fn goto_pending(h: &mut Harness<'_>) -> MessageId {
-    h.click("sidebar-all-inboxes");
-    for _ in 0..80 {
-        let id = h.cursor().unwrap();
-        if h.read(|a| !a.mailbox.pending(id).is_empty()) {
-            return id;
-        }
-        h.keys("j");
-    }
-    panic!("no message with pending suggestions in the inbox");
-}
-
 #[gpui_kit::gpui::test]
 pub fn classifier_runs_on_startup(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -88,32 +76,42 @@ pub fn classifier_runs_on_startup(cx: &mut TestAppContext) {
     h.assert_invariant("classify");
 }
 
+/// A message with a folder suggestion waiting, seeded by hand: the offline stub never files
+/// mail, so it is the only way a suggestion pends.
+fn seed_folder_suggestion(h: &mut Harness<'_>) -> MessageId {
+    let id = h.read(|a| a.visible_ids()[0]);
+    h.app.update(h.cx, |a, _| {
+        let options = a.mailbox.folder_options("personal");
+        a.mailbox.add_suggestions(vec![Suggestion {
+            message: id,
+            key: QuestionKey::Folder,
+            answer: Answer {
+                probabilities: vec![1.0; options.len() + 1],
+                value: AnswerValue::Choice(0),
+                confidence: 0.9,
+            },
+        }]);
+    });
+    id
+}
+
 #[gpui_kit::gpui::test]
 pub fn accept_applies_and_reject_discards_pending_suggestions(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let id = goto_pending(&mut h);
+    let id = seed_folder_suggestion(&mut h);
     let before_state = h.state_of(id);
     let tags_before = h.read(|a| a.mailbox.tags(id).len());
-    let suggestions: Vec<_> = h.read(|a| {
-        a.mailbox.pending(id).iter().map(|s| (s.key, format!("{:?}", s.answer.value))).collect()
-    });
-    assert!(!suggestions.is_empty());
+    assert!(!h.read(|a| a.mailbox.pending(id).is_empty()));
 
     h.keys("y");
     assert!(h.read(|a| a.mailbox.pending(id).is_empty()), "accept clears the pending badges");
-    let after_state = h.state_of(id);
-    let tags_after = h.read(|a| a.mailbox.tags(id).len());
-    assert!(
-        after_state != before_state || tags_after > tags_before,
-        "accepting must apply something ({suggestions:?})"
-    );
+    assert_ne!(h.state_of(id), before_state, "accepting the folder suggestion files it");
     h.assert_invariant("accept");
 
-    // One undo step brings the pending badges back.
+    // One undo step brings the pending badge back.
     h.keys("u");
     assert!(!h.read(|a| a.mailbox.pending(id).is_empty()));
     assert_eq!(h.state_of(id), before_state);
-    assert_eq!(h.read(|a| a.mailbox.tags(id).len()), tags_before);
 
     // Reject discards without applying.
     h.keys("n");

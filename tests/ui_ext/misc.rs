@@ -46,25 +46,17 @@ pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
+pub fn a_stored_review_mode_still_labels_without_a_prompt(cx: &mut TestAppContext) {
+    // A policy written before non-folder questions applied directly: its labels apply all the
+    // same, because only a folder move is ever queued for review.
     let mut h = harness_with_judge(cx, spam_box(), None);
-    // Settings -> AI -> Tagging -> the Spam row -> Review (the second segment), before any
-    // classification, so the message never gets the Auto label.
-    h.open_settings();
-    h.settings_click("0-4");
-    h.settings_click_in(2, 0, "ai-mode-Spam-1".to_owned());
-    h.settings_keys("escape");
-    assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
+    h.app.update(h.cx, |a, _| a.policy.set_mode(QuestionKey::Spam, Mode::Review));
     h.set_judge(Some(stub_judge()));
-    assert!(!h.has_tag(1, Tag::PossibleSpam), "Review: no auto-applied label");
-    assert_eq!(h.state_of(1), Inbox);
+    assert!(h.has_tag(1, Tag::PossibleSpam), "Review applies a non-folder label too");
     assert!(
-        h.read(|a| a.mailbox.pending(1).iter().any(|s| s.key == QuestionKey::Spam)),
-        "Review: a pending Spam suggestion (badge) is queued"
+        h.read(|a| a.mailbox.pending(1).iter().all(|s| s.key == QuestionKey::Folder)),
+        "nothing but a folder suggestion is queued"
     );
-    // Accepting it applies the label.
-    h.keys("y");
-    assert!(h.has_tag(1, Tag::PossibleSpam));
     assert_eq!(h.state_of(1), Inbox);
 }
 

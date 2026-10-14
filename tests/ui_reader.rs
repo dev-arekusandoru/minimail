@@ -54,6 +54,18 @@ impl Harness<'_> {
     fn hint(&mut self) -> HintContext {
         self.read(|a| a.hint_context())
     }
+
+    /// The accessibility label registered at `id` on the last frame, if the element is there.
+    fn label(&mut self, id: impl Into<gpui_kit::ElementId>) -> Option<String> {
+        let id = id.into();
+        let window = self.window;
+        self.cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(id).and_then(|snap| snap.label().map(str::to_owned))
+            })
+            .expect("window alive")
+    }
 }
 
 /// The `⋯` on an expanded thread message that is not the opened one acts on that message only.
@@ -294,4 +306,20 @@ fn reader_hints_follow_the_open_message_and_pending_suggestions(cx: &mut TestApp
 
     h.keys("x");
     assert_eq!(h.hint().mode, HintMode::Selection(1), "a selection takes the footer over from the reader");
+}
+
+/// The labels row shows classifier chips as words: an urgency level a row hides (2) and kind
+/// Other both render, and the raw `n/5` never does.
+#[gpui_kit::gpui::test]
+fn reader_labels_show_classifier_chips(cx: &mut TestAppContext) {
+    use mail_classifier::judge::Kind;
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.set_label(1, QuestionKey::Urgency, Some(Tag::Urgent(2)));
+    mb.set_label(1, QuestionKey::Kind, Some(Tag::Kind(Kind::Other)));
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert_eq!(h.label(("reader-chip-urgency", 1u64)).as_deref(), Some("Low"));
+    assert_eq!(h.label(("reader-chip-kind", 1u64)).as_deref(), Some("Other"));
+    assert!(!h.label(("reader-chip-urgency", 1u64)).unwrap().contains('/'), "no N/5 form");
 }

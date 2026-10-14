@@ -10,6 +10,7 @@ use mail_classifier::contacts::ContactStore;
 use mail_classifier::judge::{
     Answer, Confidence, Judge, JudgeError, JudgeStatus, Mode, Question, QuestionKey, StubJudge,
 };
+use mail_classifier::model::Tag;
 use serde_json::Value;
 
 #[path = "ui_ext/harness.rs"]
@@ -25,7 +26,7 @@ fn spam(h: &mut Harness<'_>) -> Mode {
     h.read(|a| a.policy.mode(QuestionKey::Spam))
 }
 
-/// Off is the third segment of every row.
+/// The Off segment of a non-folder question's row.
 fn set_spam_mode(h: &mut Harness<'_>, segment: usize) {
     // Group 2 is "Tagging"; its first row is Spam.
     h.settings_click_in(2, 0, format!("ai-mode-Spam-{segment}"));
@@ -43,9 +44,9 @@ fn toggling_auto_classify_reaches_the_app_and_is_stored(cx: &mut TestAppContext)
     h.settings_open_page(AI);
     let before = mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
 
-    // Tagging's switches follow the question rows: item 9 is "Classify new mail automatically".
+    // Tagging's switches follow the question rows: item 5 is "Classify new mail automatically".
     h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
-    h.settings_click_in(2, 9, "check");
+    h.settings_click_in(2, 5, "check");
     assert_eq!(
         mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope),
         !before,
@@ -61,51 +62,53 @@ fn the_folder_row_offers_only_off_and_review(cx: &mut TestAppContext) {
     assert!(h.settings_has("ai-mode-Folder-review"), "and Review");
     assert!(!h.settings_has("ai-mode-Folder-auto"), "never Auto");
 
-    // The Folder row is item 8 of Tagging; clicking Off turns the question off.
+    // The Folder row is item 4 of Tagging; clicking Off turns the question off.
     h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
-    h.settings_click_in(2, 8, "ai-mode-Folder-off");
+    h.settings_click_in(2, 4, "ai-mode-Folder-off");
     assert_eq!(h.read(|a| a.policy.mode(QuestionKey::Folder)), Mode::Off);
 }
 
 #[gpui_kit::gpui::test]
-fn turning_spam_off_stops_it_producing_suggestions(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "deals@talentloop.com", "Is this a fit?", 1, "Inbox")]));
+fn turning_spam_off_stops_it_labelling(cx: &mut TestAppContext) {
+    // Start with no judge, so nothing is labelled before the Spam row is turned off.
+    let mut h = harness_with_judge(
+        cx,
+        mailbox(&[msg(1, 1, "deals@talentloop.com", "Is this a fit?", 1, "Inbox")]),
+        None,
+    );
     h.settings_open_page(AI);
-    set_spam_mode(&mut h, 2);
+    set_spam_mode(&mut h, 1);
+    assert_eq!(spam(&mut h), Mode::Off);
+
+    h.set_judge(Some(harness::stub_judge()));
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "Off labels nothing");
+
+    set_spam_mode(&mut h, 0);
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "back to the shipped preset");
     h.keys("c");
     assert!(
-        h.read(|a| a.mailbox.pending(1).is_empty()),
-        "Off suggests nothing"
-    );
-
-    set_spam_mode(&mut h, 1);
-    assert_eq!(spam(&mut h), Mode::Review);
-    h.keys("c");
-    assert_eq!(
-        h.read(|a| a.mailbox.pending(1).iter().map(|s| s.key).collect::<Vec<_>>()),
-        vec![QuestionKey::Spam],
-        "the same check does suggest when it is not off"
+        h.has_tag(1, Tag::PossibleSpam),
+        "the same check labels the message when the question is not off"
     );
 }
 
+/// A label question is applied as soon as it arrives, so its row offers only Auto and Off.
 #[gpui_kit::gpui::test]
-fn the_confidence_row_picks_how_sure_auto_has_to_be(cx: &mut TestAppContext) {
+fn a_non_folder_row_offers_only_auto_and_off(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]));
     h.settings_open_page(AI);
     assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "the shipped default");
+    assert!(h.settings_has("ai-mode-Spam-0"), "the Auto segment");
+    assert!(h.settings_has("ai-mode-Spam-1"), "and Off");
+    assert!(!h.settings_has("ai-mode-Spam-2"), "there is no third segment");
 
-    // Row 1 of "Tagging" is Spam; row 2 is its confidence, shown while Auto.
-    h.settings_pick_option(2, 1, 2);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::Low));
-
-    set_spam_mode(&mut h, 2);
+    set_spam_mode(&mut h, 1);
     assert_eq!(spam(&mut h), Mode::Off);
-
     h.keys("cmd-,");
     h.settings_open_page(AI);
-    assert_eq!(spam(&mut h), Mode::Off, "the policy outlives the row that is hidden");
+    assert_eq!(spam(&mut h), Mode::Off, "the policy outlives the panel");
     set_spam_mode(&mut h, 0);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::Medium), "back to Auto, at the middle preset");
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "back to Auto, at the shipped preset");
 }
 
 #[gpui_kit::gpui::test]

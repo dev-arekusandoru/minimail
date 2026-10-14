@@ -189,6 +189,13 @@ pub enum Tag {
     Kind(Kind),
 }
 
+impl Tag {
+    /// The urgency label for `level` (1..=5), or `None` for level 1, which carries no tag.
+    pub fn for_urgency(level: u8) -> Option<Tag> {
+        (level >= 2).then_some(Tag::Urgent(level))
+    }
+}
+
 /// What `tick` changed. All-empty on an idempotent repeat.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TickReport {
@@ -202,6 +209,8 @@ struct Meta {
     awaiting_since: Option<Timestamp>,
     snoozed_until: Option<Timestamp>,
     tags: Vec<Tag>,
+    /// Question keys the user set by hand. The classifier never overwrites these.
+    overrides: Vec<QuestionKey>,
 }
 
 /// One inverse operation; a user action's `UndoStep` is a list of these.

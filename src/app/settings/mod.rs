@@ -22,7 +22,7 @@ use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, 
 use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::icon_button;
 use crate::clock::{DAY, Timestamp};
-use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
+use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::tz::{Now, Utc};
 use crate::{preview, theme};
 use gpui_kit::{
@@ -139,8 +139,9 @@ pub const ACCOUNTS_PAGE: usize = 0;
 /// Index of the AI (classifier) page, where the Jev connection lives.
 pub const AI_PAGE: usize = 4;
 
-const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
-const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
+/// The mode segments of a non-folder question: its label is applied as soon as it arrives, or
+/// the question is off. A folder suggestion is the only one queued for review.
+const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("off", "Off")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
@@ -623,19 +624,12 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    fn set_confidence(&mut self, question: QuestionKey, confidence: Confidence, cx: &mut Context<Self>) {
-        if matches!(self.policy.mode(question), Mode::Auto(c) if c != confidence) {
-            self.policy.set_mode(question, Mode::Auto(confidence));
-            self.changed(cx);
-        }
-    }
-
     fn set_classifier_mode(&mut self, question: QuestionKey, value: &str, cx: &mut Context<Self>) {
         let mode = match (value, self.policy.mode(question)) {
             ("auto", mode @ Mode::Auto(_)) => mode,
-            ("auto", _) => Mode::Auto(Confidence::Medium),
-            ("off", _) => Mode::Off,
-            _ => Mode::Review,
+            // Back to Auto puts the question's shipped preset back.
+            ("auto", _) => JudgePolicy::default().mode(question),
+            _ => Mode::Off,
         };
         self.set_mode(question, mode, cx);
     }
@@ -1207,10 +1201,6 @@ fn select(
             })
             .into_any_element()
     })
-}
-
-fn options(pairs: &[(&'static str, &'static str)]) -> Vec<(SharedString, SharedString)> {
-    pairs.iter().map(|(value, label)| ((*value).into(), (*label).into())).collect()
 }
 
 /// A muted one-line placeholder row.
