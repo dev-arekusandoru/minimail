@@ -171,6 +171,10 @@ impl Harness<'_> {
         menu::click_row(self.cx, self.window, label);
         self.settle(was_open);
     }
+    /// Hover the row of the open popup menu labelled `label` (this opens a submenu).
+    pub fn hover_row(&mut self, label: &str) {
+        menu::hover_row(self.cx, self.window, label);
+    }
     /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
     /// next click aims at them.
     fn settle(&mut self, was_open: bool) {

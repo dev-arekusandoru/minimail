@@ -235,6 +235,10 @@ impl MailApp {
             return Vec::new();
         };
         let mut items = triage_items(&[msg.state]);
+        items.push(MenuItem::separator());
+        // The reader's `⋯` menu reaches labels that have no chip; a submenu keeps the menu short
+        // enough for its popover to stay anchored under the trigger.
+        items.push(MenuItem::submenu("Classifier labels", self.classifier_items(id)));
         if !self.mailbox.pending(id).is_empty() {
             items.push(MenuItem::separator());
             items.push(MenuItem::action("Accept AI suggestions", || Box::new(AcceptSuggestions)));
