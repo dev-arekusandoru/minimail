@@ -5,6 +5,7 @@ use super::super::*;
 use super::parts::{selectable_verbatim, stamp, Look, Role};
 use crate::app::chrome::humanize_time;
 use crate::app::email_webview::{luminance, rgb, DocStyle, ViewKey};
+use crate::app::menu::MenuItem;
 use crate::find::Segment;
 use crate::judge::{AnswerValue, QuestionKey, Routed, Suggestion};
 use crate::reading;
@@ -12,9 +13,10 @@ use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::alert::Alert;
-use gpui_kit::component::button::ButtonVariants as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::text::Text;
 use gpui_kit::component::tooltip::Tooltip;
@@ -202,7 +204,7 @@ impl MailApp {
             .gap_2()
             .child(subject)
             .child(sender)
-            .child(self.labels_row(m, look).ml(px(52.)));
+            .child(self.labels_row(m, look, cx).ml(px(52.)));
 
         let strip = if opened { self.folder_strip(m, look, cx) } else { None };
         let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
@@ -237,7 +239,8 @@ impl MailApp {
     }
 
     /// State badge (with snooze wake time or folder name), tag badges, category and sender label.
-    fn labels_row(&self, m: &Message, look: &Look<'_>) -> Div {
+    /// The Kind, Urgency and Spam chips are clickable and open their own override menu.
+    fn labels_row(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Div {
         let t = &look.t;
         let state_text = match m.state {
             TriageState::Snoozed => match self.mailbox.snoozed_until(m.id) {
@@ -257,28 +260,73 @@ impl MailApp {
             .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
-            let (label, glyph, key) = match tag {
-                Tag::Urgent(level) => (urgency_word(*level), urgency_glyph(*level), "reader-chip-urgency"),
-                Tag::Kind(kind) => (Glyph::of_kind(*kind).spec().label, Glyph::of_kind(*kind), "reader-chip-kind"),
-                Tag::PossibleSpam => ("Possible spam", Glyph::PossibleSpam, "reader-chip-spam"),
-                Tag::NeedsReply => ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply"),
-                Tag::AwaitingReply => ("Awaiting reply", Glyph::AwaitingReply, "reader-chip-awaiting-reply"),
-                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up"),
-                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder"),
+            let (label, glyph, key, items) = match tag {
+                Tag::Urgent(level) => (
+                    urgency_word(*level),
+                    urgency_glyph(*level),
+                    "reader-chip-urgency",
+                    self.urgency_items(m.id),
+                ),
+                Tag::Kind(kind) => (
+                    Glyph::of_kind(*kind).spec().label,
+                    Glyph::of_kind(*kind),
+                    "reader-chip-kind",
+                    self.kind_items(m.id),
+                ),
+                Tag::PossibleSpam => (
+                    "Possible spam",
+                    Glyph::PossibleSpam,
+                    "reader-chip-spam",
+                    self.spam_items(m.id),
+                ),
+                Tag::NeedsReply => ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply", Vec::new()),
+                Tag::AwaitingReply => (
+                    "Awaiting reply",
+                    Glyph::AwaitingReply,
+                    "reader-chip-awaiting-reply",
+                    Vec::new(),
+                ),
+                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Vec::new()),
+                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder", Vec::new()),
             };
-            row = row.child(
-                div()
-                    .id((key, u64::from(m.id)))
-                    .test_support()
-                    .aria_label(label)
-                    .child(look.badge(label, glyph.spec().token.color(t), Some(glyph))),
-            );
+            row = row.child(self.chip(m.id, (key, label, glyph), items, look, cx));
         }
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             let spec = Glyph::NewSender.spec();
             row = row.child(look.badge(spec.label, spec.token.color(t), Some(Glyph::NewSender)));
         }
         row
+    }
+
+    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With `items` it is a ghost
+    /// button that opens that section's override menu under the chip; without them it is a plain
+    /// badge (the reply-status chips).
+    fn chip(
+        &self,
+        mid: MessageId,
+        (key, label, glyph): (&'static str, &'static str, Glyph),
+        items: Vec<MenuItem>,
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let badge = look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
+        let wrapper = div().id((key, u64::from(mid))).test_support().aria_label(label);
+        if items.is_empty() {
+            return wrapper.child(badge).into_any_element();
+        }
+        let owner = cx.weak_entity();
+        wrapper
+            .child(
+                Button::new(SharedString::from(format!("chip-menu-{key}-{mid}")))
+                    .ghost()
+                    .h(px(18.))
+                    .px_0()
+                    .child(badge)
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                        MailApp::populate_items(owner.clone(), items.clone(), Some(vec![mid]), menu, window, cx)
+                    }),
+            )
+            .into_any_element()
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.

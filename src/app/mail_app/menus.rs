@@ -235,8 +235,6 @@ impl MailApp {
             return Vec::new();
         };
         let mut items = triage_items(&[msg.state]);
-        items.push(MenuItem::separator());
-        items.extend(self.classifier_items(id));
         if !self.mailbox.pending(id).is_empty() {
             items.push(MenuItem::separator());
             items.push(MenuItem::action("Accept AI suggestions", || Box::new(AcceptSuggestions)));

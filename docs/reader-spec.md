@@ -17,8 +17,9 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 - Right of line 1, one cluster: message index (`MSG 04 / 04`, mono, threads only; chronological, 04 = newest), `COLLAPSE` (collapsed thread messages), absolute date (`Sep 30, 2026 · 20:46`, humanized time in its tooltip), Reply, `⋯`. No separate row above the subject.
 - Labels row, reusing the row badge language (`src/app/icons.rs`):
   - Triage state: `Inbox`, `Snoozed · <wake time>`, `Archived`, `Filed · <folder>`, `Deleted`, tinted by `Theme::state_color`.
-  - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender (off in v1 — see `src/known_senders.rs`).
-  - Category: the `Kind` tag (for example Newsletter or Receipt).
+  - Classifier chips, icon + word, never a confidence percent: Kind (`Person`, `Receipt`, `Newsletter`, `Notification`, `Other`), Urgency (`None`, `Low`, `Normal`, `Urgent`, `Very urgent`; Siren/Flame for 4–5 and a muted `Gauge` for 1–3, never `n/5`), Possible spam (`ShieldAlert`). A cleared or unclassified value shows no chip.
+  - Reply status: Needs Reply, Awaiting Reply, Follow Up, Reminder; New Sender (off in v1 — see `src/known_senders.rs`).
+  - Kind, Urgency and Spam chips are clickable, opening a menu of just that section (hover tint only, clean at rest); the header `⋯` menu carries the same sections for values with no chip.
 - Possible Spam keeps its banner (triage spec), with buttons: Block & Delete / Delete `d`. The New Sender banner (Allow `a` / Block `b`) is off in v1.
 - Recipient line (`to You, Ben Ito · cc Dev Rao ▾`, UI font, muted) sits under the sender name and expands to full-width rows **below** the header:
   - `To:` / `Cc:` / `Bcc:`, one row each, wrapping long lists.
@@ -88,9 +89,8 @@ Known limitations:
 
 ## AI suggestion
 
-- A strip under the header lists the pending review suggestions for the message (`Mailbox::pending`), one per question key, for example `Suggested: Needs Reply 87% · Newsletter 92%`.
-- The strip carries Accept `y` / Reject `n` buttons.
-- Resolving removes the strip; accepted tags appear in the labels row.
+- When a Folder suggestion is pending (`Mailbox::pending`), a slim strip sits under the labels row and above the body: accent tint and hairline dashed accent border, `FolderInput` icon, muted `Suggested folder` then the folder path, a solid **Move** `y` and a ghost **Dismiss** `n` on the right. No confidence percent.
+- Move accepts (files the message), Dismiss rejects; either removes the strip. Accepted Kind/Urgency/Spam answers appear as labels-row chips.
 
 ## Seed data coverage (`fixtures/`)
 

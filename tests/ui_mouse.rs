@@ -361,12 +361,20 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn ai_rows_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let ids = h.ids();
-    let pending = ids
-        .iter()
-        .copied()
-        .find(|id| h.read(|a| !a.mailbox.pending(*id).is_empty()))
-        .expect("the fixture classifies at startup, so some message is pending");
+    let pending = h.ids()[0];
+    // The offline stub never files mail, so seed the folder suggestion the menu reviews.
+    h.app.update(h.cx, |a, _| {
+        let options = a.mailbox.folder_options("personal");
+        a.mailbox.add_suggestions(vec![mail_classifier::judge::Suggestion {
+            message: pending,
+            key: mail_classifier::judge::QuestionKey::Folder,
+            answer: mail_classifier::judge::Answer {
+                probabilities: vec![1.0; options.len() + 1],
+                value: mail_classifier::judge::AnswerValue::Choice(0),
+                confidence: 0.9,
+            },
+        }]);
+    });
     h.click(("row", pending as usize));
     h.click(("btn-message-more", pending as usize));
     assert!(h.has_row("Accept AI suggestions"), "a pending suggestion offers Accept");

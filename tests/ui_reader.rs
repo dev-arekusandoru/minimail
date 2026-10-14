@@ -383,3 +383,30 @@ fn reader_folder_strip_dismiss_keeps_the_message(cx: &mut TestAppContext) {
     assert_eq!(h.state_of(1), TriageState::Inbox);
     assert!(!h.exists("reader-folder-suggestion"));
 }
+
+/// A labels-row chip opens its own section: setting a value through the urgency chip's menu.
+#[gpui_kit::gpui::test]
+fn a_reader_chip_menu_sets_its_own_value(cx: &mut TestAppContext) {
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.set_label(1, QuestionKey::Urgency, Some(Tag::Urgent(3)));
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    h.click("chip-menu-reader-chip-urgency-1");
+    h.click_row("Very urgent");
+    assert!(h.has_tag(1, Tag::Urgent(5)), "the chip's own section set the level");
+}
+
+/// The reader `⋯` menu carries the override sections, so a value with no chip is still reachable.
+#[gpui_kit::gpui::test]
+fn the_reader_more_menu_sets_a_classifier_label(cx: &mut TestAppContext) {
+    use mail_classifier::judge::Kind;
+    use mail_classifier::model::Tag;
+    let mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    h.click(("btn-message-more", 1usize));
+    assert!(h.read(|a| a.menu_open()));
+    h.click_row("Person");
+    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind section set the label");
+}
