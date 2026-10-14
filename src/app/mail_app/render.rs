@@ -201,6 +201,18 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
             .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
+            .on_action(cx.listener(|this, a: &SetKind, _, cx| {
+                this.set_kind_action(a.message, a.kind, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetUrgency, _, cx| {
+                this.set_urgency_action(a.message, a.level, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetSpam, _, cx| {
+                this.set_spam_action(a.message, a.spam, cx)
+            }))
+            .on_action(cx.listener(|this, a: &ResetLabel, _, cx| {
+                this.reset_label_action(a.message, a.key, cx)
+            }))
             .on_action(cx.listener(|this, _: &AcceptRule, w, cx| this.accept_rule(w, cx)))
             .on_action(cx.listener(|this, _: &DismissRule, _, cx| this.dismiss_rule(cx)))
             .on_action(cx.listener(|this, _: &ToggleRules, w, cx| this.toggle_rules(w, cx)))

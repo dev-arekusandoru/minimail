@@ -169,6 +169,23 @@ impl MailApp {
         self.judgements.get(&id).map(Vec::as_slice)
     }
 
+    /// The label the classifier's stored answer gives `id` for `key`, or `None` when there is no
+    /// answer or it says nothing (not spam, urgency 1, Kind "Other"). What
+    /// [`MailApp::reset_label_action`] puts back.
+    pub(super) fn classifier_label(&self, id: MessageId, key: QuestionKey) -> Option<Tag> {
+        let answer = self.cached_answers(id)?.iter().find(|a| a.key == key)?;
+        match (key, &answer.answer.value) {
+            (QuestionKey::Spam, AnswerValue::Bool(true)) => Some(Tag::PossibleSpam),
+            (QuestionKey::Urgency, AnswerValue::Score(v)) => {
+                Tag::for_urgency(v.round().clamp(1.0, 5.0) as u8)
+            }
+            (QuestionKey::Kind, AnswerValue::Choice(i)) => Kind::from_index(*i)
+                .filter(|kind| *kind != Kind::Other)
+                .map(Tag::Kind),
+            _ => None,
+        }
+    }
+
     /// Load every stored judgement into memory (once, at startup), so [`Self::cached_answers`]
     /// is a cheap map lookup per rendered row.
     pub(super) fn preload_judgements(&mut self) {

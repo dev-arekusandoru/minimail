@@ -203,6 +203,54 @@ impl MailApp {
         self.go_account_location(Location::Trash, cx);
     }
 
+    /// Messages a classifier-label action applies to: the one its menu row names, else the
+    /// cursor/selection.
+    pub(super) fn label_targets(&self, message: Option<MessageId>) -> Vec<MessageId> {
+        message.map(|id| vec![id]).unwrap_or_else(|| self.target_ids())
+    }
+
+    /// `SetKind`: set (or clear) the Kind label by hand.
+    pub(super) fn set_kind_action(&mut self, message: Option<MessageId>, kind: Option<Kind>, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Kind, kind.map(Tag::Kind), cx);
+    }
+
+    /// `SetUrgency`: set the Urgency label by hand. Level 1 ("None") clears it.
+    pub(super) fn set_urgency_action(&mut self, message: Option<MessageId>, level: u8, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Urgency, Tag::for_urgency(level.clamp(1, 5)), cx);
+    }
+
+    /// `SetSpam`: mark (or unmark) the spam flag by hand. Spam never moves the message.
+    pub(super) fn set_spam_action(&mut self, message: Option<MessageId>, spam: bool, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Spam, spam.then_some(Tag::PossibleSpam), cx);
+    }
+
+    /// `ResetLabel`: drop the hand-set label and put the classifier's own value back.
+    pub(super) fn reset_label_action(&mut self, message: Option<MessageId>, key: QuestionKey, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        let mut changed = false;
+        for id in ids {
+            let tag = self.classifier_label(id, key);
+            changed |= self.mailbox.reset_label(id, key, tag);
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Set `key`'s label on `ids` as the user's own: it sticks until it is reset.
+    fn set_label(&mut self, ids: &[MessageId], key: QuestionKey, tag: Option<Tag>, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for id in ids {
+            changed |= self.mailbox.set_label(*id, key, tag.clone());
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
     /// Close the Triage tab, whether the session is running or only its summary is up. The
     /// dock removes the tab's group on its next sync; the user's tabs were never touched.
     pub(super) fn end_session(&mut self) {
