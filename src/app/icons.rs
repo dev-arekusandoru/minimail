@@ -404,8 +404,6 @@ pub fn cluster(
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Unread", theme::unread(t), "Yellow bar; sender and subject are bold."),
-        ("Urgent unread", theme::urgent(t), "Red bar; the urgency icon remains in the icon cluster."),
         ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
         ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
     ];

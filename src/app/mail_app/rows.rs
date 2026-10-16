@@ -105,16 +105,12 @@ impl MailApp {
     pub fn row_visual(&self, id: MessageId) -> RowVisual {
         let unread = !self.mailbox.is_read(id)
             && self.mailbox.state_of(id) == Some(TriageState::Inbox);
-        let urgent = self.mailbox.tags(id).iter().any(|tag| {
-            matches!(tag, crate::model::Tag::Urgent(_))
-        });
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
             selected: self.triage().is_selected(id),
             partial: false,
             unread,
-            urgent,
         }
     }
 

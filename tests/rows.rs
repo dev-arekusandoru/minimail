@@ -259,7 +259,7 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
     let mut h = harness(cx);
     let first = h.ids()[0];
     let unread = h.read(|a| a.row_visual(first));
-    assert!(unread.unread, "new inbox messages expose the unread bar state");
+    assert!(unread.unread, "new inbox messages expose the unread state");
     assert!(!unread.selected);
 
     h.keys("x");
@@ -363,28 +363,19 @@ fn outgoing_rows_are_labelled_by_recipient() {
 
 #[test]
 fn row_bar_state_uses_the_required_precedence() {
-    let state = |unread, urgent, selected, open| {
-        RowVisual { unread, urgent, selected, open, ..RowVisual::default() }.bar_state()
-    };
-    assert_eq!(state(true, false, false, false), BarState::Unread);
-    assert_eq!(state(true, true, false, false), BarState::Urgent);
-    assert_eq!(state(false, true, false, false), BarState::None);
-    assert_eq!(state(true, false, true, false), BarState::Selected);
-    assert_eq!(state(false, false, false, true), BarState::Selected);
-    assert_eq!(state(true, true, true, false), BarState::Selected);
-    assert_eq!(state(false, false, false, false), BarState::None);
-    assert_eq!(state(false, false, false, true), BarState::Selected);
+    let state = |selected, open| RowVisual { selected, open, ..RowVisual::default() }.bar_state();
+    assert_eq!(state(false, false), BarState::None);
+    assert_eq!(state(true, false), BarState::Selected);
+    assert_eq!(state(false, true), BarState::Selected);
+    assert_eq!(state(true, true), BarState::Selected);
     assert_eq!(
         RowVisual { partial: true, ..RowVisual::default() }.bar_state(),
         BarState::Partial
     );
     for bar in [
         RowVisual::default(),
-        RowVisual { unread: true, ..RowVisual::default() },
-        RowVisual { unread: true, urgent: true, ..RowVisual::default() },
         RowVisual { selected: true, ..RowVisual::default() },
         RowVisual { open: true, ..RowVisual::default() },
-        RowVisual { selected: true, urgent: true, ..RowVisual::default() },
     ] {
         let focused = RowVisual { cursor: true, ..bar };
         assert_eq!(focused.bar_state(), bar.bar_state(), "cursor does not replace bar state");
