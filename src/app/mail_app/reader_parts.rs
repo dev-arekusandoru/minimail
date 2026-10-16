@@ -102,7 +102,7 @@ impl<'a> Look<'a> {
         b
     }
 
-    /// Row-badge look (see `icons.rs`): tinted border and fill, mono label, optional glyph.
+    /// Row-badge look (see `icons.rs`): tinted border and fill, UI label, optional glyph.
     pub fn badge(&self, label: impl Into<SharedString>, color: Hsla, glyph: Option<Glyph>) -> Tag {
         Tag::custom(color.opacity(0.1), color, color.opacity(0.5))
             .rounded(px(4.))
@@ -110,7 +110,6 @@ impl<'a> Look<'a> {
             .gap_1()
             .h(px(18.))
             .px(px(6.))
-            .font_family(self.mono.clone())
             .text_size(px(10.5))
             .when_some(glyph, |d, g| d.child(icons::icon(g, self.t, 11.)))
             .child(label.into())
