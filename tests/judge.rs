@@ -7,7 +7,7 @@ use mail_classifier::model::{Message, TriageState};
 use mail_classifier::summary::{StubSummarizer, Summarizer, SummaryError};
 
 fn fixture() -> Vec<Message> {
-    serde_json::from_str(include_str!("../fixtures/mailbox.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/mailbox.json")).unwrap()
 }
 
 fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {

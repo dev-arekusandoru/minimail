@@ -92,7 +92,7 @@ Known limitations:
 - When a Folder suggestion is pending (`Mailbox::pending`), a slim strip sits under the labels row and above the body: accent tint and hairline dashed accent border, `FolderInput` icon, muted `Suggested folder` then the folder path, a solid **Move** `y` and a ghost **Dismiss** `n` on the right. No confidence percent.
 - Move accepts (files the message), Dismiss rejects; either removes the strip. Accepted Kind/Urgency/Spam answers appear as labels-row chips.
 
-## Seed data coverage (`fixtures/`)
+## Seed data coverage (`tests/fixtures/`)
 
 Audit existing coverage first, then fill gaps:
 

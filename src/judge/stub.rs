@@ -7,7 +7,7 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 /// Deterministic keyword/heuristic judge. No randomness, no network.
-/// Tuned to `fixtures/mailbox.json`.
+/// Tuned to `tests/fixtures/mailbox.json`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StubJudge;
 

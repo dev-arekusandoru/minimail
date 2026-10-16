@@ -17,7 +17,7 @@ Built in Rust with [GPUI](https://www.gpui.rs/) and [gpui-kit](https://gpui-kit.
 Most mail apps hand you a pile and a mouse. **mail-classifier** gives every message exactly one state (**Inbox**, **Snoozed**, **Archived**, **Filed** or **Deleted**), lets you triage everything from the keyboard, and uses a fast "System 1" classifier to flag spam, replies you owe and urgent mail. Nothing is sorted away where you can't see it.
 
 > [!NOTE]
-> Early MVP. By default it runs on local mock data (`fixtures/`). The classifier is off until you add a TypeSafe Jev API key (Settings → AI → **Jev connection**), and thread summaries are still a stub. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
+> Early MVP. By default it starts with an empty mailbox. The classifier is off until you add a TypeSafe Jev API key (Settings → AI → **Jev connection**), and thread summaries are still a stub. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
 
 ## ✨ Features
 
@@ -155,9 +155,8 @@ The UI tests run headless. They drive the real views with simulated keystrokes a
 
 Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 `~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
-its directory) on first launch, migrated forward through `PRAGMA user_version`,
-and seeded once from `fixtures/contacts_seed.json`. Schema 2 is the scoped
-settings table; schema 3 adds a `judgements` table caching the classifier's raw
+its directory) on first launch and migrated forward through `PRAGMA user_version`.
+Schema 2 is the scoped settings table; schema 3 adds a `judgements` table caching the classifier's raw
 answers, and schema 4 re-keys it by `message_id` so each message is billed at
 most once — no model, endpoint or key change re-classifies anything. On the
 first launch after that migration, the old hash-keyed rows are copied onto their
@@ -167,9 +166,9 @@ matching row and is judged once more.
 Databases previously opened by the settings or classifier branch are upgraded in
 place; existing contacts and settings are preserved. Unknown newer schemas
 are rejected with a diagnostic and exit status 1 before the UI starts.
-Afterwards the file is yours, so deleting it just re-seeds on the next start.
-Everything else the app tracks (rules, themes) still comes from the fixtures.
-Messages come from the fixtures until a Gmail account is linked (below).
+The app starts with an empty mailbox and contacts database; mail appears after
+linking a Gmail account. Sample mailbox and contacts data lives under
+`tests/fixtures/` for tests only.
 
 ### Nightly builds
 
@@ -262,9 +261,8 @@ src/
 ├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
 └── app/          # GPUI views: main window, palette, compose, panels; icons.rs is the icon language table, row.rs the row frame
     └── mail_app/ # MailApp split by concern: accessors, actions, modals, help, rows, list, reader (+ reader_tabs, reader_tabbar, reader_find, reader_findbar), render (+ grouping, mouse)
-fixtures/         # mock mailbox + the seed address book (contacts_seed.json, embedded at build time)
 themes/           # built-in themes (JSON, embedded at build time)
-tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs)
+tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs); fixtures/ is the test-only mailbox and address book (the `fixtures` feature)
 ```
 
 ### Window layout: Root and Resizable

@@ -242,9 +242,11 @@ struct UndoStep {
     changes: Vec<Change>,
 }
 
+/// The test accounts and folders every fixture mailbox gets.
+#[cfg(feature = "fixtures")]
 fn fixture_accounts() -> (Vec<Account>, Vec<Folder>) {
     let data: Vec<serde_json::Value> =
-        serde_json::from_str(include_str!("../../fixtures/accounts.json")).expect("account fixture");
+        serde_json::from_str(include_str!("../../tests/fixtures/accounts.json")).expect("account fixture");
     let accounts = data
         .iter()
         .map(|v| serde_json::from_value(v.clone()).expect("account"))
@@ -295,7 +297,9 @@ pub struct Mailbox {
 }
 
 impl Mailbox {
-    /// Load messages; without a contact store, senders are not assumed known.
+    /// Load messages into the test accounts; without a contact store, senders are not assumed
+    /// known.
+    #[cfg(feature = "fixtures")]
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         let (accounts, folders) = fixture_accounts();
         Ok(Self::build(
@@ -306,7 +310,8 @@ impl Mailbox {
         ))
     }
 
-    /// Load messages plus the known addresses in `store`.
+    /// Load messages into the test accounts plus the known addresses in `store`.
+    #[cfg(feature = "fixtures")]
     pub fn from_json_with_contacts(
         json: &str,
         store: Rc<ContactStore>,
@@ -398,8 +403,8 @@ impl Mailbox {
         mb
     }
 
-    /// The mock mailbox against an in-memory copy of the shipped address
-    /// book. The app passes its own database via [`Self::load_default_with`].
+    /// The test mailbox against an in-memory copy of the test address book.
+    #[cfg(feature = "fixtures")]
     pub fn load_default() -> Self {
         Self::load_default_with(Rc::new(
             crate::contacts::open_seeded_in_memory().expect("contacts database"),
@@ -407,8 +412,9 @@ impl Mailbox {
     }
 
     /// [`Self::load_default`] against an explicit address book.
+    #[cfg(feature = "fixtures")]
     pub fn load_default_with(store: Rc<ContactStore>) -> Self {
-        Self::from_json_with_contacts(include_str!("../../fixtures/mailbox.json"), store)
+        Self::from_json_with_contacts(include_str!("../../tests/fixtures/mailbox.json"), store)
             .expect("fixtures parse")
     }
 
