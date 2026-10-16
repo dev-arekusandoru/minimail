@@ -374,7 +374,7 @@ impl MailApp {
                 "New sender",
                 selectable_verbatim(("reader-sel-new-sender", u64::from(m.id)), &format!("{} <{}>", m.from_name, m.from_email)).into_any_element(),
                 look.t.info,
-                look.t.foreground,
+                look.t,
                 actions,
             ));
         }
@@ -404,7 +404,7 @@ impl MailApp {
             "Possible spam",
             div().into_any_element(),
             look.t.danger,
-            look.t.foreground,
+            look.t,
             actions,
         )
     }
@@ -426,11 +426,10 @@ impl MailApp {
             "Suggested folder",
             div().min_w_0().truncate().text_size(px(13.)).text_color(look.t.foreground).child(self.mailbox.folder_path(folder)).into_any_element(),
             look.t.info,
-            look.t.foreground,
+            look.t,
             actions,
         ))
     }
-
 
     /// Debug-only: every stored classifier answer of `m`, with its version, value, confidence,
     /// probabilities and the routing the current policy gives it. `None` when nothing is cached.
@@ -688,7 +687,7 @@ fn suggestion_banner(
     title: &'static str,
     detail: AnyElement,
     tint: Hsla,
-    foreground: Hsla,
+    theme: &ThemeColor,
     actions: Div,
 ) -> AnyElement {
     div()
@@ -713,12 +712,13 @@ fn suggestion_banner(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(div().flex_none().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(foreground).child(title))
+                .child(div().flex_none().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(theme.foreground).child(title))
                 .child(detail),
         )
         .child(actions)
         .into_any_element()
 }
+
 /// Background of a message card. The embedded web page, its loading skeleton and its
 /// no-snapshot fallback all paint this same color, so the card never shows a seam between
 /// them; the token keeps light and dark in step.

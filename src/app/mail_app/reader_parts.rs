@@ -131,7 +131,6 @@ impl<'a> Look<'a> {
             .when(!key.is_empty(), |b| b.child(self.keycap(key)))
             .on_click(run(action))
     }
-
 }
 
 /// Avatar colours for a sender: the initials pick one of twelve evenly spaced hues, so the same
