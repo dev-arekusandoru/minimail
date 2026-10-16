@@ -139,6 +139,9 @@ const WORLD_NAME: &str = "mail-classifier.measure";
 /// flash). An email may put a colour on `body`, on the outermost wrapper (typically a full-width
 /// `<table width="100%">`/`<center>`/`div`), or both; inner cards are narrower than the body and
 /// keep their background. The `html` colour set by our own stylesheet (the card colour) stays.
+/// It also fixes text contrast: text that falls below WCAG 4.5:1 against its effective background
+/// (the card colour when nothing nearer paints one) keeps its hue and saturation and has its
+/// lightness moved away from that background until it passes.
 const NEUTRALIZE_SCRIPT: &str = r#"(function () {
   function clear(el) {
     if (!el || el.nodeType !== 1) return;
@@ -164,6 +167,110 @@ const NEUTRALIZE_SCRIPT: &str = r#"(function () {
     }
     return n === 1 ? found : null;
   }
+  // Walks the single full-width wrapper chain under `body`, clearing each element's background.
+  // It stops at the first node with siblings or one narrower than the width available to it (the
+  // inner card). The tolerance absorbs table border-spacing and rounding.
+  function clearWrappers(body) {
+    var node = body;
+    for (var guard = 0; node && guard < 32; guard++) {
+      var child = soleChild(node);
+      if (!child) return;
+      var cs = window.getComputedStyle(node);
+      var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      var avail = node.getBoundingClientRect().width - pad;
+      if (!(avail > 0)) return;
+      if (!(child.getBoundingClientRect().width >= avail - Math.max(8, avail * 0.02))) return;
+      clear(child);
+      node = child;
+    }
+  }
+  // WCAG 2 contrast. Colours are [r, g, b] in 0..255.
+  var MIN_RATIO = 4.5;
+  function luminance(c) {
+    var v = c.map(function (x) {
+      x /= 255;
+      return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) {
+    var la = luminance(a), lb = luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+  // A computed rgb()/rgba() string as {rgb, a}, or null when it does not parse.
+  function parseRgb(s) {
+    var m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\/\s]+([\d.]+)(%?))?\s*\)/.exec(s || '');
+    if (!m) return null;
+    var a = m[4] === undefined ? 1 : parseFloat(m[4]) / (m[5] ? 100 : 1);
+    return { rgb: [+m[1], +m[2], +m[3]], a: a };
+  }
+  function toHsl(c) {
+    var r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), h = 0, s = 0, l = (max + min) / 2;
+    if (max !== min) {
+      var d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return [h, s, l];
+  }
+  function fromHsl(hsl) {
+    var h = hsl[0], s = hsl[1], l = hsl[2];
+    if (s === 0) return [l, l, l].map(function (x) { return Math.round(x * 255); });
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    function hue(t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+    return [hue(h + 1 / 3), hue(h), hue(h - 1 / 3)].map(function (x) { return Math.round(x * 255); });
+  }
+  // The colour with fg's hue and saturation that reaches MIN_RATIO on bg, moving lightness away
+  // from the background. If nothing reaches it, it stops at the 0/1 bound.
+  function readable(fg, bg) {
+    if (contrast(fg, bg) >= MIN_RATIO) return fg;
+    var hsl = toHsl(fg), target = luminance(bg) < 0.179 ? 1 : 0;
+    for (var l = hsl[2]; l !== target;) {
+      l = Math.abs(target - l) <= 0.01 ? target : l + (target > l ? 0.01 : -0.01);
+      var c = fromHsl([hsl[0], hsl[1], l]);
+      if (contrast(c, bg) >= MIN_RATIO) return c;
+    }
+    return fromHsl([hsl[0], hsl[1], target]);
+  }
+  // The colour an element is drawn on: its nearest ancestor-or-self with a visible background,
+  // else the card colour on <html>.
+  function effectiveBg(el) {
+    for (var e = el; e && e.nodeType === 1; e = e.parentElement) {
+      var c = parseRgb(window.getComputedStyle(e).backgroundColor);
+      if (c && c.a > 0) return c.rgb;
+    }
+    var root = parseRgb(window.getComputedStyle(document.documentElement).backgroundColor);
+    return root ? root.rgb : null;
+  }
+  function hasText(el) {
+    for (var n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType === 3 && /\S/.test(n.nodeValue)) return true;
+    }
+    return false;
+  }
+  // Recolours text that would be unreadable on its background. Document order puts parents
+  // first, so each child's computed colour already includes any inherited recolour.
+  function fixTextContrast(body) {
+    var els = [body].concat(Array.prototype.slice.call(body.getElementsByTagName('*')));
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i], t = tag(el);
+      if (t === 'SCRIPT' || t === 'STYLE' || t === 'IMG' || t === 'SVG' || !hasText(el)) continue;
+      var fg = parseRgb(window.getComputedStyle(el).color), bg = effectiveBg(el);
+      if (!fg || !bg || contrast(fg.rgb, bg) >= MIN_RATIO) continue;
+      el.style.setProperty('color', 'rgb(' + readable(fg.rgb, bg).join(', ') + ')', 'important');
+    }
+  }
   var html = document.documentElement, body = document.body;
   if (!html || !body) return;
   // Our stylesheet owns <html>; drop any inline colour an email put on it.
@@ -175,21 +282,8 @@ const NEUTRALIZE_SCRIPT: &str = r#"(function () {
   html.removeAttribute('bgcolor');
   html.removeAttribute('background');
   clear(body);
-  // Walk the single full-width wrapper chain, clearing each element's background, and stop at
-  // the first node with siblings or one narrower than the width available to it (the inner
-  // card). The tolerance absorbs table border-spacing and rounding.
-  var node = body;
-  for (var guard = 0; node && guard < 32; guard++) {
-    var child = soleChild(node);
-    if (!child) return;
-    var cs = window.getComputedStyle(node);
-    var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-    var avail = node.getBoundingClientRect().width - pad;
-    if (!(avail > 0)) return;
-    if (!(child.getBoundingClientRect().width >= avail - Math.max(8, avail * 0.02))) return;
-    clear(child);
-    node = child;
-  }
+  clearWrappers(body);
+  fixTextContrast(body);
 })();"#;
 /// Reports the document height whenever layout changes it (resize, images, fonts), from an
 /// isolated content world, so page scripts (which are off) are never involved.
