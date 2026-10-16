@@ -145,7 +145,13 @@ fn unblocking_a_sender_then_undoing_restores_it_with_its_block_time(cx: &mut Tes
 
     h.settings_click("blocked-unblock-spammer@example.com");
     assert!(h.read(|a| a.mailbox.blocked().is_empty()), "Unblock removes the sender");
-    assert!(h.toast().contains("undo"), "the toast offers Undo: {}", h.toast());
+    // The toast's own Undo button is `toast-undo`; the button and its `u` keycap are exercised
+    // in the mail window (tests/ui_mouse.rs), where the notification list is.
+    assert!(
+        h.toast().contains("Unblocked spammer@example.com"),
+        "the toast names the sender: {}",
+        h.toast()
+    );
 
     h.keys("u");
     assert_eq!(

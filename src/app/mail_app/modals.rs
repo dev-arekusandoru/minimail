@@ -179,11 +179,7 @@ impl MailApp {
                         }
                         this.close_modals(window, cx);
                         this.open_post_send_dialog(*in_reply_to, window, cx);
-                        this.show_toast(
-                            "Reply queued · u to undo send".into(),
-                            window,
-                            cx,
-                        );
+                        this.show_undo_toast("Reply queued".into(), window, cx);
                     }
                     ComposeEvent::Cancel => this.close_modals(window, cx),
                 }
@@ -243,8 +239,8 @@ impl MailApp {
                 let local = this.local_now();
                 let n = this.mailbox.snooze(ids, until, local.at());
                 this.triage_mut().clear_selection();
-                this.show_toast(
-                    format!("Snoozed {n} until {} · u to undo", format_when(until, &local)),
+                this.show_undo_toast(
+                    format!("Snoozed {n} until {}", format_when(until, &local)),
                     window,
                     cx,
                 );
@@ -550,7 +546,7 @@ impl MailApp {
                 }
                 SettingsEvent::Unblock(email) => {
                     if this.mailbox.unblock_sender(email) {
-                        this.show_toast(format!("Unblocked {email} · u to undo"), window, cx);
+                        this.show_undo_toast(format!("Unblocked {email}"), window, cx);
                     }
                 }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
@@ -647,7 +643,7 @@ impl MailApp {
             return;
         };
         self.mailbox.mute_thread(thread);
-        self.show_toast("Thread muted · u to undo".into(), window, cx);
+        self.show_undo_toast("Thread muted".into(), window, cx);
         self.session_advance();
         cx.notify();
     }
@@ -672,7 +668,7 @@ impl MailApp {
             return;
         }
         if self.mailbox.allow_sender(&email) {
-            self.show_toast(format!("Allowed {email} · u to undo"), window, cx);
+            self.show_undo_toast(format!("Allowed {email}"), window, cx);
         }
         self.move_cursor(0);
         cx.notify();
@@ -962,11 +958,11 @@ impl MailApp {
         let text = match action {
             FileAction::BlockSender {
                 unsubscribe: true, ..
-            } => format!("Unsubscribed and filed {n} · u to undo"),
-            FileAction::BlockSender { .. } => format!("Blocked and filed {n} · u to undo"),
-            _ => format!("Filed {n} · u to undo"),
+            } => format!("Unsubscribed and filed {n}"),
+            FileAction::BlockSender { .. } => format!("Blocked and filed {n}"),
+            _ => format!("Filed {n}"),
         };
-        self.show_toast(text, window, cx);
+        self.show_undo_toast(text, window, cx);
         self.session_advance();
         self.scroll_to_cursor();
         cx.notify();
@@ -1016,7 +1012,7 @@ impl MailApp {
             TriageState::Archived => "Archived",
             _ => "Filed",
         };
-        self.show_toast(format!("{verb} {n} · u to undo"), window, cx);
+        self.show_undo_toast(format!("{verb} {n}"), window, cx);
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1099,10 +1095,10 @@ impl MailApp {
             self.mailbox.block_sender(email, state, self.now())
         };
         let tail = match state {
-            Some(_) => format!(" · moved {n} · u to undo"),
-            None => " · u to undo".to_owned(),
+            Some(_) => format!(" · moved {n}"),
+            None => String::new(),
         };
-        self.show_toast(format!("{verb} {email}{tail}"), window, cx);
+        self.show_undo_toast(format!("{verb} {email}{tail}"), window, cx);
         self.session_advance();
         self.scroll_to_cursor();
         cx.notify();
@@ -1146,11 +1142,11 @@ impl MailApp {
         let n = self.mailbox.mark_spam(ids, block, self.now());
         self.triage_mut().clear_selection();
         let text = if block {
-            format!("Marked {n} as spam and blocked the sender · u to undo")
+            format!("Marked {n} as spam and blocked the sender")
         } else {
-            format!("Marked {n} as spam · u to undo")
+            format!("Marked {n} as spam")
         };
-        self.show_toast(text, window, cx);
+        self.show_undo_toast(text, window, cx);
         self.session_advance();
         self.scroll_to_cursor();
         cx.notify();

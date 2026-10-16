@@ -1,10 +1,32 @@
 use super::*;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 
 impl MailApp {
     /// Show `text` as a kit notification at the bottom of the window. A new toast replaces the
-    /// previous one; one that mentions undo carries an Undo button. `self.toast` mirrors the
-    /// visible text because the kit keeps its notification text private.
+    /// previous one. `self.toast` mirrors the visible message because the kit keeps its
+    /// notification text private.
     pub(super) fn show_toast(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.push_toast(text, false, window, cx);
+    }
+
+    /// Same, with an Undo action: the one undo step `u` performs.
+    pub(super) fn show_undo_toast(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.push_toast(text, true, window, cx);
+    }
+
+    /// One row: status icon, message, then the Undo action the kit lays beside it.
+    fn push_toast(
+        &mut self,
+        text: String,
+        undo: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.toast_gen += 1;
         let generation = self.toast_gen;
         let text: SharedString = text.into();
@@ -22,15 +44,20 @@ impl MailApp {
                 })
                 .ok();
             });
-        if text.contains("undo") {
-            note = note.content(|_, _, cx| {
-                button("toast-undo", "Undo", "Undo", "u", cx)
-                    .on_click(cx.listener(|note, _, window, cx| {
-                        window.dispatch_action(Box::new(Undo), cx);
-                        note.dismiss(window, cx);
-                    }))
-                    .into_any_element()
-            });
+        if undo {
+            note = note
+                .action(|_, _, cx| {
+                    Button::new("toast-undo")
+                        .label("Undo")
+                        .ghost()
+                        .child(crate::app::ui::shortcut("u"))
+                        .on_click(cx.listener(|note, _, window, cx| {
+                            window.dispatch_action(Box::new(Undo), cx);
+                            note.dismiss(window, cx);
+                        }))
+                })
+                // The action slot turns autohide off; the toast still goes on its own.
+                .autohide(true);
         }
         window.push_notification(note, cx);
         cx.notify();
@@ -92,10 +119,10 @@ impl MailApp {
         self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {
-                TriageState::Inbox => format!("Moved {n} to inbox · u to undo"),
-                s => format!("Marked {n} {} · u to undo", s.label().to_lowercase()),
+                TriageState::Inbox => format!("Moved {n} to inbox"),
+                s => format!("Marked {n} {}", s.label().to_lowercase()),
             };
-            self.show_toast(msg, window, cx);
+            self.show_undo_toast(msg, window, cx);
         }
         self.session_advance();
         self.scroll_to_cursor();
@@ -116,11 +143,8 @@ impl MailApp {
         let n = self.mailbox.set_state_for_sender(&email, from, state);
         self.triage_mut().clear_selection();
         if n > 0 {
-            let msg = format!(
-                "Marked {n} from {name} {} · u to undo",
-                state.label().to_lowercase()
-            );
-            self.show_toast(msg, window, cx);
+            let msg = format!("Marked {n} from {name} {}", state.label().to_lowercase());
+            self.show_undo_toast(msg, window, cx);
         }
         if let Some(rule) = self.rules.record(&email, state) {
             self.pending_rule = Some(rule);
