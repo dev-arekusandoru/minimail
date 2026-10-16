@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds,
-    WindowOptions, base::Root, px, size,
+    AnyWindowHandle, AppContext, AsKeystroke, Bounds, Entity, Focusable, Point, TestAppContext,
+    WindowBounds, WindowOptions, base::Root, px, size,
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
@@ -524,6 +524,22 @@ fn folder_picker_typing_letters_never_triggers_mail_bindings(cx: &mut TestAppCon
 #[gpui_kit::gpui::test]
 fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
+    let delete_key = h
+        .cx
+        .update_window(h.window, |_, window, _| {
+            window
+                .highest_precedence_binding_for_action_in_context(
+                    &mail_classifier::app::actions::Delete,
+                    gpui_kit::KeyContext::parse("MailApp").unwrap(),
+                )
+                .expect("Delete binding")
+                .keystrokes()[0]
+                .as_keystroke()
+                .key
+                .clone()
+        })
+        .unwrap();
+    assert_eq!(delete_key, "d", "automatic shortcut labels use the canonical Delete key");
     h.keys("#");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     h.keys("u");

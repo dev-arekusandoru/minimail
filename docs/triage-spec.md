@@ -108,7 +108,7 @@ Every user action is one undo step.
 |---|---|
 | `e` | Archive |
 | `f` | File (folder picker) |
-| `d` / `#` | Delete |
+| `d` | Delete |
 | `s` | Snooze |
 | `r` | Reply |
 | `a` / `b` | Allow / Block sender |

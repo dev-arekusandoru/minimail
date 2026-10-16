@@ -17,7 +17,7 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 
 ## Composer (on `email-composer`)
 
-- **Answer the five Drafts-pane decisions** (not started). Search filtering vs hiding pills; ordering and excluding sent drafts; `cmd-shift-d` renamed "Go to drafts" under Navigate; Drafts above Sent in the sidebar; discard only via `d`/`#` with confirm.
+- **Answer the five Drafts-pane decisions** (not started). Search filtering vs hiding pills; ordering and excluding sent drafts; `cmd-shift-d` renamed "Go to drafts" under Navigate; Drafts above Sent in the sidebar; discard only via `d` with confirm.
 - **Fix body typing lag** (partial). Every keystroke re-renders the whole window and copies the body about four times. The notify guard landed; the missing `.cached()` boundary at Root → MailApp → Composer did not.
 - **Finish the second feedback batch** (partial). The worker died mid-batch. Confirm on the branch: toolbar styled like the kit example, footer Close removed, light-mode To/Cc/Bcc/Subject backgrounds, draft tab icon, discard shortcut and hint, kit-style attachment cards.
 - **Hard flush of drafts on quit** (partial). `flush_dirty_drafts` starts writes but never joins the lane, so the last keystrokes can be lost on quit. You chose best effort for now.

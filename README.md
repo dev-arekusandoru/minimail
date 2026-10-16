@@ -56,7 +56,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `j` / `k` | Move down / up | `cmd-k` | Command palette |
 | `enter` | Open message | `/` | Search |
 | `e` | Archive | `f` | File (folder picker; can create a folder) |
-| `d` / `#` | Delete | `s` | Snooze, with a return time |
+| `d` | Delete | `s` | Snooze, with a return time |
 | `i` | Move to Inbox | `r` | Reply (`cmd-enter` sends → post-send dialog) |
 | `shift-a` | Reply all (sender + To + Cc, minus your address) | `w` | Forward (empty editable To, `Fwd:` subject, forwarded-message block; `cmd-enter` sends) |
 | `b` | Block sender | `!` | Mark spam (Block & Delete / Delete) |

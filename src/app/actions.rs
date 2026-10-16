@@ -169,9 +169,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenMessage, m),
         KeyBinding::new("o", OpenMessage, m),
         KeyBinding::new("e", Archive, m),
-        KeyBinding::new("d", Delete, m),
-        // `#` (shift-3 on most layouts) is the second Delete key from the key table.
         KeyBinding::new("#", Delete, m),
+        // GPUI displays the last binding; keep `d` canonical and `#` as an alias.
+        KeyBinding::new("d", Delete, m),
         KeyBinding::new("f", File, m),
         KeyBinding::new("s", OpenSnoozePicker, m),
         KeyBinding::new("i", MoveToInbox, m),
