@@ -60,6 +60,27 @@ fn accepting_a_folder_suggestion_files_the_message() {
 }
 
 #[test]
+fn a_folder_suggestion_goes_when_the_mail_leaves_the_inbox() {
+    let mut mb = sample();
+    let folder = || sug(1, QuestionKey::Folder, AnswerValue::Choice(0));
+    mb.add_suggestions(vec![folder()]);
+    // Snoozed mail comes back, so it keeps its suggestion.
+    mb.snooze(&[1], T0 + 3600, T0);
+    assert_eq!(mb.pending(1).len(), 1);
+    assert!(mb.undo());
+    // Filing by hand answers it; undo brings both back.
+    mb.set_state(&[1], TriageState::Archived);
+    assert!(mb.pending(1).is_empty());
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(TriageState::Inbox));
+    assert_eq!(mb.pending(1).len(), 1);
+    // Classifying mail that is already out of the Inbox suggests nothing.
+    mb.set_state(&[1], TriageState::Archived);
+    mb.add_suggestions(vec![folder()]);
+    assert!(mb.pending(1).is_empty());
+}
+
+#[test]
 fn a_hand_set_label_sticks_against_reclassification() {
     let mut mb = sample();
     assert!(mb.set_label(1, QuestionKey::Kind, Some(Tag::Kind(Kind::Newsletter))));

@@ -7,6 +7,24 @@ impl Mailbox {
                 .retain(|p| !(p.message == s.message && p.key == s.key));
             self.pending.push(s);
         }
+        self.drop_suggestions_left_inbox();
+    }
+    /// Drop pending suggestions of mail that left the Inbox (filed, archived, deleted): the
+    /// user already decided where it goes. Snoozed keeps them, since that mail comes back.
+    /// Returns the list before, when anything was dropped.
+    pub(super) fn drop_suggestions_left_inbox(&mut self) -> Option<Vec<Suggestion>> {
+        let (messages, index) = (&self.messages, &self.index);
+        let keep = |s: &Suggestion| {
+            index.get(&s.message).is_none_or(|&i| {
+                matches!(messages[i].state, TriageState::Inbox | TriageState::Snoozed)
+            })
+        };
+        if self.pending.iter().all(keep) {
+            return None;
+        }
+        let before = self.pending.clone();
+        self.pending.retain(keep);
+        Some(before)
     }
     /// Drop pending suggestions whose question is Off in `policy` (mode changes apply at once).
     pub fn drop_suggestions_off(&mut self, policy: &crate::judge::JudgePolicy) {

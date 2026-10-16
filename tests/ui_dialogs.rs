@@ -189,6 +189,13 @@ impl Harness<'_> {
         self.read(|a| a.mailbox.tags(id).contains(&tag))
     }
 
+    /// Whether the reader's `Possible spam` banner is on screen.
+    fn banner_shown(&mut self) -> bool {
+        self.cx
+            .update_window(self.window, |_, window, _| window.try_find("banner-possible-spam").is_some())
+            .expect("window alive")
+    }
+
     fn folder(&mut self, id: FolderId) -> Option<String> {
         self.read(|a| a.mailbox.folder(id).map(|f| f.name.clone()))
     }
@@ -555,6 +562,24 @@ fn spam_banner_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     h.click("btn-banner-spam-delete");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     assert!(h.blocked().is_empty());
+}
+
+#[gpui_kit::gpui::test]
+fn spam_banner_not_spam_clears_the_flag_and_undo_brings_it_back(cx: &mut TestAppContext) {
+    let mut mb = mailbox(&[msg(1, 1, "spam@example.com", "Offer", 1)]);
+    tag_possible_spam(&mut mb, 1);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.banner_shown(), "the banner is up for a flagged message");
+
+    h.click("btn-banner-spam-not");
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "Not spam clears the flag");
+    assert!(!h.banner_shown(), "the banner goes with the flag");
+    assert_eq!(h.state_of(1), TriageState::Inbox, "Not spam never moves the message");
+
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "one undo step restores the flag");
+    assert!(h.banner_shown(), "the banner is back");
 }
 
 #[gpui_kit::gpui::test]

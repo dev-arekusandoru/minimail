@@ -62,6 +62,7 @@ impl Mailbox {
             meta.snoozed_until = None;
             meta.awaiting_since = None;
         }
+        self.drop_suggestions_left_inbox();
     }
 
     fn insert_sorted(&mut self, id: MessageId, stamp: Option<Timestamp>) {

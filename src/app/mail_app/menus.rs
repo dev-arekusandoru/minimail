@@ -130,7 +130,7 @@ impl MailApp {
         items
     }
 
-    /// The Kind section: the five kinds, "Reset to suggestion", then "None" (cleared).
+    /// The Kind section: the five kinds, then the reset/clear actions.
     pub(super) fn kind_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.kind_of(id);
         let mut items = vec![MenuItem::header("Kind")];
@@ -139,9 +139,11 @@ impl MailApp {
                 MenuItem::action_fn(Self::kind_name(kind), move || {
                     Box::new(SetKind { message: Some(id), kind: Some(kind) })
                 })
+                .icon(Glyph::of_kind(kind).spec().icon)
                 .checked(current == Some(kind)),
             );
         }
+        items.push(MenuItem::separator());
         items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
             Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
         }));
@@ -152,33 +154,43 @@ impl MailApp {
         items
     }
 
-    /// The Urgency section: levels 1..=5 by name, then "Reset to suggestion".
+    /// The Urgency section: levels 1..=5, then reset to suggestion.
     pub(super) fn urgency_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.urgency_of(id);
         let mut items = vec![MenuItem::header("Urgency")];
         for level in 1..=5 {
+            let glyph = match level {
+                5 => Glyph::UrgentHigh,
+                4 => Glyph::UrgentMid,
+                _ => Glyph::UrgencyLow,
+            };
             items.push(
                 MenuItem::action_fn(urgency_label(level), move || {
                     Box::new(SetUrgency { message: Some(id), level })
                 })
+                .icon(glyph.spec().icon)
                 .checked(current == level),
             );
         }
+        items.push(MenuItem::separator());
         items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
             Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
         }));
         items
     }
 
+
     /// The spam section: one row, which way round depends on the flag. Spam never moves mail.
     pub(super) fn spam_items(&self, id: MessageId) -> Vec<MenuItem> {
         let spam = self.mailbox.tags(id).contains(&Tag::PossibleSpam);
         vec![if spam {
             MenuItem::action_fn("Not spam", move || Box::new(SetSpam { message: Some(id), spam: false }))
+                .icon(Glyph::PossibleSpam.spec().icon)
         } else {
             MenuItem::action_fn("Mark as spam", move || {
                 Box::new(SetSpam { message: Some(id), spam: true })
             })
+            .icon(Glyph::PossibleSpam.spec().icon)
         }]
     }
 

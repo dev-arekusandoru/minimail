@@ -24,6 +24,7 @@ pub enum MenuItem {
         label: SharedString,
         /// Shown with a check mark: the active filter choice.
         checked: bool,
+        icon: Option<gpui_kit::assets::IconName>,
         action: ActionFn,
     },
     /// A non-interactive section header.
@@ -38,15 +39,12 @@ impl MenuItem {
     pub fn action(label: impl Into<SharedString>, action: fn() -> Box<dyn Action>) -> Self {
         Self::action_fn(label, action)
     }
-
-    /// A row whose action is built from data the row holds, e.g. a tag to toggle.
     pub fn action_fn(
         label: impl Into<SharedString>,
         action: impl Fn() -> Box<dyn Action> + 'static,
     ) -> Self {
-        MenuItem::Action { label: label.into(), checked: false, action: Rc::new(action) }
+        MenuItem::Action { label: label.into(), checked: false, icon: None, action: Rc::new(action) }
     }
-
     /// A non-interactive header for the rows under it.
     pub fn header(label: impl Into<SharedString>) -> Self {
         MenuItem::Label(label.into())
@@ -56,6 +54,13 @@ impl MenuItem {
     pub fn checked(mut self, on: bool) -> Self {
         if let MenuItem::Action { checked, .. } = &mut self {
             *checked = on;
+        }
+        self
+    }
+    /// Show an icon alongside an action row.
+    pub fn icon(mut self, icon: gpui_kit::assets::IconName) -> Self {
+        if let MenuItem::Action { icon: item_icon, .. } = &mut self {
+            *item_icon = Some(icon);
         }
         self
     }
@@ -91,16 +96,15 @@ pub fn populate(
     items.iter().fold(menu, |menu, item| match item {
         MenuItem::Separator => menu.separator(),
         MenuItem::Label(label) => menu.label(label.clone()),
-        MenuItem::Action { label, checked, action } => {
+        MenuItem::Action { label, checked, icon, action } => {
             let (run, build) = (run.clone(), action.clone());
             // The click handler replaces the kit's own dispatch, so the owner can scope the
             // action; the action is still attached so the row shows its key binding.
-            menu.item(
-                PopupMenuItem::new(label.clone())
-                    .action(action())
-                    .checked(*checked)
-                    .on_click(move |_, window, cx| run(build(), window, cx)),
-            )
+            let item = PopupMenuItem::new(label.clone())
+                .action(action())
+                .checked(*checked)
+                .on_click(move |_, window, cx| run(build(), window, cx));
+            menu.item(if let Some(icon) = icon { item.icon(*icon) } else { item })
         }
         MenuItem::Submenu { label, items } => {
             let (items, run) = (items.clone(), run.clone());

@@ -13,6 +13,7 @@ use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
@@ -398,32 +399,70 @@ impl MailApp {
             ));
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
-            out.push(row(
-                Alert::error(
-                    "banner-possible-spam",
-                    Text::from(selectable_verbatim(("reader-sel-spam", u64::from(m.id)), "Possible spam")),
-                )
-                .banner(),
-                actions()
-                    .child(look.action_button(
-                        "btn-banner-spam-block",
-                        "Block & Delete",
-                        "Block the sender and delete this message",
-                        "",
-                        SpamBlock,
-                        cx,
-                    ))
-                    .child(look.action_button(
-                        "btn-banner-spam-delete",
-                        "Delete",
-                        "Delete this message",
-                        "d",
-                        Delete,
-                        cx,
-                    )),
-            ));
+            out.push(self.spam_banner(m.id, look, cx));
         }
         out
+    }
+
+    /// The `Possible spam` banner: one full-width strip in the danger tint, the label on the left
+    /// and its actions inside it, right-aligned. `Not spam` clears the flag (one undo step), then
+    /// `Block & Delete` and `Delete`.
+    fn spam_banner(&self, id: MessageId, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+        let t = &look.t;
+        div()
+            .id("banner-possible-spam")
+            .test_support()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(t.danger.opacity(0.5))
+            .bg(t.danger.opacity(0.08))
+            .child(Icon::new(Glyph::PossibleSpam.spec().icon).with_size(px(14.)).text_color(t.danger))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.foreground)
+                    .child(SelectableText::new(("reader-sel-spam", u64::from(id)), "Possible spam")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_2()
+                    .child(look.primary_action_button(
+                        "btn-banner-spam-not",
+                        "Not spam",
+                        "Clear the Possible spam flag",
+                        "",
+                        SetSpam { message: Some(id), spam: false },
+                        cx,
+                    ))
+                    .child(
+                        look.action_button(
+                            "btn-banner-spam-block",
+                            "Block & Delete",
+                            "Block the sender and delete this message",
+                            "",
+                            SpamBlock,
+                            cx,
+                        )
+                        .danger(),
+                    )
+                    .child(
+                        look.action_button("btn-banner-spam-delete", "Delete", "Delete this message", "d", Delete, cx)
+                            .ghost(),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// The slim folder-only strip under the labels row: the pending Folder suggestion's target,
