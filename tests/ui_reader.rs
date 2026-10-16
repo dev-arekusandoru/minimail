@@ -422,8 +422,9 @@ fn the_reader_more_menu_sets_a_classifier_label(cx: &mut TestAppContext) {
     h.click(("btn-message-more", 1usize));
     assert!(h.read(|a| a.menu_open()));
     h.hover_row("Classifier labels");
+    h.hover_row("Kind");
     h.click_row("Person");
-    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind section set the label");
+    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind submenu set the label");
 }
 
 /// The Needs reply chip's menu clears the tag as a user override, and one `u` brings it back.

@@ -264,13 +264,13 @@ impl MailApp {
                     urgency_word(*level),
                     urgency_glyph(*level),
                     "reader-chip-urgency",
-                    self.urgency_items(m.id),
+                    Self::section("Urgency", self.urgency_items(m.id)),
                 ),
                 Tag::Kind(kind) => (
                     Glyph::of_kind(*kind).spec().label,
                     Glyph::of_kind(*kind),
                     "reader-chip-kind",
-                    self.kind_items(m.id),
+                    Self::section("Kind", self.kind_items(m.id)),
                 ),
                 Tag::PossibleSpam => (
                     "Possible spam",

@@ -128,11 +128,15 @@ impl MailApp {
         }
     }
 
-    /// The whole classifier menu of one message: Kind, Urgency, needs reply, spam, then a pending
-    /// folder suggestion.
+    /// The whole classifier menu of one message: a `Kind` and an `Urgency` submenu to keep the
+    /// list of options off this level, then needs reply, spam, and a pending folder suggestion.
     pub(super) fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
-        let mut items = self.kind_items(id);
-        for section in [self.urgency_items(id), self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
+        let mut items = vec![
+            MenuItem::submenu("Kind", self.kind_items(id)),
+            MenuItem::separator(),
+            MenuItem::submenu("Urgency", self.urgency_items(id)),
+        ];
+        for section in [self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
             if !section.is_empty() {
                 items.push(MenuItem::separator());
                 items.extend(section);
@@ -141,10 +145,17 @@ impl MailApp {
         items
     }
 
-    /// The Kind section: the five kinds, then the reset/clear actions.
+    /// `items` under a header, for a menu that opens one section on its own (a reader chip);
+    /// the classifier menu's submenus carry their own label instead.
+    pub(super) fn section(header: &'static str, items: Vec<MenuItem>) -> Vec<MenuItem> {
+        std::iter::once(MenuItem::header(header)).chain(items).collect()
+    }
+
+    /// The Kind options: the five kinds, then the reset/clear actions. Headerless: the caller
+    /// labels the section.
     pub(super) fn kind_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.kind_of(id);
-        let mut items = vec![MenuItem::header("Kind")];
+        let mut items = Vec::new();
         for kind in Kind::ALL {
             items.push(
                 MenuItem::action_fn(Self::kind_name(kind), move || {
@@ -165,10 +176,10 @@ impl MailApp {
         items
     }
 
-    /// The Urgency section: levels 1..=5, then reset to suggestion.
+    /// The Urgency options: levels 1..=5, then reset to suggestion. Headerless, like `kind_items`.
     pub(super) fn urgency_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.urgency_of(id);
-        let mut items = vec![MenuItem::header("Urgency")];
+        let mut items = Vec::new();
         for level in 1..=5 {
             let glyph = match level {
                 5 => Glyph::UrgentHigh,

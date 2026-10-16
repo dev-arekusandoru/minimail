@@ -58,13 +58,50 @@ fn the_row_icons_open_the_classifier_menu(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
     let flagged = h.has_tag(1, Tag::PossibleSpam);
     open_row_menu(&mut h);
-    assert!(h.has_row("Kind"), "the Kind sections are there");
+    assert!(h.has_row("Kind"), "the Kind submenu is there");
     assert!(h.has_row("Urgency"), "and Urgency");
+    assert!(!h.has_row("Person") && !h.has_row("Very urgent"), "their options are one level down");
     assert!(
         h.has_row(if flagged { "Not spam" } else { "Mark as spam" }),
         "and the spam flag, which way round follows the flag"
     );
     assert!(!h.has_row("Accept folder"), "nothing is suggested yet");
+}
+
+/// Hovering a section opens its options in a nested menu; picking one runs it as a row of the
+/// outer menu's action would.
+#[gpui_kit::gpui::test]
+fn the_classifier_menu_nests_the_kind_and_urgency_options(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, spam_box());
+    open_row_menu(&mut h);
+
+    h.hover_row("Kind");
+    assert!(h.has_row("Person") && h.has_row("No kind"), "hovering Kind opens its options");
+    assert!(!h.has_row("Very urgent"), "the Urgency options are still closed");
+    h.click_row("Person");
+    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the nested option set the label");
+}
+
+/// The nested menus are keyboard-navigable: right steps into one, down moves inside it and enter
+/// picks the highlighted row; left steps back out, where enter runs nothing.
+#[gpui_kit::gpui::test]
+fn the_kind_submenu_is_keyboard_navigable(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, spam_box());
+
+    open_row_menu(&mut h);
+    h.hover_row("Kind");
+    h.keys("right");
+    assert!(h.has_row("Person"), "right stepped into the submenu");
+    h.keys("down");
+    h.keys("enter");
+    assert!(h.has_tag(1, Tag::Kind(Kind::ALL[1])), "down moved inside it and enter picked");
+
+    open_row_menu(&mut h);
+    h.hover_row("Kind");
+    h.keys("right");
+    h.keys("left");
+    h.keys("enter");
+    assert!(h.has_tag(1, Tag::Kind(Kind::ALL[1])), "left left the submenu, so enter ran nothing");
 }
 
 #[gpui_kit::gpui::test]
@@ -77,6 +114,7 @@ fn a_kind_set_in_the_menu_survives_reclassification(cx: &mut TestAppContext) {
     let (label, chosen) = KINDS.into_iter().find(|(_, kind)| *kind != classified).unwrap();
 
     open_row_menu(&mut h);
+    h.hover_row("Kind");
     h.click_row(label);
     assert_eq!(kind_of(&mut h), Some(chosen), "the menu set the label");
 
@@ -98,8 +136,10 @@ fn reset_to_suggestion_restores_the_classifier_value(cx: &mut TestAppContext) {
     let (label, _chosen) = KINDS.into_iter().find(|(_, kind)| *kind != classified).unwrap();
 
     open_row_menu(&mut h);
+    h.hover_row("Kind");
     h.click_row(label);
     open_row_menu(&mut h);
+    h.hover_row("Kind");
     h.click_row("Reset Kind to suggestion");
     assert_eq!(kind_of(&mut h), Some(classified), "the classifier's value is back");
 
@@ -128,6 +168,7 @@ fn not_spam_clears_the_flag_and_sticks(cx: &mut TestAppContext) {
 fn an_urgency_set_in_the_menu_survives_reclassification(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, spam_box());
     open_row_menu(&mut h);
+    h.hover_row("Urgency");
     h.click_row("Very urgent");
     assert!(h.has_tag(1, Tag::Urgent(5)));
 
@@ -136,6 +177,7 @@ fn an_urgency_set_in_the_menu_survives_reclassification(cx: &mut TestAppContext)
 
     // "None" (level 1) clears the tag but still sticks.
     open_row_menu(&mut h);
+    h.hover_row("Urgency");
     h.click_row("None");
     assert!(!h.has_tag(1, Tag::Urgent(5)));
     h.keys("c");
@@ -193,6 +235,7 @@ fn a_hand_set_label_is_one_undo_step(cx: &mut TestAppContext) {
     );
     let classified = kind_of(&mut h);
     open_row_menu(&mut h);
+    h.hover_row("Kind");
     h.click_row("Newsletter");
     assert_eq!(kind_of(&mut h), Some(Kind::Newsletter));
 
