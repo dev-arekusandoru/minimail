@@ -39,6 +39,7 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
                     // The real worker over in-memory stores: the reply surface a test opens
                     // here is the one the app runs.
                     app.attach_composer_in_memory(window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
                     app
                 });
                 window.focus(&view.focus_handle(cx), cx);
@@ -115,10 +116,10 @@ impl Harness<'_> {
         self.read(|a| a.visible_ids())
     }
     fn index(&mut self) -> usize {
-        self.read(|a| a.triage.cursor_index())
+        self.read(|a| a.triage().cursor_index())
     }
     fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
+        self.read(|a| a.triage().cursor(&a.mailbox, &a.local_now()))
     }
     fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -172,10 +173,10 @@ fn left_edge_click_toggles_selection_without_opening(cx: &mut TestAppContext) {
     let ids = h.ids();
     h.click(("row-select", 0usize));
     h.click(("row-select", 1usize));
-    assert_eq!(h.read(|a| a.triage.selected()), vec![ids[0], ids[1]]);
+    assert_eq!(h.read(|a| a.triage().selected()), vec![ids[0], ids[1]]);
     assert_eq!(h.read(|a| a.opened()), None);
     h.click(("row-select", 0usize));
-    assert_eq!(h.read(|a| a.triage.selected()), vec![ids[1]]);
+    assert_eq!(h.read(|a| a.triage().selected()), vec![ids[1]]);
 }
 
 #[gpui_kit::gpui::test]
@@ -355,7 +356,7 @@ fn escape_dismisses_a_menu_without_running_a_row(cx: &mut TestAppContext) {
     assert!(!h.read(|a| a.menu_open()));
     assert_eq!(h.state_of(ids[0]), Inbox, "dismissing ran no menu row");
     assert_eq!(
-        h.read(|a| a.triage.selected()),
+        h.read(|a| a.triage().selected()),
         vec![ids[0]],
         "escape went to the menu, not on to clearing the selection"
     );
@@ -452,12 +453,20 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn ai_rows_appear_only_while_a_suggestion_is_pending(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let ids = h.ids();
-    let pending = ids
-        .iter()
-        .copied()
-        .find(|id| h.read(|a| !a.mailbox.pending(*id).is_empty()))
-        .expect("the fixture classifies at startup, so some message is pending");
+    let pending = h.ids()[0];
+    // The offline stub never files mail, so seed the folder suggestion the menu reviews.
+    h.app.update(h.cx, |a, _| {
+        let options = a.mailbox.folder_options("personal");
+        a.mailbox.add_suggestions(vec![mail_classifier::judge::Suggestion {
+            message: pending,
+            key: mail_classifier::judge::QuestionKey::Folder,
+            answer: mail_classifier::judge::Answer {
+                probabilities: vec![1.0; options.len() + 1],
+                value: mail_classifier::judge::AnswerValue::Choice(0),
+                confidence: 0.9,
+            },
+        }]);
+    });
     h.click(("row", pending as usize));
     h.click(("btn-message-more", pending as usize));
     assert!(

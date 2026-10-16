@@ -1618,13 +1618,16 @@ impl MailApp {
             snooze: None,
             read: true,
             partial: false,
+            bulk: false,
             attachments: crate::app::composer_worker::attachment_names(&attachments)
                 .into_iter()
                 .zip(attachments.iter().map(|a| a.size))
                 .map(|(name, size)| Attachment { name, size })
                 .collect(),
         };
-        let expects = crate::judge::expects_reply(&StubJudge, &message.text);
+        let expects = self.judge.is_some()
+            && self.auto_classify
+            && crate::judge::expects_reply(&StubJudge, &message.text);
         let local = self
             .mailbox
             .record_sent(outgoing, triage_original, expects, now);
@@ -1955,7 +1958,7 @@ impl MailApp {
             .active()
             .and_then(|tab| tab.thread_id())
             .or_else(|| {
-                self.triage
+                self.triage()
                     .cursor(&self.mailbox, &self.local_now())
                     .and_then(|id| self.mailbox.get(id).map(|message| message.thread_id))
             })?;

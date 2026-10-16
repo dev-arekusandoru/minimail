@@ -15,26 +15,50 @@
 
 mod children;
 mod error;
+#[cfg(feature = "fixtures")]
+mod fixture;
 mod groups;
+mod judgements;
 mod model;
 mod read;
 mod schema;
-mod seed;
 mod settings;
 mod write;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::clock::{Clock, SystemClock, Timestamp};
 use rusqlite::Connection;
 
 pub use error::{Error, Result};
+#[cfg(feature = "fixtures")]
+pub use fixture::{open_seeded_in_memory, seed_if_empty};
 pub use model::{
     Contact, ContactQuery, ContactSource, ContactUrl, EmailAddress, Field, Group, Label,
     NewContact, PhoneNumber, PostalAddress,
 };
-pub use seed::{SEED_JSON, default_db_path, open_default, open_seeded_in_memory, seed_if_empty};
+
+/// `$MAIL_CLASSIFIER_DB`, else `~/Library/Application Support/mail-classifier/contacts.db`.
+pub fn default_db_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MAIL_CLASSIFIER_DB")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    home.join("Library/Application Support/mail-classifier/contacts.db")
+}
+
+/// Open the database the app uses, creating the directory. Starts empty.
+pub fn open_default() -> Result<ContactStore> {
+    let path = default_db_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| Error::Invalid(format!("cannot create {}: {e}", dir.display())))?;
+    }
+    ContactStore::open(&path)
+}
 
 /// A connection to the contacts database.
 pub struct ContactStore {

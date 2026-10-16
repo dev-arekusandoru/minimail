@@ -487,6 +487,7 @@ mod tests {
             attachments: Vec::new(),
             read: true,
             partial: false,
+            bulk: false,
         }
     }
 

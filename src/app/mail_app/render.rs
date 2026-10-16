@@ -12,13 +12,14 @@ impl Render for MailApp {
         *self.visible_cache.borrow_mut() = None;
         *self.sidebar_cache.borrow_mut() = None;
         self.reconcile_tabs();
+        self.sync_webviews(cx);
         self.sync_settings_blocked(cx);
         self.place_find_match(window, cx);
         self.refresh_find();
         let hint = self.hint_context();
-        let in_session = self.in_session() || self.session_end.is_some();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
+            self.note_opened(id, cx);
             // The opened message and the next couple of rows get their bodies.
             let targets = self.body_targets();
             self.fetch_bodies(targets, cx);
@@ -27,11 +28,9 @@ impl Render for MailApp {
             self.show_toast(text, window, cx);
         }
         self.settle_fetch_toast(window, cx);
-        // Rows size themselves from the real pane: the list pane side by side, the whole
-        // region when the panes are stacked.
-        self.list_w = self.list_width(f32::from(window.viewport_size().width), cx);
-        let list = (!in_session).then(|| self.render_list(cx));
-        let reader = self.render_reader(cx);
+        // The dock's panel set follows the tab model, and the reader it shows follows the
+        // active tab; the list is the panel that sizes the rows.
+        self.sync_dock(window, cx);
         if self.find_placement_pending() {
             window.request_animation_frame();
         }
@@ -45,8 +44,17 @@ impl Render for MailApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    // A click that reaches GPUI is outside every email view: drop their selections.
+                    this.webviews.clear_selections();
                     // Clicking never steals key focus from the list (or a modal's input).
                     if !this.modal_open() {
+                        // The dock's groups focus their active panel on mouse-down before
+                        // this runs, so the focused handle says which pane was clicked —
+                        // the tab keys follow the pane the user was last in, wherever in
+                        // it they clicked.
+                        if let Some(pane) = this.panes.dock_ref().focused_pane(window, cx) {
+                            this.focus_pane(pane);
+                        }
                         window.focus(&this.focus_handle, cx);
                     }
                 }),
@@ -138,6 +146,13 @@ impl Render for MailApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Undo, window, cx| this.undo(window, cx)))
+            // `cmd-c` is the kit's `Copy`, bound at its root. GPUI text copies as before; an email
+            // view's selection lives in WebKit, so ask it.
+            .on_action(cx.listener(|this, _: &gpui_kit::base::input::Copy, window, cx| {
+                if !gpui_kit::base::TextSelection::selected_text(window, cx).is_empty() || !this.webviews.copy_selection() {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 if this.palette.is_some() {
                     this.close_modals(window, cx);
@@ -161,11 +176,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &Forward, window, cx| {
                 this.reply_to_cursor(DraftKind::Forward, window, cx);
             }))
-            .on_action(
-                cx.listener(|this, _: &CloseTab, window, cx| this.close_active_tab(window, cx)),
-            )
-            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_tab(1, window, cx)))
-            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_tab(-1, window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| this.close_focused_tab(window, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle_focused_tab(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PrevTab, window, cx| this.cycle_focused_tab(-1, window, cx)))
             .on_action(cx.listener(|this, _: &OpenFind, window, cx| this.open_find(window, cx)))
             .on_action(cx.listener(|this, _: &CloseFind, window, cx| this.close_find(window, cx)))
             .on_action(cx.listener(|this, _: &FindNext, _, cx| this.find_step(1, cx)))
@@ -189,9 +202,7 @@ impl Render for MailApp {
                 this.undo_send_hold(ev.draft, cx);
             }))
             // Sidebar navigation and the list header's filter pills.
-            .on_action(cx.listener(|this, ev: &ShowLocation, _, cx| {
-                this.show_location(ev.location.clone(), cx)
-            }))
+
             .on_action(cx.listener(|this, _: &GoInbox, _, cx| this.go_inbox(cx)))
             .on_action(cx.listener(|this, _: &GoSnoozed, _, cx| this.go_snoozed(cx)))
             .on_action(cx.listener(|this, _: &GoSent, _, cx| this.go_sent(cx)))
@@ -213,12 +224,23 @@ impl Render for MailApp {
                     this.open_snooze(w, cx);
                 }
             }))
-            .on_action(
-                cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)),
-            )
-            .on_action(
-                cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)),
-            )
+            .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
+            .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
+            .on_action(cx.listener(|this, a: &SetKind, _, cx| {
+                this.set_kind_action(a.message, a.kind, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetUrgency, _, cx| {
+                this.set_urgency_action(a.message, a.level, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetSpam, _, cx| {
+                this.set_spam_action(a.message, a.spam, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetNeedsReply, _, cx| {
+                this.set_needs_reply_action(a.message, a.needs_reply, cx)
+            }))
+            .on_action(cx.listener(|this, a: &ResetLabel, _, cx| {
+                this.reset_label_action(a.message, a.key, cx)
+            }))
             .on_action(cx.listener(|this, _: &AcceptRule, w, cx| this.accept_rule(w, cx)))
             .on_action(cx.listener(|this, _: &DismissRule, _, cx| this.dismiss_rule(cx)))
             .on_action(cx.listener(|this, _: &ToggleRules, w, cx| this.toggle_rules(w, cx)))
@@ -228,17 +250,29 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &Unsubscribe, w, cx| this.unsubscribe(w, cx)))
             .on_action(cx.listener(|this, _: &SummarizeThread, w, cx| this.summarize(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSettings, w, cx| this.toggle_settings(w, cx)))
-            .on_action(
-                cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)),
-            )
-            .on_action(
-                cx.listener(|this, _: &ManageAccounts, w, cx| this.open_settings(true, w, cx)),
-            )
+            .on_action(cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)))
+            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| {
+                this.open_settings(crate::app::settings::ACCOUNTS_PAGE, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
-                let (auto, review) = this.classify_visible();
-                this.show_toast(format!("{auto} auto-applied · {review} to review"), w, cx);
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                } else {
+                    this.confirm_classify_list(w, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ClassifyMessage, w, cx| {
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                    return;
+                }
+                let mut ids = this.target_ids();
+                if ids.is_empty() {
+                    ids.extend(this.opened());
+                }
+                this.classify_messages(&ids, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
@@ -271,15 +305,18 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &GrowListPane, w, cx| this.grow_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ShrinkListPane, w, cx| this.shrink_list_pane(w, cx)))
             .on_action(cx.listener(|this, _: &ResetPanes, w, cx| this.reset_panes(w, cx)))
-            .on_action(
-                cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)),
-            )
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &TogglePaneLayout, w, cx| this.toggle_pane_layout(w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, w, cx| this.toggle_sidebar(w, cx)))
+            .on_action(cx.listener(|this, _: &ZoomGroup, w, cx| this.toggle_zoom(w, cx)))
             .child(self.render_titlebar(window, cx))
-            .child(self.render_panes(list, reader, window, cx))
+            .child(self.render_panes(cx))
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
-            .child(div().flex_none().child(HintBar::new(hint)))
+            .child(div().flex_none().child(
+                HintBar::new(hint)
+                    .status(self.judge_status().clone())
+                    .on_status_click(cx.listener(|this, _, window, cx| this.open_settings_ai(window, cx))),
+            ))
     }
 }

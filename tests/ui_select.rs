@@ -29,7 +29,11 @@ fn open(cx: &mut TestAppContext) -> AnyWindowHandle {
             cx,
             |window, cx| {
                 let mailbox = Mailbox::from_json(MAILBOX).expect("valid mailbox");
-                let view = cx.new(|cx| MailApp::new(mailbox, window, cx));
+                let view = cx.new(|cx| {
+                    let mut app = MailApp::new(mailbox, window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
+                    app
+                });
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },

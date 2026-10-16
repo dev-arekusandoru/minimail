@@ -30,7 +30,7 @@ fn rows_show_the_account_icon_only_in_all_inboxes(cx: &mut TestAppContext) {
     );
 
     // The sidebar's first account inbox: the account is implied, so no icon.
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     let ids = visible_ids(&mut h);
     let rendered: Vec<usize> = ids.into_iter().filter(|&id| has_row(&mut h, id)).collect();
     assert!(!rendered.is_empty(), "the inbox renders rows");

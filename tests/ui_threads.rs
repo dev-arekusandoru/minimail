@@ -41,7 +41,11 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
             },
             cx,
             |window, cx| {
-                let view = cx.new(|cx| MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx));
+                let view = cx.new(|cx| {
+                    let mut app = MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
+                    app
+                });
                 window.focus(&view.focus_handle(cx), cx);
                 view
             },

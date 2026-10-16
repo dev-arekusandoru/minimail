@@ -3,6 +3,11 @@ name = "mail-classifier"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Test data (fake mailbox, accounts, contacts). Only the tests turn it on, via the
+# self dev-dependency below; the app binary never includes it.
+fixtures = []
+
 [dependencies]
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -17,15 +22,14 @@ rand = "0.8"
 url = "2"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false, features = ["system-fonts", "complex-scripts"] }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7", default-features = false }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "89e5e615aea649a1a9630c526956aa3d90a3afa7" }
-anyrender = "=0.13.0"
-anyrender_vello_cpu = "=0.17.0"
-data-url = "0.3.1"
-peniko = "0.6.1"
-image = { version = "0.25.6", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+gpui-wry = "0.7.0"
+wry = { version = "0.53.3", package = "lb-wry" }
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = "0.3"
+# NSPasteboard carries the composer's rich-text clipboard flavor.
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
+objc2-web-kit = "0.3"
 
 # Composer: Markdown parsing (pulldown-cmark) and HTML parsing (scraper on
 # html5ever). Block and inline structure comes from those parsers; the HTML and
@@ -36,22 +40,10 @@ ego-tree = "0.11"
 # Reading MIME back (mock provider, imported draft originals).
 mailparse = "0.17"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# GPUI reads plain strings and private metadata, not the system HTML flavor.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
-
-[patch.crates-io]
-# Stylo's ToCss derive leaves a nested Result error type unconstrained.
-# GPUI's serde_fmt dependency adds a second From impl for fmt::Error.
-stylo_derive = { path = "vendor/stylo_derive" }
-
-[patch."https://github.com/DioxusLabs/blitz"]
-# Collapsed-table painting must honor none/hidden and each edge's style.
-blitz-paint = { path = "vendor/blitz-paint" }
-
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }
 parking_lot = "0.12"
+mail-classifier = { path = ".", features = ["fixtures"] }
 
 [profile.dev]
 debug = "line-tables-only"

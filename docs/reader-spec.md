@@ -17,8 +17,9 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 - Right of line 1, one cluster: message index (`MSG 04 / 04`, mono, threads only; chronological, 04 = newest), `COLLAPSE` (collapsed thread messages), absolute date (`Sep 30, 2026 · 20:46`, humanized time in its tooltip), Reply, `⋯`. No separate row above the subject.
 - Labels row, reusing the row badge language (`src/app/icons.rs`):
   - Triage state: `Inbox`, `Snoozed · <wake time>`, `Archived`, `Filed · <folder>`, `Deleted`, tinted by `Theme::state_color`.
-  - Tags: Needs Reply, Awaiting Reply, Follow Up, Reminder, Urgent, Possible Spam, New Sender (off in v1 — see `src/known_senders.rs`).
-  - Category: the `Kind` tag (for example Newsletter or Receipt).
+  - Classifier chips, icon + word, never a confidence percent: Kind (`Person`, `Receipt`, `Newsletter`, `Notification`, `Other`), Urgency (`None`, `Low`, `Normal`, `Urgent`, `Very urgent`; Siren/Flame for 4–5 and a muted `Gauge` for 1–3, never `n/5`), Possible spam (`ShieldAlert`). A cleared or unclassified value shows no chip.
+  - Reply status: Needs Reply, Awaiting Reply, Follow Up, Reminder; New Sender (off in v1 — see `src/known_senders.rs`).
+  - Kind, Urgency and Spam chips are clickable, opening a menu of just that section (hover tint only, clean at rest); the header `⋯` menu carries the same sections for values with no chip.
 - Possible Spam keeps its banner (triage spec), with buttons: Block & Delete / Delete `d`. The New Sender banner (Allow `a` / Block `b`) is off in v1.
 - Recipient line (`to You, Ben Ito · cc Dev Rao ▾`, UI font, muted) sits under the sender name and expands to full-width rows **below** the header:
   - `To:` / `Cc:` / `Bcc:`, one row each, wrapping long lists.
@@ -29,8 +30,8 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 
 - Plain text and HTML are both first-class. Emails may be text only, HTML only, or both.
 - Branded HTML, such as newsletters, renders as HTML by default. Per-message **Reader mode** (`v`) swaps it for the text part (or text extracted from the HTML) in reader typography.
-  - Original HTML uses Blitz CSS resolution, font shaping, and layout, with CPU rasterization on a background task and a native GPUI image. Each retained view caches its current document/width/scale/image-policy/color-scheme result; resize, policy, and light/dark changes are single-flight and stale results are discarded. The app's mode supplies CSS `prefers-color-scheme`, without inverting authored colors. Wide content scrolls horizontally. The rasterized body is not selectable; Reader mode remains selectable.
-- Safety: scripts never execute; sender-referenced local files and external CSS/font content are denied. Bounded PNG/JPEG/GIF/WebP images load by default, including remote HTTP(S) images; private/internal hosts are denied. **Settings → General → Block remote images** opts into blocking (session-scoped), updates open readers immediately, and shows a blocked-image note. Data images remain available. Unavailable remote images do not erase the message. Rendering errors are visible; document/image limits are listed in README → *HTML mail*. Only HTTP(S)/`mailto:` links open externally.
+  - Original HTML is drawn by a native `WKWebView` (see `src/app/email_webview/`), loaded once per message and kept while its tab lives (at most 8 views; hidden, not reloaded, on tab switches). It is as tall as its document (measured by a ResizeObserver script in an isolated content world) so the reader's scroll container scrolls it; it is hidden behind a skeleton until loaded and measured. The app theme sets default colors and `color-scheme`; authored colors are not inverted. Text is selectable with the mouse and copied with `cmd-c`; the view never takes key focus.
+- Safety: page JavaScript never runs; navigation inside the view is cancelled and HTTP(S)/`mailto:` links open externally; downloads and new windows are refused; the document has no base URL. Remote images load by default. **Settings → Reader → Block remote images** opts into blocking (session-scoped) with a WebKit content rule list over all remote subresources, reloads open readers, and shows a blocked-image note. Data images remain available.
 - Quoted history inside a body is collapsed ("Show quoted text").
 - Attachments appear as chips with the filename and size.
 
@@ -74,7 +75,7 @@ Pure matching and per-tab query state live in `src/find.rs` (`find_in_thread`, `
 
 Known limitations:
 
-- HTML bodies cannot be highlighted because they are rasterized by Blitz. While a message has matches it is shown in its text (Reader mode) form instead; its own Reader mode setting is untouched, and the HTML view returns when the bar is hidden or the matches go.
+- HTML bodies cannot be highlighted because WebKit draws them. While a message has matches it is shown in its text (Reader mode) form instead; its own Reader mode setting is untouched, and the HTML view returns when the bar is hidden or the matches go.
 - Only the opened message's subject line is searched and highlighted; the other messages' subject lines repeat the thread subject.
 
 ## Actions
@@ -88,11 +89,10 @@ Known limitations:
 
 ## AI suggestion
 
-- A strip under the header lists the pending review suggestions for the message (`Mailbox::pending`), one per question key, for example `Suggested: Needs Reply 87% · Newsletter 92%`.
-- The strip carries Accept `y` / Reject `n` buttons.
-- Resolving removes the strip; accepted tags appear in the labels row.
+- When a Folder suggestion is pending (`Mailbox::pending`), a slim strip sits under the labels row and above the body: accent tint and hairline dashed accent border, `FolderInput` icon, muted `Suggested folder` then the folder path, a solid **Move** `y` and a ghost **Dismiss** `n` on the right. No confidence percent.
+- Move accepts (files the message), Dismiss rejects; either removes the strip. Accepted Kind/Urgency/Spam answers appear as labels-row chips.
 
-## Seed data coverage (`fixtures/`)
+## Seed data coverage (`tests/fixtures/`)
 
 Audit existing coverage first, then fill gaps:
 

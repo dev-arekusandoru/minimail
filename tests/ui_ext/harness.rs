@@ -1,5 +1,6 @@
 //! Headless keystroke tests for the v2 features, driving the real `MailApp` with a `FakeClock`.
 
+use std::sync::Arc;
 use gpui_kit::base::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -9,6 +10,7 @@ use gpui_kit::{
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
 use mail_classifier::clock::{Clock, FakeClock, HOUR, Timestamp};
+use mail_classifier::judge::{Judge, StubJudge};
 use mail_classifier::model::{Location, Mailbox, MessageId, Tag, TriageState};
 use mail_classifier::outgoing::{DraftId, DraftKind, HOLD_SECONDS};
 use mail_classifier::tz::Utc;
@@ -29,8 +31,13 @@ pub struct Harness<'a> {
     pub clock: Rc<FakeClock>,
 }
 
+/// The deterministic offline judge the harness installs by default.
+pub fn stub_judge() -> Arc<dyn Judge + Send + Sync> {
+    Arc::new(StubJudge)
+}
+
 pub fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
-    harness_inner(cx, mailbox, None)
+    harness_inner(cx, mailbox, None, Some(stub_judge()))
 }
 
 /// A harness whose app reads and writes preferences through `store`, as the real app does.
@@ -41,13 +48,39 @@ pub fn harness_with_prefs(
     mailbox: Mailbox,
     store: Rc<mail_classifier::contacts::ContactStore>,
 ) -> Harness<'_> {
-    harness_inner(cx, mailbox, Some(store))
+    harness_inner(cx, mailbox, Some(store), Some(stub_judge()))
+}
+
+/// A harness with no classifier at all, for the missing-key behavior.
+pub fn harness_no_judge(cx: &mut TestAppContext) -> Harness<'_> {
+    harness_inner(cx, Mailbox::load_default(), None, None)
+}
+
+/// A harness with an explicit judge (or none), for the classifier's own tests.
+pub fn harness_with_judge(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+) -> Harness<'_> {
+    harness_inner(cx, mailbox, None, judge)
+}
+
+/// A harness with both a preferences store and an explicit judge, e.g. to test the cache
+/// surviving a restart.
+pub fn harness_with_judge_prefs(
+    cx: &mut TestAppContext,
+    mailbox: Mailbox,
+    store: Rc<mail_classifier::contacts::ContactStore>,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+) -> Harness<'_> {
+    harness_inner(cx, mailbox, Some(store), judge)
 }
 
 fn harness_inner(
     cx: &mut TestAppContext,
     mailbox: Mailbox,
     prefs: Option<Rc<mail_classifier::contacts::ContactStore>>,
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
 ) -> Harness<'_> {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -69,11 +102,17 @@ fn harness_inner(
                 let view = cx.new(|cx| {
                     let mut app = MailApp::new_with_clock(mailbox, c2, Rc::new(Utc), window, cx);
                     if let Some(store) = prefs {
+                        // Automatic classification is off by default (the product setting);
+                        // headless tests exercise the automatic path, so opt in here.
+                        mail_classifier::app_settings::AUTO_CLASSIFY
+                            .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, true);
                         app.load_preferences(store, window, cx);
                     }
                     // The real worker, over stores that keep nothing: the composer paths a
                     // test drives are the ones the app runs, with no draft left on disk.
                     app.attach_composer_in_memory(window, cx);
+                    // The real app installs the judge from the keychain; tests inject a fake.
+                    app.set_judge(judge, cx);
                     app
                 });
                 window.focus(&view.focus_handle(cx), cx);
@@ -157,6 +196,10 @@ impl Harness<'_> {
         menu::click_row(self.cx, self.window, label);
         self.settle_modal(was_open);
     }
+    /// Hover the row of the open popup menu labelled `label` (this opens a submenu).
+    pub fn hover_row(&mut self, label: &str) {
+        menu::hover_row(self.cx, self.window, label);
+    }
     /// A dialog slides in for 250ms and its controls move meanwhile; wait that out before the
     /// next click aims at them.
     fn settle_modal(&mut self, was_open: bool) {
@@ -170,6 +213,11 @@ impl Harness<'_> {
     }
     pub fn read<R>(&mut self, f: impl FnOnce(&MailApp) -> R) -> R {
         self.cx.read_entity(&self.app, |a, _| f(a))
+    }
+    /// Install (or remove) the classifier and run it, as a key change would.
+    pub fn set_judge(&mut self, judge: Option<Arc<dyn Judge + Send + Sync>>) {
+        self.app.update(self.cx, |app, cx| app.set_judge(judge, cx));
+        self.cx.run_until_parked();
     }
     /// Advance the fake clock and run the app's tick.
     pub fn advance(&mut self, secs: Timestamp) {
@@ -191,7 +239,7 @@ impl Harness<'_> {
         TriageState::ALL.map(|s| self.count(s))
     }
     pub fn cursor(&mut self) -> Option<MessageId> {
-        self.read(|a| a.triage.cursor(&a.mailbox, &a.local_now()))
+        self.read(|a| a.triage().cursor(&a.mailbox, &a.local_now()))
     }
     pub fn state_of(&mut self, id: MessageId) -> TriageState {
         self.read(|a| a.mailbox.state_of(id).unwrap())
@@ -333,12 +381,15 @@ impl Harness<'_> {
     }
 
     /// Run the countdown out and let the provider confirm, ticking until the delivery is in
-    /// the mailbox. Nothing sleeps: the fake clock and the worker's own answer drive it.
+    /// the mailbox. Nothing sleeps: the fake clock and the worker's own answer drive it. A
+    /// fixture may already hold delivered mail, so it is a *new* outgoing message that ends
+    /// the wait.
     pub fn deliver_held(&mut self) {
+        let before = self.sent_bodies().len();
         self.advance(HOLD_SECONDS + 1);
         for _ in 0..20 {
             self.tick();
-            if !self.sent_bodies().is_empty() {
+            if self.sent_bodies().len() > before {
                 return;
             }
             self.advance(1);
@@ -532,6 +583,11 @@ impl Harness<'_> {
     pub fn location(&mut self) -> Option<Location> {
         self.read(|a| a.location())
     }
+
+    /// Whether the open popup menu has a row labelled `label`.
+    pub fn has_row(&mut self, label: &str) -> bool {
+        menu::has_row(self.cx, self.window, label)
+    }
 }
 
 // ---------------------------------------------------------------- Settings window
@@ -628,6 +684,29 @@ impl Harness<'_> {
                     .within(format!("group-{group}"))
                     .within(format!("item-{item}"))
                     .click(target, cx)
+            })
+            .expect("settings window alive");
+        self.cx.run_until_parked();
+    }
+
+    /// Scroll the settings page by `dy` pixels (negative scrolls down) with the pointer over
+    /// `target`, an on-screen element inside item `item` of group `group`.
+    pub fn settings_scroll(
+        &mut self,
+        group: usize,
+        item: usize,
+        target: impl Into<gpui_kit::ElementId>,
+        dy: f32,
+    ) {
+        let window = self.settings_handle();
+        self.cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.within(format!("group-{group}")).within(format!("item-{item}")).scroll(
+                    target,
+                    gpui_kit::ScrollDelta::Pixels(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(dy))),
+                    cx,
+                )
             })
             .expect("settings window alive");
         self.cx.run_until_parked();

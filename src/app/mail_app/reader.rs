@@ -1,6 +1,6 @@
 //! The reader pane: the opened thread as one chronological timeline (oldest first) on a
 //! state-colored rail, the opened message expanded in place. The pieces live in `reader_*.rs`.
-use gpui_kit::component::{ActiveTheme as _, scroll::ScrollableElement as _};
+use gpui_kit::component::{scroll::Scrollbar, ActiveTheme as _};
 
 use super::*;
 
@@ -48,14 +48,14 @@ pub(super) enum FindReveal {
 }
 
 impl MailApp {
-    /// The reader: the tab bar (outside a triage session) above whichever tab is active —
-    /// a thread, or the draft that tab is composing.
+    /// The reader body: the find bar (when open) above the opened thread. The tab bar is
+    /// the dock's now — one tab per open thread, drawn by each reader panel's title.
     pub(super) fn render_reader(&self, cx: &Context<Self>) -> AnyElement {
-        if let Some(pane) = self.render_draft_tab(cx) {
+        if let Some(pane) = self.render_draft_tab() {
             return pane;
         }
         let pane = self.render_reader_pane(cx);
-        if self.in_session() || self.session_end.is_some() || self.tabs.is_empty() {
+        if self.slot() == Slot::Triage || self.tabs.is_empty() {
             return pane;
         }
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
@@ -67,19 +67,14 @@ impl MailApp {
             .flex_col()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full())
-            .child(self.tab_bar(&Look::new(cx), cx))
-            .children(if self.find_open() {
-                self.find_bar(&Look::new(cx))
-            } else {
-                None
-            })
+            .children(if self.find_open() { self.find_bar(&Look::new(cx)) } else { None })
             .child(pane)
             .into_any_element()
     }
 
-    /// The active tab is a draft: the composer fills the reader pane, under the same tab
-    /// bar the threads use. There is no thread behind it, so no find bar either.
-    pub(super) fn render_draft_tab(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    /// The active tab is a draft: the composer fills the reader pane. The tab itself is the
+    /// dock's, and there is no thread behind the draft, so no find bar either.
+    pub(super) fn render_draft_tab(&self) -> Option<AnyElement> {
         let draft = self.tabs.active_draft()?;
         let composer = self.composers.get(&draft)?.clone();
         let stacked = self.panes.orientation() == PaneLayout::Stacked;
@@ -92,7 +87,6 @@ impl MailApp {
                 .flex_col()
                 .when(!stacked, |d| d.h_full())
                 .when(stacked, |d| d.w_full())
-                .child(self.tab_bar(&Look::new(cx), cx))
                 .child(composer)
                 .into_any_element(),
         )
@@ -133,7 +127,8 @@ impl MailApp {
             .py_4()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full());
-        if let Some((handled, secs)) = self.session_end {
+        let triage = self.slot() == Slot::Triage;
+        if let Some((handled, secs)) = self.session_end.filter(|_| triage) {
             return pane
                 .items_center()
                 .justify_center()
@@ -220,34 +215,63 @@ impl MailApp {
             pane.scroll.clone()
         };
 
-        let column = |el: AnyElement| div().w_full().child(el);
-        pane.gap_3()
-            .when_some(self.session.as_ref(), |d, s| {
-                d.child(SessionCard::new(s.index + 1, s.ids.len()))
+        // The scroll container fills the whole pane, so the wheel works in its margins too: the
+        // pane's padding moves onto the content (side margins on each row, top and bottom on
+        // the first and last).
+        let column = |el: AnyElement| div().w_full().px_5().child(el);
+        let count = usize::from(summary.is_some()) + usize::from(title.is_some()) + rows.len();
+        let edges = move |el: Div, i: usize| el.when(i == 0, |d| d.pt_4()).when(i + 1 == count, |d| d.pb_4());
+        pane.p_0()
+            .when_some(self.session.as_ref().filter(|_| triage), |d, s| {
+                d.child(div().px_5().pt_4().pb_3().child(SessionCard::new(s.index + 1, s.ids.len())))
             })
             .child(
+                // The scrollbar is a sibling of the scrolled area, over a relative wrapper the
+                // same size as it: as a child it would ride the content's scroll offset, so the
+                // thumb would cancel its own movement and read as stuck at the top.
                 div()
-                    .id("reader-scroll")
-                    // A click anywhere in the thread makes the tab permanent.
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, cx| {
-                            this.pin_active_tab(cx);
-                        }),
-                    )
-                    .track_scroll(&scroll)
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .when_some(summary, |d, s| {
-                        d.child(column(SummaryCard::new(&s).into_any_element()).pb_3())
-                    })
-                    .when_some(title, |d, el| d.child(column(el).pb_3()))
-                    .children(rows.into_iter().map(column))
-                    .when_some(self.inline_composer_element(cx), |d, el| d.child(el))
-                    .vertical_scrollbar(&scroll),
+                    .child(
+                        div()
+                            .id("reader-scroll")
+                            // A click anywhere in the thread makes the tab permanent.
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                this.pin_active_tab(cx);
+                            }))
+                            .track_scroll(&scroll)
+                            .size_full()
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .when(true, |d| {
+                                let mut i = 0;
+                                let mut d = d;
+                                if let Some(s) = summary {
+                                    d = d.child(edges(column(SummaryCard::new(&s).into_any_element()), i).pb_3());
+                                    i += 1;
+                                }
+                                if let Some(el) = title {
+                                    d = d.child(edges(column(el), i).pb_3());
+                                    i += 1;
+                                }
+                                for el in rows {
+                                    d = d.child(edges(column(el), i));
+                                    i += 1;
+                                }
+                                if let Some(el) = self.inline_composer_element(cx) {
+                                    d = d.child(el);
+                                }
+                                d
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .child(Scrollbar::vertical(&scroll).id("reader-scrollbar").viewport_from_layout()),
+                    ),
             )
             .into_any_element()
     }

@@ -22,6 +22,10 @@ const CHECK_EVERY: Duration = Duration::from_secs(60);
 const THROTTLE_BACKOFF: Duration = Duration::from_secs(60);
 /// Messages after the opened one whose body is prefetched.
 const BODY_PREFETCH: usize = 2;
+/// Bodies downloaded at once; the provider's token bucket keeps the rate under Gmail's limits.
+const BODY_IN_FLIGHT: usize = 3;
+/// How long body prefetch pauses after the provider reported a rate limit.
+const BODY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// One account's round, run on a background thread.
 struct AccountJob {
@@ -50,7 +54,7 @@ impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
     pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
         self.cache = Some(cache);
-        let client = ClientConfig::from_env();
+        let client = ClientConfig::load();
         let accounts: Vec<Account> = self
             .mailbox
             .accounts()
@@ -237,9 +241,10 @@ impl MailApp {
             Some(_) => {}
             None => self.sync_error = None,
         }
-        self.classify_visible();
+        self.classify_visible(cx);
         let bodies = self.body_targets();
         self.fetch_bodies(bodies, cx);
+        self.queue_inbox_bodies(cx);
         self.refresh_account_rows(cx);
         cx.notify();
         let wait = if more {
@@ -351,13 +356,64 @@ impl MailApp {
         ids
     }
 
-    /// Download the bodies of `ids` in the background, storing each as it lands.
+    /// Put `ids` (the opened message and the next visible rows) at the front of the body queue
+    /// and start downloading.
     pub(super) fn fetch_bodies(&mut self, ids: Vec<MessageId>, cx: &mut Context<Self>) {
+        for id in ids.into_iter().rev() {
+            if self.bodies_in_flight.contains(&id) {
+                continue;
+            }
+            self.body_queue.retain(|q| *q != id);
+            self.body_queue.push_front(id);
+        }
+        self.pump_bodies(cx);
+    }
+
+    /// Append every partial Inbox message, newest first, so the whole Inbox downloads lazily.
+    pub(super) fn queue_inbox_bodies(&mut self, cx: &mut Context<Self>) {
+        let queued: HashSet<MessageId> =
+            self.body_queue.iter().copied().chain(self.bodies_in_flight.iter().copied()).collect();
+        for id in self.inbox_partials() {
+            if !queued.contains(&id) {
+                self.body_queue.push_back(id);
+            }
+        }
+        self.pump_bodies(cx);
+    }
+
+    /// Fetch `id`'s body next, ahead of the rest of the queue. No-op unless the message is
+    /// partial. Reopening or manually classifying clears a previous failure so it is retried.
+    pub(super) fn prioritize_body(&mut self, id: MessageId, cx: &mut Context<Self>) {
+        if self.mailbox.get(id).is_none_or(|m| !m.partial) {
+            return;
+        }
+        self.body_failed.remove(&id);
+        self.body_queue.retain(|q| *q != id);
+        self.body_queue.push_front(id);
+        self.pump_bodies(cx);
+    }
+
+    /// Partial messages of the Inbox views, newest first.
+    fn inbox_partials(&self) -> Vec<MessageId> {
+        let query = self.mailbox.location_query(&Location::AllInboxes);
+        self.mailbox
+            .ids_matching(&query, &self.local_now())
+            .into_iter()
+            .filter(|id| self.mailbox.get(*id).is_some_and(|m| m.partial))
+            .collect()
+    }
+
+    /// Start body downloads from the front of the queue, up to [`BODY_IN_FLIGHT`] at once.
+    fn pump_bodies(&mut self, cx: &mut Context<Self>) {
+        if self.bodies_paused {
+            return;
+        }
         let Some(cache) = self.cache.clone() else {
             return;
         };
-        for id in ids {
-            if self.bodies_in_flight.contains(&id) {
+        while self.bodies_in_flight.len() < BODY_IN_FLIGHT {
+            let Some(id) = self.body_queue.pop_front() else { break };
+            if self.body_failed.contains(&id) || self.bodies_in_flight.contains(&id) {
                 continue;
             }
             let Some(req) = sync::body_request(&self.mailbox, &cache, id) else {
@@ -378,6 +434,21 @@ impl MailApp {
         }
     }
 
+    /// Pause body prefetch after a rate limit; a timer resumes it once the provider cools down.
+    fn pause_bodies(&mut self, cx: &mut Context<Self>) {
+        self.bodies_paused = true;
+        let executor = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            executor.timer(BODY_BACKOFF).await;
+            this.update(cx, |this, cx| {
+                this.bodies_paused = false;
+                this.pump_bodies(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn finish_body(
         &mut self,
         req: sync::BodyRequest,
@@ -394,11 +465,20 @@ impl MailApp {
                 if let Err(e) = sync::apply_body(&mut self.mailbox, cache, &req, body) {
                     self.toast_sync_error(e);
                 }
+                self.body_ready(req.id, cx);
             }
-            // A rate limit is expected and self-healing: the body is requested again.
-            Err(ProviderError::RateLimited) => {}
-            Err(e) => self.toast_sync_error(e.to_string()),
+            // Transient failures self-heal: requeue and pause the prefetch instead of hammering.
+            Err(ProviderError::RateLimited | ProviderError::Network(_)) => {
+                self.body_queue.push_front(req.id);
+                self.pause_bodies(cx);
+            }
+            // Any other failure is not retried this session (reopening or re-classifying will).
+            Err(e) => {
+                self.body_failed.insert(req.id);
+                self.toast_sync_error(e.to_string());
+            }
         }
+        self.pump_bodies(cx);
         cx.notify();
     }
 
@@ -412,16 +492,16 @@ impl MailApp {
 
     /// Reset the list, tabs and reader to a fresh state after accounts were removed.
     fn reset_view_state(&mut self) {
-        self.folder = Location::AllInboxes;
-        self.triage = Triage::new(self.mailbox.location_query(&Location::AllInboxes));
+        let all_inboxes = self.mailbox.location_query(&Location::AllInboxes);
+        self.list_tabs = ListTabs::new(all_inboxes.clone());
+        self.list_views = vec![ListView::new(all_inboxes, Location::AllInboxes)];
         self.tabs = Tabs::default();
         self.expanded.clear();
         self.reader_panes.borrow_mut().clear();
         self.finds.clear();
         self.summary = None;
-        self.session = None;
+        self.end_session();
         self.menu_target = None;
-        self.row_cursor = 0;
     }
 
     pub(super) fn add_gmail_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -458,7 +538,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(client) = ClientConfig::from_env() else {
+        let Some(client) = ClientConfig::load() else {
             self.show_toast(
                 "Set MAIL_CLASSIFIER_GOOGLE_CLIENT_ID and MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET"
                     .into(),
@@ -543,7 +623,7 @@ impl MailApp {
         self.wake_sync();
         self.show_toast(format!("Gmail connected: {label}"), window, cx);
         self.refresh_account_rows(cx);
-        self.classify_visible();
+        self.classify_visible(cx);
         cx.notify();
     }
 

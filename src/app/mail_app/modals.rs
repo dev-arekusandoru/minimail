@@ -74,6 +74,7 @@ impl MailApp {
         self.apply_query(query, cx);
     }
 
+
     pub(super) fn open_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_snooze_for(None, window, cx);
     }
@@ -92,7 +93,7 @@ impl MailApp {
             let now = self.local_now();
             if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
                 self.mailbox.snooze(&ids, until, now.at());
-                self.triage.clear_selection();
+                self.triage_mut().clear_selection();
                 self.session_advance();
             }
             cx.notify();
@@ -120,7 +121,7 @@ impl MailApp {
                 let ids = &ids;
                 let local = this.local_now();
                 let n = this.mailbox.snooze(ids, until, local.at());
-                this.triage.clear_selection();
+                this.triage_mut().clear_selection();
                 this.show_toast(
                     format!("Snoozed {n} until {} · u to undo", format_when(until, &local)),
                     window,
@@ -144,7 +145,12 @@ impl MailApp {
         }
     }
     pub(super) fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_settings(false, window, cx);
+        self.open_settings(crate::app::settings::ACCOUNTS_PAGE, window, cx);
+    }
+
+    /// Open Settings on the AI page, where the Jev key lives (the status bar's no-key prompt).
+    pub(super) fn open_settings_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(crate::app::settings::AI_PAGE, window, cx);
     }
 
     /// Apply an account's picked icon and color, and keep Gmail accounts' choice in the cache.
@@ -221,13 +227,9 @@ impl MailApp {
         self.settings_window
     }
 
-    /// Open Settings in its own native window, reusing and activating the existing window.
-    pub(super) fn open_settings(
-        &mut self,
-        accounts: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Open Settings in its own native window on `page`, reusing and activating the existing
+    /// window.
+    pub(super) fn open_settings(&mut self, page: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(handle) = self.settings_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
@@ -245,7 +247,7 @@ impl MailApp {
         let group = self.group_threads;
         let preview = self.preview_lines;
         let rows = self.account_rows();
-        let gmail_configured = crate::provider::gmail::ClientConfig::from_env().is_some();
+        let gmail_configured = crate::provider::gmail::ClientConfig::load().is_some();
         let policy = self.policy.clone();
         let summaries = self.summaries_enabled;
         let orientation = self.panes.orientation();
@@ -257,9 +259,21 @@ impl MailApp {
         let blocked = self.mailbox.blocked();
         let now = self.local_now();
         let follow_up = self.mailbox.follow_up_timeout();
+        let (jev_base, jev_model) = self.jev_settings();
+        let jev_has_key = self.has_jev_key();
+        // The switches show the stored preference (both off by default), not the running
+        // state, which a no-preferences session starts true.
+        let scope = crate::prefs::Scope::Global;
+        let (auto_classify, spam_cold_outreach) = match &self.preferences {
+            Some(store) => (
+                crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope),
+                crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope),
+            ),
+            None => (false, false),
+        };
         let app = cx.weak_entity();
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(820.), px(650.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(820.), px(760.)), cx)),
             window_min_size: Some(size(px(620.), px(460.))),
             // The panel draws the kit `TitleBar` itself, so the bar owns dragging, the
             // double click and the window controls.
@@ -278,13 +292,15 @@ impl MailApp {
                 true
             });
             let panel = cx.new(|cx| {
-                let panel = SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
+                SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
                     .block_remote_images(block_remote_images)
                     .mailbox_state(blocked, now, follow_up)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
-                    .accounts(rows, gmail_configured);
-                if accounts { panel.on_accounts_page() } else { panel }
+                    .accounts(rows, gmail_configured)
+                    .classifier_switches(auto_classify, spam_cold_outreach)
+                    .on_page(page)
+                    .jev_connection(jev_base, jev_model, jev_has_key)
             });
             let focus = panel.read(cx).focus_handle(cx).clone();
             settings_window.focus(&focus, cx);
@@ -315,6 +331,11 @@ impl MailApp {
                         crate::app_settings::MODE_EXPECTS_REPLY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_URGENCY.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
+                        crate::app_settings::MODE_FOLDER.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_CLASSIFY.reset(store.as_ref(), &scope);
+                        crate::app_settings::SPAM_COLD_OUTREACH.reset(store.as_ref(), &scope);
+                        crate::app_settings::JEV_BASE_URL.reset(store.as_ref(), &scope);
+                        crate::app_settings::JEV_MODEL.reset(store.as_ref(), &scope);
                     }
                     this.policy = JudgePolicy::default();
                     this.theme_mode = crate::theme::ThemeMode::System;
@@ -348,15 +369,19 @@ impl MailApp {
                         system_is_dark,
                     );
                     crate::theme::apply(cx, name);
-                    panel_weak
-                        .update(cx, |panel, cx| panel.reset_fields(cx))
-                        .ok();
+                    // The endpoint and model are back at their defaults: rebuild the judge so
+                    // the worker stops using the old ones.
+                    this.configure_jev(cx);
+                    this.apply_classifier_settings(cx);
+                    panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
                     cx.notify();
                 }
-                SettingsEvent::Changed(policy, summaries) => {
+                SettingsEvent::Changed { policy, summaries, auto_classify, spam_cold_outreach } => {
                     this.policy = policy.clone();
                     this.summaries_enabled = *summaries;
                     this.save_setting(&crate::app_settings::SUMMARIES, *summaries);
+                    this.save_setting(&crate::app_settings::AUTO_CLASSIFY, *auto_classify);
+                    this.save_setting(&crate::app_settings::SPAM_COLD_OUTREACH, *spam_cold_outreach);
                     for question in QuestionKey::ALL {
                         let setting = match question {
                             QuestionKey::Spam => &crate::app_settings::MODE_SPAM,
@@ -364,9 +389,12 @@ impl MailApp {
                             QuestionKey::ExpectsReply => &crate::app_settings::MODE_EXPECTS_REPLY,
                             QuestionKey::Urgency => &crate::app_settings::MODE_URGENCY,
                             QuestionKey::Kind => &crate::app_settings::MODE_KIND,
+                            QuestionKey::Folder => &crate::app_settings::MODE_FOLDER,
                         };
                         this.save_setting(setting, policy.mode(question));
                     }
+                    // The switches and modes take effect now: re-route and re-queue.
+                    this.apply_classifier_settings(cx);
                     cx.notify();
                 }
                 SettingsEvent::Theme { mode, light, dark } => {
@@ -447,6 +475,22 @@ impl MailApp {
                     }
                     crate::sync_status::SyncAction::Retry => this.retry_sync(id, cx),
                 },
+                SettingsEvent::SaveJev { key, base, model } => {
+                    if let Err(e) = this.save_jev_key(key.as_str()) {
+                        this.show_toast(format!("Could not save the Jev key: {e}"), window, cx);
+                    }
+                    this.save_setting(&crate::app_settings::JEV_BASE_URL, base.clone());
+                    this.save_setting(&crate::app_settings::JEV_MODEL, model.clone());
+                    this.configure_jev(cx);
+                    cx.notify();
+                }
+                SettingsEvent::RemoveJevKey => {
+                    this.remove_jev_key(panel_weak.clone(), cx);
+                    cx.notify();
+                }
+                SettingsEvent::TestJev { key, base, model } => {
+                    this.test_jev(key.as_str(), base, model, panel_weak.clone(), cx);
+                }
                 SettingsEvent::Close => this.close_settings(window, cx),
             },
         ));
@@ -562,11 +606,13 @@ impl MailApp {
         } else if let Some(s) = self.session.take() {
             if s.handled > 0 {
                 self.session_end = Some((s.handled, self.now() - s.started));
+            } else {
+                self.session_view = None;
             }
         } else if self.session_end.is_some() {
             self.end_session();
         } else {
-            self.triage.clear_selection();
+            self.triage_mut().clear_selection();
         }
         cx.notify();
     }
@@ -837,7 +883,7 @@ impl MailApp {
                 }
             }),
         };
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         let text = match action {
             FileAction::BlockSender {
                 unsubscribe: true, ..
@@ -1022,7 +1068,7 @@ impl MailApp {
         cx: &mut Context<Self>,
     ) {
         let n = self.mailbox.mark_spam(ids, block, self.now());
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         let text = if block {
             format!("Marked {n} as spam and blocked the sender · u to undo")
         } else {
@@ -1098,6 +1144,26 @@ impl MailApp {
         self.confirm(
             title,
             move |this, window, cx| this.open_snooze_for(Some(ids.clone()), window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Ask before re-asking Jev about every incoming message the list shows.
+    pub(super) fn confirm_classify_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: Vec<MessageId> = self
+            .visible_ids()
+            .into_iter()
+            .filter(|id| self.mailbox.get(*id).is_some_and(|m| !m.outgoing))
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let n = ids.len();
+        let title = format!("Classify {n} message{} with Jev?", if n == 1 { "" } else { "s" });
+        self.confirm(
+            title,
+            move |this, _, cx| this.classify_messages(&ids, cx),
             window,
             cx,
         );

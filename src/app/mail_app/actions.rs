@@ -75,11 +75,22 @@ impl MailApp {
 
     pub(super) fn mark(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.target_ids();
+        self.file_ids(&ids, state, window, cx);
+    }
+
+    /// Move `ids` to `state` as one undo step: clear the selection, toast, advance a session.
+    pub(super) fn file_ids(
+        &mut self,
+        ids: &[MessageId],
+        state: TriageState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if ids.is_empty() {
             return;
         }
-        let n = self.mailbox.set_state(&ids, state);
-        self.triage.clear_selection();
+        let n = self.mailbox.set_state(ids, state);
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {
                 TriageState::Inbox => format!("Moved {n} to inbox · u to undo"),
@@ -104,7 +115,7 @@ impl MailApp {
     ) {
         let (name, email) = (name.to_owned(), email.to_owned());
         let n = self.mailbox.set_state_for_sender(&email, from, state);
-        self.triage.clear_selection();
+        self.triage_mut().clear_selection();
         if n > 0 {
             let msg = format!(
                 "Marked {n} from {name} {} · u to undo",
@@ -165,13 +176,13 @@ impl MailApp {
                 None => return,
             },
         };
-        self.show_location(location, cx);
+        self.show_location(location, false, cx);
     }
 
     /// `g s` / `g t` / `g a` / `g d`: the current account's location.
     fn go_account_location(&mut self, location: fn(AccountId) -> Location, cx: &mut Context<Self>) {
         if let Some(account) = self.nav_account() {
-            self.show_location(location(account), cx);
+            self.show_location(location(account), false, cx);
         }
     }
 
@@ -195,9 +206,66 @@ impl MailApp {
         self.go_account_location(Location::Trash, cx);
     }
 
+    /// Messages a classifier-label action applies to: the one its menu row names, else the
+    /// cursor/selection.
+    pub(super) fn label_targets(&self, message: Option<MessageId>) -> Vec<MessageId> {
+        message.map(|id| vec![id]).unwrap_or_else(|| self.target_ids())
+    }
+
+    /// `SetKind`: set (or clear) the Kind label by hand.
+    pub(super) fn set_kind_action(&mut self, message: Option<MessageId>, kind: Option<Kind>, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Kind, kind.map(Tag::Kind), cx);
+    }
+
+    /// `SetUrgency`: set the Urgency label by hand. Level 1 ("None") clears it.
+    pub(super) fn set_urgency_action(&mut self, message: Option<MessageId>, level: u8, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Urgency, Tag::for_urgency(level.clamp(1, 5)), cx);
+    }
+
+    /// `SetSpam`: mark (or unmark) the spam flag by hand. Spam never moves the message.
+    pub(super) fn set_spam_action(&mut self, message: Option<MessageId>, spam: bool, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::Spam, spam.then_some(Tag::PossibleSpam), cx);
+    }
+
+    /// `SetNeedsReply`: set (or clear) the Needs reply tag by hand. It never moves the message.
+    pub(super) fn set_needs_reply_action(&mut self, message: Option<MessageId>, needs_reply: bool, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::NeedsReply, needs_reply.then_some(Tag::NeedsReply), cx);
+    }
+
+    /// `ResetLabel`: drop the hand-set label and put the classifier's own value back.
+    pub(super) fn reset_label_action(&mut self, message: Option<MessageId>, key: QuestionKey, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        let mut changed = false;
+        for id in ids {
+            let tag = self.classifier_label(id, key);
+            changed |= self.mailbox.reset_label(id, key, tag);
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Set `key`'s label on `ids` as the user's own: it sticks until it is reset.
+    fn set_label(&mut self, ids: &[MessageId], key: QuestionKey, tag: Option<Tag>, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for id in ids {
+            changed |= self.mailbox.set_label(*id, key, tag.clone());
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Close the Triage tab, whether the session is running or only its summary is up. The
+    /// dock removes the tab's group on its next sync; the user's tabs were never touched.
     pub(super) fn end_session(&mut self) {
         self.session = None;
         self.session_end = None;
+        self.session_view = None;
     }
 
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
@@ -206,8 +274,8 @@ impl MailApp {
         if ids.is_empty() {
             return;
         }
-        self.folder = Location::AllInboxes;
-        self.triage.set_query(query);
+        // The session's list is its own: the user's tabs, cursors and reader stay as they are.
+        self.session_view = Some(ListView::new(query, Location::AllInboxes));
         self.session_end = None;
         self.session = Some(Session {
             ids,
@@ -218,8 +286,17 @@ impl MailApp {
         cx.notify();
     }
 
-    /// Run the stub judge over the visible inbox. Returns `(auto-applied, queued for review)`.
-    pub(super) fn classify_visible(&mut self) -> (usize, usize) {
+    /// Re-route cached answers over the visible Inbox and, when automatic classification is on,
+    /// queue the messages with due questions. Returns `(auto-applied, queued for review)`,
+    /// counted from the cached answers only; anything queued is judged in the background and
+    /// applied when its answers land. With automatic classification off, only cached answers are
+    /// re-routed (nothing goes to Jev).
+    pub(super) fn classify_visible(&mut self, cx: &mut Context<Self>) -> (usize, usize) {
+        if self.judge.is_none() {
+            // No key: classification is off, but the status bar must say so.
+            self.refresh_judge_status();
+            return (0, 0);
+        }
         let inbox = self.mailbox.location_query(&Location::AllInboxes);
         let ids: Vec<MessageId> = self
             .mailbox
@@ -227,25 +304,23 @@ impl MailApp {
             .into_iter()
             .filter(|id| self.mailbox.pending(*id).is_empty())
             .collect();
-        let routed = {
-            let msgs: Vec<&Message> = ids.iter().filter_map(|id| self.mailbox.get(*id)).collect();
-            classify(&StubJudge, &self.policy, &msgs)
-        };
-        let now = self.now();
-        let (mut auto, mut review) = (0, Vec::new());
-        for r in routed {
-            match r {
-                Routed::Auto(s) => {
-                    self.mailbox.apply_auto(s, now);
-                    auto += 1;
-                }
-                Routed::Review(s) => review.push(s),
-                Routed::Drop => {}
+        let (mut auto, mut review) = (0, 0);
+        for id in ids {
+            // Re-route whatever answers are cached, whether or not new requests are allowed.
+            if let Some(stored) = self.cached_answers(id).map(|s| s.to_vec())
+                && !stored.is_empty()
+            {
+                let (a, r) = self.apply_answers(id, &stored);
+                auto += a;
+                review += r;
+            }
+            if self.auto_classify() && self.needs_questions(id) {
+                self.enqueue_judge(JudgeJob::Message { id, force: false });
             }
         }
-        let queued = review.len();
-        self.mailbox.add_suggestions(review);
-        (auto, queued)
+        self.refresh_judge_status();
+        self.drain_judge_queue(cx);
+        (auto, review)
     }
 
     pub(super) fn summarize(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -151,6 +151,12 @@ impl Tabs {
         self.tabs.iter().position(|t| t.draft_id() == Some(draft))
     }
 
+    /// The tab showing exactly `kind`, for a drag order that carries reader tabs of either
+    /// kind.
+    pub fn index_of_kind(&self, kind: &TabKind) -> Option<usize> {
+        self.tabs.iter().position(|t| &t.kind == kind)
+    }
+
     pub fn tab_for_draft(&self, draft: DraftId) -> Option<&Tab> {
         self.index_of_draft(draft).map(|ix| &self.tabs[ix])
     }
@@ -275,6 +281,48 @@ impl Tabs {
         }
         self.active = (self.active as isize + delta).rem_euclid(n) as usize;
         true
+    }
+
+    /// Move the tab at `from` to index `to` (where it ends up), keeping the tab that was active
+    /// active. False when either index is out of range. Pin state travels with the tab.
+    pub fn reorder(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.tabs.len() || to >= self.tabs.len() {
+            return false;
+        }
+        let active = self.active().map(|t| t.kind.clone());
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        if let Some(kind) = active
+            && let Some(ix) = self.index_of_kind(&kind)
+        {
+            self.active = ix;
+        }
+        true
+    }
+
+    /// Move the tabs into `order` (reader tabs, left to right), keeping the tab that was
+    /// active active and every pin with its tab. False when `order` is not exactly the tabs it
+    /// holds, so an order from somewhere else can never drop or duplicate a tab.
+    pub fn reorder_to(&mut self, order: &[TabKind]) -> bool {
+        if order.len() != self.tabs.len() || order.iter().any(|kind| self.index_of_kind(kind).is_none()) {
+            return false;
+        }
+        let active = self.active().map(|t| t.kind.clone());
+        let mut changed = false;
+        for (ix, kind) in order.iter().enumerate() {
+            let from = self.index_of_kind(kind).expect("checked above");
+            if from != ix {
+                self.reorder(from, ix);
+                changed = true;
+            }
+        }
+        // `reorder` keeps the active tab active; keep the field in step with its tab.
+        if let Some(kind) = active
+            && let Some(ix) = self.index_of_kind(&kind)
+        {
+            self.active = ix;
+        }
+        changed
     }
 
     /// Close tab `ix`. The active tab falls to its right neighbour, else its left one.

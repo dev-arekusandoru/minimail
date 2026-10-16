@@ -51,6 +51,7 @@ fn harness_with(cx: &mut TestAppContext, mailbox: Mailbox) -> Harness<'_> {
                     // The real worker over in-memory stores, as the app runs in production:
                     // the send path a test drives here is the one the user gets.
                     app.attach_composer_in_memory(window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
                     app
                 });
                 window.focus(&view.focus_handle(cx), cx);
@@ -111,6 +112,7 @@ impl Harness<'_> {
             .expect("window alive");
         self.cx.run_until_parked();
     }
+
     fn type_text(&mut self, text: &str) {
         let window = self.window;
         self.cx
@@ -237,7 +239,7 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
         vec!["in:inbox", "tag:needs-reply", "and", "tag:reminder"]
     );
 
-    h.click("2-4");
+    h.click("sidebar-archive-work");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
     assert_eq!(
         h.query(),
@@ -249,26 +251,22 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert_eq!(h.state_of(4), TriageState::Archived);
     assert_eq!(h.read(|a| a.location_label()), "Work · Archive");
 
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     assert_eq!(h.location(), Some(Location::Inbox("personal".into())));
     assert_eq!(h.visible(), vec![1]);
     assert_eq!(h.read(|a| a.location_label()), "Personal · Inbox");
 
-    h.click("1-3");
+    h.click("sidebar-sent-personal");
     assert_eq!(h.location(), Some(Location::Sent("personal".into())));
     assert!(h.visible().is_empty(), "no replies sent yet");
 
-    assert!(h.has("2-6"), "Projects is a work folder");
-    assert!(h.has("2-6-0"), "Northwind nests under Projects");
-    h.click("2-7");
-    assert_eq!(
-        h.location(),
-        Some(Location::Folder(6)),
-        "a folder of the work account"
-    );
+    assert!(h.has("sidebar-folder-4"), "Projects is a work folder");
+    assert!(h.has("sidebar-folder-5"), "Northwind nests under Projects");
+    h.click("sidebar-folder-6");
+    assert_eq!(h.location(), Some(Location::Folder(6)), "a folder of the work account");
     assert_eq!(h.read(|a| a.location_label()), "Recruiting");
 
-    h.click(0usize);
+    h.click("sidebar-all-inboxes");
     assert_eq!(h.read(|a| a.location_label()), "All Inboxes");
 }
 
@@ -303,7 +301,7 @@ fn the_in_pill_is_hidden_while_alone_and_shown_once_anything_else_is_applied(
 #[gpui_kit::gpui::test]
 fn removing_the_in_pill_from_a_filtered_folder_goes_global(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("2-0");
+    h.click("sidebar-inbox-work");
     assert_eq!(h.location(), Some(Location::Inbox("work".into())));
     h.keys("2");
     assert_eq!(
@@ -354,7 +352,7 @@ fn the_number_keys_toggle_quick_filter_pills_everywhere(cx: &mut TestAppContext)
     assert_eq!(h.pills(), vec!["in:inbox", "tag:urgent", "and", "tag:spam"]);
 
     // Quick filters are not Inbox-only: they work in the archive too.
-    h.click("2-4");
+    h.click("sidebar-archive-work");
     h.keys("1");
     assert_eq!(
         h.query(),
@@ -505,11 +503,11 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Some(Location::Inbox("personal".into())));
 
     // From All Inboxes the first account answers, and `g i` keeps it unified.
-    h.click(0usize);
+    h.click("sidebar-all-inboxes");
     assert_eq!(h.location(), Some(Location::AllInboxes));
     h.keys("g a");
     assert_eq!(h.location(), Some(Location::Archive("personal".into())));
-    h.click(0usize);
+    h.click("sidebar-all-inboxes");
     h.keys("g i");
     assert_eq!(
         h.location(),
@@ -518,7 +516,7 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     );
 
     // From an account's location the jumps stay in that account.
-    h.click("2-0");
+    h.click("sidebar-inbox-work");
     h.keys("g a");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
     h.keys("g i");
@@ -531,7 +529,7 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     assert!(h.outgoing().is_empty());
 
     h.keys("r");
@@ -576,7 +574,7 @@ fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn a_search_from_a_folder_keeps_the_folder_until_its_pill_is_removed(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("2-4");
+    h.click("sidebar-archive-work");
     h.keys("/");
     h.type_text("bob");
     h.keys("enter");
@@ -675,12 +673,8 @@ fn the_header_counts_what_the_list_shows_without_muted_threads(cx: &mut TestAppC
     let mut h = harness(cx);
     assert_eq!(h.header(), "All Inboxes · 2");
     h.keys("m");
-    assert_eq!(
-        h.header(),
-        "All Inboxes · 1",
-        "a muted thread leaves the count"
-    );
-    h.click("1-0");
+    assert_eq!(h.header(), "All Inboxes · 1", "a muted thread leaves the count");
+    h.click("sidebar-inbox-personal");
     assert_eq!(h.header(), "Personal · Inbox · 0");
 }
 

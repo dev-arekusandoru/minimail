@@ -204,18 +204,10 @@ fn escape_closes_the_bar_and_returns_focus_to_the_app(cx: &mut TestAppContext) {
     h.keys("escape");
     assert!(!h.read(|a| a.find_open()));
     assert!(!h.exists("find-bar"));
-    assert_eq!(
-        h.found(),
-        None,
-        "no count and no highlights while the bar is closed"
-    );
-    let before = h.read(|a| a.triage.cursor_index());
+    assert_eq!(h.found(), None, "no count and no highlights while the bar is closed");
+    let before = h.read(|a| a.triage().cursor_index());
     h.keys("k");
-    assert_ne!(
-        h.read(|a| a.triage.cursor_index()),
-        before,
-        "list keys work again"
-    );
+    assert_ne!(h.read(|a| a.triage().cursor_index()), before, "list keys work again");
 }
 
 #[gpui_kit::gpui::test]

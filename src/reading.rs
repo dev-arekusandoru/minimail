@@ -168,13 +168,13 @@ pub fn split_quoted(body: &str) -> Quoted<'_> {
     }
 }
 
-// ---------------------------------------------------------------------- HTML
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SafeHtml {
     pub html: String,
     pub blocked_images: usize,
 }
+
+// ---------------------------------------------------------------------- HTML
 
 const RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
 
@@ -363,6 +363,29 @@ impl<'a> Iterator for Scanner<'a> {
     }
 }
 
+fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    attrs
+        .iter()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.as_str())
+}
+
+/// How many `<img>` elements load a remote image: every one whose `src` is not a `data:` URL
+/// (the reader's content rule blocks those requests; this is the count it reports).
+pub fn blocked_images(html: &str) -> usize {
+    Scanner::new(html)
+        .filter(|tok| match &tok.kind {
+            Kind::Start { name, attrs } if name == "img" || name == "image" => {
+                let src = attr(attrs, "src").map(|v| decode_entities(v));
+                !src.as_deref()
+                    .map(|v| v.trim_start_matches(|c: char| c.is_whitespace() || c.is_control()))
+                    .is_some_and(|v| v.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:")))
+            }
+            _ => false,
+        })
+        .count()
+}
+
 fn escape_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -374,13 +397,6 @@ fn escape_text(s: &str) -> String {
         }
     }
     out
-}
-
-fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    attrs
-        .iter()
-        .find(|(k, _)| k == name)
-        .map(|(_, v)| v.as_str())
 }
 
 /// Replace every `<img>` whose `src` is not a `data:` URL with its (escaped)

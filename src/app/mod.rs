@@ -3,13 +3,13 @@
 //! `gpui-kit` re-exports GPUI at its root, so `use gpui_kit::*` *is* GPUI.
 
 pub mod actions;
-mod html_view;
 pub mod chrome;
 pub mod compose;
 pub mod composer_local;
 pub mod composer_state;
 pub mod composer_worker;
 pub mod dialog;
+pub mod email_webview;
 pub mod filter_popover;
 pub mod folder_picker;
 pub mod icons;

@@ -7,7 +7,7 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 /// Deterministic keyword/heuristic judge. No randomness, no network.
-/// Tuned to `fixtures/mailbox.json`.
+/// Tuned to `tests/fixtures/mailbox.json`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StubJudge;
 
@@ -224,9 +224,9 @@ impl StubJudge {
                     },
                 )
             }
-            (QuestionKey::Urgency, Question::Score { levels, .. }) if *levels >= 2 => {
+            (QuestionKey::Urgency, Question::Score { levels, .. }) if levels.len() >= 2 => {
                 let (level, sharp) = f.urgency(needs_reply);
-                let n = *levels as usize;
+                let n = levels.len();
                 score_answer(spread(n, (level - 1).min(n - 1), sharp))
             }
             (QuestionKey::Kind, Question::Choice { options, .. }) if options.len() == 5 => {
@@ -237,6 +237,10 @@ impl StubJudge {
                     _ => 0.9,
                 };
                 choice_answer(peaked(5, idx, top))
+            }
+            // The offline stub never files mail: the last option is "none".
+            (QuestionKey::Folder, Question::Choice { options, .. }) if !options.is_empty() => {
+                choice_answer(peaked(options.len(), options.len() - 1, 0.7))
             }
             _ => {
                 return Err(JudgeError::Malformed(format!(

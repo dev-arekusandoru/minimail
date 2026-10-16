@@ -35,6 +35,7 @@ fn msg(name: &str, email: &str, subject: &str, body: &str, received: &str) -> Me
         snooze: None,
         cc: String::new(),
         bcc: String::new(),
+        bulk: false,
         html: None,
         attachments: Vec::new(),
         read: false,

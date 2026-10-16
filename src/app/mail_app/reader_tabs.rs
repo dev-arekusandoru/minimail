@@ -5,6 +5,35 @@
 use super::*;
 
 impl MailApp {
+    /// The frame loop's opened-message hook: opening a message moves it to the front of the body
+    /// queue and, when automatic classification is on and questions are due, of the Jev queue.
+    /// Cheap and idempotent: it runs every frame and acts only when the opened message changed.
+    pub(super) fn note_opened(&mut self, id: MessageId, cx: &mut Context<Self>) {
+        if self.last_opened == Some(id) {
+            return;
+        }
+        self.last_opened = Some(id);
+        // A partial body is downloaded next; classification waits for it.
+        self.prioritize_body(id, cx);
+        if !self.auto_classify() || self.judge.is_none() {
+            return;
+        }
+        let Some(m) = self.mailbox.get(id) else { return };
+        let (outgoing, state, partial) = (m.outgoing, m.state, m.partial);
+        if outgoing || state != TriageState::Inbox {
+            return;
+        }
+        if partial {
+            // Remember to send it once the body lands; a manual request upgrades this.
+            self.pending_classify.entry(id).or_insert(false);
+            return;
+        }
+        if self.needs_questions(id) {
+            self.enqueue_judge_front(JudgeJob::Message { id, force: false });
+            self.drain_judge_queue(cx);
+        }
+    }
+
     /// Open `id` in its thread's tab: the preview tab unless the thread already has one.
     /// `enter` (the `enter` key or a double-click) on the message the preview already shows
     /// pins it instead.
@@ -29,6 +58,8 @@ impl MailApp {
         // An inline reply under the conversation the reader just left moves to a tab of its
         // own rather than disappearing with it.
         self.park_inline_composer(cx);
+        // Opening a message is what the reader is for, so the tab keys follow it there.
+        self.focus_pane(Pane::Reader);
         cx.notify();
     }
 
@@ -53,7 +84,7 @@ impl MailApp {
     }
 
     /// A click inside the active tab's content pins it.
-    pub(super) fn pin_active_tab(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn pin_active_tab(&mut self, cx: &mut Context<Self>) {
         if self.tabs.active().is_some_and(|t| !t.pinned) {
             self.tabs.pin_active();
             cx.notify();
@@ -62,9 +93,29 @@ impl MailApp {
 
     /// Everything the reader keeps for a thread that no longer has a tab.
     fn forget_thread(&mut self, thread: u32) {
+        self.webviews.forget(|key| self.thread_of(key.msg) == Some(thread));
         self.reader.forget(thread);
         self.drop_find(thread);
         self.reader_panes.borrow_mut().remove(&thread);
+    }
+
+    /// Tell the email views what the window is doing: whether a GPUI overlay covers them, and
+    /// which reader slots are on screen at all (a zoomed group hides the others). Runs every
+    /// frame; each is a flag write.
+    pub(super) fn sync_webviews(&self, cx: &App) {
+        let overlay = self.modal_open()
+            || self.menu_open()
+            || self.filter_popover.is_some()
+            || self.toast.is_some()
+            || self.fetch_toast;
+        self.webviews.set_overlay(overlay);
+        let zoomed = self.zoomed_group(cx);
+        self.webviews.set_slot_visible(false, matches!(zoomed, None | Some("reader")));
+        self.webviews
+            .set_slot_visible(true, self.triage_open() && matches!(zoomed, None | Some("triage")));
+        if !self.triage_open() {
+            self.webviews.forget(|key| key.triage);
+        }
     }
 
     /// The list cursor follows the active tab's message when the list has it. Selection is
@@ -91,6 +142,7 @@ impl MailApp {
             }
             self.follow_active_tab(cx);
         }
+        self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -112,12 +164,13 @@ impl MailApp {
             }
             self.follow_active_tab(cx);
         }
+        self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
-    /// `cmd-w`.
-    pub(super) fn close_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// `cmd-w` with the reader focused: close its active tab.
+    pub(super) fn close_active_reader_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }
@@ -126,8 +179,9 @@ impl MailApp {
         }
     }
 
-    /// `ctrl-tab` / `ctrl-shift-tab`: step to the next or previous tab, wrapping.
-    pub(super) fn cycle_tab(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+    /// `ctrl-tab` / `ctrl-shift-tab` with the reader focused: step to the next or previous
+    /// tab, wrapping.
+    pub(super) fn cycle_reader_tabs(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }

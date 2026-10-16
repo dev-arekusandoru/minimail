@@ -5,18 +5,12 @@ use crate::app::actions::{HelpPageDown, HelpPageUp, SelectNext, SelectPrev, Togg
 use crate::app::ui::shortcut_chips;
 use crate::clock::Timestamp;
 use crate::hints::{fit_hints, HintContext, HintMode};
+use crate::judge::JudgeStatus;
 use crate::theme::ThemeColor;
 use crate::tz::{MONTHS, Now, WEEKDAYS};
 use gpui_kit::{
     assets::IconName,
-    component::{
-        Sizable as _,
-        button::{Button, ButtonVariants as _},
-        label::Label,
-        scroll::ScrollableElement as _,
-        separator::Separator,
-        status_bar::StatusBar,
-    },
+    component::{button::{Button, ButtonVariants as _}, label::Label, scroll::Scrollbar, separator::Separator, status_bar::StatusBar, Sizable as _},
     prelude::FluentBuilder as _,
     *,
 };
@@ -75,37 +69,74 @@ pub fn humanize_time(ts: Timestamp, now: &Now) -> String {
     }
 }
 
+/// What a press on the status bar's center text does.
+pub type StatusClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 #[derive(IntoElement)]
 pub struct HintBar {
     ctx: HintContext,
+    /// Classifier state drawn in the bar's center, if any.
+    status: Option<JudgeStatus>,
+    /// What a press on the center status text does, when it does anything.
+    on_status_click: Option<StatusClick>,
 }
 
 impl HintBar {
     pub fn new(ctx: HintContext) -> Self {
-        Self { ctx }
+        Self { ctx, status: None, on_status_click: None }
+    }
+
+    /// Show the classifier's state in the bar's center.
+    pub fn status(mut self, status: JudgeStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    /// Make the center status text clickable, e.g. to open the classifier's settings page.
+    pub fn on_status_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_status_click = Some(Box::new(handler));
+        self
     }
 }
 
 /// Horizontal padding and inter-item gaps the [`StatusBar`] spends before hints get width:
-/// its `px_3` sides plus the two region gaps either side of the empty center.
+/// its `px_3` sides plus the two region gaps either side of the center.
 const BAR_PAD: f32 = 40.;
 /// Estimated width of the "N selected" label, in px.
 const SELECTED_LABEL_W: f32 = 80.;
+/// Prompt shown when no Jev key is configured.
+pub const NO_KEY_PROMPT: &str = "Add a Jev API key in Settings → Classifier";
+
+/// Estimated rendered width of the status bar's center text, in px.
+fn status_width(text: &str) -> f32 {
+    text.chars().count() as f32 * 6.5 + 16.
+}
 
 impl RenderOnce for HintBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let HintBar { ctx, status, on_status_click } = self;
         let t = cx.theme();
-        let selected = match self.ctx.mode {
+        let selected = match ctx.mode {
             HintMode::Selection(n) => Some(n),
             _ => None,
         };
-        let budget = f32::from(window.viewport_size().width) - BAR_PAD;
-        let reserved = if selected.is_some() {
-            SELECTED_LABEL_W
-        } else {
-            0.
+        // Center text: a missing-key prompt, progress, or the last classifier error.
+        let center: Option<(String, Hsla)> = match &status {
+            Some(JudgeStatus::NoKey) => Some((NO_KEY_PROMPT.to_owned(), t.muted_foreground)),
+            Some(JudgeStatus::Working { done, total }) => {
+                Some((format!("Classifying {done}/{total}"), t.muted_foreground))
+            }
+            Some(JudgeStatus::Error(e)) => Some((format!("Classifier: {e}"), t.danger)),
+            // `Idle`, or no classifier at all: the center stays empty.
+            _ => None,
         };
-        let shown = fit_hints(&self.ctx, budget, reserved);
+        let budget = f32::from(window.viewport_size().width) - BAR_PAD;
+        let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. }
+            + center.as_ref().map_or(0., |(text, _)| status_width(text));
+        let shown = fit_hints(&ctx, budget, reserved);
         let hints = div()
             .flex()
             .items_center()
@@ -125,6 +156,20 @@ impl RenderOnce for HintBar {
             .border_color(t.border)
             .bg(t.sidebar)
             .left(hints)
+            .when_some(center, |bar, (text, color)| {
+                let text = div()
+                    .id("judge-status")
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_xs()
+                    .text_color(color)
+                    .child(text);
+                let text = match on_status_click {
+                    Some(handler) => text.cursor_pointer().on_click(handler),
+                    None => text,
+                };
+                bar.child(text)
+            })
             .when_some(selected, |bar, n| {
                 bar.right(
                     div()
@@ -256,20 +301,35 @@ impl Render for HelpPanel {
             )
             .child(div().flex_none().child(Separator::horizontal()))
             .child(
+                // The scrollbar is a sibling of the scrolled area: as a child it would ride the
+                // content's scroll offset and its thumb would read as stuck at the top.
                 div()
-                    .id("help-body")
+                    .relative()
                     .flex()
                     .flex_col()
-                    .gap_3()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .vertical_scrollbar(&self.scroll)
-                    .child(div().flex().gap_4().children(columns))
-                    .child(div().flex_none().child(Separator::horizontal()))
-                    .child(div().text_sm().text_color(t.primary).child("Icon legend"))
-                    .child(crate::app::icons::legend_view(t)),
+                    .child(
+                        div()
+                            .id("help-body")
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .child(div().flex().gap_4().children(columns))
+                            .child(div().flex_none().child(Separator::horizontal()))
+                            .child(div().text_sm().text_color(t.primary).child("Icon legend"))
+                            .child(crate::app::icons::legend_view(t)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .child(Scrollbar::vertical(&self.scroll).id("help-scrollbar").viewport_from_layout()),
+                    ),
             )
     }
 }

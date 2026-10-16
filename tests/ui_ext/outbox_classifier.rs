@@ -1,10 +1,12 @@
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use crate::harness::{Harness, harness, harness_with, mailbox, msg};
+use crate::misc::spam_box;
 use crate::snooze::snooze_box;
 use gpui_kit::TestAppContext;
 use mail_classifier::app::composer_state::LOCAL_DEBOUNCE_SECS;
 use mail_classifier::model::MessageId;
 use mail_classifier::model::TriageState::*;
-use mail_classifier::model::Location;
+use mail_classifier::model::{Location, Tag};
 use mail_classifier::outgoing::DraftKind;
 use std::path::PathBuf;
 
@@ -531,9 +533,9 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()));
 
-    // The account's children are Inbox, Snoozed, Drafts, Sent, …: row 2 is Drafts.
-    assert!(h.has("1-2"), "the account has a Drafts row");
-    h.click("1-2");
+    // The account's Drafts row shows the Drafts pane.
+    assert!(h.has("sidebar-drafts-personal"), "the account has a Drafts row");
+    h.click("sidebar-drafts-personal");
     h.tick();
     assert_eq!(
         h.location(),
@@ -576,20 +578,20 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
         work_msg(2, 202, "ravi@acme.co", "Work note", 14, "Inbox"),
     ]);
     let mut h = harness_with(cx, mb);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("personal draft");
     h.settle();
     let personal = h.read(|a| a.tabs.active_draft().expect("personal draft tab"));
     h.close_draft_tab(personal);
-    h.click("2-0");
+    h.click("sidebar-inbox-work");
     h.new_draft();
     h.type_text("work draft");
     h.settle();
     let work = h.read(|a| a.tabs.active_draft().expect("work draft tab"));
     h.close_draft_tab(work);
 
-    h.click("1-2");
+    h.click("sidebar-drafts-personal");
     h.tick();
     assert_eq!(h.location(), Some(Location::Drafts("personal".into())));
     let rows = h.draft_rows();
@@ -602,7 +604,7 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
         "the badge counts the same set"
     );
 
-    h.click("2-2");
+    h.click("sidebar-drafts-work");
     h.tick();
     assert_eq!(h.location(), Some(Location::Drafts("work".into())));
     let rows = h.draft_rows();
@@ -622,21 +624,21 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
 #[gpui_kit::gpui::test]
 pub fn a_search_narrows_the_drafts_pane_and_clearing_restores_it(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("budget notes");
     h.settle();
     let first = h.read(|a| a.tabs.active_draft().expect("first draft tab"));
     h.close_draft_tab(first);
     h.advance(60);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("lunch plans");
     h.settle();
     let second = h.read(|a| a.tabs.active_draft().expect("second draft tab"));
     h.close_draft_tab(second);
 
-    h.click("1-2");
+    h.click("sidebar-drafts-personal");
     h.tick();
     assert_eq!(h.draft_rows().len(), 2, "both drafts are listed");
 
@@ -666,7 +668,7 @@ pub fn a_search_narrows_the_drafts_pane_and_clearing_restores_it(cx: &mut TestAp
 #[gpui_kit::gpui::test]
 pub fn drafts_are_newest_first_and_discard_removes_them(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("older draft");
     h.settle();
@@ -674,14 +676,14 @@ pub fn drafts_are_newest_first_and_discard_removes_them(cx: &mut TestAppContext)
     h.close_draft_tab(first);
     // A later edit makes the second draft the newer one.
     h.advance(60);
-    h.click("1-0");
+    h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("newer draft");
     h.settle();
     let second = h.read(|a| a.tabs.active_draft().expect("second draft tab"));
     h.close_draft_tab(second);
 
-    h.click("1-2");
+    h.click("sidebar-drafts-personal");
     h.tick();
     let rows = h.draft_rows();
     assert_eq!(rows.len(), 2, "both drafts are listed");
@@ -871,69 +873,52 @@ pub fn pending_total(h: &mut Harness<'_>) -> usize {
     })
 }
 
-/// Move the cursor down the current view until a message with pending suggestions is found.
-pub fn goto_pending(h: &mut Harness<'_>) -> MessageId {
-    h.click(0usize);
-    for _ in 0..80 {
-        let id = h.cursor().unwrap();
-        if h.read(|a| !a.mailbox.pending(id).is_empty()) {
-            return id;
-        }
-        h.keys("j");
-    }
-    panic!("no message with pending suggestions in the inbox");
-}
-
 #[gpui_kit::gpui::test]
-pub fn classifier_runs_on_startup_and_c_reruns(cx: &mut TestAppContext) {
+pub fn classifier_runs_on_startup(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     assert!(
         tag_total(&mut h) + pending_total(&mut h) > 0,
         "startup classification produces badges"
     );
-    h.keys("c");
-    assert!(
-        h.toast().contains("auto-applied"),
-        "toast was {:?}",
-        h.toast()
-    );
-    assert!(h.toast().contains("to review"));
     h.assert_invariant("classify");
+}
+
+/// A message with a folder suggestion waiting, seeded by hand: the offline stub never files
+/// mail, so it is the only way a suggestion pends.
+fn seed_folder_suggestion(h: &mut Harness<'_>) -> MessageId {
+    let id = h.read(|a| a.visible_ids()[0]);
+    h.app.update(h.cx, |a, _| {
+        let options = a.mailbox.folder_options("personal");
+        a.mailbox.add_suggestions(vec![Suggestion {
+            message: id,
+            key: QuestionKey::Folder,
+            answer: Answer {
+                probabilities: vec![1.0; options.len() + 1],
+                value: AnswerValue::Choice(0),
+                confidence: 0.9,
+            },
+        }]);
+    });
+    id
 }
 
 #[gpui_kit::gpui::test]
 pub fn accept_applies_and_reject_discards_pending_suggestions(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let id = goto_pending(&mut h);
+    let id = seed_folder_suggestion(&mut h);
     let before_state = h.state_of(id);
     let tags_before = h.read(|a| a.mailbox.tags(id).len());
-    let suggestions: Vec<_> = h.read(|a| {
-        a.mailbox
-            .pending(id)
-            .iter()
-            .map(|s| (s.key, format!("{:?}", s.answer.value)))
-            .collect()
-    });
-    assert!(!suggestions.is_empty());
+    assert!(!h.read(|a| a.mailbox.pending(id).is_empty()));
 
     h.keys("y");
-    assert!(
-        h.read(|a| a.mailbox.pending(id).is_empty()),
-        "accept clears the pending badges"
-    );
-    let after_state = h.state_of(id);
-    let tags_after = h.read(|a| a.mailbox.tags(id).len());
-    assert!(
-        after_state != before_state || tags_after > tags_before,
-        "accepting must apply something ({suggestions:?})"
-    );
+    assert!(h.read(|a| a.mailbox.pending(id).is_empty()), "accept clears the pending badges");
+    assert_ne!(h.state_of(id), before_state, "accepting the folder suggestion files it");
     h.assert_invariant("accept");
 
-    // One undo step brings the pending badges back.
+    // One undo step brings the pending badge back.
     h.keys("u");
     assert!(!h.read(|a| a.mailbox.pending(id).is_empty()));
     assert_eq!(h.state_of(id), before_state);
-    assert_eq!(h.read(|a| a.mailbox.tags(id).len()), tags_before);
 
     // Reject discards without applying.
     h.keys("n");
@@ -943,23 +928,19 @@ pub fn accept_applies_and_reject_discards_pending_suggestions(cx: &mut TestAppCo
 }
 
 #[gpui_kit::gpui::test]
-pub fn auto_applied_labels_can_be_undone(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    let tags = tag_total(&mut h);
-    assert!(tags > 0, "startup auto-applies at least one label");
-    // Undo repeatedly until the auto-applied labels are gone; each undo removes a step, none adds.
-    let mut last = tags;
-    let mut dropped = false;
-    for _ in 0..200 {
-        h.keys("u");
-        let now = tag_total(&mut h);
-        assert!(now <= last, "undo never adds labels here");
-        if now < last {
-            dropped = true;
-            break;
-        }
-        last = now;
-    }
-    assert!(dropped, "undo eventually removes an auto-applied label");
-    h.assert_invariant("undo auto");
+pub fn background_labels_are_not_undoable(cx: &mut TestAppContext) {
+    // spam_box's message 1 is auto-applied `PossibleSpam` during startup classification.
+    let mut h = harness_with(cx, spam_box());
+    assert!(h.has_tag(1, Tag::PossibleSpam), "startup auto-applies a label");
+
+    // The user's own action: archive the cursor message.
+    let id = h.cursor().unwrap();
+    h.keys("e");
+    assert_eq!(h.state_of(id), Archived, "the user archived the message");
+
+    // `u` undoes the archive; the background label was never on the undo stack.
+    h.keys("u");
+    assert_eq!(h.state_of(id), Inbox, "u undoes the user's action");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "u does not undo the background label");
+    h.assert_invariant("undo background label");
 }

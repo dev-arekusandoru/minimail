@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use super::error::{Error, Result};
 
 /// Applied in order; index + 1 is the `user_version` that migration sets.
-const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2];
+const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2, MIGRATION_3, MIGRATION_4];
 
 /// Provider-shaped contacts: people, child tables for their addresses, and
 /// groups for labels.
@@ -117,6 +117,32 @@ CREATE TABLE settings (
     value TEXT NOT NULL,
     PRIMARY KEY (scope, key)
 ) WITHOUT ROWID;
+"#;
+
+/// Cached judge answers, keyed by message id; each answer is a versioned `StoredAnswer`.
+/// Stored raw so threshold/mode changes never re-bill the API, and a wording change (version
+/// bump) re-asks only the affected question.
+const MIGRATION_3: &str = r#"
+CREATE TABLE judgements (
+    key       TEXT PRIMARY KEY,
+    answers   TEXT NOT NULL,
+    judged_at INTEGER NOT NULL
+) WITHOUT ROWID;
+"#;
+
+/// Re-key `judgements` from the content hash to `message_id`, so a message is billed once no
+/// matter what changes about its text, model, endpoint or key. The old rows cannot be mapped to
+/// a message id in SQL (the hash is over the state, not the row), so they are parked in
+/// `judgements_legacy`; [`crate::app::MailApp::carry_over_judgements`] copies what it can from
+/// the legacy table at startup and then drops it.
+const MIGRATION_4: &str = r#"
+ALTER TABLE judgements RENAME TO judgements_legacy;
+CREATE TABLE judgements (
+    message_id INTEGER PRIMARY KEY,
+    answers    TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    judged_at  INTEGER NOT NULL
+);
 "#;
 
 /// Turn on the pragmas the store relies on and apply missing migrations.

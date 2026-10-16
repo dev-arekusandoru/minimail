@@ -2,7 +2,7 @@
 //! and cursor / open / selection visual states.
 //! [`frame`] keeps those states consistent across message rows and thread headers.
 
-use crate::theme::{self, ThemeColor};
+use crate::theme::ThemeColor;
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 /// Height of the sender line and of the subject line.
@@ -46,7 +46,7 @@ pub fn list_width(viewport: f32) -> f32 {
 ///
 /// `cursor` is keyboard/mouse focus (ring + cursor background); `open` is shown in the
 /// reader with the same selected-bar treatment; `selected` marks bulk selection. Partial
-/// thread selection uses a dimmer bar; unread uses the unread or urgency color.
+/// thread selection uses a dimmer bar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RowVisual {
     pub cursor: bool,
@@ -54,14 +54,11 @@ pub struct RowVisual {
     pub selected: bool,
     pub partial: bool,
     pub unread: bool,
-    pub urgent: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarState {
     None,
-    Unread,
-    Urgent,
     Selected,
     Partial,
 }
@@ -72,10 +69,6 @@ impl RowVisual {
             BarState::Selected
         } else if self.partial {
             BarState::Partial
-        } else if self.unread && self.urgent {
-            BarState::Urgent
-        } else if self.unread {
-            BarState::Unread
         } else {
             BarState::None
         }
@@ -107,8 +100,6 @@ pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui
     let hover = t.list_hover;
     let bar = match v.bar_state() {
         BarState::None => None,
-        BarState::Unread => Some(theme::unread(t)),
-        BarState::Urgent => Some(theme::urgent(t)),
         BarState::Selected => Some(t.primary),
         BarState::Partial => Some(t.primary.opacity(0.45)),
     };
