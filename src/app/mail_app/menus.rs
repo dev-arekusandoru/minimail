@@ -282,6 +282,15 @@ impl MailApp {
             items.push(MenuItem::action("Accept AI suggestions", || Box::new(AcceptSuggestions)));
             items.push(MenuItem::action("Reject AI suggestions", || Box::new(RejectSuggestions)));
         }
+        // The reader footer's Reader mode toggle, moved here so the list menu and the reader's
+        // `⋯` carry it alike. Only HTML messages have two forms to switch between.
+        if msg.html.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::action(
+                if self.reader_plain(id) { "Show original" } else { "Reader mode" },
+                || Box::new(ToggleReaderMode),
+            ));
+        }
         items.push(MenuItem::separator());
         items.push(MenuItem::action("File…", || Box::new(File)));
         items.push(MenuItem::action("Mark spam…", || Box::new(MarkSpam)));

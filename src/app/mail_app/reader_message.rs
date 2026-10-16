@@ -519,8 +519,8 @@ impl MailApp {
     }
 
     /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text
-    /// with the quoted history folded. Messages with an HTML part carry the per-message Reader mode
-    /// toggle.
+    /// with the quoted history folded. The per-message Reader mode toggle lives in the message
+    /// menu, not here.
     fn message_body(
         &self,
         m: &Message,
@@ -573,35 +573,14 @@ impl MailApp {
             _ => self.text_content(m, look, cx),
         };
 
-        if html.is_some() {
+        if blocked > 0 {
             body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(if blocked > 0 {
-                        look.mono(
-                            format!(
-                                "{blocked} REMOTE IMAGE{} BLOCKED",
-                                if blocked == 1 { "" } else { "S" }
-                            ),
-                            t.muted_foreground,
-                        )
-                        .id("reader-images-blocked")
-                        .test_support()
-                        .into_any_element()
-                    } else {
-                        div().into_any_element()
-                    })
-                    .child(
-                        look.link(
-                            ("reader-mode", id),
-                            if plain { "SHOW ORIGINAL" } else { "READER MODE" },
-                            opened.then_some("v"),
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_mode(mid, cx))),
-                    ),
+                look.mono(
+                    format!("{blocked} REMOTE IMAGE{} BLOCKED", if blocked == 1 { "" } else { "S" }),
+                    t.muted_foreground,
+                )
+                .id("reader-images-blocked")
+                .test_support(),
             );
         }
         body.child(content).into_any_element()
