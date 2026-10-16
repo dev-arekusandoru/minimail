@@ -7,17 +7,18 @@
 //! To add a concept: add a [`Glyph`] variant, list it in [`Glyph::ALL`], add its arm in
 //! [`Glyph::spec`] (and the SVG to `icon_assets!` when it is new).
 
-use crate::judge::{Kind, QuestionKey, Suggestion};
+use crate::judge::{ClassifyState, Kind, QuestionKey, Suggestion};
 use crate::model::Tag;
 use crate::theme::{self, ThemeColor};
 use gpui_kit::assets::{Assets, IconName};
 use gpui_kit::component::{Icon, Sizable as _, tooltip::Tooltip};
+use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 gpui_kit::assets::icon_assets!(
     pub RowIcons,
     [
-        ShieldAlert, Reply, Siren, Flame, Zap, User, Receipt, Newspaper, Bell, Tag, Sparkles,
+        ShieldAlert, Reply, Siren, Flame, Gauge, User, Receipt, Newspaper, Bell, Tag, FolderInput,
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
@@ -25,7 +26,9 @@ gpui_kit::assets::icon_assets!(
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
-        ReplyAll, Forward, Regex, WholeWord
+        ReplyAll, Forward, Regex, WholeWord, ScanSearch,
+        // Per-message classification state (not classified / in progress / failed).
+        CircleDashed, LoaderCircle, CircleAlert
     ]
 );
 
@@ -86,7 +89,7 @@ impl Token {
 /// One concept of the icon language.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Glyph {
-    Suggestion,
+    FolderSuggestion,
     PossibleSpam,
     UrgentHigh,
     NeedsReply,
@@ -96,16 +99,16 @@ pub enum Glyph {
     NewSender,
     Snoozed,
     UrgentMid,
+    /// Urgency 1–3: shown only as a reader chip, never in a row cluster.
+    UrgencyLow,
     Muted,
     Attachment,
     KindPerson,
     KindReceipt,
     KindNewsletter,
     KindNotification,
-    UrgentLow,
     KindOther,
 }
-
 
 /// Everything the UI needs to draw and explain a [`Glyph`].
 #[derive(Clone, Copy, Debug)]
@@ -138,7 +141,7 @@ const fn spec(
 
 impl Glyph {
     pub const ALL: [Glyph; 18] = [
-        Glyph::Suggestion,
+        Glyph::FolderSuggestion,
         Glyph::PossibleSpam,
         Glyph::UrgentHigh,
         Glyph::NeedsReply,
@@ -148,13 +151,13 @@ impl Glyph {
         Glyph::NewSender,
         Glyph::Snoozed,
         Glyph::UrgentMid,
+        Glyph::UrgencyLow,
         Glyph::Muted,
         Glyph::Attachment,
         Glyph::KindPerson,
         Glyph::KindReceipt,
         Glyph::KindNewsletter,
         Glyph::KindNotification,
-        Glyph::UrgentLow,
         Glyph::KindOther,
     ];
 
@@ -162,23 +165,23 @@ impl Glyph {
     pub const fn spec(self) -> Spec {
         use Token::*;
         match self {
-            Glyph::Suggestion => spec(IconName::Sparkles, Accent, "AI suggestion", "A label the classifier proposes. y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
+            Glyph::FolderSuggestion => spec(IconName::FolderInput, Accent, "Suggested folder", "A folder the classifier proposes; y or click accepts, n or right-click rejects.", "Classifier labels", 0, false),
             Glyph::PossibleSpam => spec(IconName::ShieldAlert, PossibleSpam, "Possible spam", "Classified as possible spam.", "Classifier labels", 1, false),
-            Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 4 or 5 out of 5.", "Urgency", 2, false),
+            Glyph::UrgentHigh => spec(IconName::Siren, Urgent, "Very urgent", "Urgency 5 out of 5.", "Urgency", 2, false),
             Glyph::NeedsReply => spec(IconName::Reply, NeedsReply, "Needs reply", "The sender expects an answer.", "Classifier labels", 3, false),
             Glyph::AwaitingReply => spec(IconName::Hourglass, AwaitingReply, "Awaiting reply", "A reply has been sent and an answer is expected.", "Reply status", 4, false),
             Glyph::FollowUp => spec(IconName::CornerUpRight, FollowUp, "Follow up", "A reply is overdue: follow up with this thread.", "Reply status", 5, false),
             Glyph::Reminder => spec(IconName::AlarmClock, Reminder, "Reminder", "A snoozed message woke back up in the inbox.", "Reply status", 6, false),
             Glyph::NewSender => spec(IconName::UserPlus, NewSender, "New sender", "First mail from this sender.", "Mail state", 7, false),
             Glyph::Snoozed => spec(IconName::Clock, Snoozed, "Snoozed", "Hidden until the wake time shown on the row.", "Mail state", 8, false),
-            Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 3 out of 5.", "Urgency", 7, false),
+            Glyph::UrgentMid => spec(IconName::Flame, Urgent, "Urgent", "Urgency 4 out of 5.", "Urgency", 2, false),
+            Glyph::UrgencyLow => spec(IconName::Gauge, Muted, "Urgency", "Urgency 1 to 3; shown in reader chips only, rows show nothing.", "Urgency", 3, false),
             Glyph::Muted => spec(IconName::BellOff, Muted, "Muted thread", "New replies in this thread are hidden from the inbox.", "Mail state", 8, false),
             Glyph::Attachment => spec(IconName::Paperclip, Muted, "Attachment", "The subject or opening lines mention an attachment.", "Mail state", 9, false),
             Glyph::KindPerson => spec(IconName::User, Kind, "Person", "Written by a person.", "Kind", 10, false),
             Glyph::KindReceipt => spec(IconName::Receipt, Kind, "Receipt", "A receipt or statement.", "Kind", 10, false),
             Glyph::KindNewsletter => spec(IconName::Newspaper, Kind, "Newsletter", "A newsletter or bulk mailing.", "Kind", 10, false),
             Glyph::KindNotification => spec(IconName::Bell, Kind, "Notification", "An automatic notification.", "Kind", 10, false),
-            Glyph::UrgentLow => spec(IconName::Zap, Muted, "Low urgency", "Urgency 1 or 2 out of 5 (low signal, folded into +N).", "Urgency", 11, true),
             Glyph::KindOther => spec(IconName::Tag, Muted, "Other", "Uncategorised (low signal, folded into +N).", "Kind", 12, true),
         }
     }
@@ -193,12 +196,26 @@ impl Glyph {
         }
     }
 
-    pub fn of_urgency(level: u8) -> Glyph {
+    /// The urgency glyph for `level`, or `None` when levels 1–3 show no row icon.
+    pub fn of_urgency(level: u8) -> Option<Glyph> {
         match level {
-            4.. => Glyph::UrgentHigh,
-            3 => Glyph::UrgentMid,
-            _ => Glyph::UrgentLow,
+            5.. => Some(Glyph::UrgentHigh),
+            4 => Some(Glyph::UrgentMid),
+            _ => None,
         }
+    }
+
+    /// The row glyph for one pending classifier answer, or `None` when it has no row icon
+    /// (urgency 1–3; Kind "Other" folds into `+N` through its low-signal spec).
+    pub fn of_suggestion(s: &Suggestion) -> Option<Glyph> {
+        Some(match s.key {
+            QuestionKey::Spam => Glyph::PossibleSpam,
+            QuestionKey::NeedsReply => Glyph::NeedsReply,
+            QuestionKey::ExpectsReply => Glyph::AwaitingReply,
+            QuestionKey::Urgency => Glyph::of_urgency(s.urgency()?)?,
+            QuestionKey::Kind => Glyph::of_kind(s.kind()?),
+            QuestionKey::Folder => Glyph::FolderSuggestion,
+        })
     }
 }
 
@@ -231,19 +248,17 @@ pub struct GlyphInputs<'a> {
 /// Cluster glyphs of a message, most important first, without duplicates.
 pub fn glyphs_for(input: &GlyphInputs) -> Vec<Glyph> {
     let mut out = Vec::new();
-    if !input.pending.is_empty() {
-        out.push(Glyph::Suggestion);
-    }
+    out.extend(input.pending.iter().filter_map(|s| Glyph::of_suggestion(s)));
     for tag in input.tags {
-        out.push(match tag {
-            Tag::NeedsReply => Glyph::NeedsReply,
-            Tag::AwaitingReply => Glyph::AwaitingReply,
-            Tag::FollowUp => Glyph::FollowUp,
-            Tag::Reminder => Glyph::Reminder,
-            Tag::PossibleSpam => Glyph::PossibleSpam,
-            Tag::Urgent(n) => Glyph::of_urgency(*n),
-            Tag::Kind(k) => Glyph::of_kind(*k),
-        });
+        match tag {
+            Tag::NeedsReply => out.push(Glyph::NeedsReply),
+            Tag::AwaitingReply => out.push(Glyph::AwaitingReply),
+            Tag::FollowUp => out.push(Glyph::FollowUp),
+            Tag::Reminder => out.push(Glyph::Reminder),
+            Tag::PossibleSpam => out.push(Glyph::PossibleSpam),
+            Tag::Urgent(n) => out.extend(Glyph::of_urgency(*n)),
+            Tag::Kind(k) => out.push(Glyph::of_kind(*k)),
+        }
     }
     let flags = [
         (input.muted, Glyph::Muted),
@@ -282,25 +297,37 @@ pub fn max_icons(width: f32) -> usize {
     }
 }
 
-/// One-line description of a message's pending suggestions, e.g. `spam?, urgent 4?`.
-pub fn suggestion_summary(pending: &[&Suggestion]) -> String {
-    let parts: Vec<String> = pending
-        .iter()
-        .map(|s| match s.key {
-            QuestionKey::Spam => "spam?".to_owned(),
-            QuestionKey::NeedsReply => "needs reply?".to_owned(),
-            QuestionKey::ExpectsReply => "expects reply?".to_owned(),
-            QuestionKey::Urgency => s.urgency().map_or("urgent?".into(), |n| format!("urgent {n}?")),
-            QuestionKey::Kind => s.kind().map_or("kind?".into(), |k| format!("{}?", k.label())),
-        })
-        .collect();
-    parts.join(", ")
-}
-
 /// The themed icon of a glyph at `size` pixels.
 pub fn icon(glyph: Glyph, t: &ThemeColor, size: f32) -> Icon {
     let spec = glyph.spec();
     Icon::new(spec.icon).with_size(px(size)).text_color(spec.token.color(t))
+}
+
+/// The icon, tint and tooltip of a message's classification state (`None` states render nothing).
+pub fn classification(state: ClassifyState, t: &ThemeColor) -> (IconName, Hsla, &'static str) {
+    match state {
+        ClassifyState::NotClassified => {
+            (IconName::CircleDashed, t.muted_foreground, "Not classified")
+        }
+        ClassifyState::InProgress => (IconName::LoaderCircle, t.primary, "Classifying…"),
+        ClassifyState::Failed => (IconName::CircleAlert, t.danger, "Classification failed"),
+    }
+}
+
+/// The classification-state badge of a list row or reader header: one icon with its tooltip.
+/// `id` must be unique per message surface.
+pub fn classification_badge(
+    id: impl Into<ElementId>,
+    state: ClassifyState,
+    t: &ThemeColor,
+    size: f32,
+) -> Stateful<Div> {
+    let (name, color, label) = classification(state, t);
+    div()
+        .id(id)
+        .flex_none()
+        .child(Icon::new(name).with_size(px(size)).text_color(color))
+        .tooltip(tip(label.to_owned()))
 }
 
 /// The Lucide icon for an [`crate::account_style::ICONS`] key; `None` for an unknown key.
@@ -338,20 +365,21 @@ fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
 }
 
 /// The right-aligned icon cluster: `shown` icons with tooltips plus a `+N` chip whose tooltip
-/// lists `hidden`. `suggestion_hint` is the tooltip of the suggestion icon. `id` must be unique
-/// per row.
+/// lists `hidden`. `folder_hint` is the name of the folder a pending Folder suggestion points at;
+/// its glyph gets the `Suggested Folder: <name>` tooltip. `id` must
+/// be unique per row.
 pub fn cluster(
     shown: &[Glyph],
     hidden: &[Glyph],
-    suggestion_hint: &str,
+    folder_hint: Option<&str>,
     t: &ThemeColor,
     id: usize,
 ) -> Div {
     let icons = shown.iter().enumerate().map(|(i, &g)| {
         let label = match g {
-            Glyph::Suggestion => format!(
-                "AI suggestion: {suggestion_hint}. y / click accepts, n / right-click rejects"
-            ),
+            Glyph::FolderSuggestion => folder_hint
+                .map(|name| format!("Suggested Folder: {name}"))
+                .unwrap_or_else(|| g.spec().label.to_owned()),
             _ => g.spec().label.to_owned(),
         };
         div()
@@ -376,8 +404,6 @@ pub fn cluster(
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Unread", theme::unread(t), "Yellow bar; sender and subject are bold."),
-        ("Urgent unread", theme::urgent(t), "Red bar; the urgency icon remains in the icon cluster."),
         ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
         ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
     ];

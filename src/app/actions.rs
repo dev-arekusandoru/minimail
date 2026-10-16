@@ -6,6 +6,8 @@ use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePrese
 use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConfirm};
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
+use crate::judge::{Kind, QuestionKey};
+use crate::model::MessageId;
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -57,6 +59,7 @@ gpui_kit::actions!(
         StartSession,
         OpenSearch,
         ClassifyVisible,
+        ClassifyMessage,
         ToggleGrouping,
         CyclePreviewLines,
         ExpandThread,
@@ -88,6 +91,51 @@ gpui_kit::actions!(
         SettingsDismiss
     ]
 );
+
+// ---------------------------------------------------------------- Classifier labels
+
+/// Set a message's Kind from the row menu or the palette; `None` clears it. A label set by hand
+/// sticks, so no later classification overwrites it. `message: None` acts on the cursor/selection.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetKind {
+    pub message: Option<MessageId>,
+    pub kind: Option<Kind>,
+}
+
+/// Set a message's Urgency from the row menu or the palette, as level 1..=5 (1 is "None").
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetUrgency {
+    pub message: Option<MessageId>,
+    pub level: u8,
+}
+
+/// Mark a message as spam (or not) from the row menu or the palette. Spam is a flag: it never
+/// moves the message.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetSpam {
+    pub message: Option<MessageId>,
+    pub spam: bool,
+}
+
+/// Mark a message as needing a reply (or not) by hand, from the row or reader menu or the
+/// palette. The flag never moves the message.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetNeedsReply {
+    pub message: Option<MessageId>,
+    pub needs_reply: bool,
+}
+
+/// Drop the label the user set by hand for `key`, putting the classifier's value back.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct ResetLabel {
+    pub message: Option<MessageId>,
+    pub key: QuestionKey,
+}
 
 /// Key context of the root view.
 pub const MAIL_CONTEXT: &str = "MailApp";
@@ -168,7 +216,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-n", FetchMail, m),
         KeyBinding::new("t", StartSession, m),
         KeyBinding::new("/", OpenSearch, m),
-        KeyBinding::new("c", ClassifyVisible, m),
+        KeyBinding::new("c", ClassifyMessage, m),
+        KeyBinding::new("shift-c", ClassifyVisible, m),
         KeyBinding::new("ctrl-g", ToggleGrouping, m),
         KeyBinding::new("right", ExpandThread, m),
         KeyBinding::new("left", CollapseThread, m),
@@ -289,13 +338,16 @@ impl Category {
     }
 }
 
+/// Builds a command's action, fresh each time it runs.
+pub type CommandAction = fn() -> Box<dyn Action>;
+
 /// One user-facing command.
 pub struct CommandSpec {
     pub category: Category,
     pub name: &'static str,
     /// Human-readable key hint, e.g. `"e"`, `"shift-e"`, `"cmd-k"`.
     pub key: &'static str,
-    pub action: fn() -> Box<dyn Action>,
+    pub action: CommandAction,
 }
 
 macro_rules! cmd {
@@ -353,7 +405,8 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(App, "Fetch mail", "cmd-shift-n", FetchMail),
         cmd!(App, "Start triage session", "t", StartSession),
         cmd!(Navigate, "Search", "/", OpenSearch),
-        cmd!(Classify, "Classify visible mail", "c", ClassifyVisible),
+        cmd!(Classify, "Classify selected messages", "c", ClassifyMessage),
+        cmd!(Classify, "Classify every message in this list…", "shift-c", ClassifyVisible),
         cmd!(View, "Toggle group by thread", "ctrl-g", ToggleGrouping),
         cmd!(View, "Cycle preview lines", "", CyclePreviewLines),
         cmd!(Navigate, "Expand thread", "right", ExpandThread),
@@ -386,6 +439,36 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Navigate, "Add filter…", "l", AddFilter),
         cmd!(Navigate, "Clear filters", "escape", ClearFilters),
     ];
+    // The classifier labels the row menu sets, on the cursor or the selection: the same actions,
+    // with no key bindings of their own.
+    let labels: [(&str, CommandAction); 17] = [
+        ("Kind: Person", || Box::new(SetKind { message: None, kind: Some(Kind::Person) })),
+        ("Kind: Receipt", || Box::new(SetKind { message: None, kind: Some(Kind::Receipt) })),
+        ("Kind: Newsletter", || Box::new(SetKind { message: None, kind: Some(Kind::Newsletter) })),
+        (
+            "Kind: Notification",
+            || Box::new(SetKind { message: None, kind: Some(Kind::Notification) }),
+        ),
+        ("Kind: Other", || Box::new(SetKind { message: None, kind: Some(Kind::Other) })),
+        ("No kind", || Box::new(SetKind { message: None, kind: None })),
+        ("Reset Kind to suggestion", || Box::new(ResetLabel { message: None, key: QuestionKey::Kind })),
+        ("Urgency: None", || Box::new(SetUrgency { message: None, level: 1 })),
+        ("Urgency: Low", || Box::new(SetUrgency { message: None, level: 2 })),
+        ("Urgency: Normal", || Box::new(SetUrgency { message: None, level: 3 })),
+        ("Urgency: Urgent", || Box::new(SetUrgency { message: None, level: 4 })),
+        ("Urgency: Very urgent", || Box::new(SetUrgency { message: None, level: 5 })),
+        (
+            "Reset Urgency to suggestion",
+            || Box::new(ResetLabel { message: None, key: QuestionKey::Urgency }),
+        ),
+        ("Mark as spam", || Box::new(SetSpam { message: None, spam: true })),
+        ("Needs reply", || Box::new(SetNeedsReply { message: None, needs_reply: true })),
+        ("Doesn't need reply", || Box::new(SetNeedsReply { message: None, needs_reply: false })),
+        ("Not spam", || Box::new(SetSpam { message: None, spam: false })),
+    ];
+    for (name, action) in labels {
+        cmds.push(CommandSpec { category: Category::Classify, name, key: "", action });
+    }
     // The number keys toggle the quick filter pills (all, needs reply, follow up, urgent,
     // new senders, possible spam), in that order.
     const QUICK: [fn() -> Box<dyn Action>; 6] =

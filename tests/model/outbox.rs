@@ -95,3 +95,42 @@ fn undo_after_the_flush_reverts_a_reply_filed_by_post_send() {
     assert_eq!(mb.state_of(1), Some(State::Inbox));
     assert_eq!(mb.state_of(sent), Some(State::Inbox));
 }
+
+#[test]
+fn mark_awaiting_reply_tags_without_its_own_undo_step() {
+    let mut mb = sample();
+    let seq = mb.queue_reply_at(1, "reply".into(), false, T0).unwrap();
+    assert!(mb.mark_awaiting_reply(1, seq, T0));
+    assert!(mb.tags(1).contains(&Tag::AwaitingReply));
+    assert_eq!(mb.awaiting_since(1), Some(T0));
+
+    // The send's own step is the only one; undoing it also drops the late tag.
+    assert!(mb.undo());
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+    assert!(mb.outbox().is_empty());
+}
+
+#[test]
+fn mark_awaiting_reply_does_nothing_once_the_send_is_recalled() {
+    let mut mb = sample();
+    let seq = mb.queue_reply_at(1, "reply".into(), false, T0).unwrap();
+    assert!(mb.recall_last(T0).is_some());
+    assert!(!mb.mark_awaiting_reply(1, seq, T0));
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+    assert_eq!(mb.awaiting_since(1), None);
+}
+
+#[test]
+fn mark_awaiting_reply_ignores_an_earlier_send_to_the_same_message() {
+    let mut mb = sample();
+    // A first reply is already sent, then a second is queued and recalled while its answer
+    // is still in flight: the earlier send must not pass the check for the later one.
+    let first = mb.queue_reply_at(1, "first".into(), false, T0).unwrap();
+    mb.tick(T0 + OUTBOX_DELAY);
+    let second = mb.queue_reply_at(1, "second".into(), false, T0).unwrap();
+    assert!(mb.recall_last(T0).is_some());
+
+    assert!(mb.send_in_flight(first), "the earlier send is still there");
+    assert!(!mb.mark_awaiting_reply(1, second, T0));
+    assert!(!mb.tags(1).contains(&Tag::AwaitingReply));
+}

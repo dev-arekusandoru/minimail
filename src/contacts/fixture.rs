@@ -1,7 +1,5 @@
-//! The shipped address book: an embedded fixture that seeds an empty
-//! database, and where the on-disk database lives.
-
-use std::path::PathBuf;
+//! The test address book: a fixture that seeds an empty database. Only built with the
+//! `fixtures` feature, which the tests turn on; the app never seeds contacts.
 
 use serde::Deserialize;
 
@@ -11,34 +9,11 @@ use super::model::{
 };
 use super::ContactStore;
 
-/// Seed fixture, embedded at build time.
-pub const SEED_JSON: &str = include_str!("../../fixtures/contacts_seed.json");
+const SEED_JSON: &str = include_str!("../../tests/fixtures/contacts_seed.json");
 
 /// Bumped when the fixture changes, so an existing database is not re-seeded
 /// over contacts the user has since edited.
 const SEED_VERSION: u32 = 1;
-
-/// `$MAIL_CLASSIFIER_DB`, else `~/Library/Application Support/mail-classifier/contacts.db`.
-pub fn default_db_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MAIL_CLASSIFIER_DB")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join("Library/Application Support/mail-classifier/contacts.db")
-}
-
-/// Open the database the app uses, creating the directory. Starts empty: the
-/// shipped contacts are fixtures for tests only.
-pub fn open_default() -> Result<ContactStore> {
-    let path = default_db_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| Error::Invalid(format!("cannot create {}: {e}", dir.display())))?;
-    }
-    ContactStore::open(&path)
-}
 
 /// A seeded in-memory address book from the shipped fixture, for tests.
 pub fn open_seeded_in_memory() -> Result<ContactStore> {

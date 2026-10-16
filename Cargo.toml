@@ -3,6 +3,11 @@ name = "mail-classifier"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Test data (fake mailbox, accounts, contacts). Only the tests turn it on, via the
+# self dev-dependency below; the app binary never includes it.
+fixtures = []
+
 [dependencies]
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -28,6 +33,7 @@ objc2-web-kit = "0.3"
 [dev-dependencies]
 gpui-kit = { version = "0.7", features = ["test-support"] }
 parking_lot = "0.12"
+mail-classifier = { path = ".", features = ["fixtures"] }
 
 [profile.dev]
 debug = "line-tables-only"

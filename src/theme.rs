@@ -231,11 +231,6 @@ pub fn deleted(c: &ThemeColor) -> Hsla {
     c.danger
 }
 
-/// Unread status bar.
-pub fn unread(c: &ThemeColor) -> Hsla {
-    c.yellow
-}
-
 /// Spam and possible-spam marks.
 pub fn spam(c: &ThemeColor) -> Hsla {
     c.red

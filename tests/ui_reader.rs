@@ -11,7 +11,7 @@ use mail_classifier::model::{Mailbox, MessageId};
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
 mod harness;
-use harness::{Harness, harness_with, json, msg};
+use harness::{Harness, NOON, harness_with, json, msg};
 
 /// `message` (a harness `msg()` JSON object) with extra top-level fields merged in.
 fn with_fields(message: String, fields: serde_json::Value) -> String {
@@ -25,6 +25,20 @@ fn with_fields(message: String, fields: serde_json::Value) -> String {
 
 fn mailbox_of(messages: &[String]) -> Mailbox {
     Mailbox::from_json(&json(messages)).expect("valid mailbox json")
+}
+
+/// Tag `id` NeedsReply through the classifier's own path.
+fn tag_needs_reply(mb: &mut Mailbox, id: MessageId) {
+    mb.add_suggestions(vec![Suggestion {
+        message: id,
+        key: QuestionKey::NeedsReply,
+        answer: Answer {
+            probabilities: vec![0.1, 0.9],
+            value: AnswerValue::Bool(true),
+            confidence: 0.9,
+        },
+    }]);
+    mb.accept_suggestions(id, NOON);
 }
 
 /// Two messages in one thread.
@@ -53,6 +67,18 @@ impl Harness<'_> {
 
     fn hint(&mut self) -> HintContext {
         self.read(|a| a.hint_context())
+    }
+
+    /// The accessibility label registered at `id` on the last frame, if the element is there.
+    fn label(&mut self, id: impl Into<gpui_kit::ElementId>) -> Option<String> {
+        let id = id.into();
+        let window = self.window;
+        self.cx
+            .update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find(id).and_then(|snap| snap.label().map(str::to_owned))
+            })
+            .expect("window alive")
     }
 }
 
@@ -158,7 +184,7 @@ fn clicking_a_thread_message_row_toggles_just_that_message(cx: &mut TestAppConte
     assert!(h.read(|a| a.reader_expanded(others[0])));
     assert!(!h.read(|a| a.reader_expanded(others[1])), "siblings stay collapsed");
 
-    h.click(("reader-thread-msg", others[0] as usize));
+    h.click(("reader-thread-head", others[0] as usize));
     assert!(!h.read(|a| a.reader_expanded(others[0])));
 }
 
@@ -294,4 +320,126 @@ fn reader_hints_follow_the_open_message_and_pending_suggestions(cx: &mut TestApp
 
     h.keys("x");
     assert_eq!(h.hint().mode, HintMode::Selection(1), "a selection takes the footer over from the reader");
+}
+
+/// The labels row shows classifier chips as words: an urgency level a row hides (2) and kind
+/// Other both render, and the raw `n/5` never does.
+#[gpui_kit::gpui::test]
+fn reader_labels_show_classifier_chips(cx: &mut TestAppContext) {
+    use mail_classifier::judge::Kind;
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.set_label(1, QuestionKey::Urgency, Some(Tag::Urgent(2)));
+    mb.set_label(1, QuestionKey::Kind, Some(Tag::Kind(Kind::Other)));
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert_eq!(h.label(("reader-chip-urgency", 1u64)).as_deref(), Some("Low"));
+    assert_eq!(h.label(("reader-chip-kind", 1u64)).as_deref(), Some("Other"));
+    assert!(!h.label(("reader-chip-urgency", 1u64)).unwrap().contains('/'), "no N/5 form");
+}
+
+/// `mb` with a pending Folder suggestion on message 1 pointing at its first folder; returns the
+/// target folder.
+fn with_folder_suggestion(mb: &mut Mailbox) -> mail_classifier::model::FolderId {
+    let options = mb.folder_options("personal");
+    assert!(!options.is_empty(), "the fixture account has folders");
+    mb.add_suggestions(vec![Suggestion {
+        message: 1,
+        key: QuestionKey::Folder,
+        answer: Answer {
+            probabilities: vec![1.0; options.len() + 1],
+            value: AnswerValue::Choice(0),
+            confidence: 0.9,
+        },
+    }]);
+    options[0].0
+}
+
+/// A pending non-folder suggestion is not a folder suggestion: the strip stays away.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_needs_a_folder_suggestion(cx: &mut TestAppContext) {
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.add_suggestions(vec![Suggestion {
+        message: 1,
+        key: QuestionKey::NeedsReply,
+        answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
+    }]);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(!h.exists("reader-folder-suggestion"));
+}
+
+/// `y` on the folder strip (the Move button) files the message into the suggested folder.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_move_files_the_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    let target = with_folder_suggestion(&mut mb);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.exists("reader-folder-suggestion"));
+    h.keys("y");
+    assert_eq!(h.state_of(1), TriageState::Filed(target));
+    assert!(!h.exists("reader-folder-suggestion"), "accepting clears the strip");
+}
+
+/// `n` on the folder strip (the Dismiss button) drops the suggestion without filing.
+#[gpui_kit::gpui::test]
+fn reader_folder_strip_dismiss_keeps_the_message(cx: &mut TestAppContext) {
+    use mail_classifier::model::TriageState;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    with_folder_suggestion(&mut mb);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.exists("reader-folder-suggestion"));
+    h.keys("n");
+    assert!(h.read(|a| a.mailbox.pending(1).is_empty()), "Dismiss drops the suggestion");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    assert!(!h.exists("reader-folder-suggestion"));
+}
+
+/// A labels-row chip opens its own section: setting a value through the urgency chip's menu.
+#[gpui_kit::gpui::test]
+fn a_reader_chip_menu_sets_its_own_value(cx: &mut TestAppContext) {
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.set_label(1, QuestionKey::Urgency, Some(Tag::Urgent(3)));
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    h.click("chip-menu-reader-chip-urgency-1");
+    h.click_row("Very urgent");
+    assert!(h.has_tag(1, Tag::Urgent(5)), "the chip's own section set the level");
+}
+
+/// The reader `⋯` menu carries the override sections, so a value with no chip is still reachable.
+#[gpui_kit::gpui::test]
+fn the_reader_more_menu_sets_a_classifier_label(cx: &mut TestAppContext) {
+    use mail_classifier::judge::Kind;
+    use mail_classifier::model::Tag;
+    let mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    h.click(("btn-message-more", 1usize));
+    assert!(h.read(|a| a.menu_open()));
+    h.hover_row("Classifier labels");
+    h.click_row("Person");
+    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind section set the label");
+}
+
+/// The Needs reply chip's menu clears the tag as a user override, and one `u` brings it back.
+#[gpui_kit::gpui::test]
+fn needs_reply_chip_clears_the_tag_and_undo_restores_it(cx: &mut TestAppContext) {
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    tag_needs_reply(&mut mb, 1);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.has_tag(1, Tag::NeedsReply));
+    h.click("chip-menu-reader-chip-needs-reply-1");
+    h.click_row("Doesn't need reply");
+    assert!(!h.has_tag(1, Tag::NeedsReply), "the chip's menu cleared the tag");
+    assert!(h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)), "the clear is a user override");
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::NeedsReply), "one undo step brings the tag back");
+    assert!(!h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)), "undo drops the override");
 }

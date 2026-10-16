@@ -267,6 +267,7 @@ pub fn message(json: &Value, user_folders: &HashSet<String>) -> Option<RemoteMes
         cc: header(headers, "Cc").unwrap_or_default().to_owned(),
         bcc: header(headers, "Bcc").unwrap_or_default().to_owned(),
         subject: header(headers, "Subject").unwrap_or_default().to_owned(),
+        bulk: header(headers, "List-Unsubscribe").is_some() || header(headers, "List-Id").is_some(),
         snippet: decode_entities(json.get("snippet").and_then(Value::as_str).unwrap_or_default()),
         received,
         state,

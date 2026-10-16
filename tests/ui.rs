@@ -30,7 +30,9 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
             cx,
             |window, cx| {
                 let view = cx.new(|cx| {
-                    MailApp::new(mail_classifier::model::Mailbox::load_default(), window, cx)
+                    let mut app = MailApp::new(mail_classifier::model::Mailbox::load_default(), window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
+                    app
                 });
                 window.focus(&view.focus_handle(cx), cx);
                 view

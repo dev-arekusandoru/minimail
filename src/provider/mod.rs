@@ -75,6 +75,8 @@ pub struct RemoteMessage {
     pub cc: String,
     pub bcc: String,
     pub subject: String,
+    /// A `List-Unsubscribe` or `List-Id` header is present (bulk mail).
+    pub bulk: bool,
     /// Server snippet (HTML entities decoded); stands in for the body until it is downloaded.
     pub snippet: String,
     pub received: Timestamp,

@@ -22,7 +22,7 @@ use crate::app::actions::{SettingsDismiss, SettingsEnterBody, SettingsNextPage, 
 use crate::app::mail_app::panes::Orientation;
 use crate::app::ui::icon_button;
 use crate::clock::{DAY, Timestamp};
-use crate::judge::{Confidence, JudgePolicy, Mode, QuestionKey};
+use crate::judge::{JudgePolicy, Mode, QuestionKey};
 use crate::tz::{Now, Utc};
 use crate::{preview, theme};
 use gpui_kit::{
@@ -38,6 +38,26 @@ mod inbox;
 mod ai;
 mod senders;
 
+/// A Jev API key carried in a [`SettingsEvent`]. Its `Debug` never prints the key, so a log
+/// line that formats an event cannot leak it.
+#[derive(Clone)]
+pub struct JevKey(String);
+
+impl JevKey {
+    pub fn new(key: String) -> Self {
+        JevKey(key)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for JevKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
 /// Key context of the panel.
 pub const SETTINGS_CONTEXT: &str = "SettingsPanel";
 
@@ -49,7 +69,14 @@ pub const SETTINGS_SCOPE: &str = "SettingsPanel && !PopupMenu";
 
 #[derive(Clone, Debug)]
 pub enum SettingsEvent {
-    Changed(JudgePolicy, bool),
+    /// Classifier settings changed. The whole snapshot travels together so the app re-applies
+    /// routing once (see `MailApp::apply_classifier_settings`).
+    Changed {
+        policy: JudgePolicy,
+        summaries: bool,
+        auto_classify: bool,
+        spam_cold_outreach: bool,
+    },
     Grouping(bool),
     TabAvatars(bool),
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
@@ -69,6 +96,14 @@ pub enum SettingsEvent {
     AccountStyle { id: String, icon: &'static str, color: String },
     /// An account's nickname text changed (`mailbox.set_account_nickname`; blank clears it).
     AccountNickname { id: String, nickname: String },
+    /// Save the Jev connection. A non-empty `key` replaces the saved one; blank keeps it.
+    /// `base`/`model` are stored and the classifier is rebuilt (starting the Inbox backfill).
+    SaveJev { key: JevKey, base: String, model: String },
+    /// Forget the saved Jev key; classification turns off.
+    RemoveJevKey,
+    /// Try the classifier with these values (blank `key` falls back to the saved one). Nothing
+    /// is saved; the result goes back to the panel.
+    TestJev { key: JevKey, base: String, model: String },
     /// The user picked what the account's sync status allows.
     SyncAction { id: String, action: crate::sync_status::SyncAction },
     Close,
@@ -100,10 +135,13 @@ pub struct AccountRow {
 }
 
 /// Index of the Accounts page in [`SettingsPanel::pages`].
-const ACCOUNTS_PAGE: usize = 0;
+pub const ACCOUNTS_PAGE: usize = 0;
+/// Index of the AI (classifier) page, where the Jev connection lives.
+pub const AI_PAGE: usize = 4;
 
-const CLASSIFIER_MODES: [(&str, &str); 3] = [("auto", "Auto"), ("review", "Review"), ("off", "Off")];
-const CONFIDENCES: [(&str, &str); 3] = [("high", "High"), ("medium", "Medium"), ("low", "Low")];
+/// The mode segments of a non-folder question: its label is applied as soon as it arrives, or
+/// the question is off. A folder suggestion is the only one queued for review.
+const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("off", "Off")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
@@ -203,6 +241,10 @@ pub struct SettingsPanel {
     page_gen: u32,
     policy: JudgePolicy,
     summaries: bool,
+    /// Classify new mail automatically as it arrives (opt in; off by default).
+    auto_classify: bool,
+    /// Count recruiters' and sales cold outreach as spam (`SPAM_COLD_OUTREACH`).
+    spam_cold_outreach: bool,
     group: bool,
     tab_avatars: bool,
     /// Block remote images in the reader (opt in; images load by default).
@@ -233,6 +275,34 @@ pub struct SettingsPanel {
     controls: HashMap<String, AccountControls>,
     /// Gmail OAuth client credentials are present in the environment.
     gmail_configured: bool,
+    /// Jev endpoint and model shown in the fields; the key itself is never held here.
+    jev_base: String,
+    jev_model: String,
+    /// Whether a key is saved (only ever "Key saved" / "No key" is shown).
+    jev_has_key: bool,
+    /// The masked API-key field.
+    jev_key_input: Entity<InputState>,
+    /// The endpoint and model fields.
+    jev_base_input: Entity<InputState>,
+    jev_model_input: Entity<InputState>,
+    /// Write the seeded endpoint/model into the fields on the next render.
+    jev_seed: bool,
+    /// Clear the key field on the next render (after Save).
+    jev_clear_key: bool,
+    /// The "no key / key saved" placeholder last written into the key field.
+    jev_placeholder: bool,
+    /// The connection-test result shown under the group.
+    jev_test: Option<JevTest>,
+    /// A save/test-time validation error (a bad URL), shown inline.
+    jev_error: Option<String>,
+}
+
+/// The result of a Jev connection test, as the panel shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JevTest {
+    Running,
+    Connected(String),
+    Failed(String),
 }
 
 impl SettingsPanel {
@@ -272,6 +342,15 @@ impl SettingsPanel {
                 this.set_filter(text, cx);
             }
         });
+        // The key is masked on screen; the endpoint and model start at their defaults.
+        let jev_key_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("No key").masked(true));
+        let jev_base_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(crate::judge::jev::DEFAULT_BASE_URL)
+        });
+        let jev_model_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(crate::judge::jev::DEFAULT_MODEL)
+        });
         Self {
             focus,
             search_anchor,
@@ -281,6 +360,8 @@ impl SettingsPanel {
             page_gen: 0,
             policy,
             summaries,
+            auto_classify: false,
+            spam_cold_outreach: false,
             group,
             tab_avatars: true,
             block_remote_images: false,
@@ -297,6 +378,17 @@ impl SettingsPanel {
             accounts: Vec::new(),
             controls: HashMap::new(),
             gmail_configured: false,
+            jev_base: crate::judge::jev::DEFAULT_BASE_URL.to_owned(),
+            jev_model: crate::judge::jev::DEFAULT_MODEL.to_owned(),
+            jev_has_key: false,
+            jev_key_input,
+            jev_base_input,
+            jev_model_input,
+            jev_seed: false,
+            jev_clear_key: false,
+            jev_placeholder: false,
+            jev_test: None,
+            jev_error: None,
             follow_up_days,
             follow_up,
             preview,
@@ -314,6 +406,13 @@ impl SettingsPanel {
         self.block_remote_images = on;
         self
     }
+
+    /// The classifier switches' initial values (both off by default).
+    pub fn classifier_switches(mut self, auto_classify: bool, spam_cold_outreach: bool) -> Self {
+        self.auto_classify = auto_classify;
+        self.spam_cold_outreach = spam_cold_outreach;
+        self
+    }
     pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
         self.theme_mode = mode;
         self.light_theme = light;
@@ -328,14 +427,34 @@ impl SettingsPanel {
         self
     }
 
+    /// Seed the Jev connection: the endpoint, the model, and whether a key is saved (never the
+    /// key itself).
+    pub fn jev_connection(mut self, base: String, model: String, has_key: bool) -> Self {
+        self.jev_base = base;
+        self.jev_model = model;
+        self.jev_has_key = has_key;
+        self.jev_seed = true;
+        self
+    }
+
+    /// The connection-test result the panel is showing, if any.
+    pub fn jev_test_result(&self) -> Option<&JevTest> {
+        self.jev_test.as_ref()
+    }
+
+    /// The save/test validation error the panel is showing, if any.
+    pub fn jev_error_text(&self) -> Option<&str> {
+        self.jev_error.as_deref()
+    }
+
     /// The page on screen, as the sidebar has it.
     pub fn page(&self) -> usize {
         self.page
     }
 
-    /// Open on the Accounts page.
-    pub fn on_accounts_page(mut self) -> Self {
-        self.page = ACCOUNTS_PAGE;
+    /// Open on `page`, e.g. the AI page when the status bar asks for a key.
+    pub fn on_page(mut self, page: usize) -> Self {
+        self.page = page;
         self
     }
 
@@ -435,7 +554,12 @@ impl SettingsPanel {
     }
 
     fn changed(&self, cx: &mut Context<Self>) {
-        cx.emit(SettingsEvent::Changed(self.policy.clone(), self.summaries));
+        cx.emit(SettingsEvent::Changed {
+            policy: self.policy.clone(),
+            summaries: self.summaries,
+            auto_classify: self.auto_classify,
+            spam_cold_outreach: self.spam_cold_outreach,
+        });
         cx.notify();
     }
 
@@ -479,6 +603,8 @@ impl SettingsPanel {
     pub(super) fn reset_fields(&mut self, cx: &mut Context<Self>) {
         self.policy = JudgePolicy::default();
         self.summaries = false;
+        self.auto_classify = false;
+        self.spam_cold_outreach = false;
         self.group = false;
         self.tab_avatars = true;
         self.block_remote_images = false;
@@ -490,22 +616,20 @@ impl SettingsPanel {
         self.follow_up_days = default_follow_up_days();
         self.follow_up.set(self.follow_up_days);
         self.preview.set(self.preview_lines);
+        self.jev_base = crate::judge::jev::DEFAULT_BASE_URL.to_owned();
+        self.jev_model = crate::judge::jev::DEFAULT_MODEL.to_owned();
+        self.jev_seed = true;
+        self.jev_test = None;
+        self.jev_error = None;
         cx.notify();
-    }
-
-    fn set_confidence(&mut self, question: QuestionKey, confidence: Confidence, cx: &mut Context<Self>) {
-        if matches!(self.policy.mode(question), Mode::Auto(c) if c != confidence) {
-            self.policy.set_mode(question, Mode::Auto(confidence));
-            self.changed(cx);
-        }
     }
 
     fn set_classifier_mode(&mut self, question: QuestionKey, value: &str, cx: &mut Context<Self>) {
         let mode = match (value, self.policy.mode(question)) {
             ("auto", mode @ Mode::Auto(_)) => mode,
-            ("auto", _) => Mode::Auto(Confidence::Medium),
-            ("off", _) => Mode::Off,
-            _ => Mode::Review,
+            // Back to Auto puts the question's shipped preset back.
+            ("auto", _) => JudgePolicy::default().mode(question),
+            _ => Mode::Off,
         };
         self.set_mode(question, mode, cx);
     }
@@ -574,6 +698,89 @@ impl SettingsPanel {
             self.summaries = on;
             self.changed(cx);
         }
+    }
+
+    fn set_auto_classify(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_classify {
+            self.auto_classify = on;
+            self.changed(cx);
+        }
+    }
+
+    fn set_spam_cold_outreach(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.spam_cold_outreach {
+            self.spam_cold_outreach = on;
+            self.changed(cx);
+        }
+    }
+
+    /// Save the Jev connection: validate the endpoint, emit the values for the app to store and
+    /// apply, and clear the key field. A blank key leaves the saved one alone.
+    fn save_jev(&mut self, cx: &mut Context<Self>) {
+        let key = self.jev_key_input.read(cx).value().to_string();
+        let base = self.jev_base_input.read(cx).value().to_string();
+        let model = self.jev_model_input.read(cx).value().to_string();
+        if !crate::judge::jev::valid_base_url(&base) {
+            self.jev_error = Some(BAD_BASE_URL.into());
+            cx.notify();
+            return;
+        }
+        self.jev_error = None;
+        self.jev_test = None;
+        self.jev_has_key = self.jev_has_key || !key.is_empty();
+        // The key is never displayed: clear the field now that it is saved.
+        self.jev_clear_key = true;
+        cx.emit(SettingsEvent::SaveJev { key: JevKey::new(key), base, model });
+        cx.notify();
+    }
+
+    /// Send one test request with the field values; the app reports the result back through
+    /// [`Self::set_jev_test`]. Nothing is saved.
+    fn test_jev(&mut self, cx: &mut Context<Self>) {
+        let key = self.jev_key_input.read(cx).value().to_string();
+        let base = self.jev_base_input.read(cx).value().to_string();
+        let model = self.jev_model_input.read(cx).value().to_string();
+        if !crate::judge::jev::valid_base_url(&base) {
+            self.jev_error = Some(BAD_BASE_URL.into());
+            cx.notify();
+            return;
+        }
+        self.jev_error = None;
+        self.jev_test = Some(JevTest::Running);
+        cx.emit(SettingsEvent::TestJev { key: JevKey::new(key), base, model });
+        cx.notify();
+    }
+
+    /// Forget the key: the app deletes the secret and turns classification off. The panel keeps
+    /// showing the key as saved until the app confirms the deletion ([`Self::set_jev_removed`]).
+    fn remove_jev_key(&mut self, cx: &mut Context<Self>) {
+        if self.jev_has_key {
+            self.jev_test = None;
+            cx.emit(SettingsEvent::RemoveJevKey);
+            cx.notify();
+        }
+    }
+
+    /// The result of removing the saved key: only a confirmed deletion clears the panel's state.
+    pub fn set_jev_removed(&mut self, result: Result<(), String>, cx: &mut Context<Self>) {
+        match result {
+            Ok(()) => {
+                self.jev_has_key = false;
+                self.jev_clear_key = true;
+                self.jev_error = None;
+            }
+            Err(e) => self.jev_error = Some(format!("Could not remove the Jev key: {e}")),
+        }
+        cx.notify();
+    }
+
+    /// Show a connection-test result the app sent back.
+    pub fn set_jev_test(&mut self, result: Result<String, String>, cx: &mut Context<Self>) {
+        self.jev_test = Some(match result {
+            Ok(model) => JevTest::Connected(model),
+            Err(e) => JevTest::Failed(e),
+        });
+        cx.notify();
     }
 
     /// Narrow the Senders page to addresses containing `text`.
@@ -709,6 +916,9 @@ fn default_follow_up_days() -> u8 {
         .clamp(i64::from(*FOLLOW_UP_DAYS.start()), i64::from(*FOLLOW_UP_DAYS.end()))
         as u8
 }
+
+/// Shown when the endpoint is not HTTPS (or plain HTTP on loopback).
+const BAD_BASE_URL: &str = "Base URL must be https:// (http:// is allowed only on localhost)";
 
 /// Reports whether one row differs from its default.
 type IsDirty = Rc<dyn Fn(&App) -> bool>;
@@ -993,10 +1203,6 @@ fn select(
     })
 }
 
-fn options(pairs: &[(&'static str, &'static str)]) -> Vec<(SharedString, SharedString)> {
-    pairs.iter().map(|(value, label)| ((*value).into(), (*label).into())).collect()
-}
-
 /// A muted one-line placeholder row.
 fn note(id: &'static str, text: &'static str) -> SettingItem {
     SettingItem::render(move |_, _, cx| {
@@ -1015,6 +1221,22 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_controls(window, cx);
+        // A reset, a reseed or a Save writes into the fields here, once, so typing is not
+        // overwritten while a render is in flight.
+        if std::mem::take(&mut self.jev_seed) {
+            let (base, model) = (self.jev_base.clone(), self.jev_model.clone());
+            self.jev_base_input.update(cx, |input, cx| input.set_value(base, window, cx));
+            self.jev_model_input.update(cx, |input, cx| input.set_value(model, window, cx));
+        }
+        if std::mem::take(&mut self.jev_clear_key) {
+            self.jev_key_input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        // The key's status is its placeholder: there is nowhere else to show it without the key.
+        if self.jev_placeholder != self.jev_has_key {
+            self.jev_placeholder = self.jev_has_key;
+            let text = if self.jev_has_key { "Key saved" } else { "No key" };
+            self.jev_key_input.update(cx, |input, cx| input.set_placeholder(text, window, cx));
+        }
         let t = cx.theme();
         let weak = cx.entity().downgrade();
         let pages = self.pages(&weak, cx);

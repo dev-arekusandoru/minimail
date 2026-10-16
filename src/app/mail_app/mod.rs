@@ -3,8 +3,9 @@
 //! search and triage-session modes.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::theme;
@@ -28,9 +29,12 @@ use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
-use crate::judge::{JudgePolicy, Kind, QuestionKey, Routed, StubJudge, classify};
+use crate::judge::{
+    Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, StoredAnswer,
+};
 use crate::model::{AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState};
 use crate::reading::ReaderView;
+use crate::provider::secrets::{MemorySecrets, SecretStore};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
 use crate::summary::{StubSummarizer, Summarizer, ThreadSummary};
@@ -41,6 +45,7 @@ use crate::list_tabs::ListTabs;
 
 use self::list_strip::{Pane, Slot};
 use self::list_view::ListView;
+use self::judging::JudgeJob;
 
 mod accessors;
 mod actions;
@@ -49,6 +54,7 @@ mod drag;
 mod filters;
 mod grouping;
 mod help;
+mod judging;
 mod list;
 mod menus;
 mod modals;
@@ -126,6 +132,38 @@ pub struct MailApp {
     menu_target: Option<Vec<MessageId>>,
     pub policy: JudgePolicy,
     pub rules: RuleBook,
+    /// The classifier, when one is configured. `None` means no key: classification is off.
+    judge: Option<Arc<dyn Judge + Send + Sync>>,
+    /// Builds the judge from the Jev key, endpoint and model; swapped for a fake in tests.
+    judge_factory: JudgeFactory,
+    /// Where the Jev key is kept; `MemorySecrets` by default, the keychain in the real app.
+    secrets: Rc<dyn SecretStore>,
+    /// The classifier's state, shown in the status bar.
+    judge_status: JudgeStatus,
+    /// Judge answers cached this session, keyed by [`MessageId`]; preloaded at startup.
+    judgements: HashMap<MessageId, Vec<StoredAnswer>>,
+    /// Messages and replies waiting to be judged, oldest first.
+    judge_queue: VecDeque<JudgeJob>,
+    /// Completed requests in the current classifier batch (footer `Classifying X/Y`).
+    judge_batch_done: usize,
+    /// Total requests in the current classifier batch, grown as work is queued mid-batch.
+    judge_batch_total: usize,
+    /// A judge request is in flight; the worker is running.
+    judging: bool,
+    /// Message of the request in flight, so a second pass does not queue it again.
+    judge_in_flight: Option<MessageId>,
+    /// Bumped when the judge is replaced, so an in-flight result is discarded.
+    judge_gen: u64,
+    /// Messages whose last classification failed (cleared on success); `ClassifyState::Failed`.
+    classify_failed: HashSet<MessageId>,
+    /// Automatic classification (`AUTO_CLASSIFY`); false means Jev runs only on demand.
+    auto_classify: bool,
+    /// The cold-outreach checkbox (`SPAM_COLD_OUTREACH`); part of the Spam version.
+    spam_cold_outreach: bool,
+    /// Messages classified before their body downloaded: id → force every enabled question.
+    pending_classify: HashMap<MessageId, bool>,
+    /// The opened message the frame loop last saw, so the open hook fires once per change.
+    last_opened: Option<MessageId>,
     clock: Rc<dyn Clock>,
     /// The zone every displayed date and every relative date is read in: the user's clock.
     zone: Rc<dyn Zone>,
@@ -202,6 +240,13 @@ pub struct MailApp {
     older_in_flight: HashSet<AccountId>,
     /// Messages whose body is being downloaded.
     bodies_in_flight: HashSet<MessageId>,
+    /// Bodies waiting to be downloaded, front first: the opened/visible rows, then the rest of
+    /// the Inbox newest first.
+    body_queue: VecDeque<MessageId>,
+    /// Bodies that failed this session; not retried until reopened or re-classified.
+    body_failed: HashSet<MessageId>,
+    /// Body prefetch paused after a rate limit; a timer resumes it.
+    bodies_paused: bool,
     /// Wakes the sync loop when work is queued.
     sync_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
     /// Toast text queued from a background task, shown on the next frame.
@@ -256,6 +301,24 @@ impl MailApp {
             menu_target: None,
             policy: JudgePolicy::default(),
             rules: RuleBook::default(),
+            judge: None,
+            judge_factory: default_judge_factory(),
+            secrets: Rc::new(MemorySecrets::default()),
+            judge_status: JudgeStatus::NoKey,
+            judgements: HashMap::new(),
+            judge_queue: VecDeque::new(),
+            judge_batch_done: 0,
+            judge_batch_total: 0,
+            judging: false,
+            judge_in_flight: None,
+            judge_gen: 0,
+            classify_failed: HashSet::new(),
+            // Overridden from `AUTO_CLASSIFY` by `load_preferences` at startup; the constructor
+            // default keeps headless tests that never load preferences classifying.
+            auto_classify: true,
+            spam_cold_outreach: false,
+            pending_classify: HashMap::new(),
+            last_opened: None,
             zone,
             clock,
             group_threads: false,
@@ -300,10 +363,13 @@ impl MailApp {
             older_queue: HashMap::new(),
             older_in_flight: HashSet::new(),
             bodies_in_flight: HashSet::new(),
+            body_queue: VecDeque::new(),
+            body_failed: HashSet::new(),
+            bodies_paused: false,
             sync_wake: None,
             pending_toast: None,
         };
-        app.classify_visible();
+        app.classify_visible(cx);
         app
     }
     pub fn load_preferences(
@@ -346,6 +412,13 @@ impl MailApp {
             QuestionKey::ExpectsReply,
             crate::app_settings::MODE_EXPECTS_REPLY.get(store.as_ref(), &scope),
         );
+        self.policy.set_mode(
+            QuestionKey::Folder,
+            crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
+        );
+        self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
+        self.spam_cold_outreach =
+            crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
         self.preferences = Some(store);
         cx.set_window_appearance(match self.theme_mode {
             crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
@@ -357,7 +430,11 @@ impl MailApp {
         self._theme_sub = Some(window.observe_window_appearance(move |_, cx| {
             weak.update(cx, |this, cx| this.refresh_theme(cx)).ok();
         }));
-        self.classify_visible();
+        // Map any pre-MIGRATION_4 hash-keyed judgements onto their message ids before the first
+        // pass, so their answers are found and not re-billed, then load every cached answer.
+        self.carry_over_judgements();
+        self.preload_judgements();
+        self.classify_visible(cx);
         cx.notify();
     }
     fn refresh_theme(&self, cx: &mut App) {
@@ -376,5 +453,21 @@ impl MailApp {
     pub fn focus_handle(&self) -> &FocusHandle {
         &self.focus_handle
     }
+
+    /// Use `secrets` for the Jev key instead of the default in-memory store. `main` installs the
+    /// keychain here; tests leave the default so nothing touches the real keychain.
+    pub fn set_secrets(&mut self, secrets: Rc<dyn SecretStore>) {
+        self.secrets = secrets;
+    }
+
+    /// Use `factory` to build the judge from the Jev settings, so tests can inject a fake.
+    pub fn set_judge_factory(&mut self, factory: JudgeFactory) {
+        self.judge_factory = factory;
+    }
+}
+
+/// The production judge factory: a [`JevJudge`] over the configured endpoint.
+fn default_judge_factory() -> JudgeFactory {
+    Rc::new(|base, model, key| Arc::new(crate::judge::JevJudge::new(base, model, key)))
 }
 

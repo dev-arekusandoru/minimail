@@ -4,7 +4,6 @@
 use super::super::*;
 use super::parts::{Look, Role};
 use crate::reading;
-use gpui_kit::component::collapsible::Collapsible;
 
 /// Height of a collapsed thread line.
 pub(super) const COLLAPSED_H: f32 = 46.;
@@ -43,11 +42,11 @@ impl MailApp {
         look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
-        Collapsible::new()
-            .open(expanded)
-            .child(self.collapsed_line(m, newest, look, cx))
-            .content(self.message_surface(m, Role::Thread, look, cx))
-            .into_any_element()
+        if expanded {
+            self.message_surface(m, Role::Thread, look, cx)
+        } else {
+            self.collapsed_line(m, newest, look, cx)
+        }
     }
 
     /// One compact line: sender, muted snippet, paperclip when it has attachments, mono date.

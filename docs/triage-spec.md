@@ -80,8 +80,8 @@ Every user action is one undo step.
 
 ## Accounts & folders
 
-- Multiple accounts; each has its own folders (a tree). Mock: seeded from
-  `fixtures/`, creatable from the File picker. Later: synced with the provider
+- Multiple accounts; each has its own folders (a tree). Tests: seeded from
+  `tests/fixtures/`, creatable from the File picker. Later: synced with the provider
   (local SQLite copy, sync on open; creating a folder creates it remotely).
 - Every message belongs to one account. `Filed(folder)` refers to a folder of that
   account.

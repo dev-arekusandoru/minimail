@@ -189,6 +189,27 @@ impl Mailbox {
     pub fn folder(&self, id: FolderId) -> Option<&Folder> {
         self.folders.iter().find(|f| f.id == id)
     }
+
+    /// An account's folders as `(id, path)` pairs, sorted by path. The Folder question's
+    /// options, minus the trailing "none".
+    pub fn folder_options(&self, account: &str) -> Vec<(FolderId, String)> {
+        let mut out: Vec<(FolderId, String)> = self
+            .folders(account)
+            .iter()
+            .map(|f| (f.id, self.folder_path(f.id)))
+            .collect();
+        out.sort_by(|a, b| a.1.cmp(&b.1));
+        out
+    }
+
+    /// The folder a Folder suggestion points at, or `None` for "none" or a stale index.
+    pub fn suggested_folder(&self, s: &Suggestion) -> Option<FolderId> {
+        let (QuestionKey::Folder, AnswerValue::Choice(i)) = (s.key, &s.answer.value) else {
+            return None;
+        };
+        let account = &self.get(s.message)?.account;
+        self.folder_options(account).get(*i).map(|(id, _)| *id)
+    }
     pub fn create_folder(
         &mut self,
         account: &str,

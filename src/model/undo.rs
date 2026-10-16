@@ -9,9 +9,13 @@ impl Mailbox {
         )
     }
 
-    /// Push one undo step; empty change lists are ignored.
-    pub(super) fn push_undo(&mut self, changes: Vec<Change>) {
+    /// Push one undo step; empty change lists are ignored. Suggestions of mail the step moved
+    /// out of the Inbox are dropped within the same step.
+    pub(super) fn push_undo(&mut self, mut changes: Vec<Change>) {
         if !changes.is_empty() {
+            if let Some(before) = self.drop_suggestions_left_inbox() {
+                changes.push(Change::Pending(before));
+            }
             self.undo.push(UndoStep { changes });
         }
     }

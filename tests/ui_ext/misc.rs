@@ -4,7 +4,7 @@ use mail_classifier::clock::{DAY};
 use mail_classifier::judge::{Mode, QuestionKey};
 use mail_classifier::model::{Mailbox, Tag};
 use mail_classifier::model::TriageState::*;
-use crate::harness::{Harness, harness, harness_with, mailbox, msg};
+use crate::harness::{harness, harness_with, harness_with_judge, mailbox, msg, stub_judge};
 use crate::session_search::{search, search_box};
 
 // ---------------------------------------------------------------- Summaries
@@ -32,49 +32,31 @@ pub fn sidebar_plus_opens_settings_on_the_accounts_page(cx: &mut TestAppContext)
     assert_eq!(h.settings_page(), 0);
 }
 
-/// Undo startup auto-labels until message 1 is a plain Inbox message again.
-pub fn reset_spam(h: &mut Harness<'_>) {
-    for _ in 0..20 {
-        if h.state_of(1) == Inbox && !h.has_tag(1, Tag::PossibleSpam) {
-            return;
-        }
-        h.keys("u");
-    }
-    panic!("could not restore message 1");
-}
-
 #[gpui_kit::gpui::test]
 pub fn spam_in_auto_mode_is_applied(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, spam_box());
-    assert!(h.has_tag(1, Tag::PossibleSpam), "startup auto-applies the spam label");
+    // Start without a judge, so the label can only come from the classification under test.
+    let mut h = harness_with_judge(cx, spam_box(), None);
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "no classifier means no label");
+    h.set_judge(Some(stub_judge()));
+    assert!(h.has_tag(1, Tag::PossibleSpam), "Auto: the startup pass applies the spam label");
     assert_eq!(h.state_of(1), Inbox);
-    reset_spam(&mut h);
-    assert!(h.read(|a| a.mailbox.pending(1).iter().all(|s| s.key != QuestionKey::Spam)));
     h.keys("c");
-    assert!(h.has_tag(1, Tag::PossibleSpam), "Auto: c applies the PossibleSpam tag");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "Auto: c keeps the PossibleSpam tag");
     assert_eq!(h.state_of(1), Inbox);
 }
 
 #[gpui_kit::gpui::test]
-pub fn spam_in_review_mode_is_queued_not_applied(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, spam_box());
-    reset_spam(&mut h);
-    // Settings -> AI -> Tagging -> the Spam row -> Review (the second segment).
-    h.open_settings();
-    h.settings_click("0-4");
-    h.settings_click_in(1, 0, "ai-mode-Spam-1".to_owned());
-    h.settings_keys("escape");
-    assert!(h.read(|a| matches!(a.policy.mode(QuestionKey::Spam), Mode::Review)));
-    h.keys("c");
-    assert!(!h.has_tag(1, Tag::PossibleSpam), "Review: no auto-applied label");
-    assert_eq!(h.state_of(1), Inbox);
+pub fn a_stored_review_mode_still_labels_without_a_prompt(cx: &mut TestAppContext) {
+    // A policy written before non-folder questions applied directly: its labels apply all the
+    // same, because only a folder move is ever queued for review.
+    let mut h = harness_with_judge(cx, spam_box(), None);
+    h.app.update(h.cx, |a, _| a.policy.set_mode(QuestionKey::Spam, Mode::Review));
+    h.set_judge(Some(stub_judge()));
+    assert!(h.has_tag(1, Tag::PossibleSpam), "Review applies a non-folder label too");
     assert!(
-        h.read(|a| a.mailbox.pending(1).iter().any(|s| s.key == QuestionKey::Spam)),
-        "Review: a pending Spam suggestion (badge) is queued"
+        h.read(|a| a.mailbox.pending(1).iter().all(|s| s.key == QuestionKey::Folder)),
+        "nothing but a folder suggestion is queued"
     );
-    // Accepting it applies the label.
-    h.keys("y");
-    assert!(h.has_tag(1, Tag::PossibleSpam));
     assert_eq!(h.state_of(1), Inbox);
 }
 
@@ -99,7 +81,7 @@ pub fn summary_is_opt_in(cx: &mut TestAppContext) {
 
     h.open_settings();
     h.settings_click("0-4");
-    h.settings_click_in(0, 0, "check");
+    h.settings_click_in(1, 0, "check");
     assert!(h.read(|a| a.summaries_enabled));
     h.settings_keys("escape");
     assert!(!h.read(|a| a.settings_open()));

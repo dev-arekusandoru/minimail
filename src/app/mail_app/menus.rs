@@ -8,9 +8,11 @@
 use super::*;
 
 use crate::app::menu::{MenuItem, MenuRun, populate};
+use crate::judge::urgency_label;
 use gpui_kit::component::Selectable as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenu;
 
 /// Which menu a trigger belongs to; decides what it holds and which trigger shows itself as
 /// open.
@@ -20,6 +22,8 @@ pub(super) enum MenuKind {
     Global,
     /// Actions for one message of the reader; they apply to that message only.
     Message(MessageId),
+    /// The classifier labels of one message, opened from its row's icons or a right-click.
+    Classifier(MessageId),
     /// Actions for the list's selection.
     Selection,
 }
@@ -33,21 +37,12 @@ impl MailApp {
         trigger: Button,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let app = cx.weak_entity();
+        let owner = cx.weak_entity();
         let on_open = cx.weak_entity();
         trigger
             .selected(self.menu_is(kind))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                let Some(view) = app.upgrade() else { return menu };
-                let (items, target) = view.read(cx).menu_items(kind);
-                let owner = app.clone();
-                let run: MenuRun = Rc::new(move |action, window, cx| {
-                    let target = target.clone();
-                    owner
-                        .update(cx, |this, cx| this.run_menu_action(action, target, window, cx))
-                        .ok();
-                });
-                populate(menu, &items, &run, window, cx)
+                Self::populate_menu(owner.clone(), kind, menu, window, cx)
             })
             .on_open_change(move |open, _, cx| {
                 on_open
@@ -57,6 +52,39 @@ impl MailApp {
                     })
                     .ok();
             })
+    }
+
+    /// Fill `menu` with the rows `kind` holds right now. Any trigger can use this as its builder:
+    /// a button's `dropdown_menu`, a row's `context_menu`, or a chip's.
+    pub(super) fn populate_menu(
+        owner: WeakEntity<Self>,
+        kind: MenuKind,
+        menu: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let Some(view) = owner.upgrade() else {
+            return menu;
+        };
+        let (items, target) = view.read(cx).menu_items(kind);
+        Self::populate_items(owner, items, target, menu, window, cx)
+    }
+
+    /// Fill `menu` with `items`, dispatching every choice back to `owner`.
+    pub(super) fn populate_items(
+        owner: WeakEntity<Self>,
+        items: Vec<MenuItem>,
+        target: Option<Vec<MessageId>>,
+        menu: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let run: MenuRun = Rc::new(move |action, window, cx| {
+            owner
+                .update(cx, |this, cx| this.run_menu_action(action, target.clone(), window, cx))
+                .ok();
+        });
+        populate(menu, &items, &run, window, cx)
     }
 
     /// Dispatch a chosen row's action through the window (deferred, like every other button)
@@ -84,8 +112,147 @@ impl MailApp {
         match kind {
             MenuKind::Global => (global_items(), None),
             MenuKind::Message(id) => (self.message_items(id), Some(vec![id])),
+            MenuKind::Classifier(id) => (self.classifier_items(id), Some(vec![id])),
             MenuKind::Selection => (self.selection_items(), None),
         }
+    }
+
+    /// The whole classifier menu of one message: Kind, Urgency, needs reply, spam, then a pending
+    /// folder suggestion.
+    pub(super) fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let mut items = self.kind_items(id);
+        for section in [self.urgency_items(id), self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
+            if !section.is_empty() {
+                items.push(MenuItem::separator());
+                items.extend(section);
+            }
+        }
+        items
+    }
+
+    /// The Kind section: the five kinds, then the reset/clear actions.
+    pub(super) fn kind_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let current = self.kind_of(id);
+        let mut items = vec![MenuItem::header("Kind")];
+        for kind in Kind::ALL {
+            items.push(
+                MenuItem::action_fn(Self::kind_name(kind), move || {
+                    Box::new(SetKind { message: Some(id), kind: Some(kind) })
+                })
+                .icon(Glyph::of_kind(kind).spec().icon)
+                .checked(current == Some(kind)),
+            );
+        }
+        items.push(MenuItem::separator());
+        items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
+            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
+        }));
+        items.push(
+            MenuItem::action_fn("No kind", move || Box::new(SetKind { message: Some(id), kind: None }))
+                .checked(current.is_none()),
+        );
+        items
+    }
+
+    /// The Urgency section: levels 1..=5, then reset to suggestion.
+    pub(super) fn urgency_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let current = self.urgency_of(id);
+        let mut items = vec![MenuItem::header("Urgency")];
+        for level in 1..=5 {
+            let glyph = match level {
+                5 => Glyph::UrgentHigh,
+                4 => Glyph::UrgentMid,
+                _ => Glyph::UrgencyLow,
+            };
+            items.push(
+                MenuItem::action_fn(urgency_label(level), move || {
+                    Box::new(SetUrgency { message: Some(id), level })
+                })
+                .icon(glyph.spec().icon)
+                .checked(current == level),
+            );
+        }
+        items.push(MenuItem::separator());
+        items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
+            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
+        }));
+        items
+    }
+
+    /// The needs-reply section: one row, which way round depends on the tag.
+    pub(super) fn needs_reply_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let needs = self.mailbox.tags(id).contains(&Tag::NeedsReply);
+        vec![if needs {
+            MenuItem::action_fn("Doesn't need reply", move || {
+                Box::new(SetNeedsReply { message: Some(id), needs_reply: false })
+            })
+            .icon(Glyph::NeedsReply.spec().icon)
+        } else {
+            MenuItem::action_fn("Needs reply", move || {
+                Box::new(SetNeedsReply { message: Some(id), needs_reply: true })
+            })
+            .icon(Glyph::NeedsReply.spec().icon)
+        }]
+    }
+
+    /// The spam section: one row, which way round depends on the flag. Spam never moves mail.
+    pub(super) fn spam_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let spam = self.mailbox.tags(id).contains(&Tag::PossibleSpam);
+        vec![if spam {
+            MenuItem::action_fn("Not spam", move || Box::new(SetSpam { message: Some(id), spam: false }))
+                .icon(Glyph::PossibleSpam.spec().icon)
+        } else {
+            MenuItem::action_fn("Mark as spam", move || {
+                Box::new(SetSpam { message: Some(id), spam: true })
+            })
+            .icon(Glyph::PossibleSpam.spec().icon)
+        }]
+    }
+
+    /// The folder section, empty unless a folder suggestion is waiting on `id`.
+    pub(super) fn folder_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let Some(folder) = self.suggested_folder(id) else {
+            return Vec::new();
+        };
+        let path = self.mailbox.folder_path(folder);
+        vec![
+            MenuItem::action_fn(format!("Accept folder \"{path}\""), || Box::new(AcceptSuggestions)),
+            MenuItem::action("Reject", || Box::new(RejectSuggestions)),
+        ]
+    }
+
+    /// The Kind tag on `id`, if it carries one.
+    fn kind_of(&self, id: MessageId) -> Option<Kind> {
+        self.mailbox.tags(id).iter().find_map(|tag| match tag {
+            Tag::Kind(kind) => Some(*kind),
+            _ => None,
+        })
+    }
+
+    /// The Urgency level on `id`: 1 when it carries no urgency tag.
+    fn urgency_of(&self, id: MessageId) -> u8 {
+        self.mailbox
+            .tags(id)
+            .iter()
+            .find_map(|tag| match tag {
+                Tag::Urgent(level) => Some(*level),
+                _ => None,
+            })
+            .unwrap_or(1)
+    }
+
+    /// A kind's row-menu name, from the one icon table.
+    fn kind_name(kind: Kind) -> &'static str {
+        Glyph::of_kind(kind).spec().label
+    }
+
+    /// The folder a pending Folder suggestion points at, if one is waiting on `id`.
+    fn suggested_folder(&self, id: MessageId) -> Option<FolderId> {
+        self.mailbox
+            .pending(id)
+            .into_iter()
+            .find(|s| s.key == QuestionKey::Folder)
+            .and_then(|s| self.mailbox.suggested_folder(s))
     }
 
     /// Actions for one message: triage, then the secondary actions. Every row acts on `id`
@@ -95,6 +262,10 @@ impl MailApp {
             return Vec::new();
         };
         let mut items = triage_items(&[msg.state]);
+        items.push(MenuItem::separator());
+        // The reader's `⋯` menu reaches labels that have no chip; a submenu keeps the menu short
+        // enough for its popover to stay anchored under the trigger.
+        items.push(MenuItem::submenu("Classifier labels", self.classifier_items(id)));
         if !self.mailbox.pending(id).is_empty() {
             items.push(MenuItem::separator());
             items.push(MenuItem::action("Accept AI suggestions", || Box::new(AcceptSuggestions)));
@@ -186,7 +357,7 @@ fn global_items() -> Vec<MenuItem> {
         MenuItem::action("Commands…", || Box::new(ToggleCommandPalette)),
         MenuItem::separator(),
         MenuItem::action("Undo", || Box::new(Undo)),
-        MenuItem::action("Classify visible mail", || Box::new(ClassifyVisible)),
+        MenuItem::action("Classify every message in this list…", || Box::new(ClassifyVisible)),
         MenuItem::separator(),
         MenuItem::action("Sender rules…", || Box::new(ToggleRules)),
         MenuItem::action("Settings…", || Box::new(ToggleSettings)),

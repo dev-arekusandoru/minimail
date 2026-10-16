@@ -1,12 +1,13 @@
 use mail_classifier::judge::{
     Answer, AnswerValue, Confidence, Judge, JudgeError, JudgePolicy, Kind, Mode, Question,
-    QuestionKey, Routed, StubJudge, classify, expects_reply, message_state, triage_questions,
+    QuestionKey, Routed, StoredAnswer, StubJudge, classify, expects_reply, incoming_questions,
+    message_state, questions_to_ask, reply_question, route,
 };
 use mail_classifier::model::{Message, TriageState};
 use mail_classifier::summary::{StubSummarizer, Summarizer, SummaryError};
 
 fn fixture() -> Vec<Message> {
-    serde_json::from_str(include_str!("../fixtures/mailbox.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/mailbox.json")).unwrap()
 }
 
 fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
@@ -25,6 +26,7 @@ fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
         snooze: None,
         cc: String::new(),
         bcc: String::new(),
+        bulk: false,
         html: None,
         attachments: Vec::new(),
         read: false,
@@ -33,9 +35,15 @@ fn msg(id: u32, email: &str, subject: &str, body: &str) -> Message {
 }
 
 fn answers(m: &Message) -> Vec<(QuestionKey, Answer)> {
-    StubJudge
-        .judge(&message_state(m), &triage_questions())
-        .unwrap()
+    StubJudge.judge(&message_state(m, ""), &questions()).unwrap()
+}
+
+/// The default incoming questions, with no account folders.
+fn questions() -> Vec<(QuestionKey, Question)> {
+    incoming_questions(&JudgePolicy::default(), false, &[])
+        .into_iter()
+        .map(|s| (s.key, s.question))
+        .collect()
 }
 
 fn get(a: &[(QuestionKey, Answer)], k: QuestionKey) -> &Answer {
@@ -90,7 +98,7 @@ fn stub_is_deterministic_and_probabilities_sum_to_one() {
     for m in fixture() {
         let a = answers(&m);
         assert_eq!(a, answers(&m));
-        let qs = triage_questions();
+        let qs = questions();
         assert_eq!(a.len(), qs.len());
         for ((k, q), (ak, ans)) in qs.iter().zip(&a) {
             assert_eq!(k, ak);
@@ -132,27 +140,32 @@ fn fixture_yields_realistic_mix() {
 }
 
 #[test]
-fn classify_produces_all_routes_on_fixture() {
+fn classify_applies_labels_and_drops_noops_on_fixture() {
     let all = fixture();
     let refs: Vec<&Message> = all.iter().collect();
     let routed = classify(&StubJudge, &JudgePolicy::default(), &refs);
-    assert_eq!(routed.len(), all.len() * 5);
+    assert_eq!(routed.len(), all.len() * 4);
     assert!(routed.iter().any(|r| matches!(r, Routed::Auto(_))));
-    assert!(routed.iter().any(|r| matches!(r, Routed::Review(_))));
     assert!(routed.iter().any(|r| matches!(r, Routed::Drop)));
+    assert!(
+        !routed.iter().any(|r| matches!(r, Routed::Review(_))),
+        "the fixture has no folders, so nothing is queued for review"
+    );
 }
 
 #[test]
-fn message_state_trims_body_to_limit() {
-    let long = format!("  {}  ", "é".repeat(4000));
+fn message_state_carries_context_and_trims_body() {
+    let long = format!("  {}  ", "é".repeat(9000));
     let m = msg(1, "a@b.io", "s", &long);
-    let st = message_state(&m);
+    let st = message_state(&m, "me@x.io");
     let body = st["body"].as_str().unwrap();
-    assert_eq!(body.chars().count(), 1500);
+    assert_eq!(body.chars().count(), 8000);
     assert!(!body.starts_with(' '));
     assert!(st["sender"].as_str().unwrap().contains("a@b.io"));
     assert_eq!(st["subject"], "s");
-    assert_eq!(st.as_object().unwrap().len(), 3);
+    assert_eq!(st["recipient_role"], "to");
+    assert_eq!(st["bulk"], false);
+    assert_eq!(st.as_object().unwrap().len(), 8);
 }
 
 fn spam_route(spam_yes: f32, policy: &JudgePolicy) -> Vec<Routed> {
@@ -161,18 +174,16 @@ fn spam_route(spam_yes: f32, policy: &JudgePolicy) -> Vec<Routed> {
 }
 
 #[test]
-fn each_confidence_preset_gates_auto_against_review_inclusively() {
+fn a_non_folder_label_is_applied_however_it_routed() {
     let mut p = JudgePolicy::default();
     for c in Confidence::ALL {
         p.set_mode(QuestionKey::Spam, Mode::Auto(c));
-        // Spam is the first question.
-        assert!(matches!(spam_route(c.threshold(), &p)[0], Routed::Auto(_)), "{c:?} at threshold");
-        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Review(_)), "{c:?} below");
+        // Spam is the first question; a low-confidence answer is applied just the same.
+        assert!(matches!(spam_route(c.threshold() - 0.01, &p)[0], Routed::Auto(_)), "{c:?} below");
     }
-    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::Low));
-    assert!(matches!(spam_route(0.65, &p)[0], Routed::Auto(_)));
-    p.set_mode(QuestionKey::Spam, Mode::Auto(Confidence::High));
-    assert!(matches!(spam_route(0.65, &p)[0], Routed::Review(_)));
+    // Review applies too: the row menu replaces the y/n prompt for a non-folder label.
+    p.set_mode(QuestionKey::Spam, Mode::Review);
+    assert!(matches!(spam_route(0.51, &p)[0], Routed::Auto(_)));
 }
 
 #[test]
@@ -183,12 +194,28 @@ fn off_suggests_nothing_even_for_a_certain_answer() {
 }
 
 #[test]
-fn review_mode_never_auto_applies() {
-    let mut p = JudgePolicy::default();
-    p.set_mode(QuestionKey::Spam, Mode::Review);
-    match &spam_route(1.0, &p)[0] {
-        Routed::Review(s) => assert_eq!(s.key, QuestionKey::Spam),
-        other => panic!("{other:?}"),
+fn only_a_folder_suggestion_is_queued_for_review() {
+    let p = JudgePolicy::default();
+    let m = msg(1, "a@b.io", "s", "b");
+    let folder = Answer {
+        probabilities: vec![0.9, 0.1],
+        value: AnswerValue::Choice(0),
+        confidence: 0.9,
+    };
+    let spam_yes = Answer {
+        probabilities: vec![0.01, 0.99],
+        value: AnswerValue::Bool(true),
+        confidence: 0.99,
+    };
+    let routed = route(
+        &p,
+        &m,
+        vec![(QuestionKey::Spam, spam_yes), (QuestionKey::Folder, folder)],
+    );
+    assert!(matches!(routed[0], Routed::Auto(_)), "the spam label applies at once");
+    match &routed[1] {
+        Routed::Review(s) => assert_eq!(s.key, QuestionKey::Folder),
+        other => panic!("a folder suggestion is reviewed, not {other:?}"),
     }
 }
 
@@ -207,21 +234,20 @@ fn expects_reply_heuristic_and_api() {
     assert!(expects_reply(&StubJudge, "Can you send this today?"));
     assert!(expects_reply(&StubJudge, "Thoughts"));
     assert!(!expects_reply(&StubJudge, "Thanks, received."));
-    assert_eq!(
-        get(
-            &answers(&msg(1, "a@b.io", "s", "Could you?")),
-            QuestionKey::ExpectsReply
-        )
-        .value,
-        AnswerValue::Bool(true)
-    );
+    // The reply question is the only one asked on the reply path.
+    let (key, q) = reply_question();
+    assert_eq!(key, QuestionKey::ExpectsReply);
+    let a = StubJudge
+        .judge(&serde_json::json!({"body": "Could you?"}), &[(key, q)])
+        .unwrap();
+    assert_eq!(a[0].1.value, AnswerValue::Bool(true));
 }
 
 #[test]
 fn judge_error_drops_every_question() {
     let m = msg(1, "a@b.io", "s", "b");
     let routed = classify(&Failing, &JudgePolicy::default(), &[&m]);
-    assert_eq!(routed.len(), 5);
+    assert_eq!(routed.len(), 4);
     assert!(routed.iter().all(|r| matches!(r, Routed::Drop)));
 }
 
@@ -324,4 +350,64 @@ fn summarizer_empty_thread_and_empty_body() {
     let s = StubSummarizer.summarize(&[&t[0]]).unwrap();
     assert_eq!(s.summary, "Plan");
     assert!(s.action_items.is_empty() && s.dates.is_empty());
+}
+
+#[test]
+fn a_question_is_re_asked_only_when_missing_or_stale() {
+    let folders = vec![(3u32, "Receipts".to_owned()), (7u32, "Projects".to_owned())];
+    let policy = JudgePolicy::default();
+    let specs = incoming_questions(&policy, false, &folders);
+    let keys: Vec<QuestionKey> = specs.iter().map(|s| s.key).collect();
+    assert_eq!(
+        keys,
+        vec![
+            QuestionKey::Spam,
+            QuestionKey::NeedsReply,
+            QuestionKey::Urgency,
+            QuestionKey::Kind,
+            QuestionKey::Folder,
+        ]
+    );
+    // No folders: Folder is not asked.
+    assert_eq!(incoming_questions(&policy, false, &[]).len(), 4);
+
+    let answer = Answer {
+        probabilities: vec![0.5, 0.5],
+        value: AnswerValue::Bool(true),
+        confidence: 0.9,
+    };
+    let stored: Vec<StoredAnswer> = specs
+        .iter()
+        .map(|s| StoredAnswer {
+            key: s.key,
+            version: s.version.clone(),
+            answer: answer.clone(),
+        })
+        .collect();
+    assert!(questions_to_ask(&specs, &stored).is_empty(), "all current: nothing to ask");
+
+    // Bumping one question's version re-asks only that question.
+    let mut stale = stored.clone();
+    stale[2].version = "9".to_owned();
+    let ask = questions_to_ask(&specs, &stale);
+    assert_eq!(ask.len(), 1);
+    assert_eq!(ask[0].0, QuestionKey::Urgency);
+
+    // Changing the account's folder list re-asks only Folder.
+    let moved = vec![(7u32, "Projects".to_owned())];
+    let ask = questions_to_ask(&incoming_questions(&policy, false, &moved), &stored);
+    assert_eq!(ask.len(), 1);
+    assert_eq!(ask[0].0, QuestionKey::Folder);
+
+    // The cold-outreach checkbox is part of Spam's version, so toggling it re-asks Spam.
+    let ask = questions_to_ask(&incoming_questions(&policy, true, &folders), &stored);
+    assert_eq!(ask.len(), 1);
+    assert_eq!(ask[0].0, QuestionKey::Spam);
+
+    // An Off question is not asked at all.
+    let mut off = JudgePolicy::default();
+    off.set_mode(QuestionKey::Kind, Mode::Off);
+    let keys: Vec<QuestionKey> =
+        incoming_questions(&off, false, &folders).iter().map(|s| s.key).collect();
+    assert!(!keys.contains(&QuestionKey::Kind));
 }

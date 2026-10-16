@@ -21,6 +21,17 @@ pub const MODE_URGENCY: Setting<Mode> =
     Setting::new("mode_urgency", Mode::Auto(Confidence::Medium));
 pub const MODE_KIND: Setting<Mode> = Setting::new("mode_kind", Mode::Auto(Confidence::Low));
 pub const MODE_EXPECTS_REPLY: Setting<Mode> = Setting::new("mode_expects_reply", Mode::Review);
+pub const MODE_FOLDER: Setting<Mode> = Setting::new("mode_folder", Mode::Review);
+/// Classify new mail automatically on arrival/at startup. Off means Jev only runs on demand.
+pub const AUTO_CLASSIFY: Setting<bool> = Setting::new("auto_classify", false);
+/// Count recruiters' and sales cold outreach as spam.
+pub const SPAM_COLD_OUTREACH: Setting<bool> = Setting::new("spam_cold_outreach", false);
+/// Jev endpoint; empty means [`crate::judge::jev::DEFAULT_BASE_URL`].
+pub const JEV_BASE_URL: Setting<String> =
+    Setting::with_default_fn("jev_base_url", String::new(), default_jev_base_url);
+/// Jev model alias; empty means [`crate::judge::jev::DEFAULT_MODEL`].
+pub const JEV_MODEL: Setting<String> =
+    Setting::with_default_fn("jev_model", String::new(), default_jev_model);
 
 pub const DEFAULT_LIGHT_THEME: &str = "Default Light";
 pub const DEFAULT_DARK_THEME: &str = crate::theme::DEFAULT_THEME;
@@ -36,4 +47,12 @@ fn default_dark_theme() -> String {
 
 fn default_pane_layout() -> String {
     DEFAULT_PANE_LAYOUT.to_owned()
+}
+
+fn default_jev_base_url() -> String {
+    crate::judge::jev::DEFAULT_BASE_URL.to_owned()
+}
+
+fn default_jev_model() -> String {
+    crate::judge::jev::DEFAULT_MODEL.to_owned()
 }

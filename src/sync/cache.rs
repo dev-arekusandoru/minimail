@@ -110,6 +110,9 @@ impl Cache {
     fn connect(path: &Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
+        // Columns added after a table's first release need an ALTER; fields added to the
+        // serialized `Message` JSON (bcc, html, partial, bulk…) instead ride `#[serde(default)]`,
+        // so an old row reads them as false/empty with no schema change.
         // Caches created before read sync lack the column; their rows start unknown (NULL).
         let has_read: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='remote_read'",

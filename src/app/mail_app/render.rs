@@ -17,6 +17,7 @@ impl Render for MailApp {
         let hint = self.hint_context();
         if let Some(id) = self.opened() {
             self.mailbox.mark_read(id);
+            self.note_opened(id, cx);
             // The opened message and the next couple of rows get their bodies.
             let targets = self.body_targets();
             self.fetch_bodies(targets, cx);
@@ -200,6 +201,21 @@ impl Render for MailApp {
             }))
             .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
             .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
+            .on_action(cx.listener(|this, a: &SetKind, _, cx| {
+                this.set_kind_action(a.message, a.kind, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetUrgency, _, cx| {
+                this.set_urgency_action(a.message, a.level, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetSpam, _, cx| {
+                this.set_spam_action(a.message, a.spam, cx)
+            }))
+            .on_action(cx.listener(|this, a: &SetNeedsReply, _, cx| {
+                this.set_needs_reply_action(a.message, a.needs_reply, cx)
+            }))
+            .on_action(cx.listener(|this, a: &ResetLabel, _, cx| {
+                this.reset_label_action(a.message, a.key, cx)
+            }))
             .on_action(cx.listener(|this, _: &AcceptRule, w, cx| this.accept_rule(w, cx)))
             .on_action(cx.listener(|this, _: &DismissRule, _, cx| this.dismiss_rule(cx)))
             .on_action(cx.listener(|this, _: &ToggleRules, w, cx| this.toggle_rules(w, cx)))
@@ -210,12 +226,28 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &SummarizeThread, w, cx| this.summarize(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSettings, w, cx| this.toggle_settings(w, cx)))
             .on_action(cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)))
-            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| this.open_settings(true, w, cx)))
+            .on_action(cx.listener(|this, _: &ManageAccounts, w, cx| {
+                this.open_settings(crate::app::settings::ACCOUNTS_PAGE, w, cx)
+            }))
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
-                let (auto, review) = this.classify_visible();
-                this.show_toast(format!("{auto} auto-applied · {review} to review"), w, cx);
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                } else {
+                    this.confirm_classify_list(w, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ClassifyMessage, w, cx| {
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                    return;
+                }
+                let mut ids = this.target_ids();
+                if ids.is_empty() {
+                    ids.extend(this.opened());
+                }
+                this.classify_messages(&ids, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
@@ -249,6 +281,10 @@ impl Render for MailApp {
             .when_some(banner, |d, rule| {
                 d.child(div().flex_none().child(RuleBanner::new(&rule)))
             })
-            .child(div().flex_none().child(HintBar::new(hint)))
+            .child(div().flex_none().child(
+                HintBar::new(hint)
+                    .status(self.judge_status().clone())
+                    .on_status_click(cx.listener(|this, _, window, cx| this.open_settings_ai(window, cx))),
+            ))
     }
 }

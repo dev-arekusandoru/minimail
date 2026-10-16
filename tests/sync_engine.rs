@@ -368,6 +368,7 @@ fn local(id: MessageId, account: &str) -> Message {
         snooze: None,
         cc: String::new(),
         bcc: String::new(),
+        bulk: false,
         html: None,
         attachments: Vec::new(),
         read: false,
@@ -384,6 +385,7 @@ fn remote(id: &str, thread: &str, received: Timestamp) -> RemoteMessage {
         to: "a@x.io".to_owned(),
         cc: String::new(),
         bcc: String::new(),
+        bulk: false,
         subject: format!("Remote {id}"),
         snippet: format!("snippet of {id}"),
         received,
@@ -1279,4 +1281,19 @@ fn a_local_message_with_a_high_id_is_not_reused_by_an_import() {
     assert_eq!(ids.len(), 2, "both pulled messages land in the gmail inbox");
     assert!(ids.iter().all(|id| *id != 7), "local id 7 is untouched");
     assert_eq!(mb.get(7).map(|m| m.account.clone()), Some("personal".to_owned()));
+}
+
+#[test]
+fn bulk_survives_the_cache_and_old_rows_default_to_false() {
+    let cache = Cache::open_in_memory().unwrap();
+    let mut message = local(1, "personal");
+    message.bulk = true;
+    cache.upsert_message(&message, "m1", &RemoteState::Inbox, false).unwrap();
+    let (_, _, loaded) = cache.load().unwrap();
+    assert!(loaded[0].bulk, "bulk round-trips through the cache JSON");
+
+    // A row written before `bulk` existed reads as false.
+    let mut old = serde_json::to_value(local(2, "personal")).unwrap();
+    old.as_object_mut().unwrap().remove("bulk");
+    assert!(!serde_json::from_value::<Message>(old).unwrap().bulk);
 }

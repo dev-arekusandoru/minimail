@@ -5,17 +5,19 @@ use super::super::*;
 use super::parts::{selectable_verbatim, stamp, Look, Role};
 use crate::app::chrome::humanize_time;
 use crate::app::email_webview::{luminance, rgb, DocStyle, ViewKey};
+use crate::app::menu::MenuItem;
 use crate::find::Segment;
-use crate::judge::QuestionKey;
+use crate::judge::{AnswerValue, QuestionKey, Routed, Suggestion};
 use crate::reading;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
-use gpui_kit::component::alert::Alert;
+use gpui_kit::component::{Icon, Sizable as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::text::Text;
 use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
@@ -90,6 +92,15 @@ impl MailApp {
                     .text_color(t.muted_foreground)
                     .child(SelectableText::new(("reader-sel-stamp", id), reading::received_label(&m.received, &self.local_now())))
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            })
+            .when_some(self.classification_state(m.id), |d, state| {
+                d.child(icons::classification_badge(("reader-classify", id), state, t, 13.))
+            })
+            .when(opened && !m.outgoing, |d| {
+                d.child(
+                    icon_button(("btn-classify", id), IconName::ScanSearch, "Classify this message", "", cx)
+                        .on_click(cx.listener(move |this, _, _, cx| this.classify_message(mid, cx))),
+                )
             })
             .child(self.message_buttons(m.id, cx));
 
@@ -192,9 +203,10 @@ impl MailApp {
             .gap_2()
             .child(subject)
             .child(sender)
-            .child(self.labels_row(m, look).ml(px(52.)));
+            .child(self.labels_row(m, look, cx).ml(px(52.)));
 
-        let strip = if opened { self.suggestion_strip(m, look, cx) } else { None };
+        let strip = if opened { self.folder_strip(m, look, cx) } else { None };
+        let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
 
         div()
             .flex()
@@ -210,6 +222,7 @@ impl MailApp {
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
+            .when_some(dev, |d, el| d.child(el))
             .child(self.message_body(m, role, look, cx))
             .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
             // A message synced from headers only still holds just its snippet.
@@ -225,7 +238,8 @@ impl MailApp {
     }
 
     /// State badge (with snooze wake time or folder name), tag badges, category and sender label.
-    fn labels_row(&self, m: &Message, look: &Look<'_>) -> Div {
+    /// The Kind, Urgency and Spam chips are clickable and open their own override menu.
+    fn labels_row(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Div {
         let t = &look.t;
         let state_text = match m.state {
             TriageState::Snoozed => match self.mailbox.snoozed_until(m.id) {
@@ -245,27 +259,78 @@ impl MailApp {
             .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
-            let inputs = icons::GlyphInputs {
-                tags: std::slice::from_ref(tag),
-                pending: &[],
-                muted: false,
-                new_sender: false,
-                snoozed: false,
-                attachment: false,
+            let (label, glyph, key, items) = match tag {
+                Tag::Urgent(level) => (
+                    urgency_word(*level),
+                    urgency_glyph(*level),
+                    "reader-chip-urgency",
+                    self.urgency_items(m.id),
+                ),
+                Tag::Kind(kind) => (
+                    Glyph::of_kind(*kind).spec().label,
+                    Glyph::of_kind(*kind),
+                    "reader-chip-kind",
+                    self.kind_items(m.id),
+                ),
+                Tag::PossibleSpam => (
+                    "Possible spam",
+                    Glyph::PossibleSpam,
+                    "reader-chip-spam",
+                    self.spam_items(m.id),
+                ),
+                Tag::NeedsReply => (
+                    "Needs reply",
+                    Glyph::NeedsReply,
+                    "reader-chip-needs-reply",
+                    self.needs_reply_items(m.id),
+                ),
+                Tag::AwaitingReply => (
+                    "Awaiting reply",
+                    Glyph::AwaitingReply,
+                    "reader-chip-awaiting-reply",
+                    Vec::new(),
+                ),
+                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Vec::new()),
+                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder", Vec::new()),
             };
-            let Some(&glyph) = icons::glyphs_for(&inputs).first() else { continue };
-            let label = match tag {
-                Tag::Urgent(n) => format!("Urgent {n}"),
-                Tag::Kind(Kind::Other) => continue,
-                _ => glyph.spec().label.to_owned(),
-            };
-            row = row.child(look.badge(label, glyph.spec().token.color(t), Some(glyph)));
+            row = row.child(self.chip(m.id, (key, label, glyph), items, look, cx));
         }
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             let spec = Glyph::NewSender.spec();
             row = row.child(look.badge(spec.label, spec.token.color(t), Some(Glyph::NewSender)));
         }
         row
+    }
+
+    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With `items` it is a ghost
+    /// button that opens that section's override menu under the chip; without them it is a plain
+    /// badge (the reply-status chips).
+    fn chip(
+        &self,
+        mid: MessageId,
+        (key, label, glyph): (&'static str, &'static str, Glyph),
+        items: Vec<MenuItem>,
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let badge = look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
+        let wrapper = div().id((key, u64::from(mid))).test_support().aria_label(label);
+        if items.is_empty() {
+            return wrapper.child(badge).into_any_element();
+        }
+        let owner = cx.weak_entity();
+        wrapper
+            .child(
+                Button::new(SharedString::from(format!("chip-menu-{key}-{mid}")))
+                    .ghost()
+                    .h(px(18.))
+                    .px_0()
+                    .child(badge)
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
+                        MailApp::populate_items(owner.clone(), items.clone(), Some(vec![mid]), menu, window, cx)
+                    }),
+            )
+            .into_any_element()
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.
@@ -294,151 +359,163 @@ impl MailApp {
 
     /// New-sender and possible-spam banners, with their action buttons.
     fn banners(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Vec<AnyElement> {
-        // The kit `Alert` has no action slot, so its buttons sit beside it.
-        let row = |alert: Alert, actions: Div| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(div().flex_1().min_w_0().child(alert))
-                .child(actions)
-                .into_any_element()
-        };
-        let actions = || div().flex().flex_none().items_center().gap_2();
         let mut out = Vec::new();
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
-            out.push(row(
-                Alert::warning(
-                    "banner-new-sender",
-                    Text::from(selectable_verbatim(
-                        ("reader-sel-new-sender", u64::from(m.id)),
-                        &format!("New sender · {} <{}>", m.from_name, m.from_email),
-                    )),
-                )
-                .banner(),
-                actions()
-                    .child(look.action_button(
-                        "btn-banner-allow",
-                        "Allow",
-                        "Allow this sender",
-                        "a",
-                        AllowSender,
-                        cx,
-                    ))
-                    .child(look.action_button(
-                        "btn-banner-block",
-                        "Block",
-                        "Block this sender",
-                        "b",
-                        BlockSender,
-                        cx,
-                    )),
+            let actions = div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .child(look.action_button("btn-banner-block", "Block", "Block this sender", "b", BlockSender, cx).ghost())
+                .child(look.action_button("btn-banner-allow", "Allow", "Allow this sender", "a", AllowSender, cx).primary());
+            out.push(suggestion_banner(
+                "banner-new-sender",
+                Glyph::NewSender.spec().icon,
+                "New sender",
+                selectable_verbatim(("reader-sel-new-sender", u64::from(m.id)), &format!("{} <{}>", m.from_name, m.from_email)).into_any_element(),
+                look.t.info,
+                look.t,
+                actions,
             ));
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
-            out.push(row(
-                Alert::error(
-                    "banner-possible-spam",
-                    Text::from(selectable_verbatim(("reader-sel-spam", u64::from(m.id)), "Possible spam")),
-                )
-                .banner(),
-                actions()
-                    .child(look.action_button(
-                        "btn-banner-spam-block",
-                        "Block & Delete",
-                        "Block the sender and delete this message",
-                        "",
-                        SpamBlock,
-                        cx,
-                    ))
-                    .child(look.action_button(
-                        "btn-banner-spam-delete",
-                        "Delete",
-                        "Delete this message",
-                        "d",
-                        Delete,
-                        cx,
-                    )),
-            ));
+            out.push(self.spam_banner(m.id, look, cx));
         }
         out
     }
 
-    /// `Suggested: Needs reply 87% · Newsletter 92%` with Accept / Reject buttons (`y` / `n`).
-    /// `None` when nothing is pending.
-    fn suggestion_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
+    /// Accepting a spam suggestion uses the danger variant on Delete; other actions stay quiet.
+    fn spam_banner(&self, id: MessageId, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .child(look.action_button("btn-banner-spam-not", "Not spam", "Clear the Possible spam flag", "", SetSpam { message: Some(id), spam: false }, cx).ghost())
+            .child(
+                look.action_button("btn-banner-spam-block", "Block & Delete", "Block the sender and delete this message", "", SpamBlock, cx)
+                    .ghost()
+                    .ml_2(),
+            )
+            .child(look.action_button("btn-banner-spam-delete", "Delete", "Delete this message", "d", Delete, cx).danger());
+        suggestion_banner(
+            "banner-possible-spam",
+            Glyph::PossibleSpam.spec().icon,
+            "Possible spam",
+            div().into_any_element(),
+            look.t.danger,
+            look.t,
+            actions,
+        )
+    }
+
+    /// The pending Folder suggestion: `Move` (`y`) accepts and `Dismiss` (`n`) rejects.
+    fn folder_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
+        let s = self.mailbox.pending(m.id).into_iter().find(|s| s.key == QuestionKey::Folder)?;
+        let folder = self.mailbox.suggested_folder(s)?;
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .child(look.action_button("btn-folder-dismiss", "Dismiss", "Dismiss the suggested folder", "n", RejectSuggestions, cx).ghost())
+            .child(look.action_button("btn-folder-move", "Move", "Move the message to the suggested folder", "y", AcceptSuggestions, cx).primary());
+        Some(suggestion_banner(
+            "reader-folder-suggestion",
+            Glyph::FolderSuggestion.spec().icon,
+            "Suggested folder",
+            div().min_w_0().truncate().text_size(px(13.)).text_color(look.t.foreground).child(self.mailbox.folder_path(folder)).into_any_element(),
+            look.t.info,
+            look.t,
+            actions,
+        ))
+    }
+
+    /// Debug-only: every stored classifier answer of `m`, with its version, value, confidence,
+    /// probabilities and the routing the current policy gives it. `None` when nothing is cached.
+    fn dev_answers(&self, m: &Message, look: &Look<'_>) -> Option<AnyElement> {
+        let answers = self.cached_answers(m.id)?;
         let t = &look.t;
-        let pending = self.mailbox.pending(m.id);
-        if pending.is_empty() {
-            return None;
-        }
-        let parts: Vec<String> = pending
-            .iter()
-            .map(|s| {
-                let label = match s.key {
-                    QuestionKey::Spam => "Possible spam".to_owned(),
-                    QuestionKey::NeedsReply => "Needs reply".to_owned(),
-                    QuestionKey::ExpectsReply => "Expects reply".to_owned(),
-                    QuestionKey::Urgency => {
-                        s.urgency().map_or("Urgent".to_owned(), |n| format!("Urgent {n}"))
-                    }
-                    QuestionKey::Kind => s.kind().map_or("Kind".to_owned(), |k| {
-                        Glyph::of_kind(k).spec().label.to_owned()
-                    }),
-                };
-                format!("{label} {}%", (s.answer.confidence * 100.).round() as u32)
-            })
-            .collect();
-        Some(
+        let mut table = div()
+            .id("reader-dev-answers")
+            .test_support()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(t.border)
+            .font_family(look.mono.clone())
+            .text_size(px(11.5))
+            .text_color(t.foreground);
+        // Fixed column widths keep the rows aligned like a table.
+        let row = |cells: [AnyElement; 5]| {
+            let [q, value, conf, route, probs] = cells;
             div()
-                .id("reader-suggestions")
-                .test_support()
-                .flex_none()
                 .flex()
                 .items_center()
                 .gap_3()
-                .px_3()
-                .py_2()
-                .rounded_sm()
-                .border_1()
-                .border_color(t.primary.opacity(0.4))
-                .bg(t.primary.opacity(0.08))
-                .child(icons::icon(Glyph::Suggestion, t, 12.))
-                .child(
-                    look.mono_selectable(
-                        ("reader-sel-suggestions", u64::from(m.id)),
-                        format!("Suggested: {}", parts.join(" · ")),
-                        t.foreground,
-                    )
-                    .flex_1()
-                    .min_w_0(),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .gap_2()
-                        .child(look.action_button(
-                            "btn-suggest-accept",
-                            "Accept",
-                            "Accept the suggestions",
-                            "y",
-                            AcceptSuggestions,
-                            cx,
-                        ))
-                        .child(look.action_button(
-                            "btn-suggest-reject",
-                            "Reject",
-                            "Reject the suggestions",
-                            "n",
-                            RejectSuggestions,
-                            cx,
-                        )),
-                )
-                .into_any_element(),
-        )
+                .child(div().w(px(120.)).flex_none().child(q))
+                .child(div().w(px(150.)).flex_none().truncate().child(value))
+                .child(div().w(px(48.)).flex_none().text_right().child(conf))
+                .child(div().w(px(64.)).flex_none().child(route))
+                .child(div().flex_1().min_w_0().truncate().child(probs))
+        };
+        let muted = |s: &str| div().text_color(t.muted_foreground).child(s.to_owned()).into_any_element();
+        table = table
+            .child(div().text_xs().text_color(t.muted_foreground).child("Classifier answers · dev"))
+            .child(row(["Question", "Answer", "Conf", "Routing", "Probabilities"].map(muted)));
+        for a in answers {
+            let routing = match crate::judge::route(&self.policy, m, vec![(a.key, a.answer.clone())])
+                .into_iter()
+                .next()
+            {
+                Some(Routed::Auto(_)) => ("Auto", t.success),
+                Some(Routed::Review(_)) => ("Review", t.warning),
+                _ => ("Drop", t.muted_foreground),
+            };
+            let value = match &a.answer.value {
+                AnswerValue::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
+                AnswerValue::Choice(i) => match a.key {
+                    QuestionKey::Kind => Kind::from_index(*i)
+                        .map_or_else(|| format!("#{i}"), |k| k.label().to_owned()),
+                    QuestionKey::Folder => self
+                        .mailbox
+                        .suggested_folder(&Suggestion {
+                            message: m.id,
+                            key: a.key,
+                            answer: a.answer.clone(),
+                        })
+                        .map_or_else(|| "none".to_owned(), |f| self.mailbox.folder_path(f)),
+                    _ => format!("#{i}"),
+                },
+                AnswerValue::Score(s) => format!("{s:.0} / 5"),
+            };
+            let probs = a
+                .answer
+                .probabilities
+                .iter()
+                .map(|p| format!("{p:.2}"))
+                .collect::<Vec<_>>()
+                .join("  ");
+            // Folder's version is a long folder-list fingerprint; its head is enough to compare.
+            let version: String = a.version.chars().take(6).collect();
+            table = table.child(row([
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(a.key.label())
+                    .child(div().text_color(t.muted_foreground).child(format!("v{version}")))
+                    .into_any_element(),
+                div().child(value).into_any_element(),
+                div().child(format!("{:.0}%", a.answer.confidence * 100.)).into_any_element(),
+                div().text_color(routing.1).child(routing.0).into_any_element(),
+                div().text_color(t.muted_foreground).child(probs).into_any_element(),
+            ]));
+        }
+        Some(table.into_any_element())
     }
 
     /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text
@@ -603,9 +680,68 @@ impl MailApp {
     }
 }
 
+/// Shared frame for reader suggestions; only the icon and subtle tint vary by meaning.
+fn suggestion_banner(
+    id: &'static str,
+    icon: IconName,
+    title: &'static str,
+    detail: AnyElement,
+    tint: Hsla,
+    theme: &ThemeColor,
+    actions: Div,
+) -> AnyElement {
+    div()
+        .id(id)
+        .test_support()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_3()
+        .min_h(px(38.))
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(tint.opacity(0.22))
+        .bg(tint.opacity(0.06))
+        .child(Icon::new(icon).with_size(px(14.)).text_color(tint))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().flex_none().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(theme.foreground).child(title))
+                .child(detail),
+        )
+        .child(actions)
+        .into_any_element()
+}
+
 /// Background of a message card. The embedded web page, its loading skeleton and its
 /// no-snapshot fallback all paint this same color, so the card never shows a seam between
 /// them; the token keeps light and dark in step.
 fn message_card_bg(t: &ThemeColor) -> Hsla {
     t.secondary
+}
+
+/// The reader chip word for urgency `level`; the raw `n/5` is never shown.
+fn urgency_word(level: u8) -> &'static str {
+    match level {
+        2 => "Low",
+        3 => "Normal",
+        4 => "Urgent",
+        5.. => "Very urgent",
+        _ => "None",
+    }
+}
+
+/// The reader chip icon for urgency `level`: Siren/Flame for 4–5, a muted Gauge for 1–3.
+fn urgency_glyph(level: u8) -> Glyph {
+    match level {
+        5.. => Glyph::UrgentHigh,
+        4 => Glyph::UrgentMid,
+        _ => Glyph::UrgencyLow,
+    }
 }

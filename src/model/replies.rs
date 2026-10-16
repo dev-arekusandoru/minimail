@@ -11,9 +11,19 @@ impl Mailbox {
         awaiting_reply: bool,
         now: Timestamp,
     ) {
-        let Some(&i) = self.index.get(&to) else {
-            return;
-        };
+        let _ = self.queue_reply_at(to, body, awaiting_reply, now);
+    }
+    /// Queue a reply like [`Self::send_reply_at`], returning its outbox sequence (or `None` if
+    /// the message is gone). The classifier needs the sequence to know whether *this* send is
+    /// still in flight when its answer lands.
+    pub fn queue_reply_at(
+        &mut self,
+        to: MessageId,
+        body: String,
+        awaiting_reply: bool,
+        now: Timestamp,
+    ) -> Option<u64> {
+        let &i = self.index.get(&to)?;
         let original = self.messages[i].clone();
         let mut changes = vec![self.snapshot(to)];
         for m in &self.messages {
@@ -50,6 +60,7 @@ impl Mailbox {
         });
         changes.push(Change::Queued(seq));
         self.push_undo(changes);
+        Some(seq)
     }
     pub fn file_after_reply(&mut self, original: MessageId, state: TriageState) -> usize {
         assert_ne!(state, TriageState::Snoozed, "use snooze");
@@ -107,6 +118,27 @@ impl Mailbox {
     }
     pub fn outbox(&self) -> &[Outgoing] {
         &self.outbox
+    }
+    /// Whether the send with this outbox sequence is still queued or sent: false once it was
+    /// recalled or undone. The sequence, not the message, is what a reply judge must check.
+    pub fn send_in_flight(&self, seq: u64) -> bool {
+        self.outbox.iter().any(|o| o.seq == seq) || self.sent_ids.contains_key(&seq)
+    }
+    /// Tag `original`'s thread *Awaiting Reply* as `send_reply_at(.., true, ..)` would, but
+    /// without pushing an undo step: the send that queued it already pushed one (whose snapshot
+    /// predates this tag, so undoing the send removes it). Does nothing once that send is gone.
+    pub fn mark_awaiting_reply(&mut self, original: MessageId, seq: u64, now: Timestamp) -> bool {
+        if !self.send_in_flight(seq) {
+            return false;
+        }
+        let Some(meta) = self.meta.get_mut(&original) else {
+            return false;
+        };
+        if !meta.tags.contains(&Tag::AwaitingReply) {
+            meta.tags.push(Tag::AwaitingReply);
+        }
+        meta.awaiting_since = Some(now);
+        true
     }
     pub fn recall_last(&mut self, _now: Timestamp) -> Option<Reply> {
         let seq = self.outbox.last()?.seq;

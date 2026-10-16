@@ -263,18 +263,12 @@ impl MailApp {
         let unread = ids.iter().any(|id| {
             !self.mailbox.is_read(*id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
         });
-        let urgent = unread && ids.iter().any(|id| {
-            !self.mailbox.is_read(*id)
-                && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
-                && self.mailbox.tags(*id).iter().any(|tag| matches!(tag, crate::model::Tag::Urgent(_)))
-        });
         let visual = crate::app::row::RowVisual {
             cursor: ix == self.cursor_ix(),
             open: self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
             partial: selected_count > 0 && selected_count < ids.len(),
             unread,
-            urgent,
         };
         let thread = *thread_id;
         let preview = row::thread_preview_lines(self.preview_lines);

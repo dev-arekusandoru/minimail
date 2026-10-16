@@ -17,7 +17,7 @@ Built in Rust with [GPUI](https://www.gpui.rs/) and [gpui-kit](https://gpui-kit.
 Most mail apps hand you a pile and a mouse. **mail-classifier** gives every message exactly one state (**Inbox**, **Snoozed**, **Archived**, **Filed** or **Deleted**), lets you triage everything from the keyboard, and uses a fast "System 1" classifier to flag spam, replies you owe and urgent mail. Nothing is sorted away where you can't see it.
 
 > [!NOTE]
-> Early MVP. By default it runs on local mock data (`fixtures/`), and the AI providers are deterministic stubs. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
+> Early MVP. By default it starts with an empty mailbox. The classifier is off until you add a TypeSafe Jev API key (Settings → AI → **Jev connection**), and thread summaries are still a stub. You can optionally link a Gmail account (see [Gmail accounts](#gmail-accounts)) to triage real mail.
 
 ## ✨ Features
 
@@ -27,7 +27,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🖱️ **Mouse and keyboard driven** | Everything the keys do is one click away, and keys keep working after clicks. The titlebar holds search, **Triage**, the pane-layout toggle, a Settings gear and **More** (the global overflow: Commands, Undo, Classify, Rules, Settings, Shortcuts). Every expanded message in the reader has a **Reply** button and a **⋯** menu with Archive · Delete · Snooze (plus Inbox when it is not already there), Accept/Reject AI (only while a suggestion is pending), File, Mark spam, Select, Summarize, Mute, Unsubscribe and a **Sender actions** submenu that acts on every message from one sender at once; with two or more messages selected the list header gets the same **⋯** for the whole selection. Hover anything to see its shortcut. Click a row to open it, click its left edge (or cmd-click) to select, shift-click for a range, click a pending AI icon to accept it (right-click rejects), click sidebar locations, palette and snooze entries, click outside a menu or panel to close it, and press Escape to dismiss it. |
 | ✅ **Inbox as a to-do list** | Every message is in exactly one of Inbox, Snoozed, Archived, Filed or Deleted. Every action can be undone. |
 | 📦 **Batch triage** | Multi-select with `shift-j`/`shift-k` or `x`, or act on everything from one sender at once. |
-| 🧠 **System 1 classifier** | Labels possible spam, needs-reply, urgency and kind. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. The interface mirrors [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev). |
+| 🧠 **System 1 classifier** | Labels possible spam, needs-reply, urgency and kind. Each label either applies itself above a confidence threshold or shows as a badge for you to accept or reject. Runs on [TypeSafe's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) with your own API key (Settings → AI → **Jev connection**): new mail is judged one message at a time on a background worker, its state in the status bar, and the raw answers are cached in the contacts DB so changing a threshold never re-bills. With no key the classifier is off and nothing is labelled. |
 | 📝 **Thread summaries** | Opt-in. Shows the summary, action items and dates above the thread. |
 | ⏰ **Snooze with a return time** | Tonight, tomorrow, Monday or a custom time (`3h`, `2d`). The message returns to the Inbox tagged *Reminder* when it's due. |
 | 🔁 **Follow-ups that come back** | Send a reply that expects an answer and the thread is tagged *Awaiting Reply*. With no answer after the *Follow-up after* timeout (Settings, default 3 days) it returns to the Inbox tagged *Follow Up*. |
@@ -43,7 +43,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | 🔎 **Preview lines** | Settings → *Preview lines* (or palette → *Cycle preview lines*): Off, 1–5 lines of plain-text snippet under the subject, like Apple Mail. Quoted text (`>`), signatures and reply headers are stripped. Message rows are that tall, and a thread header sizes to its own content: one compact line (sender, subject, participants, count, date) plus at most two preview lines, so a collapsed thread reads as a group header rather than a full row. Rows are measured, not padded, and scrolling, `j`/`k` and the wheel follow the cursor. Default 2. |
 | 🗂️ **Reader tabs** | The reader has editor-style tabs, one per thread. Opening a message (click or `enter`) shows it in the *preview* tab (italic title), which the next open replaces; open a message of a thread that already has a tab and that tab comes forward instead. Double-click a tab, click inside the message, expand a collapsed thread message, reply, use a message **⋯** action, or press `enter` on the previewed message to pin it. `cmd-w` closes the active tab (or click its ×); `ctrl-tab` / `ctrl-shift-tab` and `cmd-shift-]` / `cmd-shift-[` switch, and the list cursor follows (selection untouched). Archiving, deleting or snoozing the last message of a previewed thread out of the list closes the preview; a pinned tab stays. Each tab keeps its own expansion, quoted-text, Reader-mode and scroll state; nothing persists across launches. A triage session hides the tab bar and shows only its message; the tabs come back afterwards. Each tab shows the monogram of the thread's latest sender (Settings → Appearance → *Show sender avatar in tabs*, on by default). |
 | 🔍 **Find in thread** | `cmd-f` opens a find bar under the reader tab bar (like Zed's buffer search): live match count (`3/12`), *match case* `alt-c`, *whole word* `alt-w` and *regex* `alt-r` toggles, `enter` / `cmd-g` next and `shift-enter` / `cmd-shift-g` previous (wrapping), `esc` hides it (the tab keeps its query, shown selected on the next `cmd-f`). Typing only updates the count and highlights; landing on a match happens on `enter`. It searches the subject and every message body of the tab's thread, collapsed messages and folded quoted text included; landing on a match expands its message (which pins the tab) or reveals its quote, and scrolls it into view. All matches are highlighted, the current one in the accent colour; an invalid regex finds nothing and turns the field red. Each tab keeps its own query until the tab closes. HTML bodies cannot be highlighted, so while they have matches they are shown in text form. `cmd-shift-f` focuses the global search, like `/`. |
-| 📍 **Row states** | The left edge of a row is its status bar: yellow for unread (red when urgent), blue for selected, dimmed blue when only part of a thread is selected. The row open in the reader uses the same blue bar and tint as a one-item selection; the row under the cursor has its own ring and background, and both cues combine when they coincide. Click the left edge to select without opening; cmd-click toggles and shift-click range-selects. A collapsed thread row shows the open state when the open message is inside it. |
+| 📍 **Row states** | The left edge of a row is its status bar: blue for selected (and for the row open in the reader), dimmed blue when only part of a thread is selected. Unread mail is marked by its bold sender and subject, not by the bar. The row under the cursor has its own ring and background, and both cues combine when they coincide. Click the left edge to select without opening; cmd-click toggles and shift-click range-selects. A collapsed thread row shows the open state when the open message is inside it. |
 | ↔️ **Resizable panes** | Three panes (sidebar, inbox, reader) sit in gpui-kit resizable groups. Hover a divider for a resize cursor and highlight, drag it to give either pane more room, double-click it to go back to the default (each divider resets itself). `alt-left` / `alt-right` move the inbox/reader divider from the keyboard and `alt-r` resets it; every pane keeps a usable minimum, and resizing the window keeps the proportion. Rows re-measure themselves, so the icon cluster follows the new width. |
 | ◧ **Collapsible sidebar** | `cmd-b`, the titlebar button at the far left, or the palette (*Toggle sidebar*) hides the sidebar and gives its room to the panes; showing it again restores the width it had. |
 | ⬓ **Pane layout** | List left with the reader right, or list on top with the reader below: `alt-l`, the titlebar button (its icon shows the current layout), the palette (*Toggle pane layout*) or Settings → *Pane layout*. Each orientation remembers its own size and the divider works in both. |
@@ -114,7 +114,7 @@ Nothing was dropped: every action is still reachable from the titlebar, the menu
 
 ### Settings
 
-Settings (`cmd-,` or the titlebar gear) is built on gpui-kit's `Settings` component: a sidebar of pages (Accounts, Appearance, Inbox, Reader, AI, Senders) with a search box, over grouped, described setting rows (switches, dropdowns, number inputs). Search matches titles, descriptions and keywords such as *avatar*, *stacked* or *unblock*. Settings are **mouse/Tab-driven**: click or Tab to a control and change it. The old settings shortcuts (`j`/`k` row cursor, Space/Enter, `=`/`-`, Ctrl-Tab sections, `/` search) were removed with the hand-built panel; the only settings key is **Esc**, which closes the panel. Controls cover per-question classifier handling (Auto/Review) and confidence threshold (0–100%, step 5; locked in Review), thread summaries, theme, pane layout, sender avatars in tabs, grouping, preview lines, **Follow-up after** (1–14 days) and the Blocked senders list (each with **Unblock**, plus the read-only unsubscribed list).
+Settings (`cmd-,` or the titlebar gear) is built on gpui-kit's `Settings` component: a sidebar of pages (Accounts, Appearance, Inbox, Reader, AI, Senders) with a search box, over grouped, described setting rows (switches, dropdowns, number inputs). Search matches titles, descriptions and keywords such as *avatar*, *stacked* or *unblock*. Settings are **mouse/Tab-driven**: click or Tab to a control and change it. The old settings shortcuts (`j`/`k` row cursor, Space/Enter, `=`/`-`, Ctrl-Tab sections, `/` search) were removed with the hand-built panel; the only settings key is **Esc**, which closes the panel. Controls cover the **Jev connection** on the AI page (the API key — masked, stored in the OS keychain and never shown again, with an explicit **Remove key** — the base URL and model, **Save** and **Test connection**, which sends one request and saves nothing), per-question classifier handling (Auto/Review) and confidence threshold (0–100%, step 5; locked in Review), thread summaries, theme, pane layout, sender avatars in tabs, grouping, preview lines, **Follow-up after** (1–14 days) and the Blocked senders list (each with **Unblock**, plus the read-only unsubscribed list).
 
 To add a setting, add a `SettingItem` (title, description, `.keywords(..)`, and a `SettingField` switch/dropdown/number input) to a page in `src/app/settings.rs`, connect its getter/setter to a `SettingsPanel` field through the captured `WeakEntity`, and emit the matching `SettingsEvent` for `MailApp` to consume.
 
@@ -124,19 +124,20 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 
 | Icon | Meaning | Token |
 |---|---|---|
-| Sparkles | Pending AI suggestion (`y` accept, `n` reject) | accent |
+| FolderInput | Suggested folder, shown while pending (`y` accept, `n` reject) | accent |
 | ShieldAlert | Possible spam | possible_spam |
 | Reply | Needs reply | needs_reply |
 | Hourglass | Awaiting reply (a reply was sent, an answer is expected) | awaiting |
 | CornerUpRight | Follow up (the await passed the timeout) | follow_up |
 | AlarmClock | Reminder (a snooze woke the message) | reminder |
 | Clock | Snoozed (wake time shown as text on the row) | state_snoozed |
-| Siren / Flame / Zap | Urgency 4–5 / 3 / 1–2 (1–2 only in `+N`) | urgent / muted |
+| Siren / Flame | Urgency 5 (very urgent) / 4 (urgent); levels 1–3 show no row icon | urgent |
+| Gauge | Urgency 1–3 as a reader chip (rows show nothing) | muted |
 | BellOff | Muted thread | muted |
 | Paperclip | Subject or opening lines mention an attachment | muted |
 | User / Receipt / Newspaper / Bell / Tag | Kind: person / receipt / newsletter / notification / other (other only in `+N`) | kind |
 
-To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`.
+To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`. The reader's **Classify** button and the global *Classify* command use the `ScanSearch` icon.
 
 ## 🛠️ Development
 
@@ -154,14 +155,20 @@ The UI tests run headless. They drive the real views with simulated keystrokes a
 
 Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
 `~/Library/Application Support/mail-classifier/contacts.db`. It is created (with
-its directory) on first launch, migrated forward through `PRAGMA user_version`,
-and seeded once from `fixtures/contacts_seed.json`. Schema 2 (the scoped settings
-table) is supported, including databases previously opened by the settings
-branch; existing contacts and settings are preserved. Unknown newer schemas
+its directory) on first launch and migrated forward through `PRAGMA user_version`.
+Schema 2 is the scoped settings table; schema 3 adds a `judgements` table caching the classifier's raw
+answers, and schema 4 re-keys it by `message_id` so each message is billed at
+most once — no model, endpoint or key change re-classifies anything. On the
+first launch after that migration, the old hash-keyed rows are copied onto their
+message ids (under the configured model, `jev-latest` by default) and the legacy
+table is dropped; a message whose model changed before the upgrade has no
+matching row and is judged once more.
+Databases previously opened by the settings or classifier branch are upgraded in
+place; existing contacts and settings are preserved. Unknown newer schemas
 are rejected with a diagnostic and exit status 1 before the UI starts.
-Afterwards the file is yours, so deleting it just re-seeds on the next start.
-Everything else the app tracks (rules, themes) still comes from the fixtures.
-Messages come from the fixtures until a Gmail account is linked (below).
+The app starts with an empty mailbox and contacts database; mail appears after
+linking a Gmail account. Sample mailbox and contacts data lives under
+`tests/fixtures/` for tests only.
 
 ### Nightly builds
 
@@ -239,8 +246,8 @@ Not supported yet: sending from Gmail.
 ```
 src/
 ├── model/        # triage states, undo, snooze, outbox (pure logic; split by concern)
-├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding
-├── judge/        # System 1 classifier interface, stub provider, routing policy
+├── contacts/     # SQLite address book: schema + migrations, CRUD, search, groups, seeding, cached classifier answers
+├── judge/        # System 1 classifier interface, Jev provider + wire mapping, routing policy
 ├── summary.rs    # thread summarizer interface + stub
 ├── search.rs     # structured query: parse, display, edit, match
 ├── filters.rs    # what the filter pills and picker offer (fields, values, quick filters); pure
@@ -254,9 +261,8 @@ src/
 ├── preview.rs    # plain-text snippets and the Preview lines setting (pure)
 └── app/          # GPUI views: main window, palette, compose, panels; icons.rs is the icon language table, row.rs the row frame
     └── mail_app/ # MailApp split by concern: accessors, actions, modals, help, rows, list, reader (+ reader_tabs, reader_tabbar, reader_find, reader_findbar), render (+ grouping, mouse)
-fixtures/         # mock mailbox + the seed address book (contacts_seed.json, embedded at build time)
 themes/           # built-in themes (JSON, embedded at build time)
-tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs)
+tests/            # integration and headless UI tests; model/ and ui_ext/ are multi-module test crates (shared helpers in helpers.rs / harness.rs); fixtures/ is the test-only mailbox and address book (the `fixtures` feature)
 ```
 
 ### Window layout: Root and Resizable
@@ -269,7 +275,7 @@ The window's root view is gpui-kit's `Root` (`gpui_kit::open_window` wraps `Mail
 
 ### Adding a theme
 
-Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": …, "mode": "dark", "colors": { "background": "#…", … } }] }`; see `themes/one-dark-pro.json` for a fully authored example). Views read colors from `cx.theme()`; any key a theme omits falls back to the kit's default palette, so author tabs, buttons, inputs, popover, list, sidebar, title/status bar and scrollbar keys too. Triage colors (state, unread, urgent, spam, …) are derived from the kit's `primary`, `danger`, `warning` and `base.red/yellow/magenta/cyan/blue` colors, so a theme restyles them through those keys.
+Triage colors (state, urgent, spam, …) are derived from the kit's `primary`, `danger`, `warning` and `base.red/yellow/magenta/cyan/blue` colors, so a theme restyles them through those keys.
 
 - **Built-in:** add `themes/<name>.json` and list it in `BUILTIN` in `src/theme.rs`.
   The upstream collection is vendored from [GPUI Kit revision `f6438b84`](https://github.com/longbridge/gpui-kit/tree/f6438b84de2d727f6a689fa0f9cf0f5915ce0584/themes), under `themes/LICENSE-APACHE`. Every entry in each file's `themes` array is registered; the app's existing Tokyo Night palette takes precedence over the upstream variant with the same name.
@@ -277,7 +283,8 @@ Themes are gpui-kit `ThemeSet` JSON files (`{ "name": …, "themes": [{ "name": 
 
 ## 🗺️ Roadmap
 
-- [ ] Real classifier providers: TypeSafe Jev, then Ollama and OpenAI-compatible APIs
+- [x] Real classifier provider: TypeSafe Jev (BYOK; key in the OS keychain, endpoint and model configurable)
+- [ ] More classifier providers: Ollama and OpenAI-compatible APIs
 - [ ] Bring-your-own provider for summaries
 - [ ] Review queue alongside the inline badges
 - [ ] Folders or streams driven by classifier labels

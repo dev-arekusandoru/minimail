@@ -13,7 +13,7 @@ use mail_classifier::app::row::{
     shows_account_icon, thread_preview_lines, thread_row_height,
 };
 use mail_classifier::app::MailApp;
-use mail_classifier::judge::Kind;
+use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
 use mail_classifier::model::{Location, Mailbox, MessageId, Tag};
 
 struct Harness<'a> {
@@ -39,7 +39,9 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
             cx,
             |window, cx| {
                 let view = cx.new(|cx| {
-                    MailApp::new(mail_classifier::model::Mailbox::load_default(), window, cx)
+                    let mut app = MailApp::new(mail_classifier::model::Mailbox::load_default(), window, cx);
+                    app.set_judge(Some(std::sync::Arc::new(mail_classifier::judge::StubJudge)), cx);
+                    app
                 });
                 window.focus(&view.focus_handle(cx), cx);
                 view
@@ -51,6 +53,12 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     let mut h = Harness { cx, window, app };
     h.keys("");
     h
+}
+
+/// The cursor / open / selected cues of `id`, apart from the labels the classifier applied.
+fn cues(h: &mut Harness<'_>, id: MessageId) -> (bool, bool, bool) {
+    let v = h.read(|a| a.row_visual(id));
+    (v.cursor, v.open, v.selected)
 }
 
 impl Harness<'_> {
@@ -121,7 +129,6 @@ fn overflow_keeps_top_priority_icons_and_lists_the_rest() {
     assert_eq!(glyphs[0], Glyph::PossibleSpam, "most important first");
     let (shown, hidden) = split_overflow(&glyphs, 3);
     assert_eq!(shown, [Glyph::PossibleSpam, Glyph::UrgentHigh, Glyph::NeedsReply]);
-    assert!(hidden.contains(&Glyph::UrgentLow), "low-signal glyphs only appear in +N");
     assert!(hidden.contains(&Glyph::KindReceipt));
     assert_eq!(shown.len() + hidden.len(), glyphs.len());
 }
@@ -133,12 +140,59 @@ fn narrower_panels_show_fewer_icons() {
 }
 
 #[test]
-fn suggestion_is_first_and_low_signal_never_takes_a_slot() {
-    let glyphs = [Glyph::UrgentLow, Glyph::KindOther, Glyph::PossibleSpam];
+fn folder_suggestion_is_first_and_low_signal_never_takes_a_slot() {
+    let glyphs = [Glyph::KindOther, Glyph::PossibleSpam];
     let (shown, hidden) = split_overflow(&glyphs, 4);
     assert_eq!(shown, [Glyph::PossibleSpam]);
-    assert_eq!(hidden, [Glyph::UrgentLow, Glyph::KindOther]);
-    assert_eq!(Glyph::Suggestion.spec().priority, 0);
+    assert_eq!(hidden, [Glyph::KindOther]);
+    assert_eq!(Glyph::FolderSuggestion.spec().priority, 0);
+}
+
+#[test]
+fn pending_suggestions_use_their_own_row_glyphs() {
+    let spam = Suggestion {
+        message: 1,
+        key: QuestionKey::Spam,
+        answer: Answer { probabilities: vec![0.1, 0.9], value: AnswerValue::Bool(true), confidence: 0.9 },
+    };
+    let folder = Suggestion {
+        message: 1,
+        key: QuestionKey::Folder,
+        answer: Answer { probabilities: vec![0.3, 0.7], value: AnswerValue::Choice(1), confidence: 0.7 },
+    };
+    let low_urgency = Suggestion {
+        message: 1,
+        key: QuestionKey::Urgency,
+        answer: Answer { probabilities: vec![0.6, 0.4], value: AnswerValue::Score(2.0), confidence: 0.6 },
+    };
+    let pending = vec![&spam, &folder, &low_urgency];
+    let glyphs = glyphs_for(&GlyphInputs {
+        tags: &[],
+        pending: &pending,
+        muted: false,
+        new_sender: false,
+        snoozed: false,
+        attachment: false,
+    });
+    assert!(glyphs.contains(&Glyph::PossibleSpam), "spam suggestion keeps its icon");
+    assert!(glyphs.contains(&Glyph::FolderSuggestion), "a folder suggestion gets its own glyph");
+    assert_eq!(glyphs.len(), 2, "an urgency-2 suggestion adds no row icon");
+}
+
+#[test]
+fn urgency_below_four_shows_no_row_icon() {
+    for level in [1, 2, 3] {
+        let tag = Tag::Urgent(level);
+        let glyphs = glyphs_for(&GlyphInputs {
+            tags: std::slice::from_ref(&tag),
+            pending: &[],
+            muted: false,
+            new_sender: false,
+            snoozed: false,
+            attachment: false,
+        });
+        assert!(glyphs.is_empty(), "urgency {level} shows no row icon");
+    }
 }
 
 #[test]
@@ -175,11 +229,7 @@ fn open_and_cursor_states_are_independent_and_combine(cx: &mut TestAppContext) {
     let ids = h.ids();
     let (first, second) = (ids[0], ids[1]);
     h.keys("enter");
-    assert_eq!(
-        h.read(|a| a.row_visual(first)),
-        RowVisual { cursor: true, open: true, selected: false, ..RowVisual::default() },
-        "cursor on the open row combines both cues"
-    );
+    assert_eq!(cues(&mut h, first), (true, true, false), "cursor on the open row combines both cues");
     assert!(h.read(|a| a.row_visual(first).combined()));
 
     h.keys("j");
@@ -201,8 +251,7 @@ fn selected_state_is_separate_from_cursor_and_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     h.keys("enter x j");
-    let v = h.read(|a| a.row_visual(ids[0]));
-    assert_eq!(v, RowVisual { cursor: false, open: true, selected: true, ..RowVisual::default() });
+    assert_eq!(cues(&mut h, ids[0]), (false, true, true));
 }
 
 #[gpui_kit::gpui::test]
@@ -210,7 +259,7 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
     let mut h = harness(cx);
     let first = h.ids()[0];
     let unread = h.read(|a| a.row_visual(first));
-    assert!(unread.unread, "new inbox messages expose the unread bar state");
+    assert!(unread.unread, "new inbox messages expose the unread state");
     assert!(!unread.selected);
 
     h.keys("x");
@@ -242,7 +291,7 @@ fn every_triage_tag_picks_its_own_badge() {
         (Tag::Reminder, Glyph::Reminder),
         (Tag::PossibleSpam, Glyph::PossibleSpam),
         (Tag::Urgent(5), Glyph::UrgentHigh),
-        (Tag::Urgent(3), Glyph::UrgentMid),
+        (Tag::Urgent(4), Glyph::UrgentMid),
         (Tag::Kind(Kind::Receipt), Glyph::KindReceipt),
     ];
     for (tag, expected) in cases {
@@ -314,28 +363,19 @@ fn outgoing_rows_are_labelled_by_recipient() {
 
 #[test]
 fn row_bar_state_uses_the_required_precedence() {
-    let state = |unread, urgent, selected, open| {
-        RowVisual { unread, urgent, selected, open, ..RowVisual::default() }.bar_state()
-    };
-    assert_eq!(state(true, false, false, false), BarState::Unread);
-    assert_eq!(state(true, true, false, false), BarState::Urgent);
-    assert_eq!(state(false, true, false, false), BarState::None);
-    assert_eq!(state(true, false, true, false), BarState::Selected);
-    assert_eq!(state(false, false, false, true), BarState::Selected);
-    assert_eq!(state(true, true, true, false), BarState::Selected);
-    assert_eq!(state(false, false, false, false), BarState::None);
-    assert_eq!(state(false, false, false, true), BarState::Selected);
+    let state = |selected, open| RowVisual { selected, open, ..RowVisual::default() }.bar_state();
+    assert_eq!(state(false, false), BarState::None);
+    assert_eq!(state(true, false), BarState::Selected);
+    assert_eq!(state(false, true), BarState::Selected);
+    assert_eq!(state(true, true), BarState::Selected);
     assert_eq!(
         RowVisual { partial: true, ..RowVisual::default() }.bar_state(),
         BarState::Partial
     );
     for bar in [
         RowVisual::default(),
-        RowVisual { unread: true, ..RowVisual::default() },
-        RowVisual { unread: true, urgent: true, ..RowVisual::default() },
         RowVisual { selected: true, ..RowVisual::default() },
         RowVisual { open: true, ..RowVisual::default() },
-        RowVisual { selected: true, urgent: true, ..RowVisual::default() },
     ] {
         let focused = RowVisual { cursor: true, ..bar };
         assert_eq!(focused.bar_state(), bar.bar_state(), "cursor does not replace bar state");

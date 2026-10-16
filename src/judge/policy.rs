@@ -62,6 +62,7 @@ impl Default for JudgePolicy {
                 (QuestionKey::ExpectsReply, Mode::Review),
                 (QuestionKey::Urgency, Mode::Auto(Confidence::Medium)),
                 (QuestionKey::Kind, Mode::Auto(Confidence::Low)),
+                (QuestionKey::Folder, Mode::Review),
             ]),
         }
     }
@@ -119,37 +120,48 @@ fn is_noop(_m: &Message, s: &Suggestion) -> bool {
         (QuestionKey::Kind, AnswerValue::Choice(i)) => {
             Kind::from_index(*i).is_none_or(|k| k == Kind::Other)
         }
+        // The last Folder option is "none": a no-op.
+        (QuestionKey::Folder, AnswerValue::Choice(i)) => *i + 1 >= s.answer.probabilities.len(),
         _ => true,
     }
 }
 
-/// Runs all triage questions over each message and routes every answer.
-/// Output is flat: for each message (in order), one entry per triage question
-/// (in `triage_questions` order). A judge error yields `Drop` for that message.
+/// Runs the incoming questions over each message and routes every answer. Output is flat:
+/// for each message (in order), one entry per question. A judge error yields `Drop` for that
+/// message. Folders are unknown here, so the Folder question is not asked.
 pub fn classify(judge: &dyn Judge, policy: &JudgePolicy, msgs: &[&Message]) -> Vec<Routed> {
-    let questions = triage_questions();
+    let specs = incoming_questions(policy, false, &[]);
+    let questions: Vec<(QuestionKey, Question)> =
+        specs.iter().map(|s| (s.key, s.question.clone())).collect();
     let mut out = Vec::with_capacity(msgs.len() * questions.len());
     for m in msgs {
-        let answers = match judge.judge(&message_state(m), &questions) {
-            Ok(a) => a,
-            Err(_) => {
-                out.extend(questions.iter().map(|_| Routed::Drop));
-                continue;
-            }
-        };
-        for (key, answer) in answers {
+        match judge.judge(&message_state(m, ""), &questions) {
+            Ok(answers) => out.extend(route(policy, m, answers)),
+            Err(_) => out.extend(questions.iter().map(|_| Routed::Drop)),
+        }
+    }
+    out
+}
+
+/// Routes already-fetched answers for one message, in answer order. Used both
+/// by [`classify`] and when replaying cached answers at read time. Only a Folder suggestion is
+/// queued for review — it moves the message — while every other label is applied straight away
+/// (the row menu is where the user corrects one). Folder is `Review` unless it is Off.
+pub fn route(policy: &JudgePolicy, m: &Message, answers: Vec<(QuestionKey, Answer)>) -> Vec<Routed> {
+    answers
+        .into_iter()
+        .map(|(key, answer)| {
             let s = Suggestion {
                 message: m.id,
                 key,
                 answer,
             };
-            out.push(match policy.mode(key) {
+            match policy.mode(key) {
                 _ if is_noop(m, &s) => Routed::Drop,
                 Mode::Off => Routed::Drop,
-                Mode::Auto(c) if s.answer.confidence >= c.threshold() => Routed::Auto(s),
-                Mode::Auto(_) | Mode::Review => Routed::Review(s),
-            });
-        }
-    }
-    out
+                _ if key == QuestionKey::Folder => Routed::Review(s),
+                _ => Routed::Auto(s),
+            }
+        })
+        .collect()
 }
