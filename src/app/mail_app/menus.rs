@@ -54,6 +54,17 @@ impl MailApp {
             })
     }
 
+    /// The `context_menu` builder for a right-click on some element: exactly the rows and
+    /// dispatch [`Self::menu_trigger`] gives, reached by a right-click instead of a button.
+    pub(super) fn context_menu(
+        &self,
+        kind: MenuKind,
+        cx: &Context<Self>,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let owner = cx.weak_entity();
+        move |menu, window, cx| Self::populate_menu(owner.clone(), kind, menu, window, cx)
+    }
+
     /// Fill `menu` with the rows `kind` holds right now. Any trigger can use this as its builder:
     /// a button's `dropdown_menu`, a row's `context_menu`, or a chip's.
     pub(super) fn populate_menu(

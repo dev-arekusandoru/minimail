@@ -6,7 +6,7 @@ use gpui_kit::TestAppContext;
 use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
 use mail_classifier::model::{Tag, TriageState};
 
-use crate::harness::{Harness, harness_with, mailbox, msg};
+use crate::harness::{Harness, harness_with, html_msg, mailbox, msg};
 
 /// The five Kind rows of the menu, as the menu labels them.
 const KINDS: [(&str, Kind); 5] = [
@@ -204,4 +204,25 @@ fn a_hand_set_label_is_one_undo_step(cx: &mut TestAppContext) {
     assert_eq!(kind_of(&mut h), Some(Kind::Newsletter), "the label stays");
     h.keys("u");
     assert_eq!(kind_of(&mut h), classified, "the label came off in one step");
+}
+
+/// The row's right-click shows the reader `⋯` menu item for item: both build from `menu_items`.
+#[gpui_kit::gpui::test]
+fn the_row_right_click_opens_the_reader_menu(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[html_msg()]));
+    h.keys("enter");
+    let id = h.read(|a| a.opened()).expect("a message is open");
+
+    h.click(("btn-message-more", id as usize));
+    let mut reader_menu = h.rows();
+    h.keys("escape");
+    assert!(h.rows().is_empty(), "the reader menu closed");
+
+    h.right_click(("row", id as usize));
+    let mut list_menu = h.rows();
+    // The snapshot walk does not report rows in the order the menu draws them, so compare as
+    // sets: the order itself comes from the one builder both menus share.
+    list_menu.sort();
+    reader_menu.sort();
+    assert_eq!(list_menu, reader_menu, "the right-click menu is the reader's, item for item");
 }

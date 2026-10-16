@@ -1,7 +1,6 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::ContextMenuExt as _;
-use gpui_kit::component::menu::PopupMenu;
 use super::*;
 
 impl MailApp {
@@ -173,13 +172,9 @@ impl MailApp {
         let label = (SharedString::from(sender.clone()), SharedString::from(msg.subject.clone()));
         let container = div().id(("row", ix_id)).h(px(self.message_row_h()));
         let container = self.draggable(container, &row_ids, self.thread_of(msg.id), label);
-        // Right-clicking the row's body opens the same classifier menu as its icons.
-        let owner = cx.weak_entity();
-        let menu_id = msg.id;
-        let classifier_menu =
-            move |menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>| -> PopupMenu {
-                Self::populate_menu(owner.clone(), MenuKind::Classifier(menu_id), menu, window, cx)
-            };
+        // Right-clicking the row's body opens the same menu as the reader's `⋯`, both built by
+        // `populate_menu`.
+        let menu = self.context_menu(MenuKind::Message(msg.id), cx);
         row::frame(container, visual, t)
             .child(self.row_selection_target(ix, cx))
             .child(
@@ -193,7 +188,7 @@ impl MailApp {
                     .justify_center()
                     .overflow_hidden()
                     .on_click(Self::row_click(ix, cx))
-                    .context_menu(classifier_menu)
+                    .context_menu(menu)
                     .child(
                         div()
                             .h(px(18.))
