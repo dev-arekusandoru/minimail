@@ -137,11 +137,17 @@ fn reset_to_suggestion_restores_the_classifier_value(cx: &mut TestAppContext) {
 
     open_row_menu(&mut h);
     h.hover_row("Kind");
+    assert!(!h.has_row("Reset Kind to suggestion"), "automatic labels have nothing to reset");
     h.click_row(label);
     open_row_menu(&mut h);
     h.hover_row("Kind");
+    assert!(h.has_row("Reset Kind to suggestion"), "manual labels can be reset");
     h.click_row("Reset Kind to suggestion");
     assert_eq!(kind_of(&mut h), Some(classified), "the classifier's value is back");
+    open_row_menu(&mut h);
+    h.hover_row("Kind");
+    assert!(!h.has_row("Reset Kind to suggestion"), "reset removes the override");
+    h.keys("escape");
 
     // Not sticky any more: the next classification may overwrite it again.
     h.keys("c");
@@ -169,6 +175,7 @@ fn an_urgency_set_in_the_menu_survives_reclassification(cx: &mut TestAppContext)
     let mut h = harness_with(cx, spam_box());
     open_row_menu(&mut h);
     h.hover_row("Urgency");
+    assert!(!h.has_row("Reset Urgency to suggestion"));
     h.click_row("Very urgent");
     assert!(h.has_tag(1, Tag::Urgent(5)));
 
@@ -178,6 +185,7 @@ fn an_urgency_set_in_the_menu_survives_reclassification(cx: &mut TestAppContext)
     // "None" (level 1) clears the tag but still sticks.
     open_row_menu(&mut h);
     h.hover_row("Urgency");
+    assert!(h.has_row("Reset Urgency to suggestion"));
     h.click_row("None");
     assert!(!h.has_tag(1, Tag::Urgent(5)));
     h.keys("c");

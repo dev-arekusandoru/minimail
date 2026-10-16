@@ -42,7 +42,17 @@ impl MailApp {
     }
 
     pub(super) fn open_palette(&mut self, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
-        let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), window, cx));
+        let targets = self.label_targets(None);
+        let commands = crate::app::actions::commands()
+            .into_iter()
+            .filter(|spec| {
+                let action = (spec.action)();
+                action.as_any().downcast_ref::<ResetLabel>().is_none_or(|reset| {
+                    targets.iter().any(|id| self.mailbox.is_overridden(*id, reset.key))
+                })
+            })
+            .collect();
+        let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), commands, window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &palette,
             window,

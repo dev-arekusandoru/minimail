@@ -6,7 +6,9 @@ use gpui_kit::component::ActiveTheme as _;
 
 use std::rc::Rc;
 
-use crate::app::actions::{self, Category, CommandSpec, PALETTE_CONTEXT, ToggleCommandPalette};
+use crate::app::actions::{Category, CommandSpec, PALETTE_CONTEXT, ToggleCommandPalette};
+#[cfg(test)]
+use crate::app::actions;
 use crate::app::ui::shortcut_chips;
 use crate::fuzzy;
 use crate::search::Query;
@@ -38,12 +40,12 @@ enum Target {
 
 impl CommandPalette {
     /// A palette showing `query` (empty for the full list).
-    pub fn new(query: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(query: &str, commands: Vec<CommandSpec>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| CommandState::new(window, cx));
         if !query.is_empty() {
             state.update(cx, |state, cx| state.set_query(query, window, cx));
         }
-        Self { state, query: query.to_owned(), commands: actions::commands() }
+        Self { state, query: query.to_owned(), commands }
     }
 
     /// Focus the search field.

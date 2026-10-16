@@ -166,9 +166,11 @@ impl MailApp {
             );
         }
         items.push(MenuItem::separator());
-        items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
-            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
-        }));
+        if self.mailbox.is_overridden(id, QuestionKey::Kind) {
+            items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
+                Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
+            }));
+        }
         items.push(
             MenuItem::action_fn("No kind", move || Box::new(SetKind { message: Some(id), kind: None }))
                 .checked(current.is_none()),
@@ -194,10 +196,12 @@ impl MailApp {
                 .checked(current == level),
             );
         }
-        items.push(MenuItem::separator());
-        items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
-            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
-        }));
+        if self.mailbox.is_overridden(id, QuestionKey::Urgency) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
+                Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
+            }));
+        }
         items
     }
 
