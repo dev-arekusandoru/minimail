@@ -43,6 +43,29 @@ fn is_reply_header(line: &str) -> bool {
         || (lower.starts_with("from:") && lower.contains("sent:"))
 }
 
+/// Removes HTML tags (`<br />`, `</p>`) that text bodies sometimes carry, leaving a space in
+/// their place. A `<` not followed by a tag shape is kept as text.
+fn strip_tags(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find('<') {
+        let after = &rest[start + 1..];
+        match after.find('>') {
+            Some(end) if after.starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!') => {
+                out.push_str(&rest[..start]);
+                out.push(' ');
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..=start]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Plain-text snippet of `body`: quoted lines (`>`), everything after a signature
 /// delimiter or reply header, and blank lines are dropped; whitespace is collapsed to
 /// single spaces; the result is capped at [`MAX_CHARS`] characters (ellipsis-free, the
@@ -53,7 +76,8 @@ pub fn snippet(body: &str) -> String {
         if is_signature_delimiter(line) || is_reply_header(line) {
             break;
         }
-        let line = line.trim();
+        let stripped = strip_tags(line);
+        let line = stripped.trim();
         if line.is_empty() || line.starts_with('>') {
             continue;
         }
@@ -73,5 +97,16 @@ pub fn snippet(body: &str) -> String {
             out
         }
         None => out,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snippet;
+
+    #[test]
+    fn snippet_drops_html_tags_and_keeps_bare_angle_brackets() {
+        assert_eq!(snippet("Hello Alexandru,<br /> <br />A package is here."), "Hello Alexandru, A package is here.");
+        assert_eq!(snippet("a < b"), "a < b");
     }
 }
