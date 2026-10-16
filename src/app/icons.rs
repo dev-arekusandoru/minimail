@@ -366,7 +366,7 @@ fn tip(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
 
 /// The right-aligned icon cluster: `shown` icons with tooltips plus a `+N` chip whose tooltip
 /// lists `hidden`. `folder_hint` is the name of the folder a pending Folder suggestion points at;
-/// its glyph gets a dashed "pending" outline and the `Suggested Folder: <name>` tooltip. `id` must
+/// its glyph gets the `Suggested Folder: <name>` tooltip. `id` must
 /// be unique per row.
 pub fn cluster(
     shown: &[Glyph],
@@ -385,9 +385,6 @@ pub fn cluster(
         div()
             .id(("glyph", id * 32 + i))
             .flex_none()
-            .when(g == Glyph::FolderSuggestion, |d| {
-                d.p(px(1.)).rounded_sm().border_1().border_dashed().border_color(g.spec().token.color(t).opacity(0.7))
-            })
             .child(icon(g, t, 13.))
             .tooltip(tip(label))
     });

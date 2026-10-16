@@ -124,7 +124,7 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 
 | Icon | Meaning | Token |
 |---|---|---|
-| FolderInput | Suggested folder — a dashed outline marks it pending (`y` accept, `n` reject) | accent |
+| FolderInput | Suggested folder, shown while pending (`y` accept, `n` reject) | accent |
 | ShieldAlert | Possible spam | possible_spam |
 | Reply | Needs reply | needs_reply |
 | Hourglass | Awaiting reply (a reply was sent, an answer is expected) | awaiting |
