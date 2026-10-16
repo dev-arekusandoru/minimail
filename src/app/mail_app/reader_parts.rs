@@ -132,26 +132,6 @@ impl<'a> Look<'a> {
             .on_click(run(action))
     }
 
-    pub fn primary_action_button<A: Action + Clone>(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        tip: &str,
-        key: &str,
-        action: A,
-        cx: &App,
-    ) -> Button {
-        button(id, label, tip, key, cx)
-            .gap_1()
-            .when(!key.is_empty(), |b| {
-                b.child(
-                    self.keycap(key)
-                        .text_color(cx.theme().primary_foreground)
-                        .bg(cx.theme().primary),
-                )
-            })
-            .on_click(run(action))
-    }
 }
 
 /// Avatar colours for a sender: the initials pick one of twelve evenly spaced hues, so the same

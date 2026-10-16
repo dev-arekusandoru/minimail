@@ -12,14 +12,12 @@ use crate::reading;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{SelectableText, TextSelection};
-use gpui_kit::component::alert::Alert;
 use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::separator::Separator;
-use gpui_kit::component::text::Text;
 use gpui_kit::component::tooltip::Tooltip;
 
 impl MailApp {
@@ -356,46 +354,23 @@ impl MailApp {
 
     /// New-sender and possible-spam banners, with their action buttons.
     fn banners(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Vec<AnyElement> {
-        // The kit `Alert` has no action slot, so its buttons sit beside it.
-        let row = |alert: Alert, actions: Div| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(div().flex_1().min_w_0().child(alert))
-                .child(actions)
-                .into_any_element()
-        };
-        let actions = || div().flex().flex_none().items_center().gap_2();
         let mut out = Vec::new();
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
-            out.push(row(
-                Alert::warning(
-                    "banner-new-sender",
-                    Text::from(selectable_verbatim(
-                        ("reader-sel-new-sender", u64::from(m.id)),
-                        &format!("New sender · {} <{}>", m.from_name, m.from_email),
-                    )),
-                )
-                .banner(),
-                actions()
-                    .child(look.action_button(
-                        "btn-banner-allow",
-                        "Allow",
-                        "Allow this sender",
-                        "a",
-                        AllowSender,
-                        cx,
-                    ))
-                    .child(look.action_button(
-                        "btn-banner-block",
-                        "Block",
-                        "Block this sender",
-                        "b",
-                        BlockSender,
-                        cx,
-                    )),
+            let actions = div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .child(look.action_button("btn-banner-block", "Block", "Block this sender", "b", BlockSender, cx).ghost())
+                .child(look.action_button("btn-banner-allow", "Allow", "Allow this sender", "a", AllowSender, cx).primary());
+            out.push(suggestion_banner(
+                "banner-new-sender",
+                Glyph::NewSender.spec().icon,
+                "New sender",
+                selectable_verbatim(("reader-sel-new-sender", u64::from(m.id)), &format!("{} <{}>", m.from_name, m.from_email)).into_any_element(),
+                look.t.info,
+                look.t.foreground,
+                actions,
             ));
         }
         if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
@@ -404,133 +379,53 @@ impl MailApp {
         out
     }
 
-    /// The `Possible spam` banner: one full-width strip in the danger tint, the label on the left
-    /// and its actions inside it, right-aligned. `Not spam` clears the flag (one undo step), then
-    /// `Block & Delete` and `Delete`.
+    /// Accepting a spam suggestion uses the danger variant on Delete; other actions stay quiet.
     fn spam_banner(&self, id: MessageId, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
-        let t = &look.t;
-        div()
-            .id("banner-possible-spam")
-            .test_support()
-            .flex_none()
+        let actions = div()
             .flex()
+            .flex_none()
             .items_center()
-            .gap_3()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(t.danger.opacity(0.5))
-            .bg(t.danger.opacity(0.08))
-            .child(Icon::new(Glyph::PossibleSpam.spec().icon).with_size(px(14.)).text_color(t.danger))
+            .gap_2()
+            .child(look.action_button("btn-banner-spam-not", "Not spam", "Clear the Possible spam flag", "", SetSpam { message: Some(id), spam: false }, cx).ghost())
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(px(13.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(t.foreground)
-                    .child(SelectableText::new(("reader-sel-spam", u64::from(id)), "Possible spam")),
+                look.action_button("btn-banner-spam-block", "Block & Delete", "Block the sender and delete this message", "", SpamBlock, cx)
+                    .ghost()
+                    .ml_2(),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap_2()
-                    .child(look.primary_action_button(
-                        "btn-banner-spam-not",
-                        "Not spam",
-                        "Clear the Possible spam flag",
-                        "",
-                        SetSpam { message: Some(id), spam: false },
-                        cx,
-                    ))
-                    .child(
-                        look.action_button(
-                            "btn-banner-spam-block",
-                            "Block & Delete",
-                            "Block the sender and delete this message",
-                            "",
-                            SpamBlock,
-                            cx,
-                        )
-                        .danger(),
-                    )
-                    .child(
-                        look.action_button("btn-banner-spam-delete", "Delete", "Delete this message", "d", Delete, cx)
-                            .ghost(),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    /// The slim folder-only strip under the labels row: the pending Folder suggestion's target,
-    /// with `Move` (`y`, accepts) and `Dismiss` (`n`, rejects). `None` when no folder suggestion
-    /// is pending.
-    fn folder_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
-        let t = &look.t;
-        let s = self.mailbox.pending(m.id).into_iter().find(|s| s.key == QuestionKey::Folder)?;
-        let folder = self.mailbox.suggested_folder(s)?;
-        let accent = Glyph::FolderSuggestion.spec().token.color(t);
-        Some(
-            div()
-                .id("reader-folder-suggestion")
-                .test_support()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .py_1()
-                .min_h(px(30.))
-                .rounded_md()
-                .border_1()
-                .border_dashed()
-                .border_color(accent.opacity(0.5))
-                .bg(accent.opacity(0.08))
-                .child(icons::icon(Glyph::FolderSuggestion, t, 14.))
-                .child(div().text_size(px(12.5)).text_color(t.muted_foreground).child("Suggested folder"))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(13.))
-                        .text_color(t.foreground)
-                        .child(self.mailbox.folder_path(folder)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            look.primary_action_button(
-                                "btn-folder-move",
-                                "Move",
-                                "Move the message to the suggested folder",
-                                "y",
-                                AcceptSuggestions,
-                                cx,
-                            ),
-                        )
-                        .child(
-                            look.action_button(
-                                "btn-folder-dismiss",
-                                "Dismiss",
-                                "Dismiss the suggested folder",
-                                "n",
-                                RejectSuggestions,
-                                cx,
-                            )
-                            .ghost(),
-                        ),
-                )
-                .into_any_element(),
+            .child(look.action_button("btn-banner-spam-delete", "Delete", "Delete this message", "d", Delete, cx).danger());
+        suggestion_banner(
+            "banner-possible-spam",
+            Glyph::PossibleSpam.spec().icon,
+            "Possible spam",
+            div().into_any_element(),
+            look.t.danger,
+            look.t.foreground,
+            actions,
         )
     }
+
+    /// The pending Folder suggestion: `Move` (`y`) accepts and `Dismiss` (`n`) rejects.
+    fn folder_strip(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Option<AnyElement> {
+        let s = self.mailbox.pending(m.id).into_iter().find(|s| s.key == QuestionKey::Folder)?;
+        let folder = self.mailbox.suggested_folder(s)?;
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .child(look.action_button("btn-folder-dismiss", "Dismiss", "Dismiss the suggested folder", "n", RejectSuggestions, cx).ghost())
+            .child(look.action_button("btn-folder-move", "Move", "Move the message to the suggested folder", "y", AcceptSuggestions, cx).primary());
+        Some(suggestion_banner(
+            "reader-folder-suggestion",
+            Glyph::FolderSuggestion.spec().icon,
+            "Suggested folder",
+            div().min_w_0().truncate().text_size(px(13.)).text_color(look.t.foreground).child(self.mailbox.folder_path(folder)).into_any_element(),
+            look.t.info,
+            look.t.foreground,
+            actions,
+        ))
+    }
+
 
     /// Debug-only: every stored classifier answer of `m`, with its version, value, confidence,
     /// probabilities and the routing the current policy gives it. `None` when nothing is cached.
@@ -781,6 +676,44 @@ impl MailApp {
     }
 }
 
+/// Shared frame for reader suggestions; only the icon and subtle tint vary by meaning.
+fn suggestion_banner(
+    id: &'static str,
+    icon: IconName,
+    title: &'static str,
+    detail: AnyElement,
+    tint: Hsla,
+    foreground: Hsla,
+    actions: Div,
+) -> AnyElement {
+    div()
+        .id(id)
+        .test_support()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_3()
+        .min_h(px(38.))
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(tint.opacity(0.22))
+        .bg(tint.opacity(0.06))
+        .child(Icon::new(icon).with_size(px(14.)).text_color(tint))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().flex_none().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(foreground).child(title))
+                .child(detail),
+        )
+        .child(actions)
+        .into_any_element()
+}
 /// Background of a message card. The embedded web page, its loading skeleton and its
 /// no-snapshot fallback all paint this same color, so the card never shows a seam between
 /// them; the token keeps light and dark in step.
