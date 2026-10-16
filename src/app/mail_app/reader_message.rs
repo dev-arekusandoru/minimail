@@ -96,7 +96,7 @@ impl MailApp {
             .when_some(self.classification_state(m.id), |d, state| {
                 d.child(icons::classification_badge(("reader-classify", id), state, t, 13.))
             })
-            .when(opened && !m.outgoing, |d| {
+            .when(opened && !m.outgoing && self.cached_answers(mid).is_none_or(|answers| answers.is_empty()), |d| {
                 d.child(
                     icon_button(("btn-classify", id), IconName::ScanSearch, "Classify this message", "", cx)
                         .on_click(cx.listener(move |this, _, _, cx| this.classify_message(mid, cx))),

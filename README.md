@@ -138,6 +138,7 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 | User / Receipt / Newspaper / Bell / Tag | Kind: person / receipt / newsletter / notification / other (other only in `+N`) | kind |
 
 To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`. The reader's **Classify** button and the global *Classify* command use the `ScanSearch` icon.
+The reader hides **Classify** once the message has cached answers; `c` and the global command can still classify it again.
 
 ## 🛠️ Development
 

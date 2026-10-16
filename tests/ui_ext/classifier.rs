@@ -99,6 +99,18 @@ fn installing_a_judge_classifies_each_inbox_message_once(cx: &mut TestAppContext
 }
 
 #[gpui_kit::gpui::test]
+fn reader_classify_button_disappears_after_answers_are_cached(cx: &mut TestAppContext) {
+    let mut h = harness_with_judge(cx, spam_message(), None);
+    h.keys("enter");
+    assert!(h.has(("btn-classify", 1_usize)));
+
+    h.set_judge(Some(Arc::new(StubJudge)));
+    h.keys("escape");
+    h.keys("enter");
+    assert!(!h.has(("btn-classify", 1_usize)));
+}
+
+#[gpui_kit::gpui::test]
 fn c_re_asks_jev_about_the_selected_message_even_when_cached(cx: &mut TestAppContext) {
     let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
     let mut h = harness_with_judge(cx, spam_message(), Some(Arc::new(judge)));
