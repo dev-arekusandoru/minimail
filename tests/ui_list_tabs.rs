@@ -104,7 +104,9 @@ impl Harness<'_> {
     /// Drag tab slot `from` onto slot `to` in the list strip, the way the kit's dock test does.
     fn drag_tab(&mut self, from: usize, to: usize) {
         self.cx
-            .update_window(self.window, |_, window, cx| window.within("tab-bar").drag_to(from, to, cx))
+            .update_window(self.window, |_, window, cx| {
+                window.drag_to(("list-tab", from), ("list-tab", to), cx)
+            })
             .expect("window alive");
         self.cx.run_until_parked();
         // The drag edits the dock's own tree; the app reads it back on its next frame.

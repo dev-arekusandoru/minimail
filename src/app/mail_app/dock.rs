@@ -92,10 +92,8 @@ impl Dock {
     ) -> Self {
         let app_entity = cx.entity();
         let (area, skin) = DockSkin::dock_area("mail", None, window, cx);
-        // `Auto`, not `TabBar`: under `Auto` a group of one panel draws a plain title
-        // only when that panel asks for one, so the list — `title_bar() == false` —
-        // stays bare while a reader group of two or more draws the full tab bar.
-        skin.set_panel_style(PanelStyle::Auto, cx);
+        // Keep the same tab chrome even when a group contains only one panel.
+        skin.set_panel_style(PanelStyle::TabBar, cx);
         // Our own close button lives in the reader tab's title, where it already was.
         skin.set_close_button_visible(false, cx);
         skin.set_toggle_button_visible(false, cx);
@@ -764,11 +762,6 @@ impl Panel for ListPanel {
         app.update(cx, |app, cx| app.list_tab(query.clone(), cx))
     }
 
-    /// The strip only when there is more than one view open: a group of one panel draws a
-    /// plain title bar under `Auto`, which would only repeat the list's own header.
-    fn title_bar(&self, cx: &App) -> bool {
-        self.app.read_with(cx, |app, _| app.list_tabs.len() > 1).unwrap_or(false)
-    }
     fn inner_padding(&self, _: &App) -> bool {
         false
     }
@@ -837,10 +830,6 @@ impl Panel for ReaderPanel {
             return div().into_any_element();
         };
         app.update(cx, |app, cx| app.reader_tab(thread, cx))
-    }
-
-    fn title_bar(&self, _: &App) -> bool {
-        self.thread.is_some()
     }
 
     fn inner_padding(&self, _: &App) -> bool {

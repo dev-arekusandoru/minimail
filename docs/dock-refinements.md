@@ -28,8 +28,10 @@ What that leaves, if it keeps bothering us:
 2. Give sidebar rows their own drop targets (S4) — the group preview would still show, but the
    drop would at least do what it looks like it will do.
 
-Consequence to remember: the strip is still the skin's, so a group with a single tab shows the
-skin's plain title bar and its `⋯` button. Both go away only with our own renderer.
+The strip is still the skin's, but all dock groups now use `PanelStyle::TabBar`, including
+single-tab groups: the same tab chrome replaces the skin's plain singleton title bar.
+Preview italics, sender avatars and our reader close button are unchanged. The sidebar
+is outside Dock and keeps its existing presentation.
 
 ## 2. Tabs on the message list
 
