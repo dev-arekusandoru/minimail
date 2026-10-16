@@ -176,6 +176,7 @@ impl MailApp {
         let answer = self.cached_answers(id)?.iter().find(|a| a.key == key)?;
         match (key, &answer.answer.value) {
             (QuestionKey::Spam, AnswerValue::Bool(true)) => Some(Tag::PossibleSpam),
+            (QuestionKey::NeedsReply, AnswerValue::Bool(true)) => Some(Tag::NeedsReply),
             (QuestionKey::Urgency, AnswerValue::Score(v)) => {
                 Tag::for_urgency(v.round().clamp(1.0, 5.0) as u8)
             }

@@ -165,6 +165,7 @@ fn replace_tag(tags: &mut Vec<Tag>, key: QuestionKey, tag: Option<Tag>) {
     tags.retain(|t| !matches!(
         (key, t),
         (QuestionKey::Spam, Tag::PossibleSpam)
+            | (QuestionKey::NeedsReply, Tag::NeedsReply)
             | (QuestionKey::Urgency, Tag::Urgent(_))
             | (QuestionKey::Kind, Tag::Kind(_))
     ));

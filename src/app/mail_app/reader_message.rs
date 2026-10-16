@@ -278,7 +278,12 @@ impl MailApp {
                     "reader-chip-spam",
                     self.spam_items(m.id),
                 ),
-                Tag::NeedsReply => ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply", Vec::new()),
+                Tag::NeedsReply => (
+                    "Needs reply",
+                    Glyph::NeedsReply,
+                    "reader-chip-needs-reply",
+                    self.needs_reply_items(m.id),
+                ),
                 Tag::AwaitingReply => (
                     "Awaiting reply",
                     Glyph::AwaitingReply,

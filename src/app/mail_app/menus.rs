@@ -117,11 +117,11 @@ impl MailApp {
         }
     }
 
-    /// The whole classifier menu of one message: Kind, Urgency, spam, then a pending folder
-    /// suggestion.
+    /// The whole classifier menu of one message: Kind, Urgency, needs reply, spam, then a pending
+    /// folder suggestion.
     pub(super) fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
         let mut items = self.kind_items(id);
-        for section in [self.urgency_items(id), self.spam_items(id), self.folder_items(id)] {
+        for section in [self.urgency_items(id), self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
             if !section.is_empty() {
                 items.push(MenuItem::separator());
                 items.extend(section);
@@ -179,6 +179,21 @@ impl MailApp {
         items
     }
 
+    /// The needs-reply section: one row, which way round depends on the tag.
+    pub(super) fn needs_reply_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let needs = self.mailbox.tags(id).contains(&Tag::NeedsReply);
+        vec![if needs {
+            MenuItem::action_fn("Doesn't need reply", move || {
+                Box::new(SetNeedsReply { message: Some(id), needs_reply: false })
+            })
+            .icon(Glyph::NeedsReply.spec().icon)
+        } else {
+            MenuItem::action_fn("Needs reply", move || {
+                Box::new(SetNeedsReply { message: Some(id), needs_reply: true })
+            })
+            .icon(Glyph::NeedsReply.spec().icon)
+        }]
+    }
 
     /// The spam section: one row, which way round depends on the flag. Spam never moves mail.
     pub(super) fn spam_items(&self, id: MessageId) -> Vec<MenuItem> {

@@ -120,6 +120,15 @@ pub struct SetSpam {
     pub spam: bool,
 }
 
+/// Mark a message as needing a reply (or not) by hand, from the row or reader menu or the
+/// palette. The flag never moves the message.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct SetNeedsReply {
+    pub message: Option<MessageId>,
+    pub needs_reply: bool,
+}
+
 /// Drop the label the user set by hand for `key`, putting the classifier's value back.
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
 #[action(namespace = mail, no_json)]
@@ -432,7 +441,7 @@ pub fn commands() -> Vec<CommandSpec> {
     ];
     // The classifier labels the row menu sets, on the cursor or the selection: the same actions,
     // with no key bindings of their own.
-    let labels: [(&str, CommandAction); 15] = [
+    let labels: [(&str, CommandAction); 17] = [
         ("Kind: Person", || Box::new(SetKind { message: None, kind: Some(Kind::Person) })),
         ("Kind: Receipt", || Box::new(SetKind { message: None, kind: Some(Kind::Receipt) })),
         ("Kind: Newsletter", || Box::new(SetKind { message: None, kind: Some(Kind::Newsletter) })),
@@ -453,6 +462,8 @@ pub fn commands() -> Vec<CommandSpec> {
             || Box::new(ResetLabel { message: None, key: QuestionKey::Urgency }),
         ),
         ("Mark as spam", || Box::new(SetSpam { message: None, spam: true })),
+        ("Needs reply", || Box::new(SetNeedsReply { message: None, needs_reply: true })),
+        ("Doesn't need reply", || Box::new(SetNeedsReply { message: None, needs_reply: false })),
         ("Not spam", || Box::new(SetSpam { message: None, spam: false })),
     ];
     for (name, action) in labels {

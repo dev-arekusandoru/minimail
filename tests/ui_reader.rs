@@ -11,7 +11,7 @@ use mail_classifier::model::{Mailbox, MessageId};
 #[path = "ui_ext/harness.rs"]
 #[allow(dead_code)]
 mod harness;
-use harness::{Harness, harness_with, json, msg};
+use harness::{Harness, NOON, harness_with, json, msg};
 
 /// `message` (a harness `msg()` JSON object) with extra top-level fields merged in.
 fn with_fields(message: String, fields: serde_json::Value) -> String {
@@ -25,6 +25,20 @@ fn with_fields(message: String, fields: serde_json::Value) -> String {
 
 fn mailbox_of(messages: &[String]) -> Mailbox {
     Mailbox::from_json(&json(messages)).expect("valid mailbox json")
+}
+
+/// Tag `id` NeedsReply through the classifier's own path.
+fn tag_needs_reply(mb: &mut Mailbox, id: MessageId) {
+    mb.add_suggestions(vec![Suggestion {
+        message: id,
+        key: QuestionKey::NeedsReply,
+        answer: Answer {
+            probabilities: vec![0.1, 0.9],
+            value: AnswerValue::Bool(true),
+            confidence: 0.9,
+        },
+    }]);
+    mb.accept_suggestions(id, NOON);
 }
 
 /// Two messages in one thread.
@@ -410,4 +424,22 @@ fn the_reader_more_menu_sets_a_classifier_label(cx: &mut TestAppContext) {
     h.hover_row("Classifier labels");
     h.click_row("Person");
     assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind section set the label");
+}
+
+/// The Needs reply chip's menu clears the tag as a user override, and one `u` brings it back.
+#[gpui_kit::gpui::test]
+fn needs_reply_chip_clears_the_tag_and_undo_restores_it(cx: &mut TestAppContext) {
+    use mail_classifier::model::Tag;
+    let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    tag_needs_reply(&mut mb, 1);
+    let mut h = harness_with(cx, mb);
+    h.keys("enter");
+    assert!(h.has_tag(1, Tag::NeedsReply));
+    h.click("chip-menu-reader-chip-needs-reply-1");
+    h.click_row("Doesn't need reply");
+    assert!(!h.has_tag(1, Tag::NeedsReply), "the chip's menu cleared the tag");
+    assert!(h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)), "the clear is a user override");
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::NeedsReply), "one undo step brings the tag back");
+    assert!(!h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)), "undo drops the override");
 }

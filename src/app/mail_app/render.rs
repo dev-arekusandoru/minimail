@@ -210,6 +210,9 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, a: &SetSpam, _, cx| {
                 this.set_spam_action(a.message, a.spam, cx)
             }))
+            .on_action(cx.listener(|this, a: &SetNeedsReply, _, cx| {
+                this.set_needs_reply_action(a.message, a.needs_reply, cx)
+            }))
             .on_action(cx.listener(|this, a: &ResetLabel, _, cx| {
                 this.reset_label_action(a.message, a.key, cx)
             }))

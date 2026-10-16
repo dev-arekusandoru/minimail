@@ -227,6 +227,12 @@ impl MailApp {
         self.set_label(&ids, QuestionKey::Spam, spam.then_some(Tag::PossibleSpam), cx);
     }
 
+    /// `SetNeedsReply`: set (or clear) the Needs reply tag by hand. It never moves the message.
+    pub(super) fn set_needs_reply_action(&mut self, message: Option<MessageId>, needs_reply: bool, cx: &mut Context<Self>) {
+        let ids = self.label_targets(message);
+        self.set_label(&ids, QuestionKey::NeedsReply, needs_reply.then_some(Tag::NeedsReply), cx);
+    }
+
     /// `ResetLabel`: drop the hand-set label and put the classifier's own value back.
     pub(super) fn reset_label_action(&mut self, message: Option<MessageId>, key: QuestionKey, cx: &mut Context<Self>) {
         let ids = self.label_targets(message);
