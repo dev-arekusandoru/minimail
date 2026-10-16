@@ -170,7 +170,7 @@ fn clicking_a_thread_message_row_toggles_just_that_message(cx: &mut TestAppConte
     assert!(h.read(|a| a.reader_expanded(others[0])));
     assert!(!h.read(|a| a.reader_expanded(others[1])), "siblings stay collapsed");
 
-    h.click(("reader-thread-msg", others[0] as usize));
+    h.click(("reader-thread-head", others[0] as usize));
     assert!(!h.read(|a| a.reader_expanded(others[0])));
 }
 
