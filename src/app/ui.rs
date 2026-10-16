@@ -61,18 +61,15 @@ pub fn button(
     label: impl Into<SharedString>,
     tip: &str,
     key: &str,
-    cx: &App,
+    _cx: &App,
 ) -> Button {
-    let t = cx.theme();
     key_tooltip(
         Button::new(id)
             .label(label)
             .xsmall()
             .h(px(22.))
             .px_2()
-            .text_size(px(11.))
-            .border_color(t.border)
-            .text_color(t.foreground),
+            .text_size(px(11.)),
         tip,
         key,
     )

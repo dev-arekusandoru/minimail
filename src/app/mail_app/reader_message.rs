@@ -468,15 +468,14 @@ impl MailApp {
                         .items_center()
                         .gap_2()
                         .child(
-                            look.action_button(
+                            look.primary_action_button(
                                 "btn-folder-move",
                                 "Move",
                                 "Move the message to the suggested folder",
                                 "y",
                                 AcceptSuggestions,
                                 cx,
-                            )
-                            .primary(),
+                            ),
                         )
                         .child(
                             look.action_button(
