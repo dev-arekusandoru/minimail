@@ -20,6 +20,13 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tooltip::Tooltip;
 
+/// What clicking a label chip does: open the override menu of the section it shows (an empty
+/// menu means nothing to choose, so the chip is a plain badge), or clear the flag it names.
+enum Chip {
+    Menu(Vec<MenuItem>),
+    Clear,
+}
+
 impl MailApp {
     /// Reply, Reply all, Forward and the `⋯` menu of one expanded message. All act on that
     /// message, whichever one the reader is opened on. Pressing them never counts as a click on
@@ -259,41 +266,42 @@ impl MailApp {
             .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
-            let (label, glyph, key, items) = match tag {
+            let (label, glyph, key, action) = match tag {
                 Tag::Urgent(level) => (
                     urgency_word(*level),
                     urgency_glyph(*level),
                     "reader-chip-urgency",
-                    Self::section("Urgency", self.urgency_items(m.id)),
+                    Chip::Menu(Self::section("Urgency", self.urgency_items(m.id))),
                 ),
                 Tag::Kind(kind) => (
                     Glyph::of_kind(*kind).spec().label,
                     Glyph::of_kind(*kind),
                     "reader-chip-kind",
-                    Self::section("Kind", self.kind_items(m.id)),
+                    Chip::Menu(Self::section("Kind", self.kind_items(m.id))),
                 ),
                 Tag::PossibleSpam => (
                     "Possible spam",
                     Glyph::PossibleSpam,
                     "reader-chip-spam",
-                    self.spam_items(m.id),
+                    Chip::Menu(self.spam_items(m.id)),
                 ),
-                Tag::NeedsReply => (
-                    "Needs reply",
-                    Glyph::NeedsReply,
-                    "reader-chip-needs-reply",
-                    self.needs_reply_items(m.id),
-                ),
+                Tag::NeedsReply => {
+                    ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply", Chip::Clear)
+                }
                 Tag::AwaitingReply => (
                     "Awaiting reply",
                     Glyph::AwaitingReply,
                     "reader-chip-awaiting-reply",
-                    Vec::new(),
+                    Chip::Menu(Vec::new()),
                 ),
-                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Vec::new()),
-                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder", Vec::new()),
+                Tag::FollowUp => {
+                    ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Chip::Menu(Vec::new()))
+                }
+                Tag::Reminder => {
+                    ("Reminder", Glyph::Reminder, "reader-chip-reminder", Chip::Menu(Vec::new()))
+                }
             };
-            row = row.child(self.chip(m.id, (key, label, glyph), items, look, cx));
+            row = row.child(self.chip(m.id, (key, label, glyph), action, look, cx));
         }
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             let spec = Glyph::NewSender.spec();
@@ -302,35 +310,53 @@ impl MailApp {
         row
     }
 
-    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With `items` it is a ghost
-    /// button that opens that section's override menu under the chip; without them it is a plain
-    /// badge (the reply-status chips).
+    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With a menu it is a ghost
+    /// button that opens that section's override menu under the chip; with `Clear` it clears the
+    /// flag it shows, one click; with an empty menu it is a plain badge (the reply-status chips).
     fn chip(
         &self,
         mid: MessageId,
         (key, label, glyph): (&'static str, &'static str, Glyph),
-        items: Vec<MenuItem>,
+        action: Chip,
         look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let badge = look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
         let wrapper = div().id((key, u64::from(mid))).test_support().aria_label(label);
-        if items.is_empty() {
-            return wrapper.child(badge).into_any_element();
+        let badge = || look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
+        let button = || {
+            Button::new(SharedString::from(format!("chip-menu-{key}-{mid}"))).ghost().h(px(18.)).px_0()
+        };
+        match action {
+            Chip::Clear => wrapper
+                .child(
+                    button()
+                        .tooltip("Clear this flag")
+                        .child(badge())
+                        .on_click(run(SetNeedsReply { message: Some(mid), needs_reply: false })),
+                )
+                .into_any_element(),
+            Chip::Menu(items) if items.is_empty() => wrapper.child(badge()).into_any_element(),
+            Chip::Menu(items) => {
+                let owner = cx.weak_entity();
+                wrapper
+                    .child(
+                        button().child(badge()).dropdown_menu_with_anchor(
+                            Anchor::TopRight,
+                            move |menu, window, cx| {
+                                MailApp::populate_items(
+                                    owner.clone(),
+                                    items.clone(),
+                                    Some(vec![mid]),
+                                    menu,
+                                    window,
+                                    cx,
+                                )
+                            },
+                        ),
+                    )
+                    .into_any_element()
+            }
         }
-        let owner = cx.weak_entity();
-        wrapper
-            .child(
-                Button::new(SharedString::from(format!("chip-menu-{key}-{mid}")))
-                    .ghost()
-                    .h(px(18.))
-                    .px_0()
-                    .child(badge)
-                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                        MailApp::populate_items(owner.clone(), items.clone(), Some(vec![mid]), menu, window, cx)
-                    }),
-            )
-            .into_any_element()
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.

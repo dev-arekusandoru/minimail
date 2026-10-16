@@ -205,20 +205,18 @@ impl MailApp {
         items
     }
 
-    /// The needs-reply section: one row, which way round depends on the tag.
+    /// The needs-reply row: the one that clears the flag, shown only while the message carries it.
+    /// Setting it again is the palette's or the classifier's job.
     pub(super) fn needs_reply_items(&self, id: MessageId) -> Vec<MenuItem> {
-        let needs = self.mailbox.tags(id).contains(&Tag::NeedsReply);
-        vec![if needs {
+        if !self.mailbox.tags(id).contains(&Tag::NeedsReply) {
+            return Vec::new();
+        }
+        vec![
             MenuItem::action_fn("Doesn't need reply", move || {
                 Box::new(SetNeedsReply { message: Some(id), needs_reply: false })
             })
-            .icon(Glyph::NeedsReply.spec().icon)
-        } else {
-            MenuItem::action_fn("Needs reply", move || {
-                Box::new(SetNeedsReply { message: Some(id), needs_reply: true })
-            })
-            .icon(Glyph::NeedsReply.spec().icon)
-        }]
+            .icon(Glyph::NeedsReply.spec().icon),
+        ]
     }
 
     /// The spam section: one row, which way round depends on the flag. Spam never moves mail.

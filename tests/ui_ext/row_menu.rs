@@ -4,9 +4,23 @@
 
 use gpui_kit::TestAppContext;
 use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
-use mail_classifier::model::{Tag, TriageState};
+use mail_classifier::model::{Mailbox, MessageId, Tag, TriageState};
 
 use crate::harness::{Harness, harness_with, html_msg, mailbox, msg};
+
+/// Tag `id` NeedsReply through the classifier's own path, so clearing it is the first override.
+fn tag_needs_reply(mb: &mut Mailbox, id: MessageId) {
+    mb.add_suggestions(vec![Suggestion {
+        message: id,
+        key: QuestionKey::NeedsReply,
+        answer: Answer {
+            probabilities: vec![0.1, 0.9],
+            value: AnswerValue::Bool(true),
+            confidence: 0.9,
+        },
+    }]);
+    mb.accept_suggestions(id, crate::harness::NOON);
+}
 
 /// The five Kind rows of the menu, as the menu labels them.
 const KINDS: [(&str, Kind); 5] = [
@@ -276,4 +290,37 @@ fn the_row_right_click_opens_the_reader_menu(cx: &mut TestAppContext) {
     list_menu.sort();
     reader_menu.sort();
     assert_eq!(list_menu, reader_menu, "the right-click menu is the reader's, item for item");
+}
+
+/// The needs-reply flag can be cleared from the shared menu, which carries the row only while
+/// the message has the flag; the clear is one user override and one undo step.
+#[gpui_kit::gpui::test]
+fn the_shared_menu_clears_needs_reply_only_while_it_is_set(cx: &mut TestAppContext) {
+    let mut mb = mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]);
+    tag_needs_reply(&mut mb, 1);
+    let mut h = harness_with(cx, mb);
+    assert!(h.has_tag(1, Tag::NeedsReply), "the classifier tagged it");
+
+    h.right_click(("row", 1usize));
+    h.hover_row("Classifier labels");
+    assert!(h.has_row("Doesn't need reply"), "the clear row is there while the flag is set");
+    h.click_row("Doesn't need reply");
+    assert!(!h.has_tag(1, Tag::NeedsReply), "the row cleared the flag");
+    assert!(
+        h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)),
+        "the clear is a user override, so reclassification cannot put it back"
+    );
+
+    h.right_click(("row", 1usize));
+    h.hover_row("Classifier labels");
+    assert!(!h.has_row("Doesn't need reply"), "and the row goes with the flag");
+    h.keys("escape");
+
+    // The reader's `⋯` builds the same rows, so the restored flag is clearable from there too.
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::NeedsReply), "one undo step brings the flag back");
+    h.keys("enter");
+    h.click(("btn-message-more", 1usize));
+    h.hover_row("Classifier labels");
+    assert!(h.has_row("Doesn't need reply"), "the reader menu shares the row");
 }
