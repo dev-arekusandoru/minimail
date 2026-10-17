@@ -7,6 +7,7 @@
 //! row, taken from the action's key binding.
 use std::rc::Rc;
 
+use gpui_kit::component::Side;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
@@ -93,6 +94,9 @@ pub fn populate(
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
+    // A checked row draws its check at the row's end: a row that carries an icon (every
+    // classifier label option does) fills the left slot with the icon instead.
+    let menu = menu.check_side(Side::Right);
     items.iter().fold(menu, |menu, item| match item {
         MenuItem::Separator => menu.separator(),
         MenuItem::Label(label) => menu.label(label.clone()),

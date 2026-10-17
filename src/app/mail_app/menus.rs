@@ -128,13 +128,22 @@ impl MailApp {
         }
     }
 
-    /// The whole classifier menu of one message: a `Kind` and an `Urgency` submenu to keep the
-    /// list of options off this level, then needs reply, spam, and a pending folder suggestion.
-    pub(super) fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
+    /// The whole classifier menu of one message: a `Kind` and an `Urgency` submenu, each labelled
+    /// with the value in force, to keep the list of options off this level; then needs reply,
+    /// spam, and a pending folder suggestion. Every surface that shows these options — the
+    /// reader's `⋯`, a row's right-click, a row's classifier icons, a reader chip — builds from
+    /// here, so they mark the current choice alike.
+    pub fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
         let mut items = vec![
-            MenuItem::submenu("Kind", self.kind_items(id)),
+            MenuItem::submenu(
+                labeled("Kind", self.kind_of(id).map(Self::kind_name)),
+                self.kind_items(id),
+            ),
             MenuItem::separator(),
-            MenuItem::submenu("Urgency", self.urgency_items(id)),
+            MenuItem::submenu(
+                labeled("Urgency", self.urgency_of(id).map(urgency_label)),
+                self.urgency_items(id),
+            ),
         ];
         for section in [self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
             if !section.is_empty() {
@@ -152,7 +161,7 @@ impl MailApp {
     }
 
     /// The Kind options: the five kinds, then the reset/clear actions. Headerless: the caller
-    /// labels the section.
+    /// labels the section. No kind is marked while the message carries none.
     pub(super) fn kind_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.kind_of(id);
         let mut items = Vec::new();
@@ -171,10 +180,9 @@ impl MailApp {
                 Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
             }));
         }
-        items.push(
-            MenuItem::action_fn("No kind", move || Box::new(SetKind { message: Some(id), kind: None }))
-                .checked(current.is_none()),
-        );
+        items.push(MenuItem::action_fn("No kind", move || {
+            Box::new(SetKind { message: Some(id), kind: None })
+        }));
         items
     }
 
@@ -193,7 +201,7 @@ impl MailApp {
                     Box::new(SetUrgency { message: Some(id), level })
                 })
                 .icon(glyph.spec().icon)
-                .checked(current == level),
+                .checked(current == Some(level)),
             );
         }
         if self.mailbox.is_overridden(id, QuestionKey::Urgency) {
@@ -253,16 +261,13 @@ impl MailApp {
         })
     }
 
-    /// The Urgency level on `id`: 1 when it carries no urgency tag.
-    fn urgency_of(&self, id: MessageId) -> u8 {
-        self.mailbox
-            .tags(id)
-            .iter()
-            .find_map(|tag| match tag {
-                Tag::Urgent(level) => Some(*level),
-                _ => None,
-            })
-            .unwrap_or(1)
+    /// The Urgency level on `id`, if it carries one: a message with no tag is level 1, which the
+    /// menu shows as "None".
+    fn urgency_of(&self, id: MessageId) -> Option<u8> {
+        self.mailbox.tags(id).iter().find_map(|tag| match tag {
+            Tag::Urgent(level) => Some(*level),
+            _ => None,
+        })
     }
 
     /// A kind's row-menu name, from the one icon table.
@@ -363,6 +368,15 @@ impl MailApp {
             selected.extend(fresh);
         }
         self.triage_mut().set_selection(selected);
+    }
+}
+
+/// A submenu trigger's label: the section and the value in force, or the section alone when the
+/// message carries no such label.
+fn labeled(section: &str, value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("{section} · {value}"),
+        None => section.to_owned(),
     }
 }
 

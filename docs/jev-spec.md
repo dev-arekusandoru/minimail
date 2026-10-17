@@ -92,6 +92,12 @@ re-asks only Folder, only for Inbox mail. Legacy `[key, answer]` rows read as ve
   to suggestion" clears the override and puts the classifier's stored answer back; spam has no
   reset row. Every one of these actions is one undo step. The same actions are palette commands
   (`Classify`) with no key bindings.
+- **The classifier menus mark the choice in force.** The Kind and Urgency submenus carry the value
+  on their own row (`Kind · Receipt`), and the option it names is the one the menu ticks — at the
+  row's end, because the option's glyph fills the kit's left check slot. A message with no such
+  label marks no option and leaves the row unlabelled, so clearing a label clears the mark. The
+  reader `⋯`, a row's right-click, its classifier icons and a reader chip all build from
+  `MailApp::classifier_items`, so they show the same rows.
 - `expects_reply` on send: the reply sends immediately; with `auto_classify` on, Jev judges it on
   the worker and tags the thread *Awaiting Reply* when the answer arrives (no undo step; no key or
   auto off → no tag). Reply requests contain only the ExpectsReply question.
