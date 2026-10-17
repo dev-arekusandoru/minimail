@@ -23,17 +23,6 @@ impl Confidence {
             Confidence::Low => 0.6,
         }
     }
-
-    /// The preset whose threshold is nearest to `threshold`; ties go to the stricter preset.
-    pub fn from_threshold(threshold: f32) -> Confidence {
-        Self::ALL
-            .into_iter()
-            .min_by(|a, b| {
-                let (da, db) = ((a.threshold() - threshold).abs(), (b.threshold() - threshold).abs());
-                da.total_cmp(&db)
-            })
-            .unwrap_or(Confidence::Medium)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

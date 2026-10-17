@@ -98,7 +98,7 @@ re-asks only Folder, only for Inbox mail. Legacy `[key, answer]` rows read as ve
   label marks no option and leaves the row unlabelled, so clearing a label clears the mark. The
   reader `⋯`, a row's right-click, its classifier icons and a reader chip all build from
   `MailApp::classifier_items`, so they show the same rows.
-- `expects_reply` on send: the reply sends immediately; with `auto_classify` on, Jev judges it on
+- ExpectsReply on send: with `auto_classify` on, Jev judges the reply on
   the worker and tags the thread *Awaiting Reply* when the answer arrives (no undo step; no key or
   auto off → no tag). Reply requests contain only the ExpectsReply question.
 - `StubJudge` becomes test-only. Without a key the app shows no classifier labels.

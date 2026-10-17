@@ -158,6 +158,10 @@ cargo clippy --all-targets -- -D warnings   # lint
 
 The UI tests run headless. They drive the real views with simulated keystrokes and a fake clock, so no window opens.
 
+Navigation coverage includes removing the last visible row: the cursor stays on the remaining
+row, or clears when the list empties. Legacy judgement hashes are pinned to known digests so
+upgrades keep matching cached answers, including trimmed multibyte bodies.
+
 ### Where the data lives
 
 Contacts live in one SQLite database: `$MAIL_CLASSIFIER_DB` if set, otherwise
@@ -190,7 +194,7 @@ prerelease. Repo secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 
 ### Gmail accounts
 
-Gmail is optional; without it the app runs on the mock mailbox. To connect it,
+Gmail is optional; without a linked account the app starts with an empty mailbox. To connect it,
 create a Google Cloud OAuth client of type **Desktop app**, enable the Gmail API,
 add yourself as a test user, then launch with:
 
@@ -200,8 +204,7 @@ MAIL_CLASSIFIER_GOOGLE_CLIENT_ID=… MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET=… ca
 
 In the palette (`cmd-k`), run **Add Gmail account**. It signs you in with the
 browser over a loopback redirect (PKCE, `gmail.modify` scope) and saves the
-refresh token in the OS keychain (service `mail-classifier`). After the first
-account is linked, the demo mail is dropped. Fetched mail is cached in
+refresh token in the OS keychain (service `mail-classifier`). Fetched mail is cached in
 `$MAIL_CLASSIFIER_MAIL_DB`, otherwise in
 `~/Library/Application Support/mail-classifier/mail.db`, and later launches
 start from that cache.

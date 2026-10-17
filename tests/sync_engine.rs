@@ -807,8 +807,8 @@ fn a_reconcile_imports_mail_the_window_listing_found() {
     expire_cursor(&state);
     // The reconcile itself only knows ids: it resets the backfill, and the page
     // that re-lists the window is what imports m2.
-    assert_eq!(fetched(&state).len(), 1, "the reconcile downloads no message");
     round(&mut mb, &cache, &provider, true, &[]);
+    assert_eq!(fetched(&state).len(), 1, "the reconcile downloads no message");
     assert_eq!(inbox(&mb).len(), 1, "the reset progress is planned into the next round");
     round(&mut mb, &cache, &provider, false, &[]);
     assert_eq!(inbox(&mb).len(), 2, "the reset backfill imports what the window listed");

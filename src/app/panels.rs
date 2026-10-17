@@ -3,11 +3,9 @@ use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
 
-use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
-use crate::tz::Now;
 use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
 use crate::app::ui::{button, run, shortcut};
 use crate::summary::ThreadSummary;
@@ -330,9 +328,4 @@ impl RenderOnce for RuleBanner {
                     .child(button("rule-dismiss", "Dismiss", "Dismiss rule", "shift-n", cx).on_click(run(DismissRule))),
             )
     }
-}
-
-/// Row suffix shown in the Later view: `"until Mon 5 Oct 08:00"`.
-pub fn snooze_label(until: Timestamp, now: &Now) -> String {
-    format!("until {}", format_time(until, now))
 }

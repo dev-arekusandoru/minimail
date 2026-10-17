@@ -327,12 +327,6 @@ impl MailApp {
             .collect()
     }
 
-    /// The Settings window, when it is open. Settings is its own native window, so anything
-    /// driving it (a test, a focus request) needs this handle, not the mail window.
-    pub fn settings_window_handle(&self) -> Option<AnyWindowHandle> {
-        self.settings_window
-    }
-
     /// Open Settings in its own native window on `page`, reusing and activating the existing
     /// window.
     pub(super) fn open_settings(&mut self, page: usize, window: &mut Window, cx: &mut Context<Self>) {

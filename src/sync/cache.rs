@@ -440,15 +440,6 @@ impl Cache {
         Ok(())
     }
 
-    /// Up to `limit` cached messages of `account` whose server read state is unknown.
-    pub fn unknown_read(&self, account: &str, limit: usize) -> rusqlite::Result<Vec<RemoteId>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT remote_id FROM messages WHERE account=?1 AND remote_read IS NULL ORDER BY id LIMIT ?2",
-        )?;
-        let ids = stmt.query_map(params![account, limit as i64], |row| row.get(0))?;
-        ids.collect()
-    }
-
     /// Every cached message, by local id.
     pub fn cached_messages(&self) -> rusqlite::Result<Vec<Message>> {
         let mut stmt = self.conn.prepare("SELECT json FROM messages ORDER BY id")?;

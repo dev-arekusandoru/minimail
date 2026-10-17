@@ -87,11 +87,6 @@ impl MailApp {
         self.thread_of(id).is_some_and(|t| self.reader.plain(t, id))
     }
 
-    /// Whether `id`'s recipient rows are open.
-    pub fn reader_recipients_open(&self, id: MessageId) -> bool {
-        self.thread_of(id).is_some_and(|t| self.reader.recipients_open(t, id))
-    }
-
     /// Whether `id`'s quoted history is open.
     pub fn reader_quoted_open(&self, id: MessageId) -> bool {
         self.thread_of(id).is_some_and(|t| self.reader.quoted_open(t, id))

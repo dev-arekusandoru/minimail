@@ -175,7 +175,15 @@ fn legacy_judgement_key_is_stable_and_sensitive_to_inputs() {
     let m = msg(1, "a@b.c", "hi", "hello");
     let key = legacy_judgement_key("jev-latest", &m);
     assert_eq!(key, legacy_judgement_key("jev-latest", &m));
-    assert_eq!(key.len(), 64);
+    // Digests from an independent SHA-256 over the frozen pre-MIGRATION_4 request: old cache rows
+    // are matched by them, so any change to the frozen wording/state/serialization breaks upgrades.
+    assert_eq!(key, "d790fce1046d3783ff8af7637f1e1b3fc4e9bb49e84796490f7505a5771e92f7");
+    let long = msg(1, "a@b.c", "hi", &format!("  {}  ", "é".repeat(1600)));
+    assert_eq!(
+        legacy_judgement_key("jev-latest", &long),
+        "9e3894b4db78e2507b49f7d5348c61aba410c9533604a60c99f54b7eadb27e7b",
+        "body is trimmed and cut to 1500 chars"
+    );
     assert_ne!(key, legacy_judgement_key("other-model", &m));
     assert_ne!(key, legacy_judgement_key("jev-latest", &msg(1, "a@b.c", "hi", "different")));
 }

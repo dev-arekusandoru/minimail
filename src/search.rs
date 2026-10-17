@@ -417,13 +417,6 @@ impl Query {
         true
     }
 
-    /// Drops every free-text term.
-    pub fn clear_text(&mut self) -> bool {
-        let had = !self.text.is_empty();
-        self.text.clear();
-        had
-    }
-
     /// Lays `other` over this query: each field `other` constrains replaces this query's
     /// group for that field, and `other`'s free-text terms are appended.
     pub fn overlay(&mut self, other: &Query) {

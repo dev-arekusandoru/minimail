@@ -139,8 +139,8 @@ decided, why, and how to flip it. Flip any you disagree with.
   none); choice/score confidence is passed through.
 - **`route` is a public function** in `src/judge/policy.rs`; `classify` delegates per message.
 - **Incoming mail never asks ExpectsReply.** `incoming_questions` builds Spam, NeedsReply,
-  Urgency, Kind and (when the account has folders) Folder; the reply path uses the single
-  `reply_question` definition, which `expects_reply` also uses.
+  Urgency, Kind and (when the account has folders) Folder; the reply worker uses the single
+  `reply_question` definition directly, as do the stub's reply-classification tests.
 - **Folder is a suggestion, never auto-applied.** `route` forces it to `Review` unless the mode is
   Off; `is_noop` drops the trailing "none" option. Accepting one calls `Mailbox::suggested_folder`
   and files the message via `set_state(Filed(folder))` — the same path as manual filing, so synced

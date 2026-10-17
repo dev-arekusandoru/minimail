@@ -388,24 +388,6 @@ pub fn questions_to_ask(
         .collect()
 }
 
-/// Determines whether an outgoing reply asks for a response.
-pub fn expects_reply(judge: &dyn Judge, body: &str) -> bool {
-    let state = json!({"sender": "", "subject": "", "body": body.trim()});
-    judge
-        .judge(&state, &[reply_question()])
-        .ok()
-        .and_then(|answers| {
-            answers
-                .into_iter()
-                .find(|(key, _)| *key == QuestionKey::ExpectsReply)
-        })
-        .and_then(|(_, answer)| match answer.value {
-            AnswerValue::Bool(value) => Some(value),
-            _ => None,
-        })
-        .unwrap_or(false)
-}
-
 /// The JSON state a judge sees: sender, recipients and role, subject, received date, bulk flag,
 /// and the body (quoted replies kept, cut to [`MAX_BODY_CHARS`] from the end).
 pub fn message_state(m: &Message, me: &str) -> Value {

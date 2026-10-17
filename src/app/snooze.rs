@@ -71,11 +71,6 @@ impl SnoozePicker {
         }
     }
 
-    /// Whether the custom input is showing.
-    pub fn is_custom(&self) -> bool {
-        self.custom
-    }
-
     fn pick(&mut self, ix: usize, cx: &mut Context<Self>) {
         if let Some((_, ts)) = self.presets.get(ix) {
             cx.emit(SnoozeEvent::Pick(*ts));
