@@ -29,6 +29,10 @@ pub const AUTO_CLASSIFY_MAX_AGE_DAYS: Setting<u16> =
     Setting::new("auto_classify_max_age_days", crate::judge::DEFAULT_MAX_AGE_DAYS);
 /// Count recruiters' and sales cold outreach as spam.
 pub const SPAM_COLD_OUTREACH: Setting<bool> = Setting::new("spam_cold_outreach", false);
+/// Addresses whose mail is never spam: Jev is not asked the spam question for them.
+pub const NEVER_SPAM_SENDERS: Setting<Vec<String>> = Setting::new("never_spam_senders", Vec::new());
+/// Addresses whose mail is always spam: new mail arrives flagged, with no spam question.
+pub const ALWAYS_SPAM_SENDERS: Setting<Vec<String>> = Setting::new("always_spam_senders", Vec::new());
 /// Jev endpoint; empty means [`crate::judge::jev::DEFAULT_BASE_URL`].
 pub const JEV_BASE_URL: Setting<String> =
     Setting::with_default_fn("jev_base_url", String::new(), default_jev_base_url);

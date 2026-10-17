@@ -276,12 +276,17 @@ impl MailApp {
     }
 
     /// The enabled incoming questions for an account, each with its version.
-    fn classify_specs(&self, account: &str) -> Vec<QuestionSpec> {
-        incoming_questions(
+    /// A sender the user marked never/always spam is not asked the spam question.
+    fn classify_specs(&self, account: &str, sender: &str) -> Vec<QuestionSpec> {
+        let mut specs = incoming_questions(
             &self.policy,
             self.spam_cold_outreach,
             &self.mailbox.folder_options(account),
-        )
+        );
+        if self.mailbox.spam_senders().skips_question(sender) {
+            specs.retain(|s| s.key != QuestionKey::Spam);
+        }
+        specs
     }
 
     /// The enabled questions for `id` whose stored answer is missing or stale.
@@ -292,7 +297,7 @@ impl MailApp {
         if m.outgoing || m.state != TriageState::Inbox {
             return Vec::new();
         }
-        let specs = self.classify_specs(&m.account);
+        let specs = self.classify_specs(&m.account, &m.from_email);
         let stored = self.judgements.get(&id).map(Vec::as_slice).unwrap_or(&[]);
         questions_to_ask(&specs, stored)
     }
@@ -340,8 +345,8 @@ impl MailApp {
         if m.outgoing {
             return;
         }
-        let (partial, account) = (m.partial, m.account.clone());
-        if self.classify_specs(&account).is_empty() {
+        let (partial, account, sender) = (m.partial, m.account.clone(), m.from_email.clone());
+        if self.classify_specs(&account, &sender).is_empty() {
             return;
         }
         if partial {
@@ -375,12 +380,12 @@ impl MailApp {
         if m.partial || m.outgoing || m.state != TriageState::Inbox {
             return;
         }
-        let account = m.account.clone();
+        let (account, sender) = (m.account.clone(), m.from_email.clone());
         let pending = self.pending_classify.remove(&id);
         if pending.is_none() && !self.auto_wanted(id) {
             return;
         }
-        if self.classify_specs(&account).is_empty() {
+        if self.classify_specs(&account, &sender).is_empty() {
             return;
         }
         let force = pending.unwrap_or(false);
@@ -464,8 +469,12 @@ impl MailApp {
         answers: &[(QuestionKey, Answer)],
         now: Timestamp,
     ) -> Vec<StoredAnswer> {
-        let account = self.mailbox.get(id).map(|m| m.account.clone()).unwrap_or_default();
-        let specs = self.classify_specs(&account);
+        let (account, sender) = self
+            .mailbox
+            .get(id)
+            .map(|m| (m.account.clone(), m.from_email.clone()))
+            .unwrap_or_default();
+        let specs = self.classify_specs(&account, &sender);
         let mut merged = self.judgements.get(&id).cloned().unwrap_or_default();
         for (key, answer) in answers {
             let version = specs
@@ -588,7 +597,7 @@ impl MailApp {
                 if message.partial {
                     return None;
                 }
-                let specs = self.classify_specs(&message.account);
+                let specs = self.classify_specs(&message.account, &message.from_email);
                 let stored = self.judgements.get(id).map(Vec::as_slice).unwrap_or(&[]);
                 let questions: Vec<(QuestionKey, Question)> = if *force {
                     specs.iter().map(|s| (s.key, s.question.clone())).collect()

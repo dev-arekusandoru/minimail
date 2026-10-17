@@ -207,8 +207,8 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, a: &SetUrgency, _, cx| {
                 this.set_urgency_action(a.message, a.level, cx)
             }))
-            .on_action(cx.listener(|this, a: &SetSpam, _, cx| {
-                this.set_spam_action(a.message, a.spam, cx)
+            .on_action(cx.listener(|this, a: &SetSpam, w, cx| {
+                this.set_spam_action(a.message, a.spam, w, cx)
             }))
             .on_action(cx.listener(|this, a: &SetNeedsReply, _, cx| {
                 this.set_needs_reply_action(a.message, a.needs_reply, cx)

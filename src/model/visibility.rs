@@ -123,6 +123,27 @@ impl Mailbox {
         self.push_undo(vec![Change::Blocked(e, Some(at))]);
         true
     }
+    pub fn is_blocked(&self, email: &str) -> bool {
+        self.blocked.contains_key(&email.trim().to_ascii_lowercase())
+    }
+    /// Record the user's spam verdict for `email` (`None` clears it); one undo step. The
+    /// address leaves the other list. False when nothing changed.
+    pub fn set_spam_sender(&mut self, email: &str, verdict: Option<SpamVerdict>) -> bool {
+        let before = self.spam_senders.verdict(email);
+        if before == verdict || email.trim().is_empty() {
+            return false;
+        }
+        self.spam_senders.set(email, verdict);
+        self.push_undo(vec![Change::SpamSender(email.trim().to_ascii_lowercase(), before)]);
+        true
+    }
+    pub fn spam_senders(&self) -> &SpamSenders {
+        &self.spam_senders
+    }
+    /// Seed the lists from preferences at startup; not an undo step.
+    pub fn load_spam_senders(&mut self, senders: SpamSenders) {
+        self.spam_senders = senders;
+    }
     /// Blocked senders with the time each was blocked, sorted by address.
     pub fn blocked(&self) -> Vec<(String, Timestamp)> {
         let mut v: Vec<_> = self.blocked.iter().map(|(e, at)| (e.clone(), *at)).collect();

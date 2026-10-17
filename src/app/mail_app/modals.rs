@@ -358,6 +358,7 @@ impl MailApp {
         let tab_avatars = self.tab_avatars;
         let block_remote_images = self.block_remote_images;
         let blocked = self.mailbox.blocked();
+        let spam_senders = self.mailbox.spam_senders().clone();
         let now = self.local_now();
         let follow_up = self.mailbox.follow_up_timeout();
         let (jev_base, jev_model) = self.jev_settings();
@@ -401,6 +402,7 @@ impl MailApp {
                     .tab_avatars(tab_avatars)
                     .block_remote_images(block_remote_images)
                     .mailbox_state(blocked, now, follow_up)
+                    .spam_senders(spam_senders)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured)
                     .classifier_switches(auto_classify, spam_cold_outreach)
@@ -561,6 +563,11 @@ impl MailApp {
                         this.show_undo_toast(format!("Unblocked {email}"), window, cx);
                     }
                 }
+                SettingsEvent::ClearSpamSender(email) => {
+                    if this.mailbox.set_spam_sender(email, None) {
+                        this.show_undo_toast(format!("Removed {email}"), window, cx);
+                    }
+                }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
                 SettingsEvent::RemoveAccount(id) => this.remove_linked_account(id, window, cx),
                 SettingsEvent::AccountNickname { id, nickname } => {
@@ -600,12 +607,23 @@ impl MailApp {
     /// Keep the open Settings window's blocked list in step with the mailbox: undo in the
     /// main window restores a block behind the panel's back.
     pub(super) fn sync_settings_blocked(&mut self, cx: &mut Context<Self>) {
+        // Every change to the spam-sender lists, undo included, is written here.
+        let senders = self.mailbox.spam_senders().clone();
+        if senders != self.saved_spam_senders {
+            self.save_setting(&crate::app_settings::NEVER_SPAM_SENDERS, senders.never());
+            self.save_setting(&crate::app_settings::ALWAYS_SPAM_SENDERS, senders.always());
+            self.saved_spam_senders = senders;
+        }
         let Some(panel) = &self.settings else {
             return;
         };
         let now = self.local_now();
         let blocked = self.mailbox.blocked();
-        panel.update(cx, |panel, cx| panel.set_blocked(blocked, now, cx));
+        let senders = self.mailbox.spam_senders().clone();
+        panel.update(cx, |panel, cx| {
+            panel.set_blocked(blocked, now, cx);
+            panel.set_spam_senders(senders, cx);
+        });
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1151,6 +1169,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let sender = ids.first().and_then(|id| self.mailbox.get(*id)).map(|m| m.from_email.clone());
         let n = self.mailbox.mark_spam(ids, block, self.now());
         self.triage_mut().clear_selection();
         let text = if block {
@@ -1162,6 +1181,73 @@ impl MailApp {
         self.session_advance();
         self.scroll_to_cursor();
         cx.notify();
+        // Blocking already swept the sender; a plain delete asks what to do about the rest.
+        if let Some(email) = sender.filter(|_| n > 0 && !block) {
+            self.offer_delete_and_always_spam(email, window, cx);
+        }
+    }
+
+    /// After a spam-flagged message was marked not spam: ask to never mark this address as
+    /// spam. Yes records it, as part of the same undo step. Skipped for an address that is
+    /// already tracked or blocked.
+    pub(super) fn offer_never_spam(&mut self, email: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.mailbox.spam_senders().should_prompt(&email, self.mailbox.is_blocked(&email)) {
+            return;
+        }
+        let depth = self.mailbox.undo_depth();
+        self.confirm(
+            format!("Never mark mail from {email} as spam?"),
+            move |this, window, cx| {
+                this.mailbox.amend(depth, |m| m.set_spam_sender(&email, Some(SpamVerdict::Never)));
+                this.show_undo_toast(format!("{email} is never spam"), window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// After spam was accepted by deleting without blocking: ask to delete the sender's other
+    /// mail, then whether to always mark them as spam (Esc at either step ends the sequence).
+    /// Both answers fold into the action's undo step. Skipped for a tracked or blocked address.
+    pub(super) fn offer_delete_and_always_spam(
+        &mut self,
+        email: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.mailbox.spam_senders().should_prompt(&email, self.mailbox.is_blocked(&email)) {
+            return;
+        }
+        let depth = self.mailbox.undo_depth();
+        if self.mailbox.sender_ids_in(&email, TriageState::Inbox).is_empty() {
+            return self.ask_always_spam(email, depth, window, cx);
+        }
+        self.confirm(
+            format!("Delete all mail from {email}?"),
+            move |this, window, cx| {
+                let n = this.mailbox.amend(depth, |m| {
+                    m.set_state_for_sender(&email, TriageState::Inbox, TriageState::Deleted)
+                });
+                this.show_undo_toast(format!("Deleted {n} more from {email}"), window, cx);
+                this.session_advance();
+                this.scroll_to_cursor();
+                this.ask_always_spam(email.clone(), depth, window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn ask_always_spam(&mut self, email: String, depth: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm(
+            format!("Always mark mail from {email} as spam?"),
+            move |this, window, cx| {
+                this.mailbox.amend(depth, |m| m.set_spam_sender(&email, Some(SpamVerdict::Always)));
+                this.show_undo_toast(format!("{email} is always spam"), window, cx);
+            },
+            window,
+            cx,
+        );
     }
 
     /// Sender-wide archive/delete/inbox: confirm first.

@@ -16,6 +16,7 @@ mod menu;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{FolderId, Mailbox, MessageId, Tag, TriageState};
+use mail_classifier::spam_senders::{SpamSenders, SpamVerdict};
 use mail_classifier::tz::Utc;
 
 const NOON: Timestamp = 1_790_683_200;
@@ -597,6 +598,7 @@ fn spam_banner_not_spam_clears_the_flag_and_undo_brings_it_back(cx: &mut TestApp
     assert!(!h.banner_shown(), "the banner goes with the flag");
     assert_eq!(h.state_of(1), TriageState::Inbox, "Not spam never moves the message");
 
+    h.keys("escape");
     h.keys("u");
     assert!(h.has_tag(1, Tag::PossibleSpam), "one undo step restores the flag");
     assert!(h.banner_shown(), "the banner is back");
@@ -651,4 +653,107 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     assert!(h.blocked().is_empty(), "the block reverts too");
     assert!(h.folder(folder).is_none());
     assert_eq!(h.folder_count(), before);
+}
+
+const SPAMMER: &str = "spam@example.com";
+
+fn verdict(h: &mut Harness<'_>, email: &str) -> Option<SpamVerdict> {
+    h.read(|a| a.mailbox.spam_senders().verdict(email))
+}
+
+/// Two messages from the spammer, message 1 flagged, the reader open on it.
+fn flagged_pair<'a>(cx: &'a mut TestAppContext, with: Option<(&str, SpamVerdict)>) -> Harness<'a> {
+    let mut mb = mailbox(&[msg(1, 1, SPAMMER, "Offer", 1), msg(2, 2, SPAMMER, "More", 2)]);
+    tag_possible_spam(&mut mb, 1);
+    if let Some((email, v)) = with {
+        let mut lists = SpamSenders::default();
+        lists.set(email, Some(v));
+        mb.load_spam_senders(lists);
+    }
+    let mut h = harness_with(cx, mb);
+    h.goto(1);
+    h.keys("enter");
+    h
+}
+
+#[gpui_kit::gpui::test]
+fn not_spam_yes_records_never_spam_and_undoes_with_the_flag(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-not");
+    assert!(!h.has_tag(1, Tag::PossibleSpam));
+    assert_eq!(h.dialog_title(), "Never mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, "SPAM@example.com"), Some(SpamVerdict::Never));
+    h.keys("u");
+    assert_eq!(verdict(&mut h, SPAMMER), None, "one undo drops the verdict too");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "and restores the flag");
+}
+
+#[gpui_kit::gpui::test]
+fn not_spam_cancel_only_clears_the_flag(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-not");
+    h.keys("escape");
+    assert!(!h.dialog_open());
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "the flag is cleared regardless");
+    assert_eq!(verdict(&mut h, SPAMMER), None);
+}
+
+#[gpui_kit::gpui::test]
+fn tracked_senders_get_no_prompt(cx: &mut TestAppContext) {
+    for v in [SpamVerdict::Always, SpamVerdict::Never] {
+        let mut h = flagged_pair(cx, Some((SPAMMER, v)));
+        h.click("btn-banner-spam-not");
+        assert!(!h.dialog_open(), "{v:?} sender: no never-spam prompt");
+    }
+    let mut h = flagged_pair(cx, Some((SPAMMER, SpamVerdict::Never)));
+    h.click("btn-banner-spam-delete");
+    assert!(!h.dialog_open(), "a tracked sender is not asked about deleting either");
+    assert_eq!(h.state_of(2), TriageState::Inbox);
+}
+
+#[gpui_kit::gpui::test]
+fn deleting_spam_asks_delete_all_then_always_spam_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-delete");
+    assert_eq!(h.state_of(1), TriageState::Deleted);
+    assert_eq!(h.dialog_title(), "Delete all mail from spam@example.com?");
+    h.keys("enter");
+    assert_eq!(h.state_of(2), TriageState::Deleted);
+    assert_eq!(h.dialog_title(), "Always mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Always));
+
+    h.keys("u");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    assert_eq!(h.state_of(2), TriageState::Inbox, "the sweep undoes with the delete");
+    assert_eq!(verdict(&mut h, SPAMMER), None, "so does the verdict");
+}
+
+#[gpui_kit::gpui::test]
+fn escape_at_delete_all_ends_the_sequence(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-delete");
+    h.keys("escape");
+    assert!(!h.dialog_open());
+    assert_eq!(h.state_of(2), TriageState::Inbox);
+    assert_eq!(verdict(&mut h, SPAMMER), None);
+}
+
+#[gpui_kit::gpui::test]
+fn blocking_asks_nothing_more(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-block");
+    assert!(!h.dialog_open());
+    assert_eq!(h.blocked(), vec![SPAMMER]);
+}
+
+#[gpui_kit::gpui::test]
+fn marking_spam_without_other_mail_goes_straight_to_always_spam(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, SPAMMER, "Offer", 1)]));
+    h.keys("!");
+    h.keys("2");
+    assert_eq!(h.dialog_title(), "Always mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Always));
 }

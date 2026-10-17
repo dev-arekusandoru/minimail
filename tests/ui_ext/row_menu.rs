@@ -299,10 +299,10 @@ fn not_spam_clears_the_flag_and_sticks(cx: &mut TestAppContext) {
     open_row_menu(&mut h);
     h.click_row("Not spam");
     assert!(!h.has_tag(1, Tag::PossibleSpam));
+    h.keys("enter"); // accept "Never mark mail from … as spam?", which undoes with the flag
 
     h.keys("c");
     assert!(!h.has_tag(1, Tag::PossibleSpam), "reclassification respects the flag");
-
     h.keys("u");
     assert!(h.has_tag(1, Tag::PossibleSpam), "one undo step puts the flag back");
 }

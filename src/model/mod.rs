@@ -12,6 +12,7 @@ use crate::clock::{DAY, HOUR, MINUTE, Timestamp};
 use crate::contacts::{ContactSource, ContactStore};
 use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
 use crate::search::{Field, Query};
+use crate::spam_senders::{SpamSenders, SpamVerdict};
 use crate::tz::Now;
 
 mod replies;
@@ -225,6 +226,8 @@ enum Change {
     Blocked(String, Option<Timestamp>),
     /// Sender was appended to `unsubscribed`; undo removes it.
     Unsubscribed(String),
+    /// Sender's spam verdict before the action.
+    SpamSender(String, Option<SpamVerdict>),
     /// Whole pending-suggestion list before the action.
     Pending(Vec<Suggestion>),
     /// Outbox reply with this seq was queued; undo removes it if still there.
@@ -285,6 +288,7 @@ pub struct Mailbox {
     /// Blocked sender addresses (lowercase) and when each was blocked.
     blocked: HashMap<String, Timestamp>,
     unsubscribed: Vec<String>,
+    spam_senders: SpamSenders,
     muted: HashSet<u32>,
     pending: Vec<Suggestion>,
     accounts: Vec<Account>,
@@ -380,6 +384,7 @@ impl Mailbox {
             blocked: HashMap::new(),
             contacts: None,
             unsubscribed: Vec::new(),
+            spam_senders: SpamSenders::default(),
             muted: HashSet::new(),
             pending: Vec::new(),
             accounts,

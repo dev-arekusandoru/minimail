@@ -101,7 +101,19 @@ impl MailApp {
 
     pub(super) fn mark(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.target_ids();
+        // Deleting a message that carries the spam flag accepts the suggestion.
+        let spam_sender = (state == TriageState::Deleted)
+            .then(|| ids.iter().filter_map(|id| self.mailbox.get(*id)).find(|m| {
+                !m.outgoing
+                    && m.state == TriageState::Inbox
+                    && self.mailbox.tags(m.id).contains(&Tag::PossibleSpam)
+            }))
+            .flatten()
+            .map(|m| m.from_email.clone());
         self.file_ids(&ids, state, window, cx);
+        if let Some(email) = spam_sender {
+            self.offer_delete_and_always_spam(email, window, cx);
+        }
     }
 
     /// Move `ids` to `state` as one undo step: clear the selection, toast, advance a session.
@@ -246,9 +258,21 @@ impl MailApp {
     }
 
     /// `SetSpam`: mark (or unmark) the spam flag by hand. Spam never moves the message.
-    pub(super) fn set_spam_action(&mut self, message: Option<MessageId>, spam: bool, cx: &mut Context<Self>) {
+    /// Clearing the flag offers to never ask about that sender again.
+    pub(super) fn set_spam_action(
+        &mut self,
+        message: Option<MessageId>,
+        spam: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ids = self.label_targets(message);
+        let sender = ids.first().and_then(|id| self.mailbox.get(*id)).map(|m| m.from_email.clone());
+        let before = self.mailbox.undo_depth();
         self.set_label(&ids, QuestionKey::Spam, spam.then_some(Tag::PossibleSpam), cx);
+        if let Some(email) = sender.filter(|_| !spam && self.mailbox.undo_depth() > before) {
+            self.offer_never_spam(email, window, cx);
+        }
     }
 
     /// `SetNeedsReply`: set (or clear) the Needs reply tag by hand. It never moves the message.

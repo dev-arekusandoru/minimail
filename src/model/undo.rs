@@ -33,6 +33,25 @@ impl Mailbox {
         out
     }
 
+    /// How many undo steps there are; pair with [`Mailbox::amend`].
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Run `f` and fold the steps it pushes into the step that was on top at `depth` (an
+    /// earlier [`Mailbox::undo_depth`]), so a follow-up undoes with its action. When that step
+    /// is no longer on top (the action changed nothing), they stay their own steps.
+    pub fn amend<T>(&mut self, depth: usize, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.undo.len();
+        let out = f(self);
+        if mark == depth && mark > 0 {
+            let pushed: Vec<UndoStep> = self.undo.split_off(mark);
+            let top = self.undo.last_mut().expect("depth > 0");
+            top.changes.extend(pushed.into_iter().flat_map(|step| step.changes));
+        }
+        out
+    }
+
     /// Undo the last mutation. Returns false when there is nothing to undo.
     pub fn undo(&mut self) -> bool {
         let Some(step) = self.undo.pop() else {
@@ -71,6 +90,9 @@ impl Mailbox {
                 }
                 Change::Blocked(e, None) => {
                     self.blocked.remove(&e);
+                }
+                Change::SpamSender(e, was) => {
+                    self.spam_senders.set(&e, was);
                 }
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
                 Change::FolderPush(id) => self.folders.retain(|f| f.id != id),

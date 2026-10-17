@@ -73,7 +73,14 @@ Every user action is one undo step.
   provider concern (out of scope for mock data).
 - **Unblock**: Settings → Blocked senders list. Unsubscribe is one-way (resubscribe
   happens at the original subscription).
-- **Mark spam**: dialog *Block & Delete / Delete*.
+- **Mark spam**: dialog *Block & Delete / Delete*. Accepting spam without blocking (that dialog's
+  Delete, or Delete on a Possible-spam message) then asks *Delete all mail from <address>?*
+  (only if more Inbox mail remains) and *Always mark mail from <address> as spam?*; Not spam asks
+  *Never mark mail from <address> as spam?*. Prompts are for the first message's sender only, skip
+  blocked and already-listed senders, and fold into the action's undo step. Yes stores the exact
+  address (case-insensitive) in the never-spam / always-spam list (preferences; Settings → Senders;
+  the last choice wins). Listed senders are not asked the spam question; always-spam mail arrives
+  flagged. Logic: `src/spam_senders.rs`.
 - **New sender**: off in v1 (see `src/known_senders.rs`). When enabled, Allow removes
   New Sender (and records the contact); Block runs the block dialog.
 - **Sender-wide actions** always confirm first.

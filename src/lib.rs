@@ -20,6 +20,7 @@ pub mod provider;
 pub mod sync;
 pub mod rules;
 pub mod search;
+pub mod spam_senders;
 pub mod theme;
 pub mod reading;
 pub mod summary;

@@ -355,3 +355,47 @@ fn changing_the_age_setting_takes_effect_without_a_restart(cx: &mut TestAppConte
     assert_eq!(calls.load(Ordering::SeqCst), 2, "the old message is now queued");
     assert!(tagged(&mut h, 1));
 }
+
+fn sender_lists(email: &str, verdict: mail_classifier::spam_senders::SpamVerdict) -> mail_classifier::spam_senders::SpamSenders {
+    let mut lists = mail_classifier::spam_senders::SpamSenders::default();
+    lists.set(email, Some(verdict));
+    lists
+}
+
+#[gpui_kit::gpui::test]
+fn never_spam_senders_are_not_asked_the_spam_question(cx: &mut TestAppContext) {
+    use mail_classifier::spam_senders::SpamVerdict;
+    let (judge, calls, _fail, seen) = FakeJudge::new("counting");
+    let mut mb = mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.load_spam_senders(sender_lists("Alice@Example.com", SpamVerdict::Never));
+    let mut h = harness_with_judge(cx, mb, Some(Arc::new(judge)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "other questions are still asked");
+    assert!(!seen.lock().contains(&QuestionKey::Spam));
+    assert!(seen.lock().contains(&QuestionKey::NeedsReply));
+    assert!(!h.has_tag(1, Tag::PossibleSpam));
+
+    let (judge, _calls, _fail, seen) = FakeJudge::new("counting");
+    let mut h = harness_with_judge(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]), Some(Arc::new(judge)));
+    assert!(seen.lock().contains(&QuestionKey::Spam), "an untracked sender is asked");
+    let _ = &mut h;
+}
+
+#[gpui_kit::gpui::test]
+fn always_spam_senders_new_mail_is_flagged_without_asking(cx: &mut TestAppContext) {
+    use mail_classifier::spam_senders::SpamVerdict;
+    let (judge, _calls, _fail, seen) = FakeJudge::new("counting");
+    let mut mb = mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
+    mb.load_spam_senders(sender_lists("deals@talentloop.com", SpamVerdict::Always));
+    let mut h = harness_with_judge(cx, mb, Some(Arc::new(judge)));
+    let fresh: mail_classifier::model::Message = serde_json::from_str(&msg(2, 2, "Deals@TalentLoop.com", "Offer", 2, "Inbox")).unwrap();
+    h.app.update(h.cx, |a, cx| {
+        a.mailbox.upsert_remote(fresh);
+        cx.notify();
+    });
+    assert!(h.has_tag(2, Tag::PossibleSpam), "new mail arrives flagged");
+    seen.lock().clear();
+    h.goto(2);
+    h.keys("c");
+    assert!(!seen.lock().contains(&QuestionKey::Spam), "Jev is never asked, even by hand");
+    assert!(h.has_tag(2, Tag::PossibleSpam), "and the flag stays");
+}

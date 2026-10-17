@@ -89,6 +89,8 @@ pub enum SettingsEvent {
     FollowUp(Timestamp),
     /// Unblock the sender (`mailbox.unblock_sender`); one undo step.
     Unblock(String),
+    /// Remove the sender from the never-spam / always-spam list; one undo step.
+    ClearSpamSender(String),
     /// Start the Gmail sign-in flow.
     AddGmail,
     /// Remove a linked account (confirmed in the panel).
@@ -257,6 +259,8 @@ pub struct SettingsPanel {
     /// Blocked sender addresses with the time each was blocked, sorted;
     /// `Unblock` removes one and emits [`SettingsEvent::Unblock`].
     blocked: Vec<(String, Timestamp)>,
+    /// Never-spam and always-spam senders; `ClearSpamSender` removes one.
+    spam_senders: crate::spam_senders::SpamSenders,
     /// Address filter for the Senders page.
     filter: String,
     /// The filter's input (with its subscription).
@@ -372,6 +376,7 @@ impl SettingsPanel {
             light_theme: String::new(),
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             blocked: Vec::new(),
+            spam_senders: Default::default(),
             filter: String::new(),
             filter_input,
             _filter_sub: filter_sub,
@@ -549,6 +554,20 @@ impl SettingsPanel {
             as u8;
         self.follow_up.set(self.follow_up_days);
         self
+    }
+
+    /// Seed the never/always-spam lists.
+    pub fn spam_senders(mut self, senders: crate::spam_senders::SpamSenders) -> Self {
+        self.spam_senders = senders;
+        self
+    }
+
+    /// Re-read the never/always-spam lists (undo restores an entry).
+    pub fn set_spam_senders(&mut self, senders: crate::spam_senders::SpamSenders, cx: &mut Context<Self>) {
+        if self.spam_senders != senders {
+            self.spam_senders = senders;
+            cx.notify();
+        }
     }
 
     /// Re-read the blocked senders and the clock (undo restores a block).
@@ -823,6 +842,12 @@ impl SettingsPanel {
             .iter()
             .filter(|(email, _)| needle.is_empty() || email.to_lowercase().contains(&needle))
             .collect()
+    }
+
+    fn clear_spam_sender(&mut self, email: &str, cx: &mut Context<Self>) {
+        self.spam_senders.set(email, None);
+        cx.emit(SettingsEvent::ClearSpamSender(email.to_owned()));
+        cx.notify();
     }
 
     /// Drop `email` from the local list and ask the app to unblock it.
