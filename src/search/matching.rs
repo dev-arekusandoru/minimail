@@ -50,6 +50,8 @@ impl Haystack<'_> {
         let tags = self.mailbox.tags(self.m.id);
         let m = self.m;
         match field {
+            // A full address (`user@host`) names one sender; anything shorter is a fragment.
+            Field::From if v.split_once('@').is_some_and(|(user, host)| !user.is_empty() && !host.is_empty()) => self.email() == v,
             Field::From => self.name().contains(v) || self.email().contains(v),
             Field::To => m.to.to_lowercase().contains(v),
             Field::Cc => m.cc.to_lowercase().contains(v),

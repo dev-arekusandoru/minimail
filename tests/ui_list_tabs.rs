@@ -519,3 +519,60 @@ fn dragging_a_selected_row_moves_the_whole_selection_in_one_undo_step(cx: &mut T
     assert_eq!(h.state_of(4), TriageState::Inbox);
     assert!(!h.undo_step(), "both moved in a single step");
 }
+
+/// Alice (message 3 with a differently-cased address) and Bob, across Inbox and Archive.
+fn two_senders() -> Mailbox {
+    Mailbox::from_json(&json(&[
+        msg(1, 1, "alice@example.com", "Receipt", 1, "Inbox"),
+        msg(2, 2, "alice@example.com", "Invoice", 2, "Archived"),
+        msg(3, 3, "bob@example.com", "Lunch", 3, "Inbox"),
+        msg(4, 4, "Alice@Example.com", "Digest", 4, "Inbox"),
+    ]))
+    .expect("valid mailbox json")
+}
+
+#[gpui_kit::gpui::test]
+fn p_opens_a_tab_of_only_that_senders_mail_and_a_second_press_focuses_it(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, two_senders());
+    h.goto(1);
+    h.keys("p");
+    assert_eq!(
+        h.tabs(),
+        vec![(INBOX.to_owned(), true), ("from:alice@example.com".to_owned(), true)],
+        "a pinned tab carrying the exact address"
+    );
+    assert_eq!(h.active(), 1);
+    assert_eq!(h.visible(), vec![4, 2, 1], "every folder, either casing, nobody else");
+
+    h.click(("list-tab", 0usize));
+    h.row(4); // the same address in another casing
+    h.keys("p");
+    assert_eq!(h.tabs().len(), 2, "no duplicate tab");
+    assert_eq!(h.active(), 1, "the existing tab was focused");
+}
+
+#[gpui_kit::gpui::test]
+fn triage_works_inside_a_sender_tab_and_closing_it_returns_to_the_previous_tab(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, two_senders());
+    h.goto(1);
+    h.keys("p");
+    h.goto(1);
+    h.keys("e");
+    assert_eq!(h.state_of(1), TriageState::Archived);
+    h.keys("u");
+    assert_eq!(h.state_of(1), TriageState::Inbox, "undo reverts the one action");
+
+    h.keys("cmd-w");
+    assert_eq!(h.tabs(), vec![(INBOX.to_owned(), true)]);
+    assert_eq!(h.active(), 0);
+}
+
+#[gpui_kit::gpui::test]
+fn p_with_several_selected_uses_the_cursor_message(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, two_senders());
+    h.goto(3);
+    h.keys("x");
+    h.goto(1);
+    h.keys("p");
+    assert_eq!(h.tabs()[1].0, "from:alice@example.com");
+}

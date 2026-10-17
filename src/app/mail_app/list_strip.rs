@@ -7,6 +7,7 @@
 //! another view's cursor, and a drag in the strip puts both back the same way round.
 
 use super::*;
+use crate::search::Field;
 
 /// Which pane the tab keys act on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -148,6 +149,22 @@ impl MailApp {
         let query = self.mailbox.location_query(&location);
         self.end_session();
         self.open_view(query, location, pin, cx);
+    }
+
+    /// Open (or focus) a pinned tab listing everything from the cursor message's sender:
+    /// `from:<address>` alone, so it spans every account and folder like a global search.
+    /// The tab is a view, not a mail mutation, so there is no undo step.
+    pub(super) fn open_sender_tab(&mut self, cx: &mut Context<Self>) {
+        let Some((_, email)) = self.cursor_sender() else { return };
+        let mut query = Query::default();
+        // `add` rejects an empty address; a bare name would match as a fragment, so require `@`.
+        if !email.contains('@') || !query.add(Field::From, &email) {
+            return;
+        }
+        let folder = self.view().folder.clone();
+        self.end_session();
+        self.open_view(query, folder, true, cx);
+        self.scroll_to_cursor();
     }
 
     // ------------------------------------------------------------------ switching

@@ -62,7 +62,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `b` | Block sender | `!` | Mark spam (Block & Delete / Delete) |
 | `shift-e` `shift-d` `shift-f` `shift-s` | Archive / Delete / File / Snooze **all** from the sender (confirm first) | `shift-u` | Unsubscribe (confirm first) |
 | `1`–`4`, `6` | Filter pills: clear · toggle Needs Reply · Follow Up · Urgent · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
-| `l` | Add a filter pill (`+ Filter`) | | |
+| `l` | Add a filter pill (`+ Filter`) | `p` | Open the sender's mail (exact address, every folder) in a new list tab |
 | `u` / `cmd-z` | Undo | `z` | Summarize thread |
 | `ctrl-g` | Group by thread on/off | `m` | Mute |
 | `x` | Select | `y` / `n` | Accept / reject AI badges |
@@ -104,7 +104,7 @@ The chrome stays out of the way: a sidebar of locations, one titlebar, and actio
 
 **Titlebar** — the sidebar toggle (`cmd-b`) and the current view on the left, `Search…` in the middle (`/`), then **Triage** (`t`), the pane-layout toggle (`alt-l`), a Settings gear (`cmd-,`) and **More**. Below 800px wide Triage shows only its icon. Commands, Undo and Shortcuts live in **More**, the palette and their own shortcuts.
 
-**Message menu (`⋯`)** — every expanded message in the reader has a **Reply** button (`r`) and a **⋯** menu, and both act on *that* message, not on whichever one the reader is opened on. The menu holds *Archive* (`e`), *Delete* (`d`), *Snooze…* (`s`) and *Move to inbox* (`i`) (each only when it would change something), *Accept AI* (`y`) / *Reject AI* (`n`) while a suggestion is pending, *File…* (`f`), *Mark spam…* (`!`), *Toggle select* (`x`), *Summarize thread* (`z`), *Mute thread* (`m`), *Unsubscribe* (`shift-u`) and the **Sender actions** submenu: *Archive · Delete · File · Move to inbox from this sender* (`shift-e` / `shift-d` / `shift-f` / `shift-i`).
+**Message menu (`⋯`)** — every expanded message in the reader has a **Reply** button (`r`) and a **⋯** menu, and both act on *that* message, not on whichever one the reader is opened on. The menu holds *Archive* (`e`), *Delete* (`d`), *Snooze…* (`s`) and *Move to inbox* (`i`) (each only when it would change something), *Accept AI* (`y`) / *Reject AI* (`n`) while a suggestion is pending, *File…* (`f`), *Mark spam…* (`!`), *Toggle select* (`x`), *Summarize thread* (`z`), *Mute thread* (`m`), *Unsubscribe* (`shift-u`), *Open sender in new tab* (`p`: a pinned list tab with `from:<address>` — an exact, case-insensitive address match across every account and folder, like a search with its `in:` removed; pressing it again focuses that tab) and the **Sender actions** submenu: *Archive · Delete · File · Move to inbox from this sender* (`shift-e` / `shift-d` / `shift-f` / `shift-i`).
 
 Kind and Urgency menus (including reader chips) and palette reset commands appear only for user-overridden fields. An explicit manual choice counts as an override even when it matches the classifier; resetting without a cached suggestion clears the label.
 

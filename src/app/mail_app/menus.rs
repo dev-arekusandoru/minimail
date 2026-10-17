@@ -321,6 +321,7 @@ impl MailApp {
         items.push(MenuItem::action(format!("Unsubscribe {}", sender_domain(msg)), || {
             Box::new(Unsubscribe)
         }));
+        items.push(MenuItem::action("Open sender in new tab", || Box::new(OpenSenderTab)));
         items.push(MenuItem::separator());
         items.push(MenuItem::submenu(
             "Sender actions",

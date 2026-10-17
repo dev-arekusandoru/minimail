@@ -6,18 +6,39 @@
 //! string the sidebar row shows, and the preview is italic with no close button.
 
 use super::*;
+use crate::search::Field;
 use crate::dnd::{FolderDrag, MailDrag};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dock::AnyDrag as DockDrag;
 use gpui_kit::component::Sizable as _;
 
+/// The one `from:` address a sender tab carries: a query with that and nothing else.
+pub(super) fn sender_of(query: &Query) -> Option<&str> {
+    match (query.groups(), query.values(Field::From)) {
+        ([_], [email]) if query.text().is_empty() => Some(email),
+        _ => None,
+    }
+}
+
 impl MailApp {
+    /// A sender tab is named after its sender: their display name, else the address.
+    fn sender_tab_title(&self, query: &Query) -> Option<String> {
+        let email = sender_of(query)?;
+        let name = self
+            .mailbox
+            .messages()
+            .iter()
+            .find(|m| m.from_email.eq_ignore_ascii_case(email) && !m.from_name.trim().is_empty())
+            .map(|m| m.from_name.clone());
+        Some(name.unwrap_or_else(|| email.to_owned()))
+    }
+
     /// The tab the list group draws for the panel showing `query`.
     pub(in crate::app::mail_app) fn list_tab(&self, query: Query, cx: &mut Context<Self>) -> AnyElement {
         let Some(ix) = self.list_tabs.index_of(&query) else { return div().into_any_element() };
         let preview = !self.list_tabs.tabs()[ix].pinned;
-        let title = sidebar::row_label(&self.list_views[ix].folder, &self.mailbox);
+        let title = self.sender_tab_title(&query).unwrap_or_else(|| sidebar::row_label(&self.list_views[ix].folder, &self.mailbox));
         let label = div()
             .id(("list-tab", ix))
             .when(preview, |d| d.italic())
