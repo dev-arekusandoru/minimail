@@ -77,6 +77,10 @@ Every user action is one undo step.
 - **New sender**: off in v1 (see `src/known_senders.rs`). When enabled, Allow removes
   New Sender (and records the contact); Block runs the block dialog.
 - **Sender-wide actions** always confirm first.
+- **Dialog keys**: `enter` picks the default option (shown with an enter keycap), `esc`
+  cancels; options other than the default keep their digit keys (by position, `1`–`5`).
+  Defaults: Archive (reply sent), Leave (block/unsubscribe), Block & Delete
+  (spam); sender-wide and classify confirms have only the confirm option.
 
 ## Accounts & folders
 

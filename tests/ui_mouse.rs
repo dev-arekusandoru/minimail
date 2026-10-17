@@ -348,7 +348,7 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
     h.click_row("Archive from sender");
     assert!(!h.read(|a| a.menu_open()), "the whole menu stack closes after a choice");
     assert!(h.read(|a| a.dialog_open()), "sender-wide actions confirm first");
-    h.keys("1");
+    h.keys("enter");
 
     assert_eq!(h.state_of(id), Archived);
     for other in inbox.iter().filter(|other| **other != id) {

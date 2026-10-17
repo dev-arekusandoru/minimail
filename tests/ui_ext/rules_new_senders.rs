@@ -18,9 +18,9 @@ pub fn rules_box() -> Mailbox {
 }
 
 /// Sender-wide archive from the Inbox cursor, then bring one message back so it can be repeated.
-/// The sender-wide keys confirm first, so `1` answers the dialog.
+/// The sender-wide keys confirm first, so `enter` answers the dialog.
 pub fn repeat_sender_archive(h: &mut Harness<'_>) {
-    h.keys("shift-e 1 g a i");
+    h.keys("shift-e enter g a i");
     click_all_inboxes(h);
 }
 
@@ -36,13 +36,13 @@ fn click_all_inboxes(h: &mut Harness<'_>) {
 #[gpui_kit::gpui::test]
 pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e 1");
+    h.keys("shift-e enter");
     assert_eq!(h.read(|a| a.pending_rule()), None, "no suggestion after the first action");
     assert_eq!(h.count(Archived), 3);
 
     repeat_sender_archive(&mut h);
     assert_eq!(h.read(|a| a.pending_rule()), None);
-    h.keys("shift-e 1");
+    h.keys("shift-e enter");
     let rule = h.read(|a| a.pending_rule()).expect("suggested on the 2nd identical action");
     assert_eq!(rule.sender, "sam@news.io");
     assert_eq!(rule.state, Archived);
@@ -62,9 +62,9 @@ pub fn second_sender_wide_action_suggests_rule_and_accept_applies(cx: &mut TestA
 #[gpui_kit::gpui::test]
 pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e 1");
+    h.keys("shift-e enter");
     repeat_sender_archive(&mut h);
-    h.keys("shift-e 1");
+    h.keys("shift-e enter");
     assert!(h.read(|a| a.pending_rule()).is_some());
     h.keys("shift-n");
     assert_eq!(h.read(|a| a.pending_rule()), None);
@@ -72,7 +72,7 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
 
     for _ in 0..3 {
         repeat_sender_archive(&mut h);
-        h.keys("shift-e 1");
+        h.keys("shift-e enter");
         assert_eq!(h.read(|a| a.pending_rule()), None, "dismissed rules stay dismissed");
     }
     assert!(h.read(|a| a.rules.rules().is_empty()));
@@ -81,9 +81,9 @@ pub fn dismissed_rule_is_never_suggested_again(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 pub fn rules_panel_revokes_accepted_rule(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, rules_box());
-    h.keys("shift-e 1");
+    h.keys("shift-e enter");
     repeat_sender_archive(&mut h);
-    h.keys("shift-e 1 shift-y");
+    h.keys("shift-e enter shift-y");
     assert_eq!(h.read(|a| a.rules.rules().len()), 1);
 
     h.keys("shift-r");

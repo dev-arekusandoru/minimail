@@ -421,7 +421,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     assert!(expected > 1, "fixture should have multiple msgs per sender");
     let start = h.counts();
     h.keys("shift-e");
-    h.keys("1");
+    h.keys("enter");
     let remaining = h.read(|a| {
         a.mailbox
             .messages()

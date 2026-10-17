@@ -132,7 +132,7 @@ fn shift_c_asks_first_then_re_asks_every_message_in_the_list(cx: &mut TestAppCon
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 
     h.keys("shift-c");
-    h.keys("2");
+    h.keys("escape");
     assert_eq!(calls.load(Ordering::SeqCst), 2, "Cancel sends nothing");
 
     h.keys("shift-c");

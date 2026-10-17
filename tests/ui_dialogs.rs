@@ -249,7 +249,7 @@ fn post_send_dialog_files_original_and_reply_in_one_undo(cx: &mut TestAppContext
     );
     assert_eq!(h.state_of(1), TriageState::Inbox, "nothing filed yet");
 
-    h.keys("1");
+    h.keys("enter");
     assert!(!h.dialog_open());
     assert_eq!(h.state_of(1), TriageState::Archived);
     assert_eq!(h.state_of(first[0]), TriageState::Archived, "the sent reply follows");
@@ -264,7 +264,7 @@ fn post_send_dialog_files_original_and_reply_in_one_undo(cx: &mut TestAppContext
 fn post_send_dialog_files_the_pending_reply_when_it_sends(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
     h.send_reply("Sure, let me know when");
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Archived);
 
     // The outbox flush materialises the reply; it mirrors the original's state.
@@ -336,7 +336,7 @@ fn block_dialog_leave_keeps_mail_and_escape_changes_nothing(cx: &mut TestAppCont
     assert!(h.blocked().is_empty(), "escape changes nothing");
 
     h.keys("b");
-    h.keys("4");
+    h.keys("enter");
     assert_eq!(h.blocked(), vec!["spam@example.com"]);
     assert_eq!(h.state_of(1), TriageState::Inbox, "Leave keeps the mail");
 }
@@ -372,7 +372,7 @@ fn spam_dialog_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     h.keys("!");
     assert!(h.dialog_open());
     assert_eq!(h.dialog_options(), vec!["Block & Delete", "Delete"]);
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     assert_eq!(h.blocked(), vec!["spam@example.com"]);
 
@@ -395,14 +395,14 @@ fn sender_wide_confirm_cancel_changes_nothing(cx: &mut TestAppContext) {
     h.keys("shift-e");
     assert!(h.dialog_open());
     assert_eq!(h.dialog_title(), "Archive all 2 messages from alice in Inbox?");
-    h.keys("2");
+    h.keys("escape");
     assert!(!h.dialog_open());
     assert_eq!(h.count(TriageState::Archived), 0, "cancel archives nothing");
     assert_eq!(h.count(TriageState::Inbox), 2);
 
-    h.keys("escape");
     h.keys("shift-e");
-    h.keys("1");
+    h.keys("enter");
+    assert!(!h.dialog_open());
     assert_eq!(h.count(TriageState::Archived), 2, "confirm archives both");
 }
 
@@ -417,14 +417,14 @@ fn sender_wide_delete_and_inbox_confirm(cx: &mut TestAppContext) {
     );
     h.keys("shift-d");
     assert_eq!(h.dialog_title(), "Delete all 2 messages from alice in Inbox?");
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.count(TriageState::Deleted), 2);
 
     // From Trash, the sender-wide move brings the sender's trashed mail back.
     h.keys("g d");
     h.keys("shift-i");
     assert_eq!(h.dialog_title(), "Move to Inbox all 2 messages from alice in Trash?");
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.count(TriageState::Inbox), 2);
     assert_eq!(h.count(TriageState::Deleted), 0);
     h.keys("u");
@@ -436,7 +436,11 @@ fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-f");
     assert_eq!(h.dialog_title(), "File all 1 message from alice in Inbox?");
-    h.keys("1");
+    h.keys("escape");
+    assert!(!h.dialog_open() && !h.read(|a| a.folder_picker_open()), "escape cancels");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    h.keys("shift-f");
+    h.keys("enter");
     assert!(h.folder_rows().contains(&"Receipts".to_owned()));
     h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Filed(1));
@@ -444,7 +448,7 @@ fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-s");
     assert_eq!(h.dialog_title(), "Snooze all 1 message from alice in Inbox?");
-    h.keys("1");
+    h.keys("enter");
     assert!(h.read(|a| a.snooze_open()), "confirm opens the snooze picker");
     h.keys("1");
     assert_eq!(h.state_of(1), TriageState::Snoozed);
@@ -602,7 +606,7 @@ fn spam_banner_not_spam_clears_the_flag_and_undo_brings_it_back(cx: &mut TestApp
 fn undo_after_the_flush_reverts_the_filed_reply_too(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
     h.send_reply("Sure, let me know when");
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Archived);
 
     h.advance(11);
@@ -619,7 +623,7 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     // Sender-wide file into a folder that does not exist yet.
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     let before = h.folder_count();
-    h.keys("shift-f 1");
+    h.keys("shift-f enter");
     h.type_text("Zebra");
     h.keys("enter");
     let TriageState::Filed(folder) = h.state_of(1) else {

@@ -1251,7 +1251,7 @@ impl MailApp {
         );
     }
 
-    /// Confirm/Cancel dialog; `on_confirm` runs when Confirm is chosen.
+    /// Confirm dialog: `enter` runs `on_confirm`, `escape` cancels.
     fn confirm(
         &mut self,
         title: String,
@@ -1259,17 +1259,9 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let options = vec![
-            DialogOption::new("1", "Confirm", ""),
-            DialogOption::new("2", "Cancel", ""),
-        ];
         self.open_dialog(
-            DialogSpec::new(title, String::new(), options, 0),
-            move |this, ix, window, cx| {
-                if ix == 0 {
-                    on_confirm(this, window, cx);
-                }
-            },
+            DialogSpec::new(title, String::new(), vec![DialogOption::new("", "Confirm", "")], 0),
+            move |this, _, window, cx| on_confirm(this, window, cx),
             window,
             cx,
         );

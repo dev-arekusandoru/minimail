@@ -60,7 +60,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `i` | Move to Inbox | `r` | Reply (`cmd-enter` sends → post-send dialog) |
 | `shift-a` | Reply all (sender + To + Cc, minus your address) | `w` | Forward (empty editable To, `Fwd:` subject, forwarded-message block; `cmd-enter` sends) |
 | `b` | Block sender | `!` | Mark spam (Block & Delete / Delete) |
-| `shift-e` `shift-d` `shift-f` `shift-s` | Archive / Delete / File / Snooze **all** from the sender (confirm first) | `shift-u` | Unsubscribe (confirm first) |
+| `shift-e` `shift-d` `shift-f` `shift-s` | Archive / Delete / File / Snooze **all** from the sender (`enter` confirms, `esc` cancels) | `shift-u` | Unsubscribe (dialog: `enter` = Leave, `1`–`3` move the mail first) |
 | `1`–`4`, `6` | Filter pills: clear · toggle Needs Reply · Follow Up · Urgent · Possible Spam | `g` then `i` `s` `t` `a` `d` | Go to Inbox / Snoozed / Sent / Archive / Trash |
 | `l` | Add a filter pill (`+ Filter`) | `p` | Open the sender's mail (exact address, every folder) in a new list tab |
 | `u` / `cmd-z` | Undo | `z` | Summarize thread |
