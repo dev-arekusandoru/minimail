@@ -335,7 +335,7 @@ impl MailApp {
                 auto += a;
                 review += r;
             }
-            if self.auto_classify() && self.needs_questions(id) {
+            if self.auto_wanted(id) && self.needs_questions(id) {
                 self.enqueue_judge(JudgeJob::Message { id, force: false });
             }
         }

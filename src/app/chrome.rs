@@ -122,7 +122,10 @@ impl RenderOnce for HintBar {
         let center: Option<(String, Hsla)> = match &status {
             Some(JudgeStatus::NoKey) => Some((NO_KEY_PROMPT.to_owned(), t.muted_foreground)),
             Some(JudgeStatus::Working { done, total }) => {
-                Some((format!("Classifying {done}/{total}"), t.muted_foreground))
+                Some((format!("Classifying {done}/{total} · click to stop"), t.muted_foreground))
+            }
+            Some(JudgeStatus::Paused) => {
+                Some(("Auto-classify off · click to start".to_owned(), t.muted_foreground))
             }
             Some(JudgeStatus::Error(e)) => Some((format!("Classifier: {e}"), t.danger)),
             // `Idle`, or no classifier at all: the center stays empty.

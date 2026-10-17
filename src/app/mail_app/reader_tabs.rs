@@ -15,7 +15,7 @@ impl MailApp {
         self.last_opened = Some(id);
         // A partial body is downloaded next; classification waits for it.
         self.prioritize_body(id, cx);
-        if !self.auto_classify() || self.judge.is_none() {
+        if !self.auto_wanted(id) || self.judge.is_none() {
             return;
         }
         let Some(m) = self.mailbox.get(id) else { return };

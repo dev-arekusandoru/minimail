@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use gpui_kit::TestAppContext;
+use mail_classifier::app::actions::{StartClassifying, StopClassifying};
 use mail_classifier::contacts::ContactStore;
 use mail_classifier::judge::{
     Answer, Judge, JudgeError, JudgePolicy, JudgeStatus, Question, QuestionKey, StubJudge,
@@ -270,4 +271,87 @@ fn without_a_judge_a_reply_is_not_tagged(cx: &mut TestAppContext) {
     h.keys("t h a n k s space j e space ?");
     h.keys("cmd-enter");
     assert!(!h.has_tag(id, Tag::AwaitingReply), "no key means no tag");
+}
+
+/// Two Inbox messages: id 2 arrived three hours before `NOON`, id 1 four weeks before.
+fn recent_and_old() -> mail_classifier::model::Mailbox {
+    mailbox(&[
+        msg(1, 1, "deals@talentloop.com", "Is this a fit?", 1, "Inbox"),
+        msg(2, 2, "deals@talentloop.com", "Still a fit?", 29, "Inbox"),
+    ])
+}
+
+fn tagged(h: &mut Harness<'_>, id: u32) -> bool {
+    h.read(move |a| !a.mailbox.tags(id).is_empty() || !a.mailbox.pending(id).is_empty())
+}
+
+#[gpui_kit::gpui::test]
+fn stop_cancels_queued_work_manual_classify_still_works_and_resume_restarts(cx: &mut TestAppContext) {
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
+    let mut h = harness_with_judge(cx, recent_and_old(), None);
+    // Install the judge and stop before the worker gets to run: one request is in flight,
+    // the other is queued.
+    h.app.update(h.cx, |a, cx| a.set_judge(Some(Arc::new(judge)), cx));
+    h.cx.dispatch_action(h.window, StopClassifying);
+    h.cx.run_until_parked();
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "only the request already sent goes out");
+    assert!(!tagged(&mut h, 1) && !tagged(&mut h, 2), "its answer is ignored and the queue is dropped");
+    assert_eq!(h.read(|a| a.judge_status().clone()), JudgeStatus::Paused);
+
+    h.keys("c");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "manual classify works while stopped");
+    let cursor = h.cursor().unwrap();
+    assert!(tagged(&mut h, cursor));
+
+    h.cx.dispatch_action(h.window, StartClassifying);
+    h.cx.run_until_parked();
+    assert!(tagged(&mut h, 1) && tagged(&mut h, 2), "resume classifies what is left");
+    assert_eq!(h.read(|a| a.judge_status().clone()), JudgeStatus::Idle);
+}
+
+#[gpui_kit::gpui::test]
+fn stop_and_resume_are_stored(cx: &mut TestAppContext) {
+    let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
+    let scope = mail_classifier::prefs::Scope::Global;
+    let auto = &mail_classifier::app_settings::AUTO_CLASSIFY;
+    let h = harness_with_judge_prefs(cx, spam_message(), store.clone(), Some(Arc::new(StubJudge)));
+    h.cx.dispatch_action(h.window, StopClassifying);
+    assert!(!auto.get(store.as_ref(), &scope), "a stopped classifier stays stopped on restart");
+    h.cx.dispatch_action(h.window, StartClassifying);
+    assert!(auto.get(store.as_ref(), &scope));
+}
+
+#[gpui_kit::gpui::test]
+fn the_age_cutoff_keeps_old_mail_off_the_auto_queue_but_not_manual(cx: &mut TestAppContext) {
+    let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
+    mail_classifier::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS
+        .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, 1);
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
+    let mut h = harness_with_judge_prefs(cx, recent_and_old(), store, Some(Arc::new(judge)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "only the recent message is sent");
+    assert!(tagged(&mut h, 2) && !tagged(&mut h, 1));
+
+    // Select the old message and classify it by hand.
+    while h.cursor() != Some(1) {
+        h.keys("j");
+    }
+    h.keys("c");
+    assert!(tagged(&mut h, 1), "old mail can still be classified manually");
+}
+
+#[gpui_kit::gpui::test]
+fn changing_the_age_setting_takes_effect_without_a_restart(cx: &mut TestAppContext) {
+    let store = Rc::new(ContactStore::open_in_memory().expect("contacts store"));
+    mail_classifier::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS
+        .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, 1);
+    let (judge, calls, _fail, _seen) = FakeJudge::new("counting");
+    let mut h = harness_with_judge_prefs(cx, recent_and_old(), store, Some(Arc::new(judge)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // AI page (4), Tagging group (2), age row (6), "Never skip" is the first option.
+    h.settings_open_page(4);
+    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_pick_option(2, 6, 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "the old message is now queued");
+    assert!(tagged(&mut h, 1));
 }

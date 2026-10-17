@@ -24,6 +24,9 @@ pub const MODE_EXPECTS_REPLY: Setting<Mode> = Setting::new("mode_expects_reply",
 pub const MODE_FOLDER: Setting<Mode> = Setting::new("mode_folder", Mode::Review);
 /// Classify new mail automatically on arrival/at startup. Off means Jev only runs on demand.
 pub const AUTO_CLASSIFY: Setting<bool> = Setting::new("auto_classify", false);
+/// Days of age beyond which received mail is not auto-classified; 0 means never skip.
+pub const AUTO_CLASSIFY_MAX_AGE_DAYS: Setting<u16> =
+    Setting::new("auto_classify_max_age_days", crate::judge::DEFAULT_MAX_AGE_DAYS);
 /// Count recruiters' and sales cold outreach as spam.
 pub const SPAM_COLD_OUTREACH: Setting<bool> = Setting::new("spam_cold_outreach", false);
 /// Jev endpoint; empty means [`crate::judge::jev::DEFAULT_BASE_URL`].

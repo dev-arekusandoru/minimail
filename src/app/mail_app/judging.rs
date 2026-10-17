@@ -10,13 +10,13 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::app_settings::{
-    AUTO_CLASSIFY, JEV_BASE_URL, JEV_MODEL, MODE_EXPECTS_REPLY, MODE_FOLDER, MODE_KIND,
-    MODE_NEEDS_REPLY, MODE_SPAM, MODE_URGENCY, SPAM_COLD_OUTREACH,
+    AUTO_CLASSIFY, AUTO_CLASSIFY_MAX_AGE_DAYS, JEV_BASE_URL, JEV_MODEL, MODE_EXPECTS_REPLY,
+    MODE_FOLDER, MODE_KIND, MODE_NEEDS_REPLY, MODE_SPAM, MODE_URGENCY, SPAM_COLD_OUTREACH,
 };
 use crate::judge::{
     Answer, AnswerValue, ClassifyState, Judge, JudgeError, JudgeStatus, Question, QuestionKey,
     QuestionSpec, StoredAnswer, incoming_questions, legacy_judgement_key, message_state,
-    questions_to_ask, reply_question, route,
+    questions_to_ask, reply_question, route, too_old_for_auto,
 };
 use crate::prefs::Scope;
 
@@ -142,9 +142,59 @@ impl MailApp {
         &self.judge_status
     }
 
-    /// Whether automatic classification is on (`AUTO_CLASSIFY`).
-    pub(super) fn auto_classify(&self) -> bool {
+    /// Whether `id` may be queued automatically: auto-classify is on and the message is not
+    /// older than the cutoff. Manual classification never asks.
+    pub(super) fn auto_wanted(&self, id: MessageId) -> bool {
         self.auto_classify
+            && !self.mailbox.get(id).is_some_and(|m| {
+                too_old_for_auto(m.received_at(), self.now(), self.auto_max_age_days)
+            })
+    }
+
+    /// Drop queued automatic work that a changed setting no longer allows. Manual (forced) and
+    /// reply jobs stay; an in-flight request is left to finish.
+    fn cancel_unwanted_queue(&mut self) {
+        let queue = std::mem::take(&mut self.judge_queue);
+        self.judge_queue = queue
+            .into_iter()
+            .filter(|j| match j {
+                JudgeJob::Message { id, force } => *force || self.auto_wanted(*id),
+                JudgeJob::Reply { .. } => true,
+            })
+            .collect();
+    }
+
+    /// Stop the classifier: turn automatic classification off (persisted), drop every queued
+    /// message job and pending manual request, and discard the in-flight result. A request
+    /// already sent cannot be aborted (the judge call is synchronous on a background thread);
+    /// its answer is ignored when it lands. Manual classification still works afterwards.
+    pub(super) fn stop_classifying(&mut self, cx: &mut Context<Self>) {
+        self.auto_classify = false;
+        self.save_setting(&AUTO_CLASSIFY, false);
+        self.judge_gen += 1;
+        self.judge_queue.retain(|j| matches!(j, JudgeJob::Reply { .. }));
+        self.pending_classify.clear();
+        self.judge_in_flight = None;
+        self.sync_settings_auto_classify(cx);
+        self.refresh_judge_status();
+        cx.notify();
+    }
+
+    /// Resume automatic classification (persisted) and queue what is due.
+    pub(super) fn start_classifying(&mut self, cx: &mut Context<Self>) {
+        self.auto_classify = true;
+        self.save_setting(&AUTO_CLASSIFY, true);
+        self.sync_settings_auto_classify(cx);
+        self.classify_visible(cx);
+        cx.notify();
+    }
+
+    /// Show the current auto-classify state on an open Settings panel's switch.
+    fn sync_settings_auto_classify(&self, cx: &mut Context<Self>) {
+        let on = self.auto_classify;
+        if let Some(panel) = &self.settings {
+            panel.update(cx, |panel, cx| panel.show_auto_classify(on, cx));
+        }
     }
 
     /// The configured Jev endpoint and model, falling back to the shipped defaults.
@@ -327,7 +377,7 @@ impl MailApp {
         }
         let account = m.account.clone();
         let pending = self.pending_classify.remove(&id);
-        if pending.is_none() && !self.auto_classify {
+        if pending.is_none() && !self.auto_wanted(id) {
             return;
         }
         if self.classify_specs(&account).is_empty() {
@@ -354,6 +404,7 @@ impl MailApp {
         if let Some(store) = self.preferences.clone() {
             let scope = Scope::Global;
             self.auto_classify = AUTO_CLASSIFY.get(store.as_ref(), &scope);
+            self.auto_max_age_days = AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
             self.spam_cold_outreach = SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
             self.policy.set_mode(QuestionKey::Spam, MODE_SPAM.get(store.as_ref(), &scope));
             self.policy
@@ -365,6 +416,7 @@ impl MailApp {
             self.policy.set_mode(QuestionKey::Folder, MODE_FOLDER.get(store.as_ref(), &scope));
         }
         self.mailbox.drop_suggestions_off(&self.policy);
+        self.cancel_unwanted_queue();
         self.classify_visible(cx);
         cx.notify();
     }
@@ -629,7 +681,7 @@ impl MailApp {
                 // The batch drained: the next enqueue starts a fresh one.
                 self.judge_batch_done = 0;
                 self.judge_batch_total = 0;
-                JudgeStatus::Idle
+                if self.auto_classify { JudgeStatus::Idle } else { JudgeStatus::Paused }
             } else {
                 JudgeStatus::Working {
                     done: self.judge_batch_done,

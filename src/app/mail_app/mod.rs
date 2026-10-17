@@ -158,6 +158,8 @@ pub struct MailApp {
     classify_failed: HashSet<MessageId>,
     /// Automatic classification (`AUTO_CLASSIFY`); false means Jev runs only on demand.
     auto_classify: bool,
+    /// Age cutoff for automatic classification in days (`AUTO_CLASSIFY_MAX_AGE_DAYS`); 0 = off.
+    auto_max_age_days: u16,
     /// The cold-outreach checkbox (`SPAM_COLD_OUTREACH`); part of the Spam version.
     spam_cold_outreach: bool,
     /// Messages classified before their body downloaded: id → force every enabled question.
@@ -316,6 +318,7 @@ impl MailApp {
             // Overridden from `AUTO_CLASSIFY` by `load_preferences` at startup; the constructor
             // default keeps headless tests that never load preferences classifying.
             auto_classify: true,
+            auto_max_age_days: 0,
             spam_cold_outreach: false,
             pending_classify: HashMap::new(),
             last_opened: None,
@@ -417,6 +420,8 @@ impl MailApp {
             crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
         );
         self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
+        self.auto_max_age_days =
+            crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
         self.spam_cold_outreach =
             crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
         self.preferences = Some(store);

@@ -77,6 +77,7 @@ pub enum SettingsEvent {
         auto_classify: bool,
         spam_cold_outreach: bool,
     },
+    AutoClassifyAge(u16),
     Grouping(bool),
     TabAvatars(bool),
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
@@ -243,6 +244,8 @@ pub struct SettingsPanel {
     summaries: bool,
     /// Classify new mail automatically as it arrives (opt in; off by default).
     auto_classify: bool,
+    /// Age cutoff for automatic classification in days; 0 = never skip.
+    auto_max_age_days: u16,
     /// Count recruiters' and sales cold outreach as spam (`SPAM_COLD_OUTREACH`).
     spam_cold_outreach: bool,
     group: bool,
@@ -361,6 +364,7 @@ impl SettingsPanel {
             policy,
             summaries,
             auto_classify: false,
+            auto_max_age_days: crate::judge::DEFAULT_MAX_AGE_DAYS,
             spam_cold_outreach: false,
             group,
             tab_avatars: true,
@@ -411,6 +415,12 @@ impl SettingsPanel {
     pub fn classifier_switches(mut self, auto_classify: bool, spam_cold_outreach: bool) -> Self {
         self.auto_classify = auto_classify;
         self.spam_cold_outreach = spam_cold_outreach;
+        self
+    }
+
+    /// The auto-classify age cutoff's initial value, in days (0 = never skip).
+    pub fn auto_max_age(mut self, days: u16) -> Self {
+        self.auto_max_age_days = days;
         self
     }
     pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
@@ -604,6 +614,7 @@ impl SettingsPanel {
         self.policy = JudgePolicy::default();
         self.summaries = false;
         self.auto_classify = false;
+        self.auto_max_age_days = crate::judge::DEFAULT_MAX_AGE_DAYS;
         self.spam_cold_outreach = false;
         self.group = false;
         self.tab_avatars = true;
@@ -704,6 +715,22 @@ impl SettingsPanel {
         if on != self.auto_classify {
             self.auto_classify = on;
             self.changed(cx);
+        }
+    }
+
+    fn set_auto_max_age(&mut self, days: u16, cx: &mut Context<Self>) {
+        if days != self.auto_max_age_days {
+            self.auto_max_age_days = days;
+            cx.emit(SettingsEvent::AutoClassifyAge(days));
+            cx.notify();
+        }
+    }
+
+    /// Show a change made outside the panel (Stop / Start classifying) on its switch.
+    pub fn show_auto_classify(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_classify {
+            self.auto_classify = on;
+            cx.notify();
         }
     }
 

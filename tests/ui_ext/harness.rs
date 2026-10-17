@@ -100,6 +100,19 @@ fn harness_inner(
                         // headless tests exercise the automatic path, so opt in here.
                         mail_classifier::app_settings::AUTO_CLASSIFY
                             .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, true);
+                        // Fixtures are old relative to the default cutoff; a test that stored a non-default
+                        // cutoff keeps it (a value equal to the default is not stored).
+                        let scope = mail_classifier::prefs::Scope::Global;
+                        if mail_classifier::prefs::PrefStore::get_raw(
+                            store.as_ref(),
+                            &scope,
+                            "auto_classify_max_age_days",
+                        )
+                        .is_none()
+                        {
+                            mail_classifier::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS
+                                .set(store.as_ref(), &scope, 0);
+                        }
                         app.load_preferences(store, window, cx);
                     }
                     // The real app installs the judge from the keychain; tests inject a fake.

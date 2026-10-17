@@ -142,6 +142,8 @@ Defined once in `src/app/icons.rs` (`Glyph::spec`: icon, theme token, label, des
 To add a concept: add a `Glyph` variant, list it in `Glyph::ALL`, fill its `spec` arm and add the SVG name to `icon_assets!`. The reader's **Classify** button and the global *Classify* command use the `ScanSearch` icon.
 The reader hides **Classify** once the message has cached answers; `c` and the global command can still classify it again.
 
+**Controlling cost.** Automatic classification is opt-in (Settings → AI → *Classify new mail automatically*) and only considers mail newer than *Don't auto-classify mail older than* (Never skip · 1 day · **1 week, the default** · 1 month · 3 months · 1 year; compared against the message's received time). Older mail is never queued automatically but `c` / *Classify every message in this list…* still classify it. The palette commands **Stop classifying** and **Start classifying**, or a click on the status bar text (*Classifying n/m · click to stop* / *Auto-classify off · click to start*), turn automatic classification off or on; the choice is stored like the switch, so a stopped classifier stays stopped after a restart. Stop drops every queued request; a request already sent cannot be aborted, its answer is discarded when it lands. Manual classify works while stopped. Neither command has a default key.
+
 ## 🛠️ Development
 
 **Requirements:** Rust (edition 2024) and, on macOS, Xcode with the command-line tools, which GPUI needs to build. So far it has only been built and run on macOS (Apple Silicon).

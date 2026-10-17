@@ -253,7 +253,7 @@ impl MailApp {
         cx.notify();
     }
 
-    fn save_setting<T>(&self, setting: &crate::prefs::Setting<T>, value: T)
+    pub(super) fn save_setting<T>(&self, setting: &crate::prefs::Setting<T>, value: T)
     where
         T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Clone,
     {
@@ -372,6 +372,10 @@ impl MailApp {
             ),
             None => (false, false),
         };
+        let auto_max_age = match &self.preferences {
+            Some(store) => crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope),
+            None => self.auto_max_age_days,
+        };
         let app = cx.weak_entity();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(820.), px(760.)), cx)),
@@ -400,6 +404,7 @@ impl MailApp {
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured)
                     .classifier_switches(auto_classify, spam_cold_outreach)
+                    .auto_max_age(auto_max_age)
                     .on_page(page)
                     .jev_connection(jev_base, jev_model, jev_has_key)
             });
@@ -434,6 +439,7 @@ impl MailApp {
                         crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_FOLDER.reset(store.as_ref(), &scope);
                         crate::app_settings::AUTO_CLASSIFY.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.reset(store.as_ref(), &scope);
                         crate::app_settings::SPAM_COLD_OUTREACH.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_BASE_URL.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_MODEL.reset(store.as_ref(), &scope);
@@ -469,6 +475,12 @@ impl MailApp {
                     this.configure_jev(cx);
                     this.apply_classifier_settings(cx);
                     panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
+                    cx.notify();
+                }
+                SettingsEvent::AutoClassifyAge(days) => {
+                    this.auto_max_age_days = *days;
+                    this.save_setting(&crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS, *days);
+                    this.apply_classifier_settings(cx);
                     cx.notify();
                 }
                 SettingsEvent::Changed { policy, summaries, auto_classify, spam_cold_outreach } => {

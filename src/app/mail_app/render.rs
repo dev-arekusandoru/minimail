@@ -223,6 +223,7 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &BlockSender, w, cx| this.screen_sender(false, w, cx)))
             .on_action(cx.listener(|this, _: &MuteThread, w, cx| this.mute_thread(w, cx)))
             .on_action(cx.listener(|this, _: &Unsubscribe, w, cx| this.unsubscribe(w, cx)))
+            .on_action(cx.listener(|this, _: &OpenSenderTab, _, cx| this.open_sender_tab(cx)))
             .on_action(cx.listener(|this, _: &SummarizeThread, w, cx| this.summarize(w, cx)))
             .on_action(cx.listener(|this, _: &ToggleSettings, w, cx| this.toggle_settings(w, cx)))
             .on_action(cx.listener(|this, _: &AddGmailAccount, w, cx| this.add_gmail_account(w, cx)))
@@ -236,6 +237,14 @@ impl Render for MailApp {
                     this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
                 } else {
                     this.confirm_classify_list(w, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &StopClassifying, _, cx| this.stop_classifying(cx)))
+            .on_action(cx.listener(|this, _: &StartClassifying, w, cx| {
+                if this.judge_status() == &JudgeStatus::NoKey {
+                    this.show_toast("No Jev key · add one in Settings".to_owned(), w, cx);
+                } else {
+                    this.start_classifying(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ClassifyMessage, w, cx| {
@@ -284,7 +293,11 @@ impl Render for MailApp {
             .child(div().flex_none().child(
                 HintBar::new(hint)
                     .status(self.judge_status().clone())
-                    .on_status_click(cx.listener(|this, _, window, cx| this.open_settings_ai(window, cx))),
+                    .on_status_click(cx.listener(|this, _, window, cx| match this.judge_status() {
+                        JudgeStatus::Working { .. } => this.stop_classifying(cx),
+                        JudgeStatus::Paused => this.start_classifying(cx),
+                        _ => this.open_settings_ai(window, cx),
+                    })),
             ))
     }
 }
