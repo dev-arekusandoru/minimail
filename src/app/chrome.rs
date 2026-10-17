@@ -18,10 +18,12 @@ use gpui_kit::{
 fn hint(t: &ThemeColor, key: &str, what: &str, cx: &App) -> impl IntoElement {
     div()
         .flex()
+        .flex_none()
         .items_center()
         .gap_1()
+        .whitespace_nowrap()
         .child(shortcut_chips(key, cx))
-        .child(div().text_xs().text_color(t.muted_foreground).child(SharedString::from(what.to_owned())))
+        .child(div().text_xs().text_color(t.foreground.opacity(0.85)).child(SharedString::from(what.to_owned())))
 }
 
 /// Wall-clock label for a return time on the user's own clock, e.g. `"Mon 5 Oct 08:00"`.

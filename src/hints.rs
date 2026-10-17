@@ -6,6 +6,8 @@
 
 /// Most hints ever shown at once.
 pub const MAX_HINTS: usize = 5;
+/// Gap in px between two hints in the bar (`gap_3`), counted by [`fit_hints`].
+const HINT_GAP: f32 = 12.;
 
 /// Which surface the bar sits under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,31 +188,36 @@ pub fn hints(ctx: &HintContext) -> Vec<Hint> {
 
 /// Estimated rendered width in px of one hint (keycap pills, label, gaps).
 pub fn hint_width(hint: &Hint) -> f32 {
-    const CHAR_W: f32 = 6.5;
+    /// Advance of one mono glyph in a keycap (11px mono).
+    const KEY_CHAR_W: f32 = 7.;
     /// Horizontal padding inside a keycap pill, both sides, plus its border.
-    const PILL_PAD: f32 = 10.;
+    const PILL_PAD: f32 = 12.;
+    /// Smallest keycap pill, matching `ui::KEYCAP_MIN_W`.
+    const PILL_MIN_W: f32 = 18.;
     /// Width of one "then" connector between the pills of a multi-stroke binding.
     const THEN_W: f32 = 30.;
     /// Gap between a hint's keycaps and its label.
-    const GAP: f32 = 16.;
+    const GAP: f32 = 4.;
+    const CHAR_W: f32 = 6.5;
     let strokes: Vec<&str> = hint.key.split_whitespace().collect();
-    let key_chars: usize = strokes
+    let pills: f32 = strokes
         .iter()
-        .map(|k| if k.chars().count() > 1 && *k != "?" { k.chars().count().min(6) } else { 1 })
+        .map(|k| {
+            let chars = if k.chars().count() > 1 && *k != "?" { k.chars().count().min(6) } else { 1 };
+            (chars as f32 * KEY_CHAR_W + PILL_PAD).max(PILL_MIN_W)
+        })
         .sum();
     let then = THEN_W * strokes.len().saturating_sub(1) as f32;
-    key_chars as f32 * CHAR_W
-        + strokes.len() as f32 * PILL_PAD
-        + then
-        + hint.label.len() as f32 * CHAR_W
-        + GAP
+    pills + then + hint.label.len() as f32 * CHAR_W + GAP
 }
 
 /// [`hints`], then the lowest-ranked dropped until the bar fits `budget` px
 /// (`reserved` px are already taken, e.g. by the "N selected" label).
 pub fn fit_hints(ctx: &HintContext, budget: f32, reserved: f32) -> Vec<Hint> {
     let mut v = ranked(ctx);
-    let width = |v: &[Ranked]| reserved + v.iter().map(|(h, _)| hint_width(h)).sum::<f32>();
+    let width = |v: &[Ranked]| {
+        reserved + v.iter().map(|(h, _)| hint_width(h)).sum::<f32>() + HINT_GAP * v.len().saturating_sub(1) as f32
+    };
     while (v.len() > MAX_HINTS || width(&v) > budget) && drop_one(&mut v) {}
     v.into_iter().map(|(hint, _)| hint).collect()
 }

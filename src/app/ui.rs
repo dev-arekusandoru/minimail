@@ -54,27 +54,47 @@ pub fn mono_font(cx: &App) -> SharedString {
 }
 
 /// Font size of keycap pills: one step down from the kit default, so a pill fits a 24–28px row.
-const KEYCAP_TEXT: f32 = 10.;
+const KEYCAP_TEXT: f32 = 11.;
+/// Fixed pill height, so every keycap in a bar lines up whatever its label.
+const KEYCAP_H: f32 = 18.;
 /// Minimum width of a keycap pill, so a one-character key still reads as a key.
-const KEYCAP_MIN_W: f32 = 14.;
+const KEYCAP_MIN_W: f32 = 18.;
 
-/// The one keycap every shortcut display uses: a [`Kbd`] pill for a single keystroke
-/// (`"e"`, `"shift-e"`, `"cmd-,"`). An unparseable key falls back to `space`, as the kit does.
+/// The plain keycap for a single keystroke (`"e"`, `"shift-e"`, `"cmd-,"`), used by tooltips,
+/// dialogs, panels and the reader. The hint bar, palette and help use [`shortcut_chips`].
+/// An unparseable key falls back to `space`.
 pub fn shortcut(key: &str) -> Kbd {
     let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
-    Kbd::new(stroke).text_size(px(KEYCAP_TEXT)).py_0().px(px(4.)).min_w(px(KEYCAP_MIN_W))
+    Kbd::new(stroke).text_size(px(10.)).py_0().px(px(4.)).min_w(px(14.))
+}
+
+/// One themed keycap: foreground text on a bordered pill in the mono family, at a fixed height.
+fn keycap(key: &str, cx: &App) -> Kbd {
+    let t = cx.theme();
+    let stroke = Keystroke::parse(key).unwrap_or_else(|_| Keystroke::parse("space").unwrap());
+    Kbd::new(stroke)
+        .outline()
+        .font_family(mono_font(cx))
+        .text_color(t.foreground)
+        .text_size(px(KEYCAP_TEXT))
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(KEYCAP_H))
+        .px_1()
+        .min_w(px(KEYCAP_MIN_W))
 }
 
 /// Keycaps for a possibly multi-stroke binding (`"g i"`): one pill per stroke, joined by
-/// `then`, in the muted text colour the hint bar and help overlay use.
+/// `then` in muted text. Used by the hint bar, the palette and the help overlay.
 pub fn shortcut_chips(key: &str, cx: &App) -> Div {
-    let then = cx.theme().muted_foreground;
-    let mut el = div().flex().items_center().gap_1();
+    let t = cx.theme();
+    let mut el = div().flex().flex_none().items_center().gap_1();
     for (i, part) in key.split_whitespace().enumerate() {
         if i > 0 {
-            el = el.child(div().text_size(px(KEYCAP_TEXT)).text_color(then).child("then"));
+            el = el.child(div().text_xs().text_color(t.muted_foreground).child("then"));
         }
-        el = el.child(shortcut(part));
+        el = el.child(keycap(part, cx));
     }
     el
 }
