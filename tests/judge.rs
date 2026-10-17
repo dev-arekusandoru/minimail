@@ -310,6 +310,25 @@ fn a_policy_survives_a_json_round_trip() {
     assert_eq!(back, p);
 }
 
+/// Stored values from the old Auto/Off control still decide whether a question is asked:
+/// Auto (any preset) and a missing value ask it; Off does not.
+#[test]
+fn stored_question_modes_decide_whether_it_is_asked() {
+    use mail_classifier::app_settings::MODE_SPAM;
+    use mail_classifier::prefs::{MemoryPrefs, Scope};
+    let asked = |prefs: &MemoryPrefs| {
+        let mut p = JudgePolicy::default();
+        p.set_mode(QuestionKey::Spam, MODE_SPAM.get(prefs, &Scope::Global));
+        incoming_questions(&p, false, &[]).iter().any(|q| q.key == QuestionKey::Spam)
+    };
+    let prefs = MemoryPrefs::default();
+    assert!(asked(&prefs), "missing means asked");
+    MODE_SPAM.set(&prefs, &Scope::Global, Mode::Auto(Confidence::Low));
+    assert!(asked(&prefs), "Auto means asked");
+    MODE_SPAM.set(&prefs, &Scope::Global, Mode::Off);
+    assert!(!asked(&prefs), "Off means not asked");
+}
+
 fn thread(bodies: &[&str]) -> Vec<Message> {
     bodies
         .iter()

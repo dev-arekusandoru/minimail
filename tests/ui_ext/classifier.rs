@@ -350,7 +350,7 @@ fn changing_the_age_setting_takes_effect_without_a_restart(cx: &mut TestAppConte
 
     // AI page (4), Tagging group (2), age row (6), "Never skip" is the first option.
     h.settings_open_page(4);
-    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_scroll(2, 0, "check", -600.);
     h.settings_pick_option(2, 6, 0);
     assert_eq!(calls.load(Ordering::SeqCst), 2, "the old message is now queued");
     assert!(tagged(&mut h, 1));

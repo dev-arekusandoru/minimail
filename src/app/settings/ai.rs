@@ -26,14 +26,6 @@ fn default_mode(question: QuestionKey) -> Mode {
     JudgePolicy::default().mode(question)
 }
 
-/// `mode`'s segment in [`CLASSIFIER_MODES`], which lists Auto, Off.
-fn mode_index(mode: Mode) -> usize {
-    match mode {
-        Mode::Auto(_) => 0,
-        Mode::Review | Mode::Off => 1,
-    }
-}
-
 impl SettingsPanel {
     /// The "Jev connection" group: the API key (masked, never shown), the endpoint, the model,
     /// and the Save / Test connection actions that apply them.
@@ -155,20 +147,17 @@ impl SettingsPanel {
             tagging = tagging.item(row(
                 question.label(),
                 tag_line(question),
-                &["classifier", "auto off", "tagging"],
-                Undo::of_panel(
+                &["classifier", "on off", "ask", "tagging"],
+                switch_undo(
                     weak,
-                    move |this| this.policy.mode(question) != default_mode(question),
-                    move |this, cx| this.set_mode(question, default_mode(question), cx),
+                    move |this| this.policy.mode(question) != Mode::Off,
+                    true,
+                    move |this, on, cx| this.set_question_asked(question, on, cx),
                 ),
-                segmented(
-                    format!("ai-mode-group-{}", question.label()),
-                    mode_entries(question),
+                switch(
                     weak,
-                    move |this| mode_index(this.policy.mode(question)),
-                    move |this, index, cx| {
-                        this.set_classifier_mode(question, CLASSIFIER_MODES[index].0, cx)
-                    },
+                    move |this| this.policy.mode(question) != Mode::Off,
+                    move |this, on, cx| this.set_question_asked(question, on, cx),
                 ),
             ));
         }
@@ -285,13 +274,3 @@ fn no_reset(weak: &Weak) -> Undo {
     Undo::of_panel(weak, |_| false, |_, _| {})
 }
 
-/// The Auto / Off buttons of one question, each with an id no other row uses.
-fn mode_entries(question: QuestionKey) -> Vec<(String, String)> {
-    CLASSIFIER_MODES
-        .iter()
-        .enumerate()
-        .map(|(index, (_, label))| {
-            (format!("ai-mode-{}-{index}", question.label()), (*label).to_owned())
-        })
-        .collect()
-}

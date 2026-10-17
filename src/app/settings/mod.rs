@@ -140,9 +140,6 @@ pub const ACCOUNTS_PAGE: usize = 0;
 /// Index of the AI (classifier) page, where the Jev connection lives.
 pub const AI_PAGE: usize = 4;
 
-/// The mode segments of a non-folder question: its label is applied as soon as it arrives, or
-/// the question is off. A folder suggestion is the only one queued for review.
-const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("off", "Off")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
@@ -635,12 +632,13 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    fn set_classifier_mode(&mut self, question: QuestionKey, value: &str, cx: &mut Context<Self>) {
-        let mode = match (value, self.policy.mode(question)) {
-            ("auto", mode @ Mode::Auto(_)) => mode,
-            // Back to Auto puts the question's shipped preset back.
-            ("auto", _) => JudgePolicy::default().mode(question),
-            _ => Mode::Off,
+    /// Ask `question` of the classifier (on) or not at all (off). On keeps a stored preset and
+    /// otherwise restores the question's shipped one.
+    fn set_question_asked(&mut self, question: QuestionKey, on: bool, cx: &mut Context<Self>) {
+        let mode = match (on, self.policy.mode(question)) {
+            (false, _) => Mode::Off,
+            (true, Mode::Off) => JudgePolicy::default().mode(question),
+            (true, mode) => mode,
         };
         self.set_mode(question, mode, cx);
     }
@@ -1084,8 +1082,8 @@ fn row(
 /// A switch control: the panel bool and the setter a click uses.
 fn switch(
     weak: &Weak,
-    get: fn(&SettingsPanel) -> bool,
-    set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
+    get: impl Fn(&SettingsPanel) -> bool + 'static,
+    set: impl Fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>) + 'static,
 ) -> Control {
     let (read, write) = (weak.clone(), weak.clone());
     Rc::new(move |_, _, cx| {
@@ -1104,15 +1102,16 @@ fn switch(
 /// The undo of a switch row, which a reset turns back to `default`.
 fn switch_undo(
     weak: &Weak,
-    get: fn(&SettingsPanel) -> bool,
+    get: impl Fn(&SettingsPanel) -> bool + 'static,
     default: bool,
-    set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
+    set: impl Fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>) + 'static,
 ) -> Undo {
     Undo::of_panel(
         weak,
         move |this| get(this) != default,
         move |this, cx| set(this, default, cx),
     )
+    let set = Rc::new(set);
 }
 
 /// The buttons of a segmented row, in order.
@@ -1137,7 +1136,7 @@ fn segmented(
         for (index, (id, label)) in entries.iter().enumerate() {
             control = control.child(Button::new(id.clone()).label(label.clone()).selected(index == active));
         }
-        let write = write.clone();
+        let (write, set) = (write.clone(), set.clone());
         let apply = apply.clone();
         control
             .on_click(move |clicks: &Vec<usize>, _, cx| {

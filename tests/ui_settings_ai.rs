@@ -1,8 +1,11 @@
 //! The AI and Senders settings pages, driven through the real settings window.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use gpui_kit::TestAppContext;
 use mail_classifier::clock::DAY;
@@ -26,10 +29,9 @@ fn spam(h: &mut Harness<'_>) -> Mode {
     h.read(|a| a.policy.mode(QuestionKey::Spam))
 }
 
-/// The Off segment of a non-folder question's row.
-fn set_spam_mode(h: &mut Harness<'_>, segment: usize) {
-    // Group 2 is "Tagging"; its first row is Spam.
-    h.settings_click_in(2, 0, format!("ai-mode-Spam-{segment}"));
+/// Click Spam's switch (Tagging is group 2; Spam is its first row).
+fn toggle_spam(h: &mut Harness<'_>) {
+    h.settings_click_in(2, 0, "check");
 }
 
 #[gpui_kit::gpui::test]
@@ -45,7 +47,7 @@ fn toggling_auto_classify_reaches_the_app_and_is_stored(cx: &mut TestAppContext)
     let before = mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
 
     // Tagging's switches follow the question rows: item 5 is "Classify new mail automatically".
-    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_scroll(2, 0, "check", -600.);
     h.settings_click_in(2, 5, "check");
     assert_eq!(
         mail_classifier::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope),
@@ -63,52 +65,70 @@ fn the_folder_row_offers_only_off_and_review(cx: &mut TestAppContext) {
     assert!(!h.settings_has("ai-mode-Folder-auto"), "never Auto");
 
     // The Folder row is item 4 of Tagging; clicking Off turns the question off.
-    h.settings_scroll(2, 0, "ai-mode-Spam-0", -600.);
+    h.settings_scroll(2, 0, "check", -600.);
     h.settings_click_in(2, 4, "ai-mode-Folder-off");
     assert_eq!(h.read(|a| a.policy.mode(QuestionKey::Folder)), Mode::Off);
 }
 
 #[gpui_kit::gpui::test]
-fn turning_spam_off_stops_it_labelling(cx: &mut TestAppContext) {
-    // Start with no judge, so nothing is labelled before the Spam row is turned off.
+fn turning_spam_off_stops_it_being_asked_and_on_resumes(cx: &mut TestAppContext) {
+    // Start with no judge, so nothing is asked before the Spam row is turned off.
     let mut h = harness_with_judge(
         cx,
         mailbox(&[msg(1, 1, "deals@talentloop.com", "Is this a fit?", 1, "Inbox")]),
         None,
     );
     h.settings_open_page(AI);
-    set_spam_mode(&mut h, 1);
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "the shipped default is on");
+    toggle_spam(&mut h);
     assert_eq!(spam(&mut h), Mode::Off);
 
-    h.set_judge(Some(harness::stub_judge()));
+    let seen = Arc::new(Mutex::new(HashSet::new()));
+    h.set_judge(Some(Arc::new(RecordingJudge(seen.clone()))));
+    assert!(seen.lock().contains(&QuestionKey::NeedsReply), "other questions are asked");
+    assert!(!seen.lock().contains(&QuestionKey::Spam), "Spam is not asked while off");
     assert!(!h.has_tag(1, Tag::PossibleSpam), "Off labels nothing");
 
-    set_spam_mode(&mut h, 0);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "back to the shipped preset");
-    h.keys("c");
-    assert!(
-        h.has_tag(1, Tag::PossibleSpam),
-        "the same check labels the message when the question is not off"
-    );
-}
-
-/// A label question is applied as soon as it arrives, so its row offers only Auto and Off.
-#[gpui_kit::gpui::test]
-fn a_non_folder_row_offers_only_auto_and_off(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]));
-    h.settings_open_page(AI);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "the shipped default");
-    assert!(h.settings_has("ai-mode-Spam-0"), "the Auto segment");
-    assert!(h.settings_has("ai-mode-Spam-1"), "and Off");
-    assert!(!h.settings_has("ai-mode-Spam-2"), "there is no third segment");
-
-    set_spam_mode(&mut h, 1);
-    assert_eq!(spam(&mut h), Mode::Off);
+    // The panel outlives itself: the choice is kept.
     h.keys("cmd-,");
     h.settings_open_page(AI);
     assert_eq!(spam(&mut h), Mode::Off, "the policy outlives the panel");
-    set_spam_mode(&mut h, 0);
-    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "back to Auto, at the shipped preset");
+
+    toggle_spam(&mut h);
+    assert_eq!(spam(&mut h), Mode::Auto(Confidence::High), "back on, at the shipped preset");
+    assert!(seen.lock().contains(&QuestionKey::Spam), "turning it on asks again at once");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "and labels the message");
+}
+
+/// A label question is a plain switch: no Auto/Off segments, and the choice is stored.
+#[gpui_kit::gpui::test]
+fn a_non_folder_row_is_a_switch(cx: &mut TestAppContext) {
+    let store = Rc::new(ContactStore::open_in_memory().expect("in-memory address book"));
+    let scope = mail_classifier::prefs::Scope::Global;
+    let mut h = harness_with_prefs(
+        cx,
+        mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]),
+        store.clone(),
+    );
+    h.settings_open_page(AI);
+    assert!(!h.settings_has("ai-mode-Spam-0"), "there are no Auto/Off segments");
+
+    toggle_spam(&mut h);
+    assert_eq!(mail_classifier::app_settings::MODE_SPAM.get(store.as_ref(), &scope), Mode::Off);
+}
+
+/// Records the questions it is asked.
+struct RecordingJudge(Arc<Mutex<HashSet<QuestionKey>>>);
+
+impl Judge for RecordingJudge {
+    fn judge(
+        &self,
+        state: &Value,
+        questions: &[(QuestionKey, Question)],
+    ) -> Result<Vec<(QuestionKey, Answer)>, JudgeError> {
+        self.0.lock().extend(questions.iter().map(|(k, _)| *k));
+        StubJudge.judge(state, questions)
+    }
 }
 
 #[gpui_kit::gpui::test]
