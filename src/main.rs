@@ -22,6 +22,7 @@ fn main() {
         theme::init(cx);
         theme::watch_user_themes(cx);
         actions::bind_keys(cx);
+        cx.on_action(|_: &actions::Quit, cx| cx.quit());
         let scope = Scope::Global;
         let mode = app_settings::THEME_MODE.get(store.as_ref(), &scope);
         let light = app_settings::LIGHT_THEME.get(store.as_ref(), &scope);

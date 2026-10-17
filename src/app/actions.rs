@@ -13,6 +13,7 @@ use gpui_kit::*;
 gpui_kit::actions!(
     mail,
     [
+        Quit,
         SelectNext,
         SelectPrev,
         ExtendNext,
@@ -60,6 +61,8 @@ gpui_kit::actions!(
         OpenSearch,
         ClassifyVisible,
         ClassifyMessage,
+        StopClassifying,
+        StartClassifying,
         ToggleGrouping,
         CyclePreviewLines,
         ExpandThread,
@@ -158,6 +161,7 @@ pub fn bind_keys(cx: &mut App) {
     let m = Some(MAIL_BINDING);
     let p = Some(PALETTE_CONTEXT);
     cx.bind_keys([
+        KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", SelectNext, m),
         KeyBinding::new("down", SelectNext, m),
         KeyBinding::new("k", SelectPrev, m),
@@ -404,9 +408,12 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(App, "Manage accounts", "", ManageAccounts),
         cmd!(App, "Fetch mail", "cmd-shift-n", FetchMail),
         cmd!(App, "Start triage session", "t", StartSession),
+        cmd!(App, "Quit", "cmd-q", Quit),
         cmd!(Navigate, "Search", "/", OpenSearch),
         cmd!(Classify, "Classify selected messages", "c", ClassifyMessage),
         cmd!(Classify, "Classify every message in this list…", "shift-c", ClassifyVisible),
+        cmd!(Classify, "Stop classifying (pause auto-classify)", "", StopClassifying),
+        cmd!(Classify, "Start classifying (resume auto-classify)", "", StartClassifying),
         cmd!(View, "Toggle group by thread", "ctrl-g", ToggleGrouping),
         cmd!(View, "Cycle preview lines", "", CyclePreviewLines),
         cmd!(Navigate, "Expand thread", "right", ExpandThread),
@@ -512,3 +519,16 @@ gpui_kit::actions!(
     ]
 );
 
+
+#[cfg(test)]
+mod tests {
+    use super::{Category, Quit, commands};
+
+    #[test]
+    fn quit_is_listed_with_its_shortcut() {
+        let command = commands().into_iter().find(|command| (command.action)().as_any().is::<Quit>())
+            .expect("Quit belongs in the command palette and help");
+        assert_eq!(command.category, Category::App);
+        assert_eq!(command.key, "cmd-q");
+    }
+}

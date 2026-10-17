@@ -71,7 +71,7 @@ Most mail apps hand you a pile and a mouse. **mail-classifier** gives every mess
 | `]` / `[` | Next / previous message in thread | `right` / `left` | Expand / collapse thread |
 | `alt-l` | Toggle pane layout (side by side / stacked) | `alt-left` / `alt-right` | Shrink / grow the list pane |
 | `alt-r` | Reset pane sizes | `v` | Reader mode for the open HTML message |
-| `cmd-b` | Toggle the sidebar | | |
+| `cmd-b` | Toggle the sidebar | `cmd-q` | Quit (also from inputs and Settings) |
 | `shift-o` | Expand / collapse the other messages of the open thread | `cmd-w` | Close the active reader tab |
 | `ctrl-tab` / `ctrl-shift-tab` | Next / previous reader tab (also `cmd-shift-]` / `cmd-shift-[`) | `cmd-f` | Find in the open thread (`enter` / `shift-enter` or `cmd-g` / `cmd-shift-g` step, `esc` closes) |
 | `cmd-shift-f` | Global search (same as `/`) | | |
