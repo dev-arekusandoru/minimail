@@ -84,15 +84,19 @@ impl MailApp {
                 return pane.into_any_element();
             }
             return pane
-                .items_center()
-                .justify_center()
-                .flex()
-                .gap_1()
-                .text_size(px(13.))
-                .text_color(t.muted_foreground)
-                .child("Click a message or press")
-                .child(crate::app::ui::shortcut("enter"))
-                .child("to open")
+                .child(crate::app::ui::empty(
+                    gpui_kit::assets::IconName::MailOpen,
+                    "No message open",
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .child("Click a message or press")
+                        .child(crate::app::ui::shortcut("enter"))
+                        .child("to open"),
+                ))
                 .into_any_element();
         };
         let look = Look::new(cx);

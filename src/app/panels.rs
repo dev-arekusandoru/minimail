@@ -1,6 +1,8 @@
 //! Small presentational panels: rules list, session card, summary card, rule banner.
 use gpui_kit::component::ActiveTheme as _;
 
+use gpui_kit::assets::IconName;
+
 use crate::app::chrome::format_time;
 use crate::clock::Timestamp;
 use crate::model::TriageState;
@@ -105,13 +107,11 @@ impl Render for RulesPanel {
             )
             .child(Separator::horizontal())
             .when(self.rules.is_empty(), |el| {
-                el.child(
-                    div()
-                        .px_2()
-                        .text_xs()
-                        .text_color(t.muted_foreground)
-                        .child("No rules yet. Repeat a sender-wide action to get a suggestion."),
-                )
+                el.child(crate::app::ui::empty_small(
+                    IconName::Sparkles,
+                    "No rules yet",
+                    "Repeat a sender-wide action to get a suggestion.",
+                ))
             })
             .children(self.rules.iter().enumerate().map(|(i, rule)| {
                 div()

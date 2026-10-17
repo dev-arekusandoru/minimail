@@ -3,32 +3,31 @@ use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::Button;
 use gpui_kit::base::component_traits::Disableable as _;
-use gpui_kit::component::empty::{Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle};
+use gpui_kit::component::empty::EmptyContent;
 
 impl MailApp {
     /// The list area before any account is linked: what to do next, and the one button to do it.
     fn render_onboarding(&self, cx: &Context<Self>) -> AnyElement {
         let configured = crate::provider::gmail::ClientConfig::load().is_some();
         let muted = cx.theme().muted_foreground;
-        Empty::new()
-            .header(
-                EmptyHeader::new()
-                    .title(EmptyTitle::new().child("No accounts yet"))
-                    .description(EmptyDescription::new().child("Add a Gmail account to see your mail here.")),
-            )
-            .content(
-                EmptyContent::new()
-                    .child(
-                        Button::new("onboarding-add-gmail")
-                            .label("Add Gmail account…")
-                            .disabled(!configured)
-                            .on_click(run(AddGmailAccount)),
-                    )
-                    .when(!configured, |c| {
-                        c.child(div().text_xs().text_color(muted).child(crate::app::settings::GMAIL_ENV_HINT))
-                    }),
-            )
-            .into_any_element()
+        crate::app::ui::empty(
+            IconName::Mails,
+            "No accounts yet",
+            "Add a Gmail account to see your mail here.",
+        )
+        .content(
+            EmptyContent::new()
+                .child(
+                    Button::new("onboarding-add-gmail")
+                        .label("Add Gmail account…")
+                        .disabled(!configured)
+                        .on_click(run(AddGmailAccount)),
+                )
+                .when(!configured, |c| {
+                    c.child(div().text_xs().text_color(muted).child(crate::app::settings::GMAIL_ENV_HINT))
+                }),
+        )
+        .into_any_element()
     }
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -84,10 +83,12 @@ impl MailApp {
         let body = if self.mailbox.accounts().is_empty() {
             self.render_onboarding(cx)
         } else if count == 0 {
-            let title = format!("No mail in {}", self.location_label());
-            Empty::new()
-                .header(EmptyHeader::new().title(EmptyTitle::new().child(title)))
-                .into_any_element()
+            crate::app::ui::empty(
+                IconName::Inbox,
+                format!("No mail in {}", self.location_label()),
+                "Press / to search all mail, or pick another mailbox in the sidebar.",
+            )
+            .into_any_element()
         } else {
             div()
                 .w_full()

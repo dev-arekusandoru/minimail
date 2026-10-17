@@ -2,7 +2,7 @@
 //!
 //! Filtering is ours ([`crate::fuzzy`]); `Command` only renders the pre-filtered, sectioned
 //! list (`filterable(false)`) and reports the typed query and the confirmed row.
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::assets::IconName;
 
 use std::rc::Rc;
 
@@ -82,12 +82,12 @@ impl Render for CommandPalette {
             .filterable(false)
             .max_h(px(400.))
             .placeholder("Type a command…")
-            .empty(|_, _, cx| {
-                div()
-                    .p_4()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No matching commands")
+            .empty(|_, _, _| {
+                crate::app::ui::empty_small(
+                    IconName::SearchX,
+                    "No matching commands",
+                    "Try another word, or type / to search your mail.",
+                )
             });
 
         if Query::is_search(&self.query) {

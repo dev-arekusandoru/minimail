@@ -6,6 +6,7 @@
 //! logic: the choice leaves through [`FilterPopoverEvent`] and the owner edits the query.
 //! Clicking a pill's value opens it straight on the value step, prefilled.
 use chrono::{Datelike, NaiveDate};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::calendar::{Calendar, CalendarEvent, CalendarState};
 
@@ -276,7 +277,13 @@ impl Render for FilterPopover {
                             .filterable(false)
                             .max_h(px(280.))
                             .placeholder(placeholder)
-                            .empty(move |_, _, _| div().p_3().text_xs().text_color(muted).child("Nothing matches"))
+                            .empty(move |_, _, _| {
+                                crate::app::ui::empty_small(
+                                    IconName::ListFilter,
+                                    "Nothing matches",
+                                    "Try a different value.",
+                                )
+                            })
                             .items(items.into_iter().map(|label| CommandItem::new().label(label)))
                             .on_query(move |q, _, cx| {
                                 on_query

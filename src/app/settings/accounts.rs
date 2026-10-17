@@ -18,7 +18,16 @@ impl SettingsPanel {
         let keywords = ["accounts", "gmail", "add account", "remove account", "sign in", "email"];
         let mut cards = SettingGroup::new();
         if self.accounts.is_empty() {
-            cards = cards.item(note("accounts-empty", "No accounts.").keywords(keywords));
+            cards = cards.item(
+                SettingItem::render(|_, _, _| {
+                    div().id("accounts-empty").child(crate::app::ui::empty(
+                        IconName::Mails,
+                        "No accounts",
+                        "Add a Gmail account to sync your mail.",
+                    ))
+                })
+                .keywords(keywords),
+            );
         }
         for (index, account) in self.accounts.iter().cloned().enumerate() {
             let nickname_input = self.controls.get(&account.id).map(|c| c.nickname.clone());

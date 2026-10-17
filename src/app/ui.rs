@@ -4,9 +4,10 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     kbd::Kbd,
     tooltip::Tooltip,
-    Sizable as _,
+    Icon, Sizable as _,
 };
 use gpui_kit::*;
 
@@ -19,6 +20,30 @@ pub fn run<A: Action + Clone>(
     action: A,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     move |_, window, cx| window.dispatch_action(Box::new(action.clone()), cx)
+}
+
+/// The app's one empty state: an outline icon, a one-line title and a short hint, centred in
+/// whatever surface holds it. Add an action with `.content(EmptyContent::new().child(..))`.
+pub fn empty(
+    icon: IconName,
+    title: impl Into<SharedString>,
+    hint: impl IntoElement,
+) -> Empty {
+    Empty::new().header(
+        EmptyHeader::new()
+            .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::new(icon)))
+            .title(EmptyTitle::new().child(title.into()))
+            .description(EmptyDescription::new().child(hint)),
+    )
+}
+
+/// [`empty`] sized for a popup, palette, picker or other small panel.
+pub fn empty_small(
+    icon: IconName,
+    title: impl Into<SharedString>,
+    hint: impl IntoElement,
+) -> Empty {
+    empty(icon, title, hint).p_4().gap_2()
 }
 
 /// Monospace family for metadata. Read from the kit theme, which keeps it on a font the machine

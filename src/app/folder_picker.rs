@@ -6,6 +6,8 @@
 //! folders and files mail. Filtering is ours; `Command` renders the pre-filtered rows.
 use gpui_kit::component::ActiveTheme as _;
 
+use gpui_kit::assets::IconName;
+
 use std::rc::Rc;
 
 use crate::model::FolderId;
@@ -146,12 +148,12 @@ impl Render for FolderPicker {
                     .text_color(cx.theme().foreground)
                     .child(title.clone())
             })
-            .empty(|_, _, cx| {
-                div()
-                    .p_4()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No folders in this account yet.")
+            .empty(|_, _, _| {
+                crate::app::ui::empty_small(
+                    IconName::FolderOpen,
+                    "No folders yet",
+                    "Type a name and press enter to create one.",
+                )
             })
             .items(labels.into_iter().map(|label| CommandItem::new().label(label)))
             .on_query(move |q, _, cx| {

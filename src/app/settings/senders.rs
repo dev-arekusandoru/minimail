@@ -13,24 +13,25 @@ impl SettingsPanel {
         );
         let shown = self.filtered_blocked();
         if self.blocked.is_empty() {
-            blocked = blocked
-                .item(note("blocked-empty", "No blocked senders.").keywords(keywords))
-                .item(
-                    note(
-                        "blocked-empty-hint",
+            blocked = blocked.item(
+                SettingItem::render(|_, _, _| {
+                    div().id("blocked-empty").child(crate::app::ui::empty(
+                        IconName::ShieldBan,
+                        "No blocked senders",
                         "Blocking a sender — with s on a thread, or when you mark their mail as spam — hides their mail and stops it being classified.",
-                    )
-                    .keywords(keywords),
-                );
+                    ))
+                })
+                .keywords(keywords),
+            );
         } else if shown.is_empty() {
             let filter = self.filter.clone();
             blocked = blocked.item(
-                SettingItem::render(move |_, _, cx| {
-                    div()
-                        .id("blocked-no-match")
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("No blocked sender matches “{filter}”."))
+                SettingItem::render(move |_, _, _| {
+                    div().id("blocked-no-match").child(crate::app::ui::empty(
+                        IconName::SearchX,
+                        format!("No blocked sender matches “{filter}”"),
+                        "Clear the filter to see every blocked sender.",
+                    ))
                 })
                 .keywords(keywords),
             );

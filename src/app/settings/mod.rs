@@ -1203,13 +1203,6 @@ fn select(
     })
 }
 
-/// A muted one-line placeholder row.
-fn note(id: &'static str, text: &'static str) -> SettingItem {
-    SettingItem::render(move |_, _, cx| {
-        div().id(id).text_sm().text_color(cx.theme().muted_foreground).child(text)
-    })
-}
-
 impl Focusable for SettingsPanel {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
