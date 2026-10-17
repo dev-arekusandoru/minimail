@@ -97,14 +97,16 @@ fn location_icon(loc: &Location, t: &ThemeColor, open: bool) -> (IconName, Hsla)
     }
 }
 
-/// A pill badge with a message count, used as a menu item's suffix.
-fn count_badge(t: &ThemeColor, n: usize, highlighted: bool) -> Tag {
-    let (bg, fg) = if highlighted {
-        (t.primary, t.primary_foreground)
-    } else {
-        (t.secondary, t.muted_foreground)
-    };
-    Tag::custom(bg, fg, bg).small().rounded_full().flex_none().child(n.to_string())
+/// A pill badge with a message count: a compact capsule in the theme's foreground with its
+/// number in the surface colour. The inversion is what makes the count the strongest thing on
+/// the row, and it reads the same way in a light and a dark theme.
+fn count_badge(t: &ThemeColor, n: usize) -> Tag {
+    Tag::custom(t.foreground, t.background, t.foreground)
+        .small()
+        .rounded_full()
+        .flex_none()
+        .font_semibold()
+        .child(n.to_string())
 }
 
 /// What a sidebar row does when it is clicked: show the location in the list strip. The
@@ -210,7 +212,7 @@ impl SidebarItem for SidebarRow {
         let (accent, accent_fg, border) =
             (cx.theme().sidebar_accent, cx.theme().sidebar_accent_foreground, cx.theme().sidebar_border);
         let radius = cx.theme().radius;
-        let badge = (count > 0).then(|| count_badge(cx.theme(), count, active).into_any_element());
+        let badge = (count > 0).then(|| count_badge(cx.theme(), count).into_any_element());
         let caret = open_state.clone().map(|state| {
             let caret_id = ElementId::NamedChild(std::sync::Arc::new(id.clone()), "caret".into());
             Button::new(caret_id)
@@ -235,15 +237,16 @@ impl SidebarItem for SidebarRow {
             .flex()
             .items_center()
             .gap_x_2()
-            .p_2()
-            .h_7()
+            .px_2()
+            .h_9()
             .rounded(radius)
             .text_sm()
+            .when(count > 0 || active, |this| this.font_semibold())
             .when(!active, |this| {
-                this.hover(|this| this.bg(accent.opacity(0.8)).text_color(accent_fg))
+                this.hover(|this| this.bg(accent.opacity(0.5)).text_color(accent_fg))
             })
-            .when(active, |this| this.font_medium().bg(accent).text_color(accent_fg))
-            .child(icon)
+            .when(active, |this| this.bg(accent).text_color(accent_fg))
+            .child(icon.size_4())
             .child(
                 div()
                     .flex_1()
@@ -349,7 +352,13 @@ impl MailApp {
             .w_full()
             .items_center()
             .justify_between()
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Mailboxes"))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Mailboxes"),
+            )
             .child(
                 div()
                     .flex()
