@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sidebar: rail + panel</title>
+<style>
+  /* One Dark Pro tokens, as the app loads them from themes/one-dark-pro.json */
+  :root {
+    --bg: #282c34; --fg: #abb2bf; --muted: #7f848e; --border: #3b4048;
+    --sb: #21252b; --rail: #1b1e23; --tile: #2c313a; --tile-hover: #323842; --tile-active: #3e4451;
+    --primary: #61afef; --primary-fg: #282c34;
+    --blue: #61afef; --yellow: #e5c07b; --magenta: #c678dd; --cyan: #56b6c2;
+    --red: #e06c75; --green: #98c379;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #14161a; color: var(--fg); font: 14px/1.2 -apple-system, "SF Pro Text", Inter, sans-serif; padding: 24px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 4px; color: #d7dae0; }
+  p.note { font-size: 12px; color: var(--muted); max-width: 288px; margin-bottom: 10px; min-height: 48px; }
+  .grid { display: flex; gap: 40px; align-items: flex-start; }
+  .frame { width: 288px; height: 800px; background: var(--sb); border: 1px solid var(--border); overflow: hidden; display: flex; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* rail */
+  .rail-col { width: 56px; flex: none; background: var(--rail); border-right: 1px solid var(--border); padding: 12px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .rail-col .sp { flex: 1; }
+  .rail-col .div { width: 24px; height: 1px; background: var(--border); }
+  .ac { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; position: relative; background: var(--tile); }
+  .ac.on { background: var(--tile-active); }
+  .ac.on::before { content: ""; position: absolute; left: -9px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 2px 2px 0; background: var(--primary); }
+  .ac .b, .tile em { position: absolute; top: -5px; right: -6px; font-style: normal; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--fg); color: var(--sb); display: grid; place-items: center; border: 2px solid var(--rail); box-sizing: content-box; }
+  .add { width: 38px; height: 38px; border-radius: 10px; border: 1.5px dashed var(--border); display: grid; place-items: center; color: var(--muted); }
+  /* ghost rail buttons: no fill, so they read as tools, not accounts */
+  .gb { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); position: relative; }
+  .gb:hover, .gb.hv { background: var(--tile); color: var(--fg); }
+  .gb .i { width: 18px; height: 18px; }
+  .gb .st { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; border: 2px solid var(--rail); box-sizing: content-box; }
+  .gb .ring { position: absolute; inset: 2px; border-radius: 50%; background: conic-gradient(var(--primary) var(--p), var(--border) 0); -webkit-mask: radial-gradient(circle, transparent 14.5px, #000 15px); mask: radial-gradient(circle, transparent 14.5px, #000 15px); }
+  .gb .i.spin { animation: spin 1s linear infinite; color: var(--primary); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .gb.primary { background: var(--primary); color: var(--primary-fg); }
+
+  /* panel */
+  .panel { flex: 1; min-width: 0; padding: 12px 8px 8px; overflow: hidden auto; }
+  .title { display: flex; align-items: center; gap: 8px; padding: 0 8px 8px; font-size: 14px; font-weight: 600; color: #d7dae0; }
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0 6px; }
+  .tile { height: 44px; border-radius: 10px; background: var(--tile); display: grid; place-items: center; position: relative; }
+  .tile.new { background: none; border: 1.5px dashed var(--border); color: var(--muted); }
+  .tile.new:hover { background: var(--tile); color: var(--fg); }
+  .tile:hover { background: var(--tile-hover); }
+  .tile.active { background: var(--tile-active); }
+  .tile .i { width: 18px; height: 18px; }
+  .tile em { border-color: var(--sb); right: -4px; }
+  .tip { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); background: #14161a; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; color: var(--fg); white-space: nowrap; z-index: 5; }
+  .rail-col .tip { top: 4px; left: 48px; transform: none; }
+  .sec { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; margin-top: 12px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .sec .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sec .caret { width: 14px; height: 14px; opacity: 0; }
+  .sec:hover .caret { opacity: 1; }
+  .row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
+  .row:hover { background: color-mix(in srgb, var(--tile-hover) 60%, transparent); }
+  .row.active { background: var(--tile-active); }
+  .row.unread { font-weight: 600; color: #d7dae0; }
+  .row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .row .chev { width: 12px; height: 12px; color: var(--muted); margin-left: -2px; margin-right: -4px; }
+  .pill { font-size: 10px; font-weight: 700; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--fg); color: var(--sb); display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+  .kids { margin-left: 15px; padding-left: 4px; border-left: 1px solid var(--border); }
+
+  h2.sub { margin: 40px 0 12px; }
+  .opts { display: flex; gap: 32px; }
+  .opts p { max-width: 150px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .rail-only { width: 56px; height: 290px; background: var(--rail); border: 1px solid var(--border); padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
+</style>
+
+<div class="grid" id="root"></div>
+
+<script>
+const P = {
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  snooze: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/><path d="M6.38 18.7 4 21"/><path d="M17.64 18.67 20 21"/>',
+  sent: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  house: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  mails: '<rect width="16" height="13" x="6" y="4" rx="2"/><path d="m22 7-7.1 3.78c-.57.3-1.23.3-1.8 0L6 7"/><path d="M2 8v11c0 1.1.9 2 2 2h14"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M9 13a4.5 4.5 0 0 0 3-4"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M12 13h4"/><path d="M12 18h6a2 2 0 0 1 2 2v1"/><path d="M12 8h8"/><path d="M16 8V5a2 2 0 0 1 2-2"/><circle cx="16" cy="13" r=".5"/><circle cx="18" cy="3" r=".5"/><circle cx="20" cy="21" r=".5"/><circle cx="20" cy="8" r=".5"/>',
+  tags: '<path d="M13.172 2a2 2 0 0 1 1.414.586l6.71 6.71a2.4 2.4 0 0 1 0 3.408l-4.592 4.592a2.4 2.4 0 0 1-3.408 0l-6.71-6.71A2 2 0 0 1 6 9.172V3a1 1 0 0 1 1-1z"/><path d="M2 7v6.172a2 2 0 0 0 .586 1.414l6.71 6.71a2.4 2.4 0 0 0 3.191.193"/><circle cx="10.5" cy="6.5" r=".5" fill="currentColor"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/><path d="m16 16-1.9-1.9"/>',
+  folderplus: '<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  pen: '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  rules: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+};
+const ic = (n, c, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" style="${c ? 'color:' + c : ''}">${P[n]}</svg>`;
+const COL = { inbox: 'var(--blue)', snooze: 'var(--yellow)', sent: 'var(--blue)', archive: 'var(--magenta)', trash: 'var(--red)', folder: 'var(--cyan)' };
+const SYS = [['inbox', 'Inbox'], ['snooze', 'Snoozed'], ['sent', 'Sent'], ['archive', 'Archive'], ['trash', 'Trash']];
+const compact = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : n;
+
+// folder = [name, unread, children?]
+const PERSONAL = [['Receipts', 12, [['2024', 8], ['2023', 4]]], ['Notes', 0], ['Applications', 2], ['Crossway', 0], ['Recipes', 0], ['Tech', 3, [['Rust', 3], ['Swift', 0]]], ['Newsletters', 148], ['Chieftain', 1], ['Golf', 0], ['CFA GTown', 0]];
+const GMAIL = [['Car Insurance', 0]];
+const total = f => f[1];
+const pill = n => n ? `<span class="pill">${compact(n)}</span>` : '';
+const strip = (counts, activeKey, tipKey) => `<div class="strip">` + SYS.map(([k, n]) =>
+  `<span class="tile ${k === activeKey ? 'active' : ''}">${ic(k, COL[k])}${counts[k] ? `<em>${compact(counts[k])}</em>` : ''}${k === tipKey ? `<span class="tip">${n}</span>` : ''}</span>`).join('') +
+  `<span class="tile new">${ic('folderplus')}${tipKey === 'new' ? '<span class="tip">New folder</span>' : ''}</span></div>`;
+// `flat` = top-level only, parents shown collapsed (All Inboxes view)
+const folders = (list, flat, activeName) => list.map(([f, n, kids]) =>
+  `<div class="row ${n ? 'unread' : ''} ${f === activeName ? 'active' : ''}">${kids ? ic(flat ? 'right' : 'down', null, 'chev') : ''}${ic('folder', COL.folder)}<span class="lbl">${f}</span>${pill(n)}</div>` +
+  (kids && !flat ? `<div class="kids">${folders(kids)}</div>` : '')).join('');
+
+// ---- rail
+const ghost = (icon, extra = '', cls = '') => `<span class="gb ${cls}">${ic(icon, null, extra.includes('spin') ? 'spin' : '')}${extra.startsWith('<') ? extra : ''}</span>`;
+const OK = '';  // idle: no indicator, so nothing reads as "needs action"
+const bottom = {
+  full: () => ghost('refresh', OK) +
+    ghost('scan', '<i class="ring" style="--p:62%"></i>') + ghost('rules') + ghost('gear'),
+};
+const rail = sel => `<div class="rail-col">` +
+  `<span class="gb primary">${ic('pen')}</span><span class="div"></span>` +
+  `<div class="ac ${sel === 0 ? 'on' : ''}">${ic('mails', 'var(--primary)')}${sel === 0 ? '' : '<span class="b">2.3k</span>'}</div>` +
+  `<div class="ac ${sel === 1 ? 'on' : ''}">${ic('users', 'var(--blue)')}${sel === 1 ? '' : '<span class="b">2.3k</span>'}</div>` +
+  `<div class="ac ${sel === 2 ? 'on' : ''}">${ic('house', 'var(--green)')}</div>` +
+  `<span class="add">${ic('plus')}</span><div class="sp"></div>${bottom.full()}</div>`;
+
+const frame = (inner, title, note) => `<div><h2>${title}</h2><p class="note">${note}</p><div class="frame">${inner}</div></div>`;
+
+// ---- panels
+const allView = () => `<div class="panel"><div class="title">${ic('mails', 'var(--primary)')}All Inboxes</div>` +
+  strip({ inbox: 2285, snooze: 3 }, 'inbox', 'snooze') +
+  `<div class="sec">${ic('users', 'var(--blue)')}<span class="lbl">Personal</span>${ic('down', null, 'caret')}</div>` + folders(PERSONAL, true) +
+  `<div class="sec">${ic('house', 'var(--green)')}<span class="lbl">av.muresan26@gmail.com</span>${ic('down', null, 'caret')}</div>` + folders(GMAIL, true) + `</div>`;
+const acctView = () => `<div class="panel"><div class="title">${ic('users', 'var(--blue)')}Personal</div>` +
+  strip({ inbox: 2285, snooze: 3 }, null, 'new') + folders(PERSONAL, false, 'Newsletters') + `</div>`;
+
+const states = `<div class="opts">` +
+  `<div><h2>Rail bottom</h2><div class="rail-only" style="height:300px"><div class="sp" style="flex:1"></div>${bottom.full()}</div><p>Sync, classifier, rules, settings. Search and help move elsewhere.</p></div>` +
+  `<div><h2>Sync states</h2><div class="rail-only" style="height:auto;gap:14px;padding:14px 0">` +
+  ghost('refresh') + ghost('refresh', 'spin') +
+  ghost('refresh', '<i class="st" style="background:var(--yellow)"></i>') + ghost('refresh', '<i class="st" style="background:var(--red)"></i>') +
+  `</div><p>idle (no dot) · fetching · stale · error</p></div>` +
+  `<div><h2>Hover</h2><div class="rail-only" style="height:auto;padding:14px 0;gap:14px">` +
+  `<span class="gb hv">${ic('refresh')}<span class="tip">Fetch mail  ⌘⇧N</span></span><span class="gb">${ic('gear')}</span></div><p>tooltip carries label + shortcut</p></div></div>`;
+
+root.innerHTML = frame(rail(0) + allView(), 'All Inboxes selected', 'Same tile strip, aggregated across accounts. Folders grouped per account (account icon + small caps), parents collapsed, so identical folder names stay distinguishable.') +
+  frame(rail(1) + acctView(), 'Account selected (Newsletters active)', 'Folder badges are unread pills, same style as tile counts. Row text goes semibold when unread. Tiles show no active state until one is picked.') +
+  `<div><h2 class="sub" style="margin-top:0">Rail bottom options</h2>${states}</div>`;
+</script>
