@@ -22,15 +22,16 @@ impl MailApp {
                 .on_ok(|_, _, _| false)
                 .p_0()
                 .w(px(width(f32::from(window.viewport_size().width))))
-                .on_close(move |_, _, cx| {
-                    app.update(cx, |this, cx| this.dialog_dismissed(cx)).ok();
+                .on_close(move |_, window, cx| {
+                    app.update(cx, |this, cx| this.dialog_dismissed(window, cx)).ok();
                 })
                 .content(move |content, _, _| content.child(view.clone()))
         });
     }
 
-    /// The hosting dialog closed itself (escape, backdrop): forget its view.
-    fn dialog_dismissed(&mut self, cx: &mut Context<Self>) {
+    /// The hosting dialog closed itself (escape, backdrop): forget its view and take focus
+    /// back, as `close_modals` does, so keys work even when the opener (a menu) is gone.
+    fn dialog_dismissed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = None;
         self.folder_picker = None;
         self.snooze = None;
@@ -38,6 +39,7 @@ impl MailApp {
         self.dialog = None;
         self.help = None;
         self._modal_sub = None;
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 

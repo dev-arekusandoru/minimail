@@ -299,7 +299,7 @@ fn not_spam_clears_the_flag_and_sticks(cx: &mut TestAppContext) {
     open_row_menu(&mut h);
     h.click_row("Not spam");
     assert!(!h.has_tag(1, Tag::PossibleSpam));
-    h.keys("enter"); // accept "Never mark mail from … as spam?", which undoes with the flag
+    h.keys("escape"); // decline "Never mark mail from … as spam?"; keys must still work
 
     h.keys("c");
     assert!(!h.has_tag(1, Tag::PossibleSpam), "reclassification respects the flag");
@@ -449,4 +449,16 @@ fn the_shared_menu_clears_needs_reply_only_while_it_is_set(cx: &mut TestAppConte
     h.click(("btn-message-more", 1usize));
     h.hover_row("Classifier labels");
     assert!(h.has_row("Doesn't need reply"), "the reader menu shares the row");
+}
+
+#[gpui_kit::gpui::test]
+fn escape_on_a_menu_launched_dialog_returns_focus_to_the_app(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, spam_box());
+    open_row_menu(&mut h);
+    h.click_row("Not spam");
+    assert!(h.read(|a| a.dialog_open()));
+    h.keys("escape");
+    assert!(!h.read(|a| a.dialog_open()));
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "u undoes: the app has keyboard focus");
 }
