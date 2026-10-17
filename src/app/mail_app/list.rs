@@ -34,6 +34,10 @@ impl MailApp {
         let slot = self.slot();
         let count = self.visible_ids().len();
         let row_count = if self.grouped() { self.rows().len() } else { count };
+        // Mailbox changes that never scroll (sync, snooze expiry) can leave the cursor past the end.
+        if self.cursor_ix() > row_count.saturating_sub(1) {
+            self.move_cursor(0);
+        }
         self.sync_list(row_count, cx);
         // Near the end of the list, ask the server for the next page of older mail.
         let cursor = self.cursor_ix();

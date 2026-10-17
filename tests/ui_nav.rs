@@ -496,3 +496,20 @@ fn filter_changes_are_view_state_not_undo_steps(cx: &mut TestAppContext) {
     assert!(h.pills().is_empty(), "escape drops every filter but the folder");
     assert_eq!(h.visible(), vec![1, 2]);
 }
+
+#[gpui_kit::gpui::test]
+fn archiving_the_last_row_leaves_the_cursor_on_the_remaining_row(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert_eq!(h.visible(), vec![1, 2]);
+    h.keys("j");
+    assert_eq!(h.read(|a| a.cursor_message()), Some(2));
+    h.keys("e");
+    assert_eq!(h.state_of(2), TriageState::Archived);
+    assert_eq!(h.visible(), vec![1]);
+    assert_eq!(h.read(|a| a.cursor_message()), Some(1));
+    assert_eq!(h.read(|a| a.triage().cursor_index()), 0, "the stored cursor index points at the remaining row");
+    h.keys("e");
+    assert!(h.visible().is_empty());
+    assert_eq!(h.read(|a| a.cursor_message()), None);
+    assert_eq!(h.read(|a| a.triage().cursor_index()), 0);
+}

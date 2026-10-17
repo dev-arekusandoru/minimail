@@ -240,8 +240,9 @@ impl MailApp {
     }
 
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state
-    /// works it out.
-    pub(super) fn scroll_to_cursor(&self) {
+    /// works it out. Re-clamps first: mailbox changes shrink the list without touching the cursor.
+    pub(super) fn scroll_to_cursor(&mut self) {
+        self.move_cursor(0);
         self.view().list_state.scroll_to_reveal_item(self.cursor_ix());
     }
 }
