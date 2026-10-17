@@ -218,6 +218,7 @@ impl SidebarItem for SidebarRow {
             Button::new(caret_id)
                 .xsmall()
                 .ghost()
+                .flex_none()
                 .icon(Icon::new(IconName::ChevronRight).size_4().when(is_open, |this| {
                     this.rotate(percentage(90. / 360.))
                 }))
@@ -246,16 +247,19 @@ impl SidebarItem for SidebarRow {
                 this.hover(|this| this.bg(accent.opacity(0.5)).text_color(accent_fg))
             })
             .when(active, |this| this.bg(accent).text_color(accent_fg))
-            .child(icon.size_4())
+            .child(icon.size_4().flex_none())
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .flex()
                     .items_center()
                     .gap_x_2()
                     .justify_between()
                     .overflow_x_hidden()
-                    .child(div().flex_1().overflow_x_hidden().child(label))
+                    // The label shrinks and truncates to one line when the pane is thin;
+                    // min_w_0 at each flex link is what lets it shrink below its text.
+                    .child(div().flex_1().min_w_0().truncate().child(label))
                     .when_some(badge, |this, badge| this.child(badge)),
             )
             .when_some(caret, |this, caret| this.child(caret));
@@ -354,6 +358,8 @@ impl MailApp {
             .justify_between()
             .child(
                 div()
+                    .min_w_0()
+                    .truncate()
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
@@ -362,6 +368,7 @@ impl MailApp {
             .child(
                 div()
                     .flex()
+                    .flex_none()
                     .gap_1()
                     .when(self.has_remote_accounts(), |row| {
                         row.child(
