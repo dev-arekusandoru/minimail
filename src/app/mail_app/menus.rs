@@ -18,8 +18,6 @@ use gpui_kit::component::menu::PopupMenu;
 /// open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum MenuKind {
-    /// Overflow of the quiet header.
-    Global,
     /// Actions for one message of the reader; they apply to that message only.
     Message(MessageId),
     /// The classifier labels of one message, opened from its row's icons or a right-click.
@@ -121,7 +119,6 @@ impl MailApp {
     /// the usual cursor/selection targets).
     pub(super) fn menu_items(&self, kind: MenuKind) -> (Vec<MenuItem>, Option<Vec<MessageId>>) {
         match kind {
-            MenuKind::Global => (global_items(), None),
             MenuKind::Message(id) => (self.message_items(id), Some(vec![id])),
             MenuKind::Classifier(id) => (self.classifier_items(id), Some(vec![id])),
             MenuKind::Selection => (self.selection_items(), None),
@@ -397,20 +394,6 @@ fn triage_items(states: &[TriageState]) -> Vec<MenuItem> {
         items.push(MenuItem::action("Move to inbox", || Box::new(MoveToInbox)));
     }
     items
-}
-
-/// The quiet header's overflow: everything that is not about the current message.
-fn global_items() -> Vec<MenuItem> {
-    vec![
-        MenuItem::action("Commands…", || Box::new(ToggleCommandPalette)),
-        MenuItem::separator(),
-        MenuItem::action("Undo", || Box::new(Undo)),
-        MenuItem::action("Classify every message in this list…", || Box::new(ClassifyVisible)),
-        MenuItem::separator(),
-        MenuItem::action("Sender rules…", || Box::new(ToggleRules)),
-        MenuItem::action("Settings…", || Box::new(ToggleSettings)),
-        MenuItem::action("Shortcuts", || Box::new(ToggleHelp)),
-    ]
 }
 
 /// Short sender label for a menu row, e.g. `"acme.com"`.

@@ -64,30 +64,47 @@ pub fn humanize_time(ts: Timestamp, now: &Now) -> String {
     }
 }
 
-/// What a press on the status bar's center text does.
+/// What a press on the status text does.
 pub type StatusClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
+/// The bottom bar: tool buttons pinned to each edge, the key hints, and the classifier state.
 #[derive(IntoElement)]
 pub struct HintBar {
     ctx: HintContext,
-    /// Classifier state drawn in the bar's center, if any.
+    /// Tool buttons pinned to the left edge, and their width in px.
+    leading: Option<(AnyElement, f32)>,
+    /// Tool buttons pinned to the right edge after the status text, and their width in px.
+    trailing: Option<(AnyElement, f32)>,
+    /// Classifier state drawn after the hints, if any.
     status: Option<JudgeStatus>,
-    /// What a press on the center status text does, when it does anything.
+    /// What a press on the status text does, when it does anything.
     on_status_click: Option<StatusClick>,
 }
 
 impl HintBar {
     pub fn new(ctx: HintContext) -> Self {
-        Self { ctx, status: None, on_status_click: None }
+        Self { ctx, leading: None, trailing: None, status: None, on_status_click: None }
     }
 
-    /// Show the classifier's state in the bar's center.
+    /// Pin `tools` to the left edge. `width` is their rendered width in px, which the hints budget around.
+    pub fn leading(mut self, tools: impl IntoElement, width: f32) -> Self {
+        self.leading = Some((tools.into_any_element(), width));
+        self
+    }
+
+    /// Pin `tools` to the right edge, after the status text. `width` as for [`HintBar::leading`].
+    pub fn trailing(mut self, tools: impl IntoElement, width: f32) -> Self {
+        self.trailing = Some((tools.into_any_element(), width));
+        self
+    }
+
+    /// Show the classifier's state after the hints.
     pub fn status(mut self, status: JudgeStatus) -> Self {
         self.status = Some(status);
         self
     }
 
-    /// Make the center status text clickable, e.g. to open the classifier's settings page.
+    /// Make the status text clickable, e.g. to open the classifier's settings page.
     pub fn on_status_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -97,28 +114,28 @@ impl HintBar {
     }
 }
 
-/// Horizontal padding and inter-item gaps the [`StatusBar`] spends before hints get width:
-/// its `px_3` sides plus the two region gaps either side of the center.
-const BAR_PAD: f32 = 40.;
+/// Horizontal padding and region gaps the [`StatusBar`] spends before the hints get width:
+/// its `px_3` sides plus the two gaps between its three regions.
+const BAR_PAD: f32 = 48.;
 /// Estimated width of the "N selected" label, in px.
 const SELECTED_LABEL_W: f32 = 80.;
 /// Prompt shown when no Jev key is configured.
 pub const NO_KEY_PROMPT: &str = "Add a Jev API key in Settings → Classifier";
 
-/// Estimated rendered width of the status bar's center text, in px.
+/// Estimated rendered width of the status text, in px.
 fn status_width(text: &str) -> f32 {
     text.chars().count() as f32 * 6.5 + 16.
 }
 
 impl RenderOnce for HintBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let HintBar { ctx, status, on_status_click } = self;
+        let HintBar { ctx, leading, trailing, status, on_status_click } = self;
         let t = cx.theme();
         let selected = match ctx.mode {
             HintMode::Selection(n) => Some(n),
             _ => None,
         };
-        // Center text: a missing-key prompt, progress, or the last classifier error.
+        // Status text: a missing-key prompt, progress, or the last classifier error.
         let center: Option<(String, Hsla)> = match &status {
             Some(JudgeStatus::NoKey) => Some((NO_KEY_PROMPT.to_owned(), t.muted_foreground)),
             Some(JudgeStatus::Working { done, total }) => {
@@ -128,20 +145,45 @@ impl RenderOnce for HintBar {
                 Some(("Auto-classify off · click to start".to_owned(), t.muted_foreground))
             }
             Some(JudgeStatus::Error(e)) => Some((format!("Classifier: {e}"), t.danger)),
-            // `Idle`, or no classifier at all: the center stays empty.
+            // `Idle`, or no classifier at all: the status text stays empty.
             _ => None,
         };
-        let budget = f32::from(window.viewport_size().width) - BAR_PAD;
+        let (leading, leading_w) = leading.map_or((None, 0.), |(tools, w)| (Some(tools), w));
+        let (trailing, trailing_w) = trailing.map_or((None, 0.), |(tools, w)| (Some(tools), w));
+        let budget = f32::from(window.viewport_size().width) - BAR_PAD - leading_w - trailing_w;
         let reserved = if selected.is_some() { SELECTED_LABEL_W } else { 0. }
             + center.as_ref().map_or(0., |(text, _)| status_width(text));
         let shown = fit_hints(&ctx, budget, reserved);
         let hints = div()
             .flex()
+            .flex_1()
             .items_center()
             .gap_3()
             .min_w_0()
             .overflow_hidden()
             .children(shown.iter().map(|h| hint(t, h.key, h.label, cx).into_any_element()));
+        let status = center.map(|(text, color)| {
+            let text = div()
+                .id("judge-status")
+                .min_w_0()
+                .overflow_hidden()
+                .text_xs()
+                .text_color(color)
+                .child(text);
+            match on_status_click {
+                Some(handler) => text.cursor_pointer().on_click(handler),
+                None => text,
+            }
+        });
+        let selected = selected.map(|n| div().text_xs().text_color(t.primary).child(format!("{n} selected")));
+        let right = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_3()
+            .children(status)
+            .children(selected)
+            .children(trailing);
         StatusBar::new()
             .h(px(28.))
             .px_3()
@@ -149,24 +191,9 @@ impl RenderOnce for HintBar {
             .flex_none()
             .border_color(t.border)
             .bg(t.sidebar)
-            .left(hints)
-            .when_some(center, |bar, (text, color)| {
-                let text = div()
-                    .id("judge-status")
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_xs()
-                    .text_color(color)
-                    .child(text);
-                let text = match on_status_click {
-                    Some(handler) => text.cursor_pointer().on_click(handler),
-                    None => text,
-                };
-                bar.child(text)
-            })
-            .when_some(selected, |bar, n| {
-                bar.right(div().text_xs().text_color(t.primary).child(format!("{n} selected")))
-            })
+            .when_some(leading, |bar, tools| bar.left(tools))
+            .child(hints)
+            .right(right)
     }
 }
 

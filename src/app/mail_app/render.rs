@@ -35,6 +35,8 @@ impl Render for MailApp {
         let banner = self.pending_rule.clone();
         let t = cx.theme();
         let (bg, fg) = (t.background, t.foreground);
+        let (leading, leading_w) = self.bottom_leading(cx);
+        let (trailing, trailing_w) = self.bottom_trailing(cx);
         div()
             .id("mail-app")
             .track_focus(&self.focus_handle)
@@ -297,7 +299,9 @@ impl Render for MailApp {
                         JudgeStatus::Working { .. } => this.stop_classifying(cx),
                         JudgeStatus::Paused => this.start_classifying(cx),
                         _ => this.open_settings_ai(window, cx),
-                    })),
+                    }))
+                    .leading(leading, leading_w)
+                    .trailing(trailing, trailing_w),
             ))
     }
 }

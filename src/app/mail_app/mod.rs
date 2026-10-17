@@ -50,6 +50,7 @@ use self::judging::JudgeJob;
 
 mod accessors;
 mod actions;
+mod bottombar;
 mod dock;
 mod drag;
 mod filters;

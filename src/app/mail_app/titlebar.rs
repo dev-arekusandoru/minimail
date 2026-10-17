@@ -1,17 +1,17 @@
-//! The window titlebar: the kit `TitleBar` holding the sidebar toggle and view title, the
-//! search box and the global buttons.
+//! The window titlebar: the kit `TitleBar` holding the view title, the search box and the
+//! Triage button.
 use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
 
-use super::{MailApp, MenuKind};
+use super::MailApp;
 use crate::app::actions::*;
 use crate::app::ui::{button, icon_button, primary_button, run, shortcut};
 
-/// Width kept clear on each side of the search box for the sidebar toggle and title (left, past
-/// the traffic lights) and the global buttons (right).
+/// Width kept clear on each side of the search box for the title (left, past the traffic
+/// lights) and the Triage button (right).
 const SEARCH_SIDE: f32 = 190.;
 
 impl MailApp {
@@ -56,7 +56,6 @@ impl MailApp {
             );
 
         let width = f32::from(window.viewport_size().width);
-        let sidebar_icon = if self.sidebar_visible() { IconName::PanelLeftClose } else { IconName::PanelLeftOpen };
         let left = div().flex().flex_1().flex_basis(px(0.)).min_w_0().overflow_hidden().h_full().child(
             div()
                 .flex()
@@ -65,9 +64,6 @@ impl MailApp {
                 .h_full()
                 .pl(px(if cfg!(target_os = "macos") && !window.is_fullscreen() { 80. } else { 12. }))
                 .gap_2()
-                .child(no_drag(
-                    icon_button("btn-sidebar", sidebar_icon, "Toggle the sidebar", "cmd-b", cx).on_click(run(ToggleSidebar)),
-                ))
                 .pr_3()
                 .text_size(px(12.))
                 .text_color(title_fg)
@@ -91,17 +87,7 @@ impl MailApp {
                     cx,
                 )
                 .on_click(run(StartSession)),
-            ))
-            .child(no_drag(
-                icon_button("btn-layout", self.layout_icon(), "Stack the panes the other way", "alt-l", cx)
-                    .on_click(run(TogglePaneLayout)),
-            ))
-            .child(no_drag(icon_button("tb-settings", IconName::Settings, "Settings", "cmd-,", cx).on_click(run(ToggleSettings))))
-            .child(no_drag(self.menu_trigger(
-                MenuKind::Global,
-                icon_button("btn-more", IconName::Ellipsis, "More actions", "", cx),
-                cx,
-            )));
+            ));
         let right = div()
             .flex()
             .flex_1()
