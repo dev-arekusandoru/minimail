@@ -163,9 +163,9 @@ pub struct MailApp {
     auto_max_age_days: u16,
     /// The cold-outreach checkbox (`SPAM_COLD_OUTREACH`); part of the Spam version.
     spam_cold_outreach: bool,
-    /// Messages classified before their body downloaded: id → force every enabled question.
     /// The never/always-spam lists as last written to preferences.
     saved_spam_senders: SpamSenders,
+    /// Messages classified before their body downloaded: id → force every enabled question.
     pending_classify: HashMap<MessageId, bool>,
     /// The opened message the frame loop last saw, so the open hook fires once per change.
     last_opened: Option<MessageId>,
@@ -323,8 +323,8 @@ impl MailApp {
             auto_classify: true,
             auto_max_age_days: 0,
             spam_cold_outreach: false,
-            pending_classify: HashMap::new(),
             saved_spam_senders: SpamSenders::default(),
+            pending_classify: HashMap::new(),
             last_opened: None,
             zone,
             clock,
@@ -428,13 +428,13 @@ impl MailApp {
             crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
         self.spam_cold_outreach =
             crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
-        self.preferences = Some(store);
         let senders = SpamSenders::from_lists(
             crate::app_settings::NEVER_SPAM_SENDERS.get(store.as_ref(), &scope),
             crate::app_settings::ALWAYS_SPAM_SENDERS.get(store.as_ref(), &scope),
         );
         self.mailbox.load_spam_senders(senders.clone());
         self.saved_spam_senders = senders;
+        self.preferences = Some(store);
         cx.set_window_appearance(match self.theme_mode {
             crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
             crate::theme::ThemeMode::Dark => Some(WindowAppearance::Dark),
