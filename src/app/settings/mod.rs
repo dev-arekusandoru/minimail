@@ -1086,9 +1086,10 @@ fn switch(
     set: impl Fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>) + 'static,
 ) -> Control {
     let (read, write) = (weak.clone(), weak.clone());
+    let set = Rc::new(set);
     Rc::new(move |_, _, cx| {
         let on = read.read_with(cx, |this, _| get(this)).unwrap_or_default();
-        let write = write.clone();
+        let (write, set) = (write.clone(), set.clone());
         Switch::new("check")
             .checked(on)
             .small()
@@ -1111,7 +1112,6 @@ fn switch_undo(
         move |this| get(this) != default,
         move |this, cx| set(this, default, cx),
     )
-    let set = Rc::new(set);
 }
 
 /// The buttons of a segmented row, in order.
@@ -1136,7 +1136,7 @@ fn segmented(
         for (index, (id, label)) in entries.iter().enumerate() {
             control = control.child(Button::new(id.clone()).label(label.clone()).selected(index == active));
         }
-        let (write, set) = (write.clone(), set.clone());
+        let write = write.clone();
         let apply = apply.clone();
         control
             .on_click(move |clicks: &Vec<usize>, _, cx| {
