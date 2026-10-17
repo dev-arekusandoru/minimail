@@ -71,6 +71,7 @@ impl MailApp {
         let (id, mid) = (m.id as usize, m.id);
         let me = self.mailbox.account(&m.account).map_or("", |a| a.email.as_str());
         let (pos, total) = reading::thread_position(self.mailbox.messages(), m);
+        let in_thread = total > 1;
         let recipients_open = self.reader.recipients_open(m.thread_id, m.id);
 
         let head_id: ElementId =
@@ -221,16 +222,16 @@ impl MailApp {
             .gap_3()
             .min_w_0()
             .p_4()
-            .rounded_md()
-            .border_1()
-            .border_color(t.border)
-            .bg(message_card_bg(t))
+            // Only a real thread gets the card; a lone message sits straight on the pane.
+            .when(in_thread, |d| {
+                d.rounded_md().border_1().border_color(t.border).bg(message_card_bg(t))
+            })
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
             .when_some(dev, |d, el| d.child(el))
-            .child(self.message_body(m, role, look, cx))
+            .child(self.message_body(m, role, in_thread, look, cx))
             .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
             // A message synced from headers only still holds just its snippet.
             .when(m.partial, |d| {
@@ -551,6 +552,7 @@ impl MailApp {
         &self,
         m: &Message,
         role: Role,
+        in_thread: bool,
         look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -575,10 +577,8 @@ impl MailApp {
         let mut blocked = 0;
         let content = match html {
             Some(h) if !plain => {
-                // Exactly the card's background, not the window's: the page fills the card, so
-                // the loading skeleton, the no-snapshot fallback and the loaded page must all
-                // resolve to this one color or the reader flashes as they swap.
-                let bg = rgb(message_card_bg(t));
+                // Match the surface under the page — card in a thread, pane alone — or it seams.
+                let bg = rgb(if in_thread { message_card_bg(t) } else { t.background });
                 let style = DocStyle {
                     block: self.block_remote_images,
                     dark: luminance(bg) < 0.5,
