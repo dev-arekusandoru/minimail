@@ -14,10 +14,9 @@ pub fn compact_count(n: usize) -> String {
     }
 }
 
-/// The text of the badge on a sidebar tile: none for an empty count, and none while `hidden`
-/// (a selected rail tile, whose number the panel's Inbox tile already shows).
-pub fn tile_badge(count: usize, hidden: bool) -> Option<String> {
-    (count > 0 && !hidden).then(|| compact_count(count))
+/// The text of the badge on a sidebar tile: none for an empty count.
+pub fn tile_badge(count: usize) -> Option<String> {
+    (count > 0).then(|| compact_count(count))
 }
 
 #[cfg(test)]
@@ -37,9 +36,8 @@ mod tests {
     }
 
     #[test]
-    fn a_badge_needs_a_count_and_an_unselected_tile() {
-        assert_eq!(tile_badge(2285, false).as_deref(), Some("2.3k"));
-        assert_eq!(tile_badge(2285, true), None);
-        assert_eq!(tile_badge(0, false), None);
+    fn a_badge_needs_a_count() {
+        assert_eq!(tile_badge(2285).as_deref(), Some("2.3k"));
+        assert_eq!(tile_badge(0), None);
     }
 }

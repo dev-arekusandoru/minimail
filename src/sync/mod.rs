@@ -1052,6 +1052,12 @@ fn ensure_folder(
         .find(|f| f.parent == parent && f.name == name)
         .map(|f| f.id);
     if let Some(id) = existing {
+        // A folder made locally gets its label's id once the provider lists the same path.
+        if let (Some(rid), Some(folder)) = (by_path.get(path), mb.folder(id))
+            && cache.folder_remote_id(id).map_err(err)?.is_none()
+        {
+            cache.upsert_folder(folder, Some(rid)).map_err(err)?;
+        }
         return Ok(id);
     }
     let folder = Folder {
@@ -1152,9 +1158,10 @@ pub fn apply_body(mb: &mut Mailbox, cache: &Cache, req: &BodyRequest, body: Body
 
 // -------------------------------------------------------------- persistence
 
-/// Write local-only changes (pending states, snoozes, reads) back to the cache so
-/// they survive a restart.
+/// Write local-only changes (pending states, snoozes, reads, folders made but never filed
+/// into) back to the cache so they survive a restart.
 pub fn persist_local(mb: &Mailbox, cache: &Cache) {
+    persist_local_folders(mb, cache);
     let Ok(cached) = cache.cached_messages() else {
         return;
     };
@@ -1177,5 +1184,24 @@ pub fn persist_local(mb: &Mailbox, cache: &Cache) {
             None
         };
         let _ = cache.save_local(&next);
+    }
+}
+
+/// Keep the cache's provider-unknown folders equal to the mailbox's: a new folder is stored
+/// without a remote label (the provider hears of it when the first message is filed), and one
+/// that is gone from the mailbox (its creation undone) is dropped.
+fn persist_local_folders(mb: &Mailbox, cache: &Cache) {
+    for account in cache.account_ids().unwrap_or_default() {
+        let cached = cache.folder_list(&account).unwrap_or_default();
+        for folder in mb.folders(&account) {
+            if !cached.iter().any(|(id, ..)| *id == folder.id) {
+                let _ = cache.upsert_folder(folder, None);
+            }
+        }
+        for (id, _, _, remote) in &cached {
+            if remote.is_none() && mb.folder(*id).is_none() {
+                let _ = cache.delete_local_folder(*id);
+            }
+        }
     }
 }

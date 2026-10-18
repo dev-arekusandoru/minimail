@@ -284,6 +284,13 @@ impl Cache {
             .flatten())
     }
 
+    /// Drop a folder the provider never saw. One with a remote label stays: only the provider
+    /// can remove it.
+    pub fn delete_local_folder(&self, id: FolderId) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM folders WHERE id=?1 AND remote_id IS NULL", [id as i64])?;
+        Ok(())
+    }
+
     pub fn folder_by_remote(
         &self,
         account: &str,

@@ -13,10 +13,9 @@
 use gpui_kit::component::ActiveTheme as _;
 
 use super::panes::RAIL_W;
-use super::sidebar::{corner_badge, rail_bg};
+use super::sidebar::rail_bg;
 use super::*;
 use crate::app::ui::{Observable, key_tooltip};
-use crate::badge::tile_badge;
 use crate::sync_status::Attention;
 use crate::theme::ThemeColor;
 use gpui_kit::assets::IconName;
@@ -99,7 +98,7 @@ impl MailApp {
             Icon::new(IconName::Mails).with_size(px(16.)).text_color(t.primary),
             "All Inboxes".to_owned(),
             shown.is_none(),
-            self.mailbox.count_at(&Location::AllInboxes, &now),
+            self.mailbox.unread_count_at(&Location::AllInboxes, &now) > 0,
             None,
             cx,
         );
@@ -109,7 +108,7 @@ impl MailApp {
                 icons::account_icon(crate::account_style::icon_key(a), &a.color, t, 16.),
                 crate::account_style::display_name(a).to_owned(),
                 shown.as_deref() == Some(a.id.as_str()),
-                self.mailbox.count_at(&Location::Inbox(a.id.clone()), &now),
+                self.mailbox.unread_count_at(&Location::Inbox(a.id.clone()), &now) > 0,
                 Some(a.id.clone()),
                 cx,
             )
@@ -166,9 +165,9 @@ impl MailApp {
             .child(self.rail_tools(cx))
     }
 
-    /// An account tile: the account's icon, its inbox count on the corner (hidden while the
-    /// tile is selected, since the panel's Inbox tile shows the same number), and the primary
-    /// bar on the rail's edge while selected. `target` is the account it shows, `None` for All.
+    /// An account tile: the account's icon, a dot on the corner while its inbox has unread mail
+    /// (always, selected or not; real counts live in the panel), and the primary bar on the
+    /// rail's edge while selected. `target` is the account it shows, `None` for All.
     #[allow(clippy::too_many_arguments)]
     fn account_tile(
         &self,
@@ -176,11 +175,12 @@ impl MailApp {
         icon: Icon,
         name: String,
         selected: bool,
-        count: usize,
+        unread: bool,
         target: Option<AccountId>,
         cx: &Context<Self>,
     ) -> AnyElement {
         let t = cx.theme();
+        let dot_id = ElementId::NamedChild(std::sync::Arc::new(id.clone()), "unread".into());
         tile(id, &name, "")
             .bg(if selected { t.secondary_active } else { t.secondary })
             .when(!selected, |d| d.hover(|s| s.bg(t.secondary_hover)))
@@ -199,8 +199,21 @@ impl MailApp {
                         .bg(t.primary),
                 )
             })
-            .when_some(tile_badge(count, selected), |d, text| {
-                d.child(corner_badge(t, text, rail_bg(t), 6.))
+            .when(unread, |d| {
+                // An 8px dot ringed by 2px of rail colour, so it cuts out of the tile.
+                d.child(
+                    div()
+                        .id(dot_id)
+                        .test_support()
+                        .absolute()
+                        .top(px(-4.))
+                        .right(px(-4.))
+                        .size(px(12.))
+                        .rounded_full()
+                        .bg(t.primary)
+                        .border_2()
+                        .border_color(rail_bg(t)),
+                )
             })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.pick_sidebar_account(target.clone(), cx);

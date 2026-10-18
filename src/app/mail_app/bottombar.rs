@@ -37,8 +37,8 @@ fn divider(color: Hsla) -> Div {
 }
 
 impl MailApp {
-    /// The left cluster and its width: the sidebar toggle and palette, the list commands
-    /// (Undo, Classify, Sender rules), then Settings.
+    /// The left cluster and its width: the sidebar toggle and palette, then the list commands
+    /// (Undo, Classify). Sender rules and Settings live on the sidebar rail.
     pub(super) fn bottom_leading(&self, cx: &App) -> (AnyElement, f32) {
         let border = cx.theme().border;
         let sidebar = self.sidebar_visible();
@@ -66,11 +66,8 @@ impl MailApp {
                 false,
                 ClassifyVisible,
                 cx,
-            ))
-            .child(tool("btn-rules", IconName::ListFilter, "Sender rules", "shift-r", self.rules_open(), ToggleRules, cx))
-            .child(divider(border))
-            .child(tool("btn-settings", IconName::Settings, "Settings", "cmd-,", self.settings_open(), ToggleSettings, cx));
-        (tools.into_any_element(), cluster_width(6, 2))
+            ));
+        (tools.into_any_element(), cluster_width(4, 1))
     }
 
     /// The right cluster and its width, after the status text: the pane layout and the shortcut

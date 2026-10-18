@@ -989,6 +989,39 @@ fn empty_remote_folders_are_imported_and_survive_a_restart() {
     assert_eq!(names(&cached), ["Receipts"]);
 }
 
+#[test]
+fn a_folder_made_locally_survives_a_restart_until_its_creation_is_undone() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let id = mb.create_folder(ACCOUNT, "Receipts", None);
+
+    persist_local(&mb, &cache);
+    let (_, cached, _) = cache.load().unwrap();
+    assert_eq!(cached.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Receipts"]);
+    assert_eq!(cache.folder_remote_id(id).unwrap(), None, "the provider has not heard of it");
+
+    assert!(mb.undo());
+    persist_local(&mb, &cache);
+    assert!(cache.load().unwrap().1.is_empty(), "an undone folder does not come back");
+}
+
+#[test]
+fn a_local_folder_takes_the_label_the_provider_lists_for_the_same_path() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let id = mb.create_folder(ACCOUNT, "Receipts", None);
+    persist_local(&mb, &cache);
+    let (_state, provider) = FakeProvider::with_folders(
+        Vec::new(),
+        vec![RemoteFolder { id: "Label_3".to_owned(), path: "Receipts".to_owned() }],
+    );
+
+    drain(&mut mb, &cache, &provider, true);
+
+    assert_eq!(mb.folders(ACCOUNT).len(), 1, "no duplicate folder");
+    assert_eq!(cache.folder_remote_id(id).unwrap().as_deref(), Some("Label_3"));
+}
+
 // ------------------------------------------------------------------- snoozes
 
 #[test]

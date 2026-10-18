@@ -150,7 +150,7 @@ fn row_pill(t: &ThemeColor, count: usize) -> Div {
 /// A count badge on a tile's top-right corner, ringed in `ring` (the colour behind the tile) so
 /// it cuts out of the tile. `right` is how far it hangs past the tile's edge. The ring sits
 /// outside a 16px-high pill, as the design has it, so the badge is 20px tall.
-pub(super) fn corner_badge(t: &ThemeColor, text: String, ring: Hsla, right: f32) -> Div {
+fn corner_badge(t: &ThemeColor, text: String, ring: Hsla, right: f32) -> Div {
     pill_base(t, text)
         .absolute()
         .top(px(-5.))
@@ -169,7 +169,7 @@ fn click_to_show(loc: Location, cx: &Context<MailApp>) -> impl Fn(&ClickEvent, &
     let app = cx.weak_entity();
     move |event: &ClickEvent, _window: &mut Window, cx: &mut App| {
         let pin = event.modifiers().platform || event.click_count() >= 2;
-        app.update(cx, |app, cx| app.show_location(loc.clone(), pin, cx)).ok();
+        app.update(cx, |app, cx| app.show_location_in_panel(loc.clone(), pin, cx)).ok();
     }
 }
 
@@ -221,6 +221,14 @@ impl MailApp {
     pub(super) fn pick_sidebar_account(&mut self, account: Option<AccountId>, cx: &mut Context<Self>) {
         self.sidebar_pick = Some((account, self.folder().clone()));
         cx.notify();
+    }
+
+    /// Show `location` from a sidebar click or drop: the panel stays on the account it showed, so
+    /// a folder opened from the All view does not jump the panel to that folder's account.
+    pub(super) fn show_location_in_panel(&mut self, location: Location, pin: bool, cx: &mut Context<Self>) {
+        let panel = self.sidebar_account();
+        self.show_location(location, pin, cx);
+        self.pick_sidebar_account(panel, cx);
     }
 
     /// Whether the folder or section stored under `key` is open, `default` if never toggled.
@@ -371,7 +379,7 @@ impl MailApp {
             .items_center()
             .justify_center()
             .child(Icon::new(icon).with_size(px(18.)).text_color(color))
-            .when_some(tile_badge(count, false), |d, text| d.child(corner_badge(t, text, t.sidebar, 4.)))
+            .when_some(tile_badge(count), |d, text| d.child(corner_badge(t, text, t.sidebar, 4.)))
             .on_click(click_to_show(loc, cx))
             .into_any_element()
     }

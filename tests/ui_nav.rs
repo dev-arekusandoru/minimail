@@ -569,6 +569,36 @@ fn the_panel_follows_the_list_and_g_jumps_follow_the_panel(cx: &mut TestAppConte
 }
 
 #[gpui_kit::gpui::test]
+fn a_folder_opened_from_the_all_view_keeps_the_panel_on_all(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert!(h.has("sidebar-all-archive"), "the app starts on the All view");
+    h.click("sidebar-folder-4");
+    assert_eq!(h.location(), Some(Location::Folder(4)), "the folder is listed");
+    assert!(h.has("sidebar-all-archive"), "the panel is still the All view");
+    assert!(!h.has("sidebar-archive-work"));
+}
+
+#[gpui_kit::gpui::test]
+fn the_rail_dot_marks_unread_inbox_mail_whether_or_not_the_tile_is_selected(cx: &mut TestAppContext) {
+    let unread = |tile: &'static str| {
+        ElementId::NamedChild(std::sync::Arc::new(ElementId::from(tile)), "unread".into())
+    };
+    let mut h = harness(cx);
+    assert!(h.has(unread("sidebar-rail-all")) && h.has(unread("sidebar-rail-work")));
+    h.click("sidebar-rail-work");
+    assert!(h.has(unread("sidebar-rail-work")), "a selected tile keeps its dot");
+
+    h.cx.update_entity(&h.app, |app, cx| {
+        app.mailbox.mark_read(2);
+        cx.notify();
+    });
+    h.cx.run_until_parked();
+    assert!(!h.has(unread("sidebar-rail-work")), "no unread inbox mail, no dot");
+    assert!(h.has(unread("sidebar-rail-personal")));
+    assert!(h.has(unread("sidebar-rail-all")), "personal's mail is still unread");
+}
+
+#[gpui_kit::gpui::test]
 fn the_all_view_tiles_list_every_accounts_mail_and_keep_the_all_view(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.click("sidebar-all-archive");

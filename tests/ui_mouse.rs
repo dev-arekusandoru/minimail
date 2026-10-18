@@ -240,7 +240,7 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
 #[gpui_kit::gpui::test]
 fn commands_button_opens_palette_and_runs_the_highlighted_command(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    for id in ["btn-session", "btn-layout", "btn-settings", "btn-commands", "btn-undo"] {
+    for id in ["btn-session", "btn-layout", "btn-commands", "btn-undo"] {
         assert!(h.has(id), "{id}");
     }
     h.click("search-box");
@@ -416,9 +416,9 @@ fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn bottom_bar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
+fn rail_settings_and_bottom_bar_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("btn-settings");
+    h.click("sidebar-settings");
     assert!(h.read(|a| a.settings_open()));
     let settings = h.read(|a| a.settings_window()).expect("the settings window is open");
     h.cx.simulate_keystrokes(settings, "escape");

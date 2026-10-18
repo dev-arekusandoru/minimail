@@ -54,7 +54,7 @@ impl MailApp {
             })
             .on_drop(cx.listener(move |this, item: &DockDrag, window, cx| {
                 if let Some(drag) = item.value().downcast_ref::<FolderDrag>() {
-                    this.show_location(drag.location.clone(), true, cx);
+                    this.show_location_in_panel(drag.location.clone(), true, cx);
                 } else if let Some(drag) = item.value().downcast_ref::<MailDrag>() {
                     let location = this.list_views[ix].location().clone();
                     this.drop_messages(&drag.ids, &location, window, cx);
