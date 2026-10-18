@@ -73,6 +73,7 @@ impl MailApp {
         self.snooze = None;
         self.rules_panel = None;
         self.dialog = None;
+        self.new_folder = None;
         self.folder_picker = None;
         self._modal_sub = None;
         window.focus(&self.focus_handle, cx);

@@ -1078,13 +1078,14 @@ pub fn scopes_for(mb: &Mailbox, cache: &Cache, location: &Location) -> Vec<(Stri
             Vec::new()
         }
     };
+    let all_accounts = |scope: Scope| -> Vec<(String, Scope)> {
+        let ids = cache.account_ids().unwrap_or_default();
+        ids.into_iter().map(|account| (account, scope.clone())).collect()
+    };
     match location {
-        Location::AllInboxes => cache
-            .account_ids()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|account| (account, Scope::Inbox))
-            .collect(),
+        Location::AllInboxes => all_accounts(Scope::Inbox),
+        Location::AllArchive => all_accounts(Scope::Archive),
+        Location::AllTrash => all_accounts(Scope::Trash),
         Location::Inbox(account) => scoped(account, Scope::Inbox),
         Location::Archive(account) => scoped(account, Scope::Archive),
         Location::Trash(account) => scoped(account, Scope::Trash),
@@ -1095,7 +1096,7 @@ pub fn scopes_for(mb: &Mailbox, cache: &Cache, location: &Location) -> Vec<(Stri
             };
             scoped(&f.account, Scope::Folder(remote))
         }
-        Location::Snoozed(_) | Location::Sent(_) => Vec::new(),
+        Location::Snoozed(_) | Location::Sent(_) | Location::AllSnoozed | Location::AllSent => Vec::new(),
     }
 }
 

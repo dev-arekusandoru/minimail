@@ -24,10 +24,12 @@ pub fn repeat_sender_archive(h: &mut Harness<'_>) {
     click_all_inboxes(h);
 }
 
-/// The sidebar's All Inboxes row, by its own stable id.
+/// The sidebar's All Inboxes tile, by its own stable id; the rail's All tile first, since the
+/// panel shows the account the list was in.
 fn click_all_inboxes(h: &mut Harness<'_>) {
     let window = h.window;
     let cx = &mut *h.cx;
+    cx.update_window(window, |_, window, cx| window.click("sidebar-rail-all", cx)).expect("window alive");
     cx.update_window(window, |_, window, cx| window.click("sidebar-all-inboxes", cx))
         .expect("window alive");
     cx.run_until_parked();

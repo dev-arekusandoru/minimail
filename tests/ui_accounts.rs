@@ -24,7 +24,9 @@ fn rows_show_the_account_icon_only_in_all_inboxes(cx: &mut TestAppContext) {
     let ids = visible_ids(&mut h);
     assert!(ids.iter().any(|&id| has_account_icon(&mut h, id)), "rendered unified rows carry one");
 
-    // The sidebar's first account inbox: the account is implied, so no icon.
+    // An account's inbox tile: the panel shows it once the account's rail tile is picked. The
+    // account is implied there, so no icon.
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     let ids = visible_ids(&mut h);
     let rendered: Vec<usize> = ids.into_iter().filter(|&id| has_row(&mut h, id)).collect();

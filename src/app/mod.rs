@@ -12,6 +12,7 @@ pub mod filter_popover;
 pub mod folder_picker;
 pub mod mail_app;
 pub mod menu;
+pub mod new_folder;
 pub mod row;
 pub mod palette;
 pub mod panels;

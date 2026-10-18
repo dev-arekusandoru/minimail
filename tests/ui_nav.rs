@@ -177,6 +177,7 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     h.keys("enter");
     assert_eq!(h.pills(), vec!["in:inbox", "tag:needs-reply", "and", "tag:reminder"]);
 
+    h.click("sidebar-rail-work");
     h.click("sidebar-archive-work");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
     assert_eq!(h.query(), "in:archived account:work", "clicking a location clears the filters");
@@ -185,6 +186,7 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert_eq!(h.state_of(4), TriageState::Archived);
     assert_eq!(h.read(|a| a.location_label()), "Work · Archive");
 
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     assert_eq!(h.location(), Some(Location::Inbox("personal".into())));
     assert_eq!(h.visible(), vec![1]);
@@ -194,12 +196,14 @@ fn sidebar_click_sets_the_location_and_clears_the_filters(cx: &mut TestAppContex
     assert_eq!(h.location(), Some(Location::Sent("personal".into())));
     assert!(h.visible().is_empty(), "no replies sent yet");
 
+    h.click("sidebar-rail-work");
     assert!(h.has("sidebar-folder-4"), "Projects is a work folder");
     assert!(h.has("sidebar-folder-5"), "Northwind nests under Projects");
     h.click("sidebar-folder-6");
     assert_eq!(h.location(), Some(Location::Folder(6)), "a folder of the work account");
     assert_eq!(h.read(|a| a.location_label()), "Recruiting");
 
+    h.click("sidebar-rail-all");
     h.click("sidebar-all-inboxes");
     assert_eq!(h.read(|a| a.location_label()), "All Inboxes");
 }
@@ -222,6 +226,7 @@ fn the_in_pill_is_hidden_while_alone_and_shown_once_anything_else_is_applied(cx:
 #[gpui_kit::gpui::test]
 fn removing_the_in_pill_from_a_filtered_folder_goes_global(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.click("sidebar-rail-work");
     h.click("sidebar-inbox-work");
     assert_eq!(h.location(), Some(Location::Inbox("work".into())));
     h.keys("2");
@@ -262,6 +267,7 @@ fn the_number_keys_toggle_quick_filter_pills_everywhere(cx: &mut TestAppContext)
     assert_eq!(h.pills(), vec!["in:inbox", "tag:urgent", "and", "tag:spam"]);
 
     // Quick filters are not Inbox-only: they work in the archive too.
+    h.click("sidebar-rail-work");
     h.click("sidebar-archive-work");
     h.keys("1");
     assert_eq!(h.query(), "in:archived account:work", "key 1 drops every filter but the folder");
@@ -365,15 +371,18 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
     assert_eq!(h.location(), Some(Location::Inbox("personal".into())));
 
     // From All Inboxes the first account answers, and `g i` keeps it unified.
+    h.click("sidebar-rail-all");
     h.click("sidebar-all-inboxes");
     assert_eq!(h.location(), Some(Location::AllInboxes));
     h.keys("g a");
     assert_eq!(h.location(), Some(Location::Archive("personal".into())));
+    h.click("sidebar-rail-all");
     h.click("sidebar-all-inboxes");
     h.keys("g i");
     assert_eq!(h.location(), Some(Location::AllInboxes), "`g i` stays on All Inboxes");
 
     // From an account's location the jumps stay in that account.
+    h.click("sidebar-rail-work");
     h.click("sidebar-inbox-work");
     h.keys("g a");
     assert_eq!(h.location(), Some(Location::Archive("work".into())));
@@ -384,6 +393,7 @@ fn g_prefix_jumps_to_the_current_accounts_locations(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn sent_shows_the_outgoing_message_after_a_flushed_reply(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     assert!(h.outgoing().is_empty());
 
@@ -407,6 +417,7 @@ fn sent_shows_the_outgoing_message_after_a_flushed_reply(cx: &mut TestAppContext
 #[gpui_kit::gpui::test]
 fn a_search_from_a_folder_keeps_the_folder_until_its_pill_is_removed(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.click("sidebar-rail-work");
     h.click("sidebar-archive-work");
     h.keys("/");
     h.type_text("bob");
@@ -477,6 +488,7 @@ fn the_header_counts_what_the_list_shows_without_muted_threads(cx: &mut TestAppC
     assert_eq!(h.header(), "All Inboxes · 2");
     h.keys("m");
     assert_eq!(h.header(), "All Inboxes · 1", "a muted thread leaves the count");
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     assert_eq!(h.header(), "Personal · Inbox · 0");
 }
@@ -512,4 +524,95 @@ fn archiving_the_last_row_leaves_the_cursor_on_the_remaining_row(cx: &mut TestAp
     assert!(h.visible().is_empty());
     assert_eq!(h.read(|a| a.cursor_message()), None);
     assert_eq!(h.read(|a| a.triage().cursor_index()), 0);
+}
+
+#[gpui_kit::gpui::test]
+fn a_rail_click_shows_that_account_in_the_panel_without_moving_the_list(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert!(h.has("sidebar-all-archive"), "the app starts on the All view");
+    assert!(!h.has("sidebar-archive-work"));
+
+    h.click("sidebar-rail-work");
+    assert!(h.has("sidebar-archive-work"), "the panel shows work's tiles");
+    assert!(!h.has("sidebar-all-archive"));
+    assert_eq!(h.location(), Some(Location::AllInboxes), "the list did not move");
+    assert_eq!(h.visible(), vec![1, 2]);
+
+    h.click("sidebar-rail-all");
+    assert!(h.has("sidebar-all-archive"));
+    assert!(!h.has("sidebar-archive-work"));
+}
+
+#[gpui_kit::gpui::test]
+fn the_panel_follows_the_list_and_g_jumps_follow_the_panel(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("g a");
+    assert_eq!(h.location(), Some(Location::Archive("personal".into())));
+    assert!(h.has("sidebar-archive-personal") && !h.has("sidebar-archive-work"), "a g-jump moves the panel");
+
+    h.click("sidebar-rail-work");
+    h.click("sidebar-inbox-work");
+    assert_eq!(h.location(), Some(Location::Inbox("work".into())));
+    assert!(h.has("sidebar-archive-work") && !h.has("sidebar-archive-personal"));
+
+    // A picked rail tile is where the next jump lands, even though the list is elsewhere.
+    h.click("sidebar-rail-personal");
+    assert_eq!(h.location(), Some(Location::Inbox("work".into())), "picking does not move the list");
+    h.keys("g a");
+    assert_eq!(h.location(), Some(Location::Archive("personal".into())));
+
+    // Going back to All through its own tile hands the panel back to the list.
+    h.click("sidebar-rail-all");
+    h.click("sidebar-all-inboxes");
+    assert_eq!(h.location(), Some(Location::AllInboxes));
+    assert!(h.has("sidebar-all-archive"));
+}
+
+#[gpui_kit::gpui::test]
+fn the_all_view_tiles_list_every_accounts_mail_and_keep_the_all_view(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("sidebar-all-archive");
+    assert_eq!(h.location(), Some(Location::AllArchive));
+    let mut archived = h.visible();
+    archived.sort();
+    assert_eq!(archived, vec![3, 4], "the archived mail of both accounts");
+    assert!(h.has("sidebar-all-archive"), "the panel stays on All: the location names no account");
+    assert_eq!(h.read(|a| a.location_label()), "All Archive");
+}
+
+#[gpui_kit::gpui::test]
+fn folders_fold_in_both_views_and_the_all_view_keeps_parents_closed(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    assert!(h.has("sidebar-section-work"), "the All view has a section per account");
+    assert!(h.has("sidebar-folder-4"), "Projects is a top-level work folder");
+    assert!(!h.has("sidebar-folder-5"), "its child stays hidden until the parent is opened");
+    h.click("sidebar-fold-all-folder-4");
+    assert!(h.has("sidebar-folder-5"));
+
+    h.click("sidebar-section-work");
+    assert!(!h.has("sidebar-folder-4"), "a folded section hides its folders");
+    h.click("sidebar-section-work");
+    assert!(h.has("sidebar-folder-4") && h.has("sidebar-folder-5"), "and remembers what was open");
+
+    h.click("sidebar-rail-work");
+    assert!(h.has("sidebar-folder-5"), "the account view opens parents by default");
+    h.click("sidebar-fold-account-folder-4");
+    assert!(!h.has("sidebar-folder-5"));
+}
+
+#[gpui_kit::gpui::test]
+fn the_new_folder_tile_names_the_panels_account_or_asks_in_the_all_view(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("sidebar-new-folder");
+    assert!(h.read(|a| a.modal_open()), "the All view asks which account");
+    h.keys("escape");
+    assert!(!h.read(|a| a.modal_open()));
+
+    h.click("sidebar-rail-work");
+    let before = h.read(|a| a.mailbox.folders("work").len());
+    h.click("sidebar-new-folder");
+    h.type_text("Receipts 2027");
+    h.keys("enter");
+    assert_eq!(h.read(|a| a.mailbox.folders("work").len()), before + 1, "created in the panel's account");
+    assert!(h.read(|a| a.mailbox.folders("personal").iter().all(|f| f.name != "Receipts 2027")));
 }

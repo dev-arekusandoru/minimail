@@ -81,4 +81,12 @@ fn a_drop_on_a_snoozed_tab_asks_for_a_time() {
 fn sent_and_all_inboxes_take_no_drop() {
     assert_eq!(drop_action(&Location::Sent("personal".into())), DropAction::Nothing);
     assert_eq!(drop_action(&Location::AllInboxes), DropAction::Nothing);
+    assert_eq!(drop_action(&Location::AllSent), DropAction::Nothing);
+    assert_eq!(drop_action(&Location::AllSnoozed), DropAction::Nothing);
+}
+
+#[test]
+fn cross_account_archive_and_trash_file_like_their_per_account_forms() {
+    assert_eq!(drop_action(&Location::AllArchive), DropAction::File(TriageState::Archived));
+    assert_eq!(drop_action(&Location::AllTrash), DropAction::File(TriageState::Deleted));
 }

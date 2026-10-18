@@ -245,6 +245,33 @@ impl MailApp {
         !self.providers.is_empty()
     }
 
+    /// How `account` is syncing, from what the app tracks per account (the settings Accounts
+    /// page shows the same). Accounts without a provider of their own have nothing to sync.
+    pub(super) fn account_sync_status(&self, account: &crate::model::Account) -> crate::sync_status::SyncStatus {
+        if account.provider != crate::model::ProviderKind::Gmail {
+            return crate::sync_status::SyncStatus::Synced(None);
+        }
+        let facts = crate::sync_status::SyncFacts {
+            last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&account.id).ok().flatten()),
+            syncing: self.older_in_flight.contains(&account.id),
+            signed_in: self.providers.contains_key(&account.id),
+            error: self.account_errors.get(&account.id).map(String::as_str),
+        };
+        crate::sync_status::status(&facts)
+    }
+
+    /// The worst attention any syncing account asks for: what the sidebar's fetch button flags.
+    pub(super) fn sync_attention(&self) -> crate::sync_status::Attention {
+        let now = self.now();
+        self.mailbox
+            .accounts()
+            .iter()
+            .filter(|a| a.provider == crate::model::ProviderKind::Gmail)
+            .map(|a| crate::sync_status::attention(&self.account_sync_status(a), now))
+            .max()
+            .unwrap_or(crate::sync_status::Attention::Fine)
+    }
+
     /// Ask the server for changes on the next round (within ~2 s), then report the result.
     pub(super) fn fetch_mail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.providers.is_empty() {

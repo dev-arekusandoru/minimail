@@ -1,6 +1,7 @@
 pub mod account_style;
 pub mod app_settings;
 pub mod app;
+pub mod badge;
 pub mod filters;
 pub mod fuzzy;
 pub mod preview;

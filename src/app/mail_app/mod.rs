@@ -23,6 +23,7 @@ use crate::draft::DraftKind;
 use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::email_webview::EmailWebViews;
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
+use crate::app::new_folder::{AccountPicker, NamePrompt, NewFolderEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
 use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
@@ -71,6 +72,7 @@ mod reader_find;
 mod reader_state;
 mod reader_tabs;
 mod sidebar;
+mod rail;
 mod titlebar;
 mod sync;
 mod rows;
@@ -103,6 +105,14 @@ pub struct MailApp {
     list_views: Vec<ListView>,
     /// Which pane the tab keys act on.
     pane_focus: Pane,
+    /// The account tile the user clicked in the sidebar rail (`None` = All) and the view it
+    /// was clicked in. The panel shows that account only while that view is still the active
+    /// one; any other view makes the panel follow its own location (see
+    /// [`MailApp::sidebar_account`]).
+    sidebar_pick: Option<(Option<AccountId>, Location)>,
+    /// Folders and account sections the user folded or unfolded in the sidebar, by key, true
+    /// when open. A key that is absent has its view's default.
+    sidebar_folds: HashMap<String, bool>,
     /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
     /// (see [`MailApp::opened`]).
     pub tabs: Tabs,
@@ -181,6 +191,8 @@ pub struct MailApp {
     dialog: Option<Entity<ChoiceDialog>>,
     /// Folder picker (`f` and the dialogs' `File…`).
     folder_picker: Option<Entity<FolderPicker>>,
+    /// "New folder" account picker or name prompt.
+    new_folder: Option<AnyView>,
     settings: Option<Entity<SettingsPanel>>,
     _theme_sub: Option<Subscription>,
     /// Separate native Settings window, if currently open.
@@ -289,6 +301,8 @@ impl MailApp {
             list_tabs: ListTabs::new(all_inboxes.clone()),
             list_views: vec![ListView::new(all_inboxes, Location::AllInboxes)],
             pane_focus: Pane::default(),
+            sidebar_pick: None,
+            sidebar_folds: HashMap::new(),
             tabs: Tabs::default(),
             tab_avatars: true,
             theme_mode: crate::theme::ThemeMode::System,
@@ -334,6 +348,7 @@ impl MailApp {
             _theme_sub: None,
             snooze: None,
             dialog: None,
+            new_folder: None,
             folder_picker: None,
             settings: None,
             settings_window: None,

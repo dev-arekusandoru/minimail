@@ -323,6 +323,9 @@ fn new_sender_badge_is_derived_from_the_mailbox() {
 #[test]
 fn account_icon_shows_only_in_the_unified_inbox() {
     assert!(shows_account_icon(&Location::AllInboxes));
+    for all in [Location::AllSnoozed, Location::AllSent, Location::AllArchive, Location::AllTrash] {
+        assert!(shows_account_icon(&all));
+    }
     assert!(!shows_account_icon(&Location::Inbox("personal".into())));
     assert!(!shows_account_icon(&Location::Snoozed("personal".into())));
     assert!(!shows_account_icon(&Location::Sent("personal".into())));

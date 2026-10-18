@@ -28,11 +28,17 @@ pub const STEP: f32 = 40.;
 /// Width of the double-click target centred on the sidebar's edge.
 pub const DIVIDER_HIT: f32 = 7.;
 
-/// The sidebar's default width.
-pub const SIDEBAR_W: f32 = 190.;
+/// Width of the sidebar's fixed account rail; the folder panel takes the rest.
+pub const RAIL_W: f32 = 56.;
+/// The folder panel's default width, and the narrowest it may be dragged to: tiles, titles
+/// and the unread pills stop fitting under that.
+pub const PANEL_W: f32 = 232.;
+pub const MIN_PANEL_W: f32 = 176.;
+/// The sidebar's default width: the rail and its panel.
+pub const SIDEBAR_W: f32 = RAIL_W + PANEL_W;
 /// Sidebar drag limits.
-pub const MIN_SIDEBAR_W: f32 = 120.;
-pub const MAX_SIDEBAR_W: f32 = 320.;
+pub const MIN_SIDEBAR_W: f32 = RAIL_W + MIN_PANEL_W;
+pub const MAX_SIDEBAR_W: f32 = 420.;
 /// The titlebar and the hint bar, which the stacked panes do not get. Only used to size the
 /// stacked list before the first layout has measured the real container.
 const CHROME_H: f32 = 78.;

@@ -160,3 +160,81 @@ fn blocked_ago_counts_days_on_the_users_clock() {
     assert_eq!(blocked_ago(&east, midnight), "Blocked today");
     assert_eq!(blocked_ago(&east, midnight - 2 * HOUR), "Blocked yesterday");
 }
+/// Two accounts: archived 1 (personal) and 2 (work); inbox 3 (personal, unread) and 4 (work).
+fn two_accounts() -> mail_classifier::model::Mailbox {
+    let rows = [
+        (1, "personal", State::Archived),
+        (2, "work", State::Archived),
+        (3, "personal", State::Inbox),
+        (4, "work", State::Inbox),
+    ];
+    let values: Vec<_> = rows
+        .iter()
+        .map(|(id, account, state)| {
+            let mut m = crate::helpers::msg(*id, *id, "a@x.test", "2026-09-29T00:00:00Z", *state);
+            m["account"] = (*account).into();
+            m
+        })
+        .collect();
+    mail_classifier::model::Mailbox::from_json(&serde_json::to_string(&values).unwrap()).unwrap()
+}
+#[test]
+fn cross_account_locations_round_trip_and_span_every_account() {
+    let mb = two_accounts();
+    for (loc, place) in [
+        (Location::AllSnoozed, "snoozed"),
+        (Location::AllSent, "sent"),
+        (Location::AllArchive, "archived"),
+        (Location::AllTrash, "deleted"),
+    ] {
+        let q = mb.location_query(&loc);
+        assert_eq!(q.values(Field::In), [place.to_owned()]);
+        assert!(q.values(Field::Account).is_empty());
+        assert_eq!(mb.query_location(&q), Some(loc));
+    }
+    let all = mb.location_query(&Location::AllArchive);
+    let mut ids = mb.ids_matching(&all, &utc(NOW));
+    ids.sort();
+    assert_eq!(ids, vec![1, 2]);
+    let one = mb.location_query(&Location::Archive("work".into()));
+    assert_eq!(mb.ids_matching(&one, &utc(NOW)), vec![2]);
+}
+#[test]
+fn unread_count_skips_read_and_muted_mail_in_inbox_and_folders() {
+    let mut mb = two_accounts();
+    let now = utc(NOW);
+    assert_eq!(mb.unread_count_at(&Location::AllInboxes, &now), 2);
+    assert_eq!(mb.unread_count_at(&Location::AllArchive, &now), 2);
+    mb.mark_read(3);
+    mb.mark_read(2);
+    assert_eq!(mb.unread_count_at(&Location::AllInboxes, &now), 1);
+    assert_eq!(mb.unread_count_at(&Location::Inbox("personal".into()), &now), 0);
+    assert_eq!(mb.unread_count_at(&Location::AllArchive, &now), 1);
+    assert_eq!(mb.count_at(&Location::AllArchive, &now), 2, "read mail still counts as present");
+    let folder = mb.create_folder("work", "Zebras", None);
+    mb.set_state(&[4], State::Filed(folder));
+    assert_eq!(mb.unread_count_at(&Location::Folder(folder), &now), 1);
+    assert!(mb.mute_thread(4));
+    assert_eq!(mb.unread_count_at(&Location::Folder(folder), &now), 0, "a muted thread is not counted");
+}
+#[test]
+fn folder_unread_counts_each_folders_whole_subtree_once() {
+    let mut mb = two_accounts();
+    let parent = mb.create_folder("work", "Projects", None);
+    let child = mb.create_folder("work", "Northwind", Some(parent));
+    let sibling = mb.create_folder("work", "Notes", None);
+    // Message 4 is unread in the parent itself, 2 and 3 in the child and sibling; 1 is read.
+    mb.set_state(&[4], State::Filed(parent));
+    mb.set_state(&[2], State::Filed(child));
+    mb.set_state(&[3], State::Filed(sibling));
+    mb.set_state(&[1], State::Filed(child));
+    mb.mark_read(1);
+    let unread = mb.folder_unread();
+    assert_eq!(unread.get(&child), Some(&1), "the read message does not count");
+    assert_eq!(unread.get(&parent), Some(&2), "its own message plus the child's, not counted twice");
+    assert_eq!(unread.get(&sibling), Some(&1));
+    assert!(mb.mute_thread(2));
+    let unread = mb.folder_unread();
+    assert_eq!(unread.get(&child), None, "a muted thread is not counted, and an empty folder is absent");
+    assert_eq!(unread.get(&parent), Some(&1));
+}

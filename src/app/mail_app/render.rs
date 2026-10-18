@@ -196,6 +196,12 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ClearFilters, _, cx| this.clear_filters(cx)))
             .on_action(cx.listener(|this, _: &AddFilter, window, cx| this.open_add_filter(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleHelp, w, cx| this.toggle_help(w, cx)))
+            .on_action(cx.listener(|this, _: &NewFolder, w, cx| {
+                // The panel's account, as its new-folder tile has it: All names no account, so
+                // the picker asks which.
+                let account = this.sidebar_account();
+                this.new_folder(account, w, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenSnoozePicker, w, cx| {
                 if !this.modal_open() {
                     this.open_snooze(w, cx);

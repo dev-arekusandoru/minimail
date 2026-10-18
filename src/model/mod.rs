@@ -152,6 +152,10 @@ pub struct Folder {
 pub enum Location {
     #[default]
     AllInboxes,
+    AllSnoozed,
+    AllSent,
+    AllArchive,
+    AllTrash,
     Inbox(AccountId),
     Snoozed(AccountId),
     Sent(AccountId),

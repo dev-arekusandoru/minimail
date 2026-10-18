@@ -33,6 +33,7 @@ impl MailApp {
     /// back, as `close_modals` does, so keys work even when the opener (a menu) is gone.
     fn dialog_dismissed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = None;
+        self.new_folder = None;
         self.folder_picker = None;
         self.snooze = None;
         self.rules_panel = None;
@@ -300,13 +301,7 @@ impl MailApp {
             .map(|a| {
                 let gmail = a.provider == crate::model::ProviderKind::Gmail;
                 let (status, (sync, sync_problem)) = if gmail {
-                    let facts = crate::sync_status::SyncFacts {
-                        last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&a.id).ok().flatten()),
-                        syncing: self.older_in_flight.contains(&a.id),
-                        signed_in: self.providers.contains_key(&a.id),
-                        error: self.account_errors.get(&a.id).map(String::as_str),
-                    };
-                    let status = crate::sync_status::status(&facts);
+                    let status = self.account_sync_status(a);
                     (status.clone(), crate::sync_status::describe(&status, now))
                 } else {
                     (crate::sync_status::SyncStatus::Synced(None), (String::new(), false))
@@ -899,6 +894,75 @@ impl MailApp {
                 .map(|m| m.id),
         };
         first.and_then(|id| self.mailbox.get(id)).map(|m| m.account.clone())
+    }
+
+    /// Standalone "New folder": pick the account first when there are several and none was
+    /// given, then name the folder. Creation is one undo step.
+    pub(super) fn new_folder(
+        &mut self,
+        account: Option<AccountId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let accounts = self.mailbox.accounts().to_vec();
+        match (account, accounts.as_slice()) {
+            (_, []) => {}
+            (Some(account), _) => self.open_folder_name(account, window, cx),
+            (None, [only]) => self.open_folder_name(only.id.clone(), window, cx),
+            (None, _) => {
+                let picker = cx.new(|cx| AccountPicker::new(accounts, window, cx));
+                self._modal_sub = Some(cx.subscribe_in(
+                    &picker,
+                    window,
+                    |this, _, event: &NewFolderEvent, window, cx| {
+                        if let NewFolderEvent::Account(id) = event {
+                            this.close_modals(window, cx);
+                            this.open_folder_name(id.clone(), window, cx);
+                        }
+                    },
+                ));
+                self.new_folder = Some(picker.clone().into());
+                self.host_in_dialog(picker.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
+                picker.update(cx, |p, cx| p.focus(window, cx));
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_folder_name(&mut self, account: AccountId, window: &mut Window, cx: &mut Context<Self>) {
+        let label = self.mailbox.account(&account).map_or_else(
+            || account.clone(),
+            |a| crate::account_style::display_name(a).to_owned(),
+        );
+        let prompt = cx.new(|cx| NamePrompt::new(label, window, cx));
+        self._modal_sub = Some(cx.subscribe_in(
+            &prompt,
+            window,
+            move |this, _, event: &NewFolderEvent, window, cx| {
+                let NewFolderEvent::Name(name) = event else { return };
+                let name = name.trim();
+                if name.is_empty() {
+                    return;
+                }
+                this.close_modals(window, cx);
+                let exists = this
+                    .mailbox
+                    .folders(&account)
+                    .iter()
+                    .any(|f| f.parent.is_none() && f.name.eq_ignore_ascii_case(name));
+                if exists {
+                    this.show_toast(format!("Folder “{name}” already exists"), window, cx);
+                } else {
+                    this.mailbox.create_folder(&account, name, None);
+                    this.show_undo_toast(format!("Created folder “{name}”"), window, cx);
+                }
+                cx.notify();
+            },
+        ));
+        self.new_folder = Some(prompt.clone().into());
+        self.host_in_dialog(prompt.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
+        prompt.update(cx, |p, cx| p.focus(window, cx));
+        cx.notify();
     }
 
     /// Folder picker for the account of the messages `action` files.

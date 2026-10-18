@@ -227,6 +227,7 @@ impl MailApp {
             || self.rules_panel.is_some()
             || self.dialog.is_some()
             || self.folder_picker.is_some()
+            || self.new_folder.is_some()
     }
 
     /// The documents the email views loaded without a native window (the headless platform).

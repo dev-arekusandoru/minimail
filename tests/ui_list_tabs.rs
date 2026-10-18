@@ -148,7 +148,7 @@ impl Harness<'_> {
 
 #[gpui_kit::gpui::test]
 fn a_sidebar_click_opens_a_preview_tab_and_the_next_replaces_it(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     assert_eq!(h.tabs(), vec![(INBOX.to_owned(), true)], "a window opens on All Inboxes");
 
     h.click("sidebar-archive-personal"); // Personal · Archive
@@ -171,7 +171,7 @@ fn a_sidebar_click_opens_a_preview_tab_and_the_next_replaces_it(cx: &mut TestApp
 
 #[gpui_kit::gpui::test]
 fn a_cmd_click_pins_the_view_it_opens(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal");
     assert_eq!(
         h.tabs(),
@@ -187,7 +187,7 @@ fn a_cmd_click_pins_the_view_it_opens(cx: &mut TestAppContext) {
 
 #[gpui_kit::gpui::test]
 fn clicking_a_view_that_is_already_pinned_activates_its_tab(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.click("sidebar-trash-personal"); // the preview takes Trash
     assert_eq!(h.active(), 2);
@@ -200,7 +200,7 @@ fn clicking_a_view_that_is_already_pinned_activates_its_tab(cx: &mut TestAppCont
 
 #[gpui_kit::gpui::test]
 fn every_tab_keeps_its_own_cursor_selection_and_scroll(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.click("sidebar-trash-personal"); // the preview takes Trash, which is empty
     assert_eq!(h.state(2), (0, Vec::new(), 0), "an empty view starts at the top");
@@ -223,7 +223,7 @@ fn every_tab_keeps_its_own_cursor_selection_and_scroll(cx: &mut TestAppContext) 
 
 #[gpui_kit::gpui::test]
 fn ctrl_tab_cycles_the_focused_pane_and_cmd_w_closes_its_tab(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.click("sidebar-trash-personal"); // the preview takes Trash
     assert_eq!(h.tabs().len(), 3);
@@ -257,7 +257,7 @@ fn ctrl_tab_cycles_the_focused_pane_and_cmd_w_closes_its_tab(cx: &mut TestAppCon
 
 #[gpui_kit::gpui::test]
 fn the_readers_preview_follows_the_active_list_tab(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.click(("list-tab", 0usize));
     h.row(4);
@@ -278,7 +278,7 @@ fn the_readers_preview_follows_the_active_list_tab(cx: &mut TestAppContext) {
 
 #[gpui_kit::gpui::test]
 fn dragging_a_tab_in_the_list_strip_reorders_the_model(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive
     h.cmd_click("sidebar-trash-personal"); // pin Trash
     assert_eq!(h.tabs().len(), 3);
@@ -297,7 +297,7 @@ fn dragging_a_tab_in_the_list_strip_reorders_the_model(cx: &mut TestAppContext) 
 
 #[gpui_kit::gpui::test]
 fn a_click_in_the_reader_content_gives_it_the_tab_keys(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.cmd_click("sidebar-archive-personal"); // pin Archive, so the list strip has tabs to cycle
     h.click("sidebar-trash-personal"); // the preview takes Trash
     h.click(("list-tab", 0usize)); // back to the inbox, where the rows are
@@ -330,7 +330,7 @@ fn a_click_in_the_reader_content_gives_it_the_tab_keys(cx: &mut TestAppContext) 
 
 #[gpui_kit::gpui::test]
 fn dragging_a_folder_onto_the_list_opens_a_pinned_tab_and_activates_it_again(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.drag_to_list("sidebar-folder-1"); // Receipts, a personal folder
     assert_eq!(
         h.tabs(),
@@ -353,7 +353,7 @@ fn dragging_a_folder_onto_the_list_opens_a_pinned_tab_and_activates_it_again(cx:
 
 #[gpui_kit::gpui::test]
 fn dropping_a_folder_on_a_list_tab_opens_it_as_a_pinned_tab(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     h.drag_to_list("sidebar-folder-1"); // Receipts, so the strip has a second tab to aim at
     assert_eq!(h.tabs().len(), 2);
 
@@ -398,7 +398,7 @@ impl Harness<'_> {
 /// A harness whose setup undo steps (none of which touch a message's state) are dropped, so an
 /// empty undo stack means a drop pushed nothing.
 fn fresh(cx: &mut TestAppContext) -> Harness<'_> {
-    let mut h = harness_with(cx, mailbox());
+    let mut h = on_personal(cx);
     while h.undo_step() {}
     h
 }
@@ -575,4 +575,12 @@ fn p_with_several_selected_uses_the_cursor_message(cx: &mut TestAppContext) {
     h.goto(1);
     h.keys("p");
     assert_eq!(h.tabs()[1].0, "from:alice@example.com");
+}
+
+/// A harness on the inline mailbox with the sidebar panel showing the Personal account, whose
+/// tiles and folders these tests click. The list still shows All Inboxes.
+fn on_personal(cx: &mut TestAppContext) -> Harness<'_> {
+    let mut h = harness_with(cx, mailbox());
+    h.click("sidebar-rail-personal");
+    h
 }

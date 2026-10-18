@@ -118,6 +118,8 @@ impl MailApp {
     ///
     /// This is opening a view, not switching tabs, so the reader keeps what it shows.
     pub(super) fn open_view(&mut self, query: Query, folder: Location, pin: bool, cx: &mut Context<Self>) {
+        // Opening a view is the list's own choice of account again, not the rail's.
+        self.sidebar_pick = None;
         match self.list_tabs.index_of(&query) {
             Some(ix) => {
                 if pin {

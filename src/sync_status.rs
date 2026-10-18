@@ -80,6 +80,32 @@ pub fn describe(status: &SyncStatus, now: Timestamp) -> (String, bool) {
     }
 }
 
+/// How long a completed check may go unrefreshed before the sidebar calls it stale. The sync
+/// loop asks the server every minute while it works, so an hour without a completed check
+/// means something is quietly wrong, not that the user is just idle.
+pub const STALE_AFTER: Timestamp = HOUR;
+
+/// How loudly the sidebar's sync button should flag the accounts' state, worst last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Attention {
+    /// Nothing to flag: idle, running, or checked recently.
+    Fine,
+    /// No completed check yet, or the last one is older than [`STALE_AFTER`].
+    Stale,
+    /// A round failed or a sign-in is dead.
+    Error,
+}
+
+/// The attention one account's `status` asks for as of `now`.
+pub fn attention(status: &SyncStatus, now: Timestamp) -> Attention {
+    match status {
+        SyncStatus::Syncing => Attention::Fine,
+        SyncStatus::SignInAgain | SyncStatus::Failed(_) => Attention::Error,
+        SyncStatus::Synced(Some(at)) if now - at <= STALE_AFTER => Attention::Fine,
+        SyncStatus::Synced(_) => Attention::Stale,
+    }
+}
+
 /// `secs` as a coarse age: "just now", "2 min ago", "3 h ago", "yesterday", "5 days ago".
 /// A negative age (clock moved back) reads as "just now".
 pub fn ago(secs: Timestamp) -> String {
@@ -143,5 +169,29 @@ mod tests {
         assert_eq!(SyncStatus::Syncing.action(), None);
         assert_eq!(SyncStatus::Synced(Some(5)).action(), None);
         assert_eq!(SyncStatus::Synced(None).action(), None);
+    }
+}
+
+#[cfg(test)]
+mod attention_tests {
+    use super::*;
+
+    const NOW: Timestamp = 1_000_000;
+
+    #[test]
+    fn only_failures_are_errors_and_only_old_or_missing_checks_are_stale() {
+        let at = |s: SyncStatus| attention(&s, NOW);
+        assert_eq!(at(SyncStatus::Synced(Some(NOW - STALE_AFTER))), Attention::Fine);
+        assert_eq!(at(SyncStatus::Synced(Some(NOW - STALE_AFTER - 1))), Attention::Stale);
+        assert_eq!(at(SyncStatus::Synced(None)), Attention::Stale);
+        assert_eq!(at(SyncStatus::Syncing), Attention::Fine);
+        assert_eq!(at(SyncStatus::Failed("offline".into())), Attention::Error);
+        assert_eq!(at(SyncStatus::SignInAgain), Attention::Error);
+    }
+
+    #[test]
+    fn the_worst_account_decides() {
+        let worst = [Attention::Fine, Attention::Error, Attention::Stale].into_iter().max();
+        assert_eq!(worst, Some(Attention::Error));
     }
 }

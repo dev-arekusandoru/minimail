@@ -25,6 +25,8 @@ gpui_kit::assets::icon_assets!(
         // Account icons.
         Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
+        // Sidebar rail and panel (not in gpui-kit's default bundle).
+        SquarePen, FolderPlus, ListFilter,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
         ReplyAll, Forward, Regex, WholeWord, ScanSearch,
         // Per-message classification state (not classified / in progress / failed).

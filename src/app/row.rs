@@ -88,10 +88,11 @@ pub fn sender_label(msg: &crate::model::Message) -> String {
     }
 }
 
-/// Rows carry the sender's account icon (in the account color) only in the unified `All Inboxes`
-/// view, where the account is otherwise ambiguous.
+/// Rows carry the sender's account icon (in the account color) only in the cross-account views (`All Inboxes`,
+/// `All Archive`, ...), where the account is otherwise ambiguous.
 pub fn shows_account_icon(location: &crate::model::Location) -> bool {
-    matches!(location, crate::model::Location::AllInboxes)
+    use crate::model::Location::*;
+    matches!(location, AllInboxes | AllSnoozed | AllSent | AllArchive | AllTrash)
 }
 
 /// Apply the row geometry and the visual states of `v` to a row container. The caller sets the

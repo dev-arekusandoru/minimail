@@ -67,10 +67,10 @@ pub enum DropAction {
 pub fn drop_action(location: &Location) -> DropAction {
     match location {
         Location::Inbox(_) => DropAction::File(TriageState::Inbox),
-        Location::Archive(_) => DropAction::File(TriageState::Archived),
-        Location::Trash(_) => DropAction::File(TriageState::Deleted),
+        Location::Archive(_) | Location::AllArchive => DropAction::File(TriageState::Archived),
+        Location::Trash(_) | Location::AllTrash => DropAction::File(TriageState::Deleted),
         Location::Folder(id) => DropAction::File(TriageState::Filed(*id)),
         Location::Snoozed(_) => DropAction::Snooze,
-        Location::AllInboxes | Location::Sent(_) => DropAction::Nothing,
+        Location::AllInboxes | Location::Sent(_) | Location::AllSent | Location::AllSnoozed => DropAction::Nothing,
     }
 }
