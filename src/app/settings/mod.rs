@@ -83,6 +83,8 @@ pub enum SettingsEvent {
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
     BlockRemoteImages(bool),
     PreviewLines(u8),
+    /// The row style changed (density, leading element, group tile, chips, subject first).
+    RowStyle(crate::row_style::RowStyle),
     Theme { mode: theme::ThemeMode, light: String, dark: String },
     PaneLayout(Orientation),
     /// New global follow-up timeout, in seconds (`mailbox.set_follow_up_timeout`).
@@ -252,6 +254,7 @@ pub struct SettingsPanel {
     /// Block remote images in the reader (opt in; images load by default).
     block_remote_images: bool,
     preview_lines: u8,
+    row_style: crate::row_style::RowStyle,
     orientation: Orientation,
     theme_mode: theme::ThemeMode,
     light_theme: String,
@@ -371,6 +374,7 @@ impl SettingsPanel {
             tab_avatars: true,
             block_remote_images: false,
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
+            row_style: crate::row_style::RowStyle::default(),
             orientation,
             theme_mode: theme::ThemeMode::System,
             light_theme: String::new(),
@@ -399,6 +403,12 @@ impl SettingsPanel {
             follow_up,
             preview,
         }
+    }
+
+    /// The row style's initial value.
+    pub fn row_style(mut self, style: crate::row_style::RowStyle) -> Self {
+        self.row_style = style;
+        self
     }
 
     /// Whether tabs show the sender's avatar (the row's initial value).
@@ -636,6 +646,7 @@ impl SettingsPanel {
         self.tab_avatars = true;
         self.block_remote_images = false;
         self.preview_lines = preview::DEFAULT_LINES;
+        self.row_style = crate::row_style::RowStyle::default();
         self.orientation = Orientation::SideBySide;
         self.theme_mode = theme::ThemeMode::System;
         self.light_theme = crate::app_settings::DEFAULT_LIGHT_THEME.to_owned();
@@ -698,6 +709,21 @@ impl SettingsPanel {
     /// Restore the per-thread inbox grouping.
     fn reset_grouping(&mut self, cx: &mut Context<Self>) {
         self.set_grouping(false, cx);
+    }
+
+    /// Apply `edit` to the row style and tell the app when it changed.
+    fn edit_row_style(
+        &mut self,
+        edit: impl FnOnce(&mut crate::row_style::RowStyle),
+        cx: &mut Context<Self>,
+    ) {
+        let mut style = self.row_style;
+        edit(&mut style);
+        if style != self.row_style {
+            self.row_style = style;
+            cx.emit(SettingsEvent::RowStyle(style));
+            cx.notify();
+        }
     }
 
     fn set_tab_avatars(&mut self, on: bool, cx: &mut Context<Self>) {

@@ -6,13 +6,9 @@
 //! all of them in one undo step. Sender-wide actions and mute are unchanged (mute already
 //! covers the whole thread). Threads split across states show only the panel's messages.
 //! `]` / `[` walk the whole thread in date order regardless of the grouping setting.
-use gpui_kit::component::ActiveTheme as _;
-
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::MailApp;
-use crate::app::row;
 use crate::model::MessageId;
 use crate::threads::{self, Row};
 
@@ -234,135 +230,5 @@ impl MailApp {
             }
         }
         cx.notify();
-    }
-}
-
-impl MailApp {
-    /// Thread header row: chevron, latest sender, subject, participants, count badge, the
-    /// newest date and the snippet of the newest message while the Preview setting asks for
-    /// one. It sizes to that content, not to the message-row height. Click selects it; the
-    /// chevron expands/collapses.
-    pub(super) fn render_group_header(
-        &self,
-        row: &Row,
-        ix: usize,
-        newest: &str,
-        cx: &Context<Self>,
-    ) -> crate::app::ui::Observable {
-        let Row::Header { thread_id, ids, expanded } = row else {
-            unreachable!("render_group_header takes header rows")
-        };
-        let t = cx.theme();
-        let latest = self.mailbox.get(ids[0]);
-        let now = self.local_now();
-        let (from, subject, date) = latest
-            .map(|m| (crate::app::row::sender_label(m), m.subject.clone(), self.clock_label(&m.received, newest, &now)))
-            .unwrap_or_default();
-        let people = threads::participants(ids, |id| self.mailbox.get(id)).join(", ");
-        let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
-        let unread = ids.iter().any(|id| {
-            !self.mailbox.is_read(*id) && self.mailbox.state_of(*id) == Some(crate::model::TriageState::Inbox)
-        });
-        let visual = crate::app::row::RowVisual {
-            cursor: ix == self.cursor_ix(),
-            open: self.opened().is_some_and(|id| ids.contains(&id)),
-            selected: selected_count == ids.len() && selected_count > 0,
-            partial: selected_count > 0 && selected_count < ids.len(),
-            unread,
-        };
-        let thread = *thread_id;
-        let preview = row::thread_preview_lines(self.preview_lines);
-        let snippet = latest
-            .map(|m| crate::preview::snippet(&crate::reading::reader_text(m)))
-            .unwrap_or_default();
-        let label = (SharedString::from(from.clone()), SharedString::from(subject.clone()));
-        let container = div().id(("thread-row", thread as usize)).h(px(self.thread_row_h()));
-        let container = self.draggable(container, ids, Some(thread), label);
-        crate::app::row::frame(container, visual, t)
-            .child(self.row_selection_target(ix, cx))
-            .child(
-                div()
-                    .id(("thread-chevron", thread as usize))
-                    .flex_none()
-                    .w(px(12.))
-                    .text_color(t.muted_foreground)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.cursor_to(ix);
-                        this.toggle_thread(thread);
-                        window.focus(&this.focus_handle, cx);
-                        cx.notify();
-                    }))
-                    .child(if *expanded { "▾" } else { "▸" }),
-            )
-            .child(
-                div()
-                    .id(("thread-body", thread as usize))
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                        this.click_row(ix, ev, window, cx)
-                    }))
-                    .child(
-                        div()
-                            .h(px(row::LINE_H))
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .w(px(108.))
-                                    .flex_none()
-                                    .truncate()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(from),
-                            )
-                            .child(div().flex_1().truncate().text_color(t.muted_foreground).child(subject))
-                            .child(
-                                div()
-                                    .w(px(90.))
-                                    .flex_none()
-                                    .truncate()
-                                    .text_size(px(11.))
-                                    .text_color(t.muted_foreground)
-                                    .child(people),
-                            ),
-                    )
-                    .when(preview > 0, |d| {
-                        d.child(
-                            div()
-                                .h(px(row::PREVIEW_LINE_H * f32::from(preview)))
-                                .line_clamp(preview as usize)
-                                .text_size(px(12.))
-                                .line_height(px(row::PREVIEW_LINE_H))
-                                .text_color(t.muted_foreground)
-                                .child(snippet),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .px_1()
-                    .rounded_sm()
-                    .text_size(px(11.))
-                    .border_1()
-                    .border_color(t.border)
-                    .text_color(t.muted_foreground)
-                    .child(format!("{}", ids.len())),
-            )
-            .child(
-                div()
-                    .id(("thread-date", thread as usize))
-                    .flex_none()
-                    .text_size(px(11.))
-                    .text_color(t.muted_foreground)
-                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                        this.click_row(ix, ev, window, cx)
-                    }))
-                    .child(date),
-            )
     }
 }

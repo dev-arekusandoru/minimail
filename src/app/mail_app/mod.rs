@@ -51,6 +51,7 @@ use self::judging::JudgeJob;
 
 mod accessors;
 mod actions;
+mod day;
 mod folder_edit;
 mod bottombar;
 mod dock;
@@ -76,7 +77,9 @@ mod sidebar;
 mod rail;
 mod titlebar;
 mod sync;
+mod compact;
 mod rows;
+mod thread_rows;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
@@ -133,6 +136,8 @@ pub struct MailApp {
     pub block_remote_images: bool,
     /// Preview snippet lines under each subject (`crate::preview::OPTIONS`); 0 is Off.
     pub preview_lines: u8,
+    /// How list rows look (settings > Appearance): density, leading element, chips, group tiles.
+    pub row_style: crate::row_style::RowStyle,
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
@@ -316,6 +321,7 @@ impl MailApp {
             summaries_enabled: false,
             block_remote_images: false,
             preview_lines: crate::preview::DEFAULT_LINES,
+            row_style: crate::row_style::RowStyle::default(),
             list_w: 0.,
             panes,
             reader: ReaderView::default(),
@@ -408,6 +414,7 @@ impl MailApp {
         self.block_remote_images = crate::app_settings::BLOCK_REMOTE_IMAGES.get(store.as_ref(), &scope);
         self.group_threads = crate::app_settings::GROUP_THREADS.get(store.as_ref(), &scope);
         self.preview_lines = crate::app_settings::PREVIEW_LINES.get(store.as_ref(), &scope).min(5);
+        self.row_style = crate::app_settings::load_row_style(store.as_ref(), &scope);
         self.summaries_enabled = crate::app_settings::SUMMARIES.get(store.as_ref(), &scope);
         let days = crate::app_settings::FOLLOW_UP_DAYS.get(store.as_ref(), &scope).clamp(1, 14);
         self.mailbox.set_follow_up_timeout(i64::from(days) * DAY);

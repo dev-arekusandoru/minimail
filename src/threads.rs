@@ -119,13 +119,13 @@ pub fn rows(groups: &[ThreadGroup], expanded: &HashSet<u32>) -> Vec<Row> {
     out
 }
 
-/// Distinct sender names of `ids`, oldest message first.
-pub fn participants<'a>(
+/// Distinct sender names of `ids` (newest message first, as in a group), newest sender first.
+pub fn senders<'a>(
     ids: &[MessageId],
     get: impl Fn(MessageId) -> Option<&'a Message>,
 ) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    for &id in ids.iter().rev() {
+    for &id in ids {
         if let Some(m) = get(id)
             && !names.contains(&m.from_name)
         {
@@ -133,6 +133,22 @@ pub fn participants<'a>(
         }
     }
     names
+}
+
+/// The header's people line: the first three senders joined by `, ` and how many more there are.
+pub fn people(names: &[String]) -> (String, usize) {
+    (names.iter().take(3).cloned().collect::<Vec<_>>().join(", "), names.len().saturating_sub(3))
+}
+
+/// Text of the count node on the rail and whether it needs the small type (`99+`).
+pub fn node_label(count: usize) -> (String, bool) {
+    if count > 99 { ("99+".into(), true) } else { (count.to_string(), false) }
+}
+
+/// Lines of the header's people/preview block: the setting, kept between one (the people line
+/// always shows) and two (a header stays a header).
+pub fn header_preview_lines(setting: u8) -> u8 {
+    setting.clamp(1, 2)
 }
 
 /// Every message of a thread (any state), oldest first; ties broken by id.
@@ -149,4 +165,13 @@ pub fn step(order: &[MessageId], from: MessageId, delta: isize) -> Option<Messag
         .ok()
         .and_then(|i| order.get(i))
         .copied()
+}
+
+/// Whether row `ix` of `rows` is the first and the last child of its expanded thread (the
+/// rail detour curves out above the first and back in below the last).
+pub fn child_position(rows: &[Row], ix: usize) -> (bool, bool) {
+    let sibling = |at: Option<usize>| {
+        at.and_then(|at| rows.get(at)).is_some_and(|r| matches!(r, Row::Child { .. }))
+    };
+    (!sibling(ix.checked_sub(1)), !sibling(ix.checked_add(1)))
 }

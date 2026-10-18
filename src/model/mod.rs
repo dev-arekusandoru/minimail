@@ -311,6 +311,9 @@ pub struct Mailbox {
     post_send: HashMap<u64, TriageState>,
     /// Replies the outbox materialised, by the outbox entry they came from.
     sent_ids: HashMap<u64, MessageId>,
+    /// Days the list shows collapsed: their messages stay out of the list, the cursor and
+    /// every selection (see [`Mailbox::ids_shown`]).
+    collapsed_days: HashSet<crate::day_groups::DayKey>,
 }
 
 impl Mailbox {
@@ -406,6 +409,7 @@ impl Mailbox {
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
             post_send: HashMap::new(),
             sent_ids: HashMap::new(),
+            collapsed_days: HashSet::new(),
         }
     }
 

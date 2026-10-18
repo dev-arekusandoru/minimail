@@ -3,7 +3,10 @@
 use std::collections::HashSet;
 
 use mail_classifier::model::{Mailbox, MessageId};
-use mail_classifier::threads::{Row, group, participants, rows, step, thread_order};
+use mail_classifier::threads::{
+    Row, child_position, group, header_preview_lines, node_label, people, rows, senders, step,
+    thread_order,
+};
 
 fn msg(id: u32, thread: u32, name: &str, day: u32) -> String {
     format!(
@@ -55,9 +58,40 @@ fn a_panel_only_groups_the_ids_it_is_given() {
 }
 
 #[test]
-fn participants_are_distinct_oldest_first() {
+fn children_know_their_place_in_the_detour() {
     let mb = mailbox();
-    assert_eq!(participants(&[4, 2, 1], |id| mb.get(id)), vec!["ann", "bob"]);
+    let groups = group(&[4, 3, 2, 1], |id| mb.get(id));
+    let open = rows(&groups, &HashSet::from([10]));
+    assert_eq!(
+        (1..4).map(|i| child_position(&open, i)).collect::<Vec<_>>(),
+        vec![(true, false), (false, false), (false, true)]
+    );
+}
+
+#[test]
+fn senders_are_distinct_newest_first() {
+    let mb = mailbox();
+    assert_eq!(senders(&[4, 2, 1], |id| mb.get(id)), vec!["ann", "bob"]);
+    assert_eq!(senders(&[2, 4, 1], |id| mb.get(id)), vec!["bob", "ann"]);
+}
+
+#[test]
+fn people_line_names_three_and_counts_the_rest() {
+    let names: Vec<String> = ["a", "b", "c", "d", "e"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(people(&names), ("a, b, c".to_string(), 2));
+    assert_eq!(people(&names[..2]), ("a, b".to_string(), 0));
+}
+
+#[test]
+fn count_node_caps_at_99_plus_in_small_type() {
+    assert_eq!(node_label(23), ("23".to_string(), false));
+    assert_eq!(node_label(99), ("99".to_string(), false));
+    assert_eq!(node_label(100), ("99+".to_string(), true));
+}
+
+#[test]
+fn header_block_keeps_one_to_two_lines() {
+    assert_eq!([0, 1, 2, 5].map(header_preview_lines), [1, 1, 2, 2]);
 }
 
 #[test]

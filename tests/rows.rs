@@ -8,10 +8,9 @@ use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
 use mail_classifier::app::icons::{
     Glyph, GlyphInputs, glyphs_for, legend, max_icons, split_overflow,
 };
-use mail_classifier::app::row::{
-    BarState, LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, sender_label,
-    shows_account_icon, thread_preview_lines, thread_row_height,
-};
+use mail_classifier::app::actions::SetUrgency;
+use mail_classifier::app::row::{BarState, RowVisual, sender_label, shows_account_icon};
+use mail_classifier::row_style::Chips;
 use mail_classifier::app::MailApp;
 use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
 use mail_classifier::model::{Location, Mailbox, MessageId, Tag};
@@ -89,30 +88,21 @@ fn preview_setting_cycles_from_off_to_five(cx: &mut TestAppContext) {
     assert_eq!(seen, [2, 3, 4, 5, 0, 1], "cycle wraps 5 -> Off -> 1");
 }
 
-#[test]
-fn message_row_height_grows_by_one_preview_line() {
-    let base = message_row_height(0);
-    for n in 1..=5u8 {
-        assert_eq!(message_row_height(n) - base, PREVIEW_LINE_H * f32::from(n));
+#[gpui_kit::gpui::test]
+fn chips_replace_the_urgency_icon_in_the_cluster(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let id = h.ids()[0];
+    h.cx.dispatch_action(h.window, SetUrgency { message: Some(id), level: 5 });
+    h.cx.run_until_parked();
+    let shows_siren = |h: &mut Harness<'_>| {
+        let (shown, hidden) = h.read(|a| a.row_icons(id, 600.));
+        shown.iter().chain(&hidden).any(|g| *g == Glyph::UrgentHigh)
+    };
+    assert!(shows_siren(&mut h), "chips off: urgency is an icon");
+    for chips in [Chips::Above, Chips::Below] {
+        h.cx.update_entity(&h.app, |a, _| a.row_style.chips = chips);
+        assert!(!shows_siren(&mut h), "chips {chips:?}: the urgency chip carries it");
     }
-    assert!(base >= 44., "room for sender and subject even with previews off");
-    assert!(base > 2. * LINE_H, "previews never squeeze out a line");
-}
-
-#[test]
-fn thread_header_sizes_to_its_own_content_and_never_matches_a_message_row() {
-    for n in 0..=5u8 {
-        let header = thread_row_height(n);
-        let message = message_row_height(n);
-        assert!(
-            header < message,
-            "a thread header at {n} preview lines ({header}) must be shorter than a message row ({message})"
-        );
-        assert_eq!(header, 24. + PREVIEW_LINE_H * f32::from(thread_preview_lines(n)));
-    }
-    assert!(thread_row_height(1) > thread_row_height(0), "it follows the preview setting");
-    assert_eq!(thread_preview_lines(0), 0, "no preview lines, no preview block");
-    assert_eq!(thread_row_height(5), thread_row_height(2), "a header caps its preview");
 }
 
 #[test]

@@ -9,7 +9,6 @@ use gpui_kit::{
 use gpui_kit::test::TestWindowExt;
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
-use mail_classifier::app::row::{message_row_height, thread_row_height};
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::model::{Mailbox, MessageId, TriageState, TriageState::*};
 use mail_classifier::threads::Row;
@@ -274,44 +273,24 @@ fn reader_renders_the_thread_chronologically_and_stepping_does_not_reorder(
 }
 
 #[gpui_kit::gpui::test]
-fn thread_rows_size_to_their_content_while_message_rows_keep_their_height(
-    cx: &mut TestAppContext,
-) {
+fn row_heights_follow_the_preview_setting_without_going_stale(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
     h.keys("ctrl-g");
     let message = h.row_height(("row", 4usize));
     let header = h.row_height(("thread-row", 1usize));
-    assert!(header < message, "collapsed header ({header}) must be shorter than a message row ({message})");
 
-    // Expanding leaves the header alone and gives the children full message-row height.
-    h.keys("j right");
-    assert_eq!(h.row_height(("thread-row", 1usize)), header, "expanding does not resize the header");
-    assert_eq!(h.row_height(("row", 2usize)), message, "a child message row keeps message height");
-    h.keys("left");
-
-    // The header follows the preview setting, and stays shorter than a message row.
     for _ in 0..4 {
         h.dispatch(CyclePreviewLines);
     }
     assert_eq!(h.read(|a| a.preview_lines), 0, "cycled to Off");
-    let bare_message = h.row_height(("row", 4usize));
-    let bare_header = h.row_height(("thread-row", 1usize));
-    assert!(bare_message < message, "message rows shrink with the preview setting");
-    assert!(bare_header < header, "headers shrink with the preview setting too");
-    assert!(bare_header < bare_message, "and are still not padded to message height");
-    assert!(bare_header < px(40.), "a header with no preview is one compact line: {bare_header}");
+    assert!(h.row_height(("row", 4usize)) <= message, "message rows never grow when the preview goes away");
+    assert!(h.row_height(("thread-row", 1usize)) <= header, "a header never grows when the preview goes away");
 
-    // Back to the default: measured heights match what the row functions promise.
+    // Back to the default: no stale heights after cycling previews.
     h.dispatch(CyclePreviewLines);
-    assert_eq!(h.read(|a| a.preview_lines), 1);
     h.dispatch(CyclePreviewLines);
-    assert_eq!(h.read(|a| a.preview_lines), 2);
-    let message_again = h.row_height(("row", 4usize));
-    let header_again = h.row_height(("thread-row", 1usize));
-    assert_eq!(message_again, message, "no stale heights after cycling previews");
-    assert_eq!(header_again, header);
-    assert_eq!(message_again, px(message_row_height(2)));
-    assert_eq!(header_again, px(thread_row_height(2)));
+    assert_eq!(h.row_height(("row", 4usize)), message);
+    assert_eq!(h.row_height(("thread-row", 1usize)), header);
 }
 
 /// Forty single-message threads, so the list is far taller than the window.

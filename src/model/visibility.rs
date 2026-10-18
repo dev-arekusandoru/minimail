@@ -276,6 +276,29 @@ impl Mailbox {
             })
             .collect()
     }
+    /// [`Mailbox::ids_matching`] minus the messages of collapsed days: exactly what the list,
+    /// the cursor and selections work over.
+    pub fn ids_shown(&self, query: &Query, now: &Now) -> Vec<MessageId> {
+        let mut ids = self.ids_matching(query, now);
+        if !self.collapsed_days.is_empty() {
+            ids.retain(|id| !self.collapsed_days.contains(&self.day_of(*id, now)));
+        }
+        ids
+    }
+    /// Local day a message was received on (the epoch's day when `received` is unreadable).
+    pub fn day_of(&self, id: MessageId, now: &Now) -> crate::day_groups::DayKey {
+        let ts = self.get(id).and_then(Message::received_at).unwrap_or(0);
+        crate::day_groups::day_key(now, ts)
+    }
+    pub fn collapsed_days(&self) -> &HashSet<crate::day_groups::DayKey> {
+        &self.collapsed_days
+    }
+    /// Collapse the day, or expand it when it already is collapsed.
+    pub fn toggle_day(&mut self, day: crate::day_groups::DayKey) {
+        if !self.collapsed_days.remove(&day) {
+            self.collapsed_days.insert(day);
+        }
+    }
     /// How many visible messages `location` holds.
     pub fn count_at(&self, location: &Location, now: &Now) -> usize {
         self.ids_matching(&self.location_query(location), now).len()

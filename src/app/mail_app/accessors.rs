@@ -145,9 +145,9 @@ impl MailApp {
         commands().iter().map(|c| c.name.to_string()).collect()
     }
 
-    /// Exactly the message ids the list shows, top to bottom.
+    /// Exactly the message ids the list shows, top to bottom: collapsed days hold none.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        self.mailbox.ids_matching(&self.triage().query, &self.local_now())
+        self.mailbox.ids_shown(&self.triage().query, &self.local_now())
     }
 
     pub fn now(&self) -> Timestamp {
@@ -244,6 +244,7 @@ impl MailApp {
     /// works it out. Re-clamps first: mailbox changes shrink the list without touching the cursor.
     pub(super) fn scroll_to_cursor(&mut self) {
         self.move_cursor(0);
-        self.view().list_state.scroll_to_reveal_item(self.cursor_ix());
+        let item = self.list_model().item_of_row(self.cursor_ix());
+        self.view().list_state.scroll_to_reveal_item(item);
     }
 }

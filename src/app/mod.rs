@@ -14,10 +14,12 @@ pub mod mail_app;
 pub mod menu;
 pub mod new_folder;
 pub mod row;
+pub mod row_parts;
 pub mod palette;
 pub mod panels;
 pub mod settings;
 pub mod snooze;
+pub mod tile;
 pub mod ui;
 
 pub use mail_app::MailApp;

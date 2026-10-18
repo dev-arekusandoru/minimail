@@ -250,3 +250,62 @@ fn lowering_the_follow_up_row_resurfaces_a_waiting_thread_on_tick(cx: &mut TestA
     assert!(h.has_tag(1, Tag::FollowUp), "the overdue thread is flagged for follow-up");
     assert!(!h.has_tag(1, Tag::AwaitingReply), "resurfacing clears Awaiting Reply");
 }
+
+#[gpui_kit::gpui::test]
+fn compact_density_hides_the_standard_only_rows(cx: &mut TestAppContext) {
+    use mail_classifier::row_style::Density;
+    let mut h = app(cx);
+    h.settings_open_page(APPEARANCE);
+    assert!(h.settings_has("leading-tiles") && h.settings_has("chips-above"));
+    assert!(!h.settings_has("tile-deck"), "group tiles need sender tiles");
+
+    h.settings_click("density-compact");
+    assert_eq!(h.read(|a| a.row_style.density), Density::Compact);
+    assert!(!h.settings_has("leading-tiles"), "compact rows have no leading choice");
+    assert!(!h.settings_has("chips-above"), "compact rows have no chips");
+    assert!(h.settings_has("density-standard"), "the density row stays");
+
+    h.settings_click("density-standard");
+    assert!(h.settings_has("leading-tiles") && h.settings_has("chips-above"));
+}
+
+#[gpui_kit::gpui::test]
+fn sender_tiles_reveal_the_group_tile_style(cx: &mut TestAppContext) {
+    use mail_classifier::row_style::{GroupTile, Leading};
+    let mut h = app(cx);
+    h.settings_open_page(APPEARANCE);
+    h.settings_click("leading-tiles");
+    assert_eq!(h.read(|a| a.row_style.leading), Leading::Tiles);
+    assert!(h.settings_has("tile-deck"));
+
+    h.settings_click("tile-deck");
+    assert_eq!(h.read(|a| a.row_style.group_tile), GroupTile::Deck);
+
+    h.settings_click("leading-rail");
+    assert!(!h.settings_has("tile-deck"), "the rail has no group tiles");
+    assert_eq!(h.read(|a| a.row_style.group_tile), GroupTile::Deck, "the pick is remembered");
+}
+
+#[gpui_kit::gpui::test]
+fn row_style_persists_and_the_page_reset_restores_it(cx: &mut TestAppContext) {
+    use mail_classifier::row_style::{Chips, Density, RowStyle};
+    let store = std::rc::Rc::new(
+        mail_classifier::contacts::ContactStore::open_in_memory().expect("in-memory address book"),
+    );
+    let mailbox = || mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]);
+    let mut h = harness::harness_with_prefs(cx, mailbox(), store.clone());
+    h.settings_open_page(APPEARANCE);
+    h.settings_click("chips-below");
+    assert_eq!(h.read(|a| a.row_style.chips), Chips::Below);
+
+    // A second app over the same store is a restart.
+    let mut restarted = harness::harness_with_prefs(h.cx, mailbox(), store.clone());
+    let style = restarted.read(|a| a.row_style);
+    assert_eq!(style.chips, Chips::Below);
+    assert_eq!(style.density, Density::Standard, "rows left alone keep their defaults");
+
+    h.settings_click("reset");
+    assert_eq!(h.read(|a| a.row_style), RowStyle::default());
+    let mut again = harness::harness_with_prefs(h.cx, mailbox(), store);
+    assert_eq!(again.read(|a| a.row_style), RowStyle::default(), "the reset reached the store");
+}

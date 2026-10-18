@@ -342,6 +342,7 @@ impl MailApp {
         }
         let group = self.group_threads;
         let preview = self.preview_lines;
+        let row_style = self.row_style;
         let rows = self.account_rows();
         let gmail_configured = crate::provider::gmail::ClientConfig::load().is_some();
         let policy = self.policy.clone();
@@ -395,6 +396,7 @@ impl MailApp {
             let panel = cx.new(|cx| {
                 SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
+                    .row_style(row_style)
                     .block_remote_images(block_remote_images)
                     .mailbox_state(blocked, now, follow_up)
                     .spam_senders(spam_senders)
@@ -427,6 +429,11 @@ impl MailApp {
                         crate::app_settings::BLOCK_REMOTE_IMAGES.reset(store.as_ref(), &scope);
                         crate::app_settings::GROUP_THREADS.reset(store.as_ref(), &scope);
                         crate::app_settings::PREVIEW_LINES.reset(store.as_ref(), &scope);
+                        crate::app_settings::save_row_style(
+                            store.as_ref(),
+                            &scope,
+                            crate::row_style::RowStyle::default(),
+                        );
                         crate::app_settings::FOLLOW_UP_DAYS.reset(store.as_ref(), &scope);
                         crate::app_settings::SUMMARIES.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_SPAM.reset(store.as_ref(), &scope);
@@ -454,6 +461,7 @@ impl MailApp {
                     this.tab_avatars = true;
                     this.block_remote_images = false;
                     this.preview_lines = crate::preview::DEFAULT_LINES;
+                    this.row_style = crate::row_style::RowStyle::default();
                     this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
                     this.panes.set_orientation(PaneLayout::SideBySide);
                     let light = crate::theme::names_for(cx, true).first().cloned().unwrap_or_default();
@@ -534,6 +542,17 @@ impl MailApp {
                 SettingsEvent::PreviewLines(n) => {
                     this.preview_lines = (*n).min(5);
                     this.save_setting(&crate::app_settings::PREVIEW_LINES, this.preview_lines);
+                    cx.notify();
+                }
+                SettingsEvent::RowStyle(style) => {
+                    this.row_style = *style;
+                    if let Some(store) = &this.preferences {
+                        crate::app_settings::save_row_style(
+                            store.as_ref(),
+                            &crate::prefs::Scope::Global,
+                            *style,
+                        );
+                    }
                     cx.notify();
                 }
                 SettingsEvent::PaneLayout(orientation) => {

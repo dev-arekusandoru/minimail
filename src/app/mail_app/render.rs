@@ -269,6 +269,7 @@ impl Render for MailApp {
                 this.classify_messages(&ids, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleGrouping, w, cx| this.toggle_grouping(w, cx)))
+            .on_action(cx.listener(|this, _: &ToggleDay, _, cx| this.toggle_cursor_day(cx)))
             .on_action(cx.listener(|this, _: &CyclePreviewLines, w, cx| {
                 this.preview_lines = crate::preview::cycle_lines(this.preview_lines);
                 let text = format!("Preview: {}", crate::preview::lines_label(this.preview_lines));

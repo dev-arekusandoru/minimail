@@ -1,5 +1,30 @@
 //! Built-in, typed global preferences. This module is independent of GPUI.
-use crate::{judge::{Confidence, Mode}, prefs::Setting, theme::ThemeMode};
+use crate::{
+    judge::{Confidence, Mode},
+    prefs::{PrefStore, Scope, Setting},
+    row_style::{Chips, Density, GroupTile, Leading, RowStyle},
+    theme::ThemeMode,
+};
+
+/// The row style stored at `scope` (global defaults where unset).
+pub fn load_row_style(store: &dyn PrefStore, scope: &Scope) -> RowStyle {
+    RowStyle {
+        density: ROW_DENSITY.get(store, scope),
+        leading: ROW_LEADING.get(store, scope),
+        group_tile: ROW_GROUP_TILE.get(store, scope),
+        chips: ROW_CHIPS.get(store, scope),
+        subject_first: ROW_SUBJECT_FIRST.get(store, scope),
+    }
+}
+
+/// Store every field of `style` at `scope`.
+pub fn save_row_style(store: &dyn PrefStore, scope: &Scope, style: RowStyle) {
+    ROW_DENSITY.set(store, scope, style.density);
+    ROW_LEADING.set(store, scope, style.leading);
+    ROW_GROUP_TILE.set(store, scope, style.group_tile);
+    ROW_CHIPS.set(store, scope, style.chips);
+    ROW_SUBJECT_FIRST.set(store, scope, style.subject_first);
+}
 
 pub const THEME_MODE: Setting<ThemeMode> = Setting::new("theme_mode", ThemeMode::System);
 pub const LIGHT_THEME: Setting<String> =
@@ -12,6 +37,11 @@ pub const TAB_AVATARS: Setting<bool> = Setting::new("tab_avatars", true);
 pub const GROUP_THREADS: Setting<bool> = Setting::new("group_threads", false);
 pub const BLOCK_REMOTE_IMAGES: Setting<bool> = Setting::new("block_remote_images", false);
 pub const PREVIEW_LINES: Setting<u8> = Setting::new("preview_lines", crate::preview::DEFAULT_LINES);
+pub const ROW_DENSITY: Setting<Density> = Setting::new("row_density", Density::Standard);
+pub const ROW_LEADING: Setting<Leading> = Setting::new("row_leading", Leading::Rail);
+pub const ROW_GROUP_TILE: Setting<GroupTile> = Setting::new("row_group_tile", GroupTile::Ring);
+pub const ROW_CHIPS: Setting<Chips> = Setting::new("row_chips", Chips::Off);
+pub const ROW_SUBJECT_FIRST: Setting<bool> = Setting::new("row_subject_first", true);
 pub const FOLLOW_UP_DAYS: Setting<u8> = Setting::new("follow_up_days", 3);
 pub const SUMMARIES: Setting<bool> = Setting::new("summaries", false);
 pub const MODE_SPAM: Setting<Mode> = Setting::new("mode_spam", Mode::Auto(Confidence::High));

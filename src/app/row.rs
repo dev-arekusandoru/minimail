@@ -9,33 +9,6 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 pub const LINE_H: f32 = 18.;
 /// Height of one preview line.
 pub const PREVIEW_LINE_H: f32 = 16.;
-/// Vertical padding of a message row (top + bottom).
-const PAD_Y: f32 = 8.;
-/// Vertical padding of a thread header row: tighter than a message row, it groups
-/// messages rather than showing one.
-const THREAD_PAD_Y: f32 = 6.;
-/// Preview lines a thread header shows at most, however the `Preview lines` setting is set.
-const THREAD_PREVIEW_MAX: u8 = 2;
-
-/// Height of a message row for a `Preview lines` setting: sender/date line, subject line and
-/// `preview_lines` snippet lines. Rows are measured by the list, so this only has to match
-/// what [`frame`] lays out.
-pub fn message_row_height(preview_lines: u8) -> f32 {
-    PAD_Y + 2. * LINE_H + PREVIEW_LINE_H * f32::from(preview_lines)
-}
-
-/// Preview lines a thread header shows for a `Preview lines` setting: the snippet of its
-/// newest message, capped so a header stays a header.
-pub fn thread_preview_lines(preview_lines: u8) -> u8 {
-    preview_lines.min(THREAD_PREVIEW_MAX)
-}
-
-/// Height of a thread header row: one compact line (sender, subject, participants, count,
-/// date) plus the preview lines [`thread_preview_lines`] allows. Always shorter than
-/// [`message_row_height`] for the same setting.
-pub fn thread_row_height(preview_lines: u8) -> f32 {
-    THREAD_PAD_Y + LINE_H + PREVIEW_LINE_H * f32::from(thread_preview_lines(preview_lines))
-}
 
 /// Width of the message list panel for a window `viewport` width, in pixels.
 pub fn list_width(viewport: f32) -> f32 {
@@ -95,37 +68,46 @@ pub fn shows_account_icon(location: &crate::model::Location) -> bool {
     matches!(location, AllInboxes | AllSnoozed | AllSent | AllArchive | AllTrash)
 }
 
-/// Apply the row geometry and the visual states of `v` to a row container. The caller sets the
-/// height, so a thread header can be shorter than the message rows around it.
+/// Background of a row in its resting state (`--rowbg` of the mockups): cursor, then the
+/// open/selected tint (primary at .14 over the list background, opaque so marker and badge
+/// cutouts can match it), else the list background.
+pub fn row_bg(v: RowVisual, t: &ThemeColor) -> Hsla {
+    if v.cursor {
+        t.list_active
+    } else if v.selected || v.open {
+        t.background.blend(t.primary.opacity(0.14))
+    } else {
+        t.background
+    }
+}
+
+/// The background a hovered row switches to; `None` when the state already decides it.
+pub fn hover_bg(v: RowVisual, t: &ThemeColor) -> Option<Hsla> {
+    (!v.cursor && !v.selected && !v.open).then_some(t.list_hover)
+}
+
+/// Apply the row geometry and the visual states of `v` to a row container: background, cursor
+/// ring, left bar, hover, and joins the `row` hover group the marker cutout follows. Rows are
+/// content-sized; the caller adds one `w_full` inner flow (padding 4px top/bottom).
 pub fn frame(row: Stateful<Div>, v: RowVisual, t: &ThemeColor) -> crate::app::ui::Observable {
-    let hover = t.list_hover;
     let bar = match v.bar_state() {
         BarState::None => None,
         BarState::Selected => Some(t.primary),
         BarState::Partial => Some(t.primary.opacity(0.45)),
     };
-    row.test_support().relative()
+    let hover = hover_bg(v, t);
+    row.group(crate::app::row_parts::ROW_GROUP).test_support().relative()
         .w_full()
         .flex()
         .items_center()
-        .gap_2()
         .pl(px(10.))
         .pr_2()
         .border_1()
         .border_color(if v.cursor { t.primary.opacity(0.8) } else { transparent_black() })
+        .bg(row_bg(v, t))
         .when_some(bar, |d, color| {
             d.child(div().absolute().left_0().top_0().bottom_0().w(px(3.)).bg(color))
         })
-        .when(v.cursor, |d| d.bg(t.list_active))
-        .when((v.selected || v.open) && !v.cursor, |d| d.bg(t.primary.opacity(0.14)))
-        .hover(move |s| {
-            s.bg(if v.cursor {
-                t.list_active
-            } else if v.selected || v.open {
-                t.primary.opacity(0.14)
-            } else {
-                hover
-            })
-        })
+        .when_some(hover, |d, bg| d.hover(move |s| s.bg(bg)))
 }
 

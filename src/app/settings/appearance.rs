@@ -123,8 +123,127 @@ impl SettingsPanel {
                 ),
                 switch(weak, |this| this.tab_avatars, SettingsPanel::set_tab_avatars),
             ));
-        SettingPage::new("Appearance").resettable(true).group(group)
+        SettingPage::new("Appearance")
+            .resettable(true)
+            .group(group)
+            .group(self.message_list_group(weak))
     }
+
+    /// The "Message list" group: row density and, for Standard rows only, the options that
+    /// need room. Options a `RowStyle` ignores are not offered, so a collision cannot be picked.
+    fn message_list_group(&self, weak: &Weak) -> SettingGroup {
+        use crate::row_style::{Chips, Density, GroupTile, Leading, RowStyle};
+        let standard = self.row_style.density == Density::Standard;
+        let mut group = SettingGroup::new().title("Message list").item(style_row(
+            weak,
+            "Row density",
+            "Standard rows show a preview; compact rows fit one line.",
+            &["density", "compact", "rows", "list"],
+            "density-group",
+            &[("density-standard", "Standard"), ("density-compact", "Compact")],
+            &[Density::Standard, Density::Compact],
+            |s| s.density,
+            |s, v| s.density = v,
+        ));
+        if standard {
+            group = group.item(style_row(
+                weak,
+                "Leading element",
+                "The timeline rail with the time, or a tile for the sender.",
+                &["rail", "timeline", "tiles", "avatar", "list"],
+                "leading-group",
+                &[("leading-rail", "Timeline rail"), ("leading-tiles", "Sender tiles")],
+                &[Leading::Rail, Leading::Tiles],
+                |s| s.leading,
+                |s, v| s.leading = v,
+            ));
+        }
+        if standard && self.row_style.leading == Leading::Tiles {
+            group = group.item(style_row(
+                weak,
+                "Group tile style",
+                "How a thread with several senders draws its tile.",
+                &["ring", "deck", "mosaic", "pair", "thread", "tiles"],
+                "group-tile-group",
+                &[
+                    ("tile-ring", "Ring"),
+                    ("tile-deck", "Deck"),
+                    ("tile-mosaic", "Mosaic"),
+                    ("tile-pair", "Pair"),
+                ],
+                &[GroupTile::Ring, GroupTile::Deck, GroupTile::Mosaic, GroupTile::Pair],
+                |s| s.group_tile,
+                |s, v| s.group_tile = v,
+            ));
+        }
+        if standard {
+            group = group
+                .item(style_row(
+                    weak,
+                    "Chips",
+                    "Suggested folder and urgency as labels",
+                    &["chips", "folder", "urgency", "labels", "list"],
+                    "chips-group",
+                    &[("chips-off", "Off"), ("chips-above", "Above"), ("chips-below", "Below")],
+                    &[Chips::Off, Chips::Above, Chips::Below],
+                    |s| s.chips,
+                    |s, v| s.chips = v,
+                ))
+                .item(row(
+                    "Subject first",
+                    "Put the subject on the first line and the sender below it.",
+                    &["subject", "sender", "order", "list"],
+                    switch_undo(
+                        weak,
+                        |this| this.row_style.subject_first,
+                        RowStyle::default().subject_first,
+                        |this, on, cx| this.edit_row_style(|s| s.subject_first = on, cx),
+                    ),
+                    switch(weak, |this| this.row_style.subject_first, |this, on, cx| {
+                        this.edit_row_style(|s| s.subject_first = on, cx)
+                    }),
+                ));
+        }
+        group
+    }
+}
+
+/// A segmented row over one `RowStyle` field: `values[i]` is what button `entries[i]` selects,
+/// and the row's undo puts the field back to its `RowStyle::default()` value.
+#[allow(clippy::too_many_arguments)]
+fn style_row<T: Copy + PartialEq + 'static>(
+    weak: &Weak,
+    title: &'static str,
+    description: &'static str,
+    keywords: &[&'static str],
+    group: &'static str,
+    entries: &'static [(&'static str, &'static str)],
+    values: &'static [T],
+    get: fn(&crate::row_style::RowStyle) -> T,
+    set: fn(&mut crate::row_style::RowStyle, T),
+) -> SettingItem {
+    let default = get(&crate::row_style::RowStyle::default());
+    row(
+        title,
+        description,
+        keywords,
+        Undo::of_panel(
+            weak,
+            move |this| get(&this.row_style) != default,
+            move |this, cx| this.edit_row_style(|s| set(s, default), cx),
+        ),
+        segmented(
+            group,
+            segments(entries),
+            weak,
+            move |this| values.iter().position(|v| *v == get(&this.row_style)).unwrap_or(0),
+            move |this, index, cx| {
+                if let Some(value) = values.get(index) {
+                    this.edit_row_style(|s| set(s, *value), cx);
+                }
+            },
+        ),
+    )
 }
 
 /// The theme picker of one appearance: a dropdown over the registered theme names.

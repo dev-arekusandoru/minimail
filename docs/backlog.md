@@ -52,6 +52,8 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 - **Inline search input in the title bar** (not started). Search phase 3: autocomplete dropdown and live token highlighting. The title-bar search is still a button that opens the palette.
 - **Move the result count to the title bar** (not started). Show it after the folder name and drop "All Inboxes · 100" from the list header (`filters.rs`).
 - **Redesign mute** (not started). Mute still hides threads through a separate set, outside the triage-state model (`triage-spec.md`).
+- **Attention fade** (not started). Optional row setting, off by default: unread rows stay bright, read rows dim with age, and a thin left bar shows classifier confidence. Mocked in `mockups/rows.html` (concept 1); deferred from the row redesign. Needs a design pass for the rail and tiles layouts (it only changes opacity, so compact can honour it).
+- **Chips with tiles, thread chips** (not started). Chips Above/Below are mocked on the rail layout only; thread headers show no chips, and the tiles-plus-chips combination was never mocked.
 
 ## Contacts and senders
 

@@ -1,3 +1,4 @@
+use crate::day_groups::Item;
 use gpui_kit::component::ActiveTheme as _;
 use super::*;
 use gpui_kit::assets::IconName;
@@ -32,17 +33,18 @@ impl MailApp {
 
     pub(super) fn render_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let slot = self.slot();
-        let count = self.visible_ids().len();
-        let row_count = if self.grouped() { self.rows().len() } else { count };
+        let model = self.list_model();
+        let count = model.items.len();
+        let row_count = model.row_count();
         // Mailbox changes that never scroll (sync, snooze expiry) can leave the cursor past the end.
         if self.cursor_ix() > row_count.saturating_sub(1) {
             self.move_cursor(0);
         }
-        self.sync_list(row_count, cx);
+        self.sync_list(count, cx);
         // Near the end of the list, ask the server for the next page of older mail.
         let cursor = self.cursor_ix();
-        let near_end = self.view().list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= row_count
-            || cursor + LOAD_MORE_MARGIN >= row_count;
+        let near_end = self.view().list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= count
+            || model.item_of_row(cursor) + LOAD_MORE_MARGIN >= count;
         self.maybe_load_older(near_end);
         let selected = self.triage().selected().len();
         let pills = self.render_pills(cx);
@@ -148,6 +150,8 @@ impl MailApp {
             count,
             grouped: self.grouped(),
             preview_lines: self.preview_lines,
+            row_style: self.row_style,
+            collapsed_days: self.mailbox.collapsed_days().len(),
             // Sub-pixel pane resizes do not change the layout.
             width: self.list_w.round() as i32,
         };
@@ -175,29 +179,55 @@ impl MailApp {
         view.list_shape = Some(shape);
     }
 
-    /// Row `ix` of the list: a thread header or a message row, measured to its own content.
-    fn render_list_row(&self, ix: usize, cx: &Context<Self>) -> AnyElement {
+    /// Item `list_ix` of the list: a day header, a thread header or a message row, measured to
+    /// its own content. `ix` handed to the row renderers is the row (cursor) index.
+    fn render_list_row(&self, list_ix: usize, cx: &Context<Self>) -> AnyElement {
+        let model = self.list_model();
+        match model.items.get(list_ix) {
+            Some(Item::Header(day)) => self.render_day_header(*day, &model.days[*day], cx),
+            Some(Item::Row(ix)) => self.render_list_item(*ix, cx),
+            // The list shrank under this index between the layout pass and rendering.
+            None => div().into_any_element(),
+        }
+    }
+
+    /// Row `ix` (cursor space), by density and by kind (message, thread header, thread child).
+    fn render_list_item(&self, ix: usize, cx: &Context<Self>) -> AnyElement {
         let newest = self.newest();
+        let compact = self.row_style.compact();
         if self.grouped() {
             match self.rows().get(ix) {
+                Some(row @ Row::Header { .. }) if compact => {
+                    return self.render_compact_header(row, ix, &newest, cx).into_any_element();
+                }
                 Some(row @ Row::Header { .. }) => {
                     return self.render_group_header(row, ix, &newest, cx).into_any_element();
                 }
-                Some(row) => {
-                    if let Some(msg) = self.mailbox.get(row.primary()) {
-                        let child = matches!(row, Row::Child { .. });
-                        let r = self.render_row(msg, ix, &newest, cx);
-                        let indented = if child { r.pl(px(34.)) } else { r };
-                        return indented.into_any_element();
+                Some(row @ Row::Child { .. }) if compact => {
+                    return self.render_compact_child(row, ix, &newest, cx).into_any_element();
+                }
+                Some(row @ Row::Child { .. }) => {
+                    return self.render_thread_child(row, ix, &newest, cx).into_any_element();
+                }
+                Some(Row::Single(id)) => {
+                    if let Some(msg) = self.mailbox.get(*id) {
+                        return self.render_message_row(msg, ix, &newest, cx);
                     }
                 }
                 None => {}
             }
         } else if let Some(msg) = self.visible_ids().get(ix).and_then(|id| self.mailbox.get(*id)) {
-            return self.render_row(msg, ix, &newest, cx).into_any_element();
+            return self.render_message_row(msg, ix, &newest, cx);
         }
-        // The row list shrank under this index between the layout pass and rendering.
         div().into_any_element()
+    }
+
+    fn render_message_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> AnyElement {
+        if self.row_style.compact() {
+            self.render_compact_row(msg, ix, newest, cx).into_any_element()
+        } else {
+            self.render_row(msg, ix, newest, cx).into_any_element()
+        }
     }
 }
 
@@ -205,10 +235,13 @@ impl MailApp {
 /// row heights are stale.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct ListShape {
-    /// Rows the list holds: messages, or headers plus their expanded children.
+    /// Items the list holds: day headers plus messages, or headers plus their expanded children.
     pub count: usize,
     pub grouped: bool,
     pub preview_lines: u8,
+    /// Density, leading element and chips decide every row's height.
+    pub row_style: crate::row_style::RowStyle,
+    pub collapsed_days: usize,
     /// Pane width in whole pixels.
     pub width: i32,
 }
