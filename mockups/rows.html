@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Row concepts</title>
+<style>
+:root{--bg:#282c34;--fg:#abb2bf;--muted:#7f848e;--border:#3b4048;--active:#3e4451;--accent:#323842;--primary:#61afef;--danger:#e06c75;--warn:#d19a66;--ok:#98c379;--purple:#c678dd;--cyan:#56b6c2}
+*{box-sizing:border-box;margin:0}
+body{background:#1e2127;color:var(--fg);font:14px/18px -apple-system,system-ui,sans-serif;padding:24px;display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.col{width:420px}
+h2{font:600 12px/16px ui-monospace,monospace;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em}
+.list{background:var(--bg);border:1px solid var(--border)}
+.row{position:relative;padding:8px 12px;display:flex;gap:8px;cursor:default}
+.row.cur{background:var(--active)}
+.row.unread .s,.row.unread .t{font-weight:600;color:#d7dae0}
+.s,.t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.p{font-size:12px;line-height:16px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.d{font-size:11px;color:var(--muted);flex:none}
+.unread .d{color:var(--primary)}
+.chip{font-size:11px;line-height:16px;padding:0 6px;border-radius:4px;background:var(--accent);color:var(--fg);white-space:nowrap;flex:none}
+.chip.tag{color:var(--primary)} .chip.warn{color:var(--danger)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.grow{flex:1;min-width:0}
+.line{display:flex;align-items:center;gap:6px;height:18px}
+kbd{font:10px/14px ui-monospace,monospace;border:1px solid var(--border);border-radius:3px;padding:0 4px;color:var(--muted)}
+.mono{font-family:ui-monospace,"SF Mono",monospace}
+
+/* 1 attention gradient: weight/brightness encode priority, a thin bar on the left encodes suggestion confidence */
+.v1 .row{padding-left:15px}
+.v1 .row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary);opacity:var(--a,0)}
+.v1 .s{flex:none;max-width:45%}
+.v1 .t{flex:1}
+.v1 .row .s,.v1 .row .t{opacity:var(--o,1)}
+.v1 .row .p{opacity:calc(var(--o,1) * .9)}
+
+/* 2 verdict row: classifier verdict is the hero line */
+.v2 .verdict{display:flex;align-items:center;gap:6px;height:18px;font-size:12px}
+.v2 .arrow{color:var(--primary)}
+.v2 .conf{margin-left:auto;color:var(--muted);font-size:11px}
+.v2 .t{color:#d7dae0}
+
+/* 3 timeline rail */
+.v3 .row{padding:6px 12px 6px 0;gap:0}
+.v3 .gut{width:56px;flex:none;text-align:right;padding-right:10px;font-size:11px;color:var(--muted);position:relative}
+.v3 .rail{width:1px;background:var(--border);flex:none;position:relative}
+.v3 .rail i{position:absolute;left:-4px;top:5px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg)}
+.v3 .body{padding-left:14px;flex:1;min-width:0}
+.v3 .day{padding:6px 12px 2px 12px;font:600 10px/14px ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+
+/* 4 subject-first headline */
+.v4 .t{font-size:15px;line-height:20px;color:#d7dae0;font-weight:500;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.v4 .by{display:flex;gap:6px;align-items:center;font-size:11px;line-height:16px;color:var(--muted)}
+.v4 .by b{font-weight:600;color:var(--fg);letter-spacing:.02em}
+.v4 .row.unread .by b{color:var(--primary)}
+
+/* 5 sender tiles */
+.v5 .av{width:32px;height:32px;border-radius:8px;flex:none;display:grid;place-items:center;font:600 13px/1 -apple-system,sans-serif;color:#282c34;margin-top:2px}
+.v5 .row{gap:10px}
+
+/* 6 terminal ledger */
+.v6 .row{font:12px/16px ui-monospace,"SF Mono",monospace;padding:3px 12px;gap:8px;align-items:baseline}
+.v6 .d{width:44px;font-size:12px}
+.v6 .s{width:96px;flex:none}
+.v6 .t{flex:1;color:var(--fg)}
+.v6 .t em{font-style:normal;color:var(--muted)}
+.v6 .f{color:var(--primary);flex:none}
+.v6 .mk{width:8px;flex:none;color:var(--primary)}
+</style>
+
+<!-- sample: sender, subject, preview, date, account color, suggestion, confidence, unread, cursor, tags -->
+<div class="col v1"><h2>1 · Attention gradient</h2><div class="list">
+ <div class="row cur" style="--o:1;--a:.9"><div class="grow"><div class="line"><span class="s">helumi</span><span class="t" style="color:var(--muted)">helumi just got its first big update 🎉</span><span class="d">Oct 15</span></div><div class="p">your files on every device, and more</div></div></div>
+ <div class="row unread" style="--o:1;--a:1"><div class="grow"><div class="line"><span class="s">Apple Developer</span><span class="t">Updated Apple Developer Program License Agreement</span><span class="d">Oct 13</span></div><div class="p">Hello, The Apple Developer Program License Agreement has been revised to support new features and updated policies, and to</div></div></div>
+ <div class="row" style="--o:.8;--a:.5"><div class="grow"><div class="line"><span class="s">First Tee Alumni Network</span><span class="t">You have been tagged in a post</span><span class="d">Oct 13</span></div><div class="p">(https://us.links.graduway.com/ls/click?upn=u001.j-2FvyL6nXwHA3Egmr4rHP9yTR</div></div></div>
+ <div class="row" style="--o:.65;--a:.25"><div class="grow"><div class="line"><span class="s">Trevor Shan</span><span class="t">Forget your bench press</span><span class="d">Oct 13</span></div><div class="p">"How much do you bench?" Worst question in fitness. It tells you one thing. How much a man can push off his chest, once, ly</div></div></div>
+ <div class="row" style="--o:.5;--a:0"><div class="grow"><div class="line"><span class="s">Office of Alumni</span><span class="t">October 2026 Messiah University Alumni Newsletter</span><span class="d">Oct 13</span></div><div class="p">Welcome to this month's alumni update! We're sharing upcoming events, campus news, and opportunities</div></div></div>
+ <div class="row" style="--o:.4;--a:0"><div class="grow"><div class="line"><span class="s">Nothing Technology</span><span class="t">Introducing CMF Speakers</span><span class="d">Oct 12</span></div><div class="p">Pack your sound to every corner of the room with the new CMF speakers</div></div></div>
+</div></div>
+
+<div class="col v2"><h2>2 · Verdict row</h2><div class="list">
+ <div class="row cur"><div class="grow"><div class="verdict"><span class="arrow">→</span><span class="chip tag">Newsletters</span><span class="conf">94% · <kbd>y</kbd></span></div><div class="line"><span class="s" style="color:var(--muted)">helumi</span><span class="d">Oct 15</span></div><div class="t" style="color:#d7dae0">helumi just got its first big update 🎉</div><div class="p">your files on every device, and more</div></div></div>
+ <div class="row unread"><div class="grow"><div class="verdict"><span class="arrow">→</span><span class="chip tag">Receipts / Apple</span><span class="conf">88% · <kbd>y</kbd></span></div><div class="line"><span class="s">Apple Developer</span><span class="d">Oct 13</span></div><div class="t">Updated Apple Developer Program License Agreement</div><div class="p">Hello, The Apple Developer Program License Agreement has been revised…</div></div></div>
+ <div class="row"><div class="grow"><div class="verdict"><span class="arrow">→</span><span class="chip">Social</span><span class="conf">61% · <kbd>y</kbd></span></div><div class="line"><span class="s">First Tee Alumni Network</span><span class="d">Oct 13</span></div><div class="t">You have been tagged in a post</div><div class="p">(https://us.links.graduway.com/ls/click?upn=u001.j-2FvyL6nXwHA3Egmr4rHP9yTR</div></div></div>
+ <div class="row"><div class="grow"><div class="verdict"><span class="arrow" style="color:var(--danger)">!</span><span class="chip warn">Check sender</span><span class="conf">new sender</span></div><div class="line"><span class="s">Trevor Shan</span><span class="d">Oct 13</span></div><div class="t">Forget your bench press</div><div class="p">"How much do you bench?" Worst question in fitness. It tells you one thing…</div></div></div>
+</div></div>
+
+<div class="col v3"><h2>3 · Timeline rail</h2><div class="list">
+ <div class="day">Oct 15</div>
+ <div class="row cur"><div class="gut">9:41</div><div class="rail"><i style="background:var(--cyan)"></i></div><div class="body"><div class="line"><span class="s grow">helumi just got its first big update 🎉</span><span class="chip tag">Newsletters</span></div><div class="p"><b style="font-weight:500;color:var(--fg)">helumi</b> · your files on every device, and more</div></div></div>
+ <div class="day">Oct 13</div>
+ <div class="row unread"><div class="gut" style="color:var(--primary)">17:02</div><div class="rail"><i style="background:var(--primary)"></i></div><div class="body"><div class="line"><span class="s grow" style="font-weight:600">Updated Apple Developer Program License Agreement</span></div><div class="p"><b style="font-weight:600;color:var(--fg)">Apple Developer</b> · Hello, The Apple Developer Program License Agreement has been revised</div></div></div>
+ <div class="row"><div class="gut">14:20</div><div class="rail"><i style="background:var(--primary)"></i></div><div class="body"><div class="line"><span class="s grow">You have been tagged in a post</span><span class="chip">Social</span></div><div class="p"><b style="font-weight:500;color:var(--fg)">First Tee Alumni Network</b> · (https://us.links.graduway.com/ls/click</div></div></div>
+ <div class="row"><div class="gut">11:08</div><div class="rail"><i style="background:var(--cyan)"></i></div><div class="body"><div class="line"><span class="s grow">Forget your bench press</span><span class="chip warn">⚠</span></div><div class="p"><b style="font-weight:500;color:var(--fg)">Trevor Shan</b> · "How much do you bench?" Worst question in fitness.</div></div></div>
+</div></div>
+
+<div class="col v4"><h2>4 · Subject-first headline</h2><div class="list">
+ <div class="row cur"><div class="grow"><div class="t" style="-webkit-line-clamp:2">helumi just got its first big update 🎉</div><div class="by"><b>HELUMI</b><span>·</span><span>Oct 15</span><span class="chip tag" style="margin-left:auto">Newsletters</span></div><div class="p">your files on every device, and more</div></div></div>
+ <div class="row unread"><div class="grow"><div class="t">Updated Apple Developer Program License Agreement Now Available</div><div class="by"><b>APPLE DEVELOPER</b><span>·</span><span style="color:var(--primary)">Oct 13</span><span class="chip tag" style="margin-left:auto">Receipts</span></div><div class="p">Hello, The Apple Developer Program License Agreement has been revised to support new features</div></div></div>
+ <div class="row"><div class="grow"><div class="t">You have been tagged in a post</div><div class="by"><b>FIRST TEE ALUMNI NETWORK</b><span>·</span><span>Oct 13</span><span class="chip" style="margin-left:auto">Social</span></div><div class="p">(https://us.links.graduway.com/ls/click?upn=u001.j-2FvyL6nXwHA3Egmr4rHP9yTR</div></div></div>
+ <div class="row"><div class="grow"><div class="t">Forget your bench press</div><div class="by"><b>TREVOR SHAN</b><span>·</span><span>Oct 13</span><span class="chip warn" style="margin-left:auto">⚠ new sender</span></div><div class="p">"How much do you bench?" Worst question in fitness. It tells you one thing.</div></div></div>
+</div></div>
+
+<div class="col v5"><h2>5 · Sender tiles</h2><div class="list">
+ <div class="row cur"><div class="av" style="background:var(--cyan)">h</div><div class="grow"><div class="line"><span class="s grow">helumi</span><span class="d">Oct 15</span></div><div class="t" style="color:#d7dae0">helumi just got its first big update 🎉</div><div class="p">your files on every device, and more</div></div></div>
+ <div class="row unread"><div class="av" style="background:var(--primary)">A</div><div class="grow"><div class="line"><span class="s grow">Apple Developer</span><span class="d">Oct 13</span></div><div class="t">Updated Apple Developer Program License Agreement</div><div class="p">Hello, The Apple Developer Program License Agreement has been revised to support new</div></div></div>
+ <div class="row"><div class="av" style="background:var(--purple)">F</div><div class="grow"><div class="line"><span class="s grow">First Tee Alumni Network</span><span class="d">Oct 13</span></div><div class="t" style="color:#d7dae0">You have been tagged in a post</div><div class="p">(https://us.links.graduway.com/ls/click?upn=u001.j-2FvyL6nXwHA3Egmr4rHP9yTR</div></div></div>
+ <div class="row"><div class="av" style="background:var(--warn)">T</div><div class="grow"><div class="line"><span class="s grow">Trevor Shan</span><span class="chip warn">⚠</span><span class="d">Oct 13</span></div><div class="t" style="color:#d7dae0">Forget your bench press</div><div class="p">"How much do you bench?" Worst question in fitness. It tells you one thing.</div></div></div>
+</div></div>
+
+<div class="col v6"><h2>6 · Terminal ledger</h2><div class="list" style="padding:4px 0">
+ <div class="row cur"><span class="mk"></span><span class="d">Oct 15</span><span class="s">helumi</span><span class="t">helumi just got its first big update 🎉 <em>— your files on every device</em></span><span class="f">→news</span></div>
+ <div class="row unread"><span class="mk">●</span><span class="d">Oct 13</span><span class="s">Apple Developer</span><span class="t">Updated Apple Developer Program License Agreement <em>— Hello, The Apple</em></span><span class="f">→recpt</span></div>
+ <div class="row"><span class="mk"></span><span class="d">Oct 13</span><span class="s">First Tee Alumni</span><span class="t">You have been tagged in a post <em>— (https://us.links.graduway</em></span><span class="f">→soc</span></div>
+ <div class="row"><span class="mk"></span><span class="d">Oct 13</span><span class="s">Trevor Shan</span><span class="t">Forget your bench press <em>— "How much do you bench?" Worst</em></span><span class="f" style="color:var(--danger)">⚠</span></div>
+ <div class="row"><span class="mk"></span><span class="d">Oct 13</span><span class="s">Office of Alumni</span><span class="t">October 2026 Messiah University Alumni Newsletter <em>— Welcome</em></span><span class="f">→news</span></div>
+ <div class="row"><span class="mk"></span><span class="d">Oct 12</span><span class="s">Nothing Technology</span><span class="t">Introducing CMF Speakers <em>— Pack your sound to every</em></span><span class="f">→news</span></div>
+</div></div>

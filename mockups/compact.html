@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Compact</title>
+<style>
+/* Compact: one 26px line per message. Ignores rail, chips and preview lines; icons only. */
+:root{--bg:#282c34;--fg:#abb2bf;--strong:#d7dae0;--muted:#7f848e;--border:#3b4048;--active:#3e4451;--hover:#323842;--accent:#323842;--primary:#61afef;--danger:#e06c75;--warn:#d19a66;--purple:#c678dd;--cyan:#56b6c2}
+*{box-sizing:border-box;margin:0}
+body{background:#1e2127;color:var(--fg);font:14px/18px -apple-system,system-ui,sans-serif;padding:24px;display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+h2{font:600 12px/16px ui-monospace,monospace;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em}
+.sec{flex-basis:100%;font:600 13px/18px ui-monospace,monospace;color:var(--strong);border-bottom:1px solid var(--border);padding-bottom:6px}
+.list{background:var(--bg);border:1px solid var(--border);position:relative}
+.day{height:22px;padding:6px 10px 0 11px;font:600 10px/14px ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:4px;padding-right:9px;cursor:pointer;user-select:none}
+.day .chev{margin-left:auto;width:12px;height:12px;opacity:0}
+.day:hover .chev{opacity:1}
+.row{--rowbg:var(--bg);position:relative;display:flex;align-items:center;gap:8px;height:26px;width:100%;border:1px solid transparent;padding:0 8px 0 10px;background:var(--rowbg)}
+.row:hover{--rowbg:var(--hover)}
+.row.cur{--rowbg:var(--active);border-color:rgba(97,175,239,.8)}
+.row.open,.row.sel{--rowbg:#2f3a4a}
+.row.cur.open,.row.cur.sel{--rowbg:var(--active)}
+.row.open::before,.row.sel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary)}
+.mark{width:15px;height:15px;flex:none;display:grid;place-items:center;position:relative}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--c,var(--primary));visibility:hidden}
+.unread .dot{visibility:visible}
+.sel .dot{width:13px;height:13px;visibility:visible;background:var(--primary);display:grid;place-items:center}
+.sel .dot svg{width:9px;height:9px;stroke:#282c34;stroke-width:3.5}
+.node{min-width:15px;height:15px;padding:0 3px;border-radius:8px;border:1.5px solid var(--c,var(--muted));display:grid;place-items:center;font:600 9px/1 ui-monospace,monospace;color:var(--muted);white-space:nowrap;background:var(--rowbg)}
+.unread .node{background:var(--c,var(--primary));border-color:var(--c,var(--primary));color:#282c34}
+.tm{width:36px;flex:none;font:11px/18px ui-monospace,"SF Mono",monospace;color:var(--muted)}
+.unread .tm{color:var(--primary)}
+.ac{width:13px;height:13px;flex:none}
+.s{width:104px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg)}
+.unread .s{color:var(--strong);font-weight:600}
+.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--strong)}
+.unread .t{font-weight:600}
+.t em{font-style:normal;font-weight:400;font-size:12px;color:var(--muted)}
+.cnt2{font-size:11px;line-height:16px;padding:0 6px;border-radius:4px;background:var(--accent);color:var(--primary);white-space:nowrap;flex:none}
+.icons{display:flex;gap:4px;align-items:center;flex:none}
+.ic{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.k{color:var(--primary)} .m{color:var(--muted)} .sp{color:var(--danger)} .ns{color:var(--warn)}
+.kid{--rowbg:#24282f;padding-left:28px}
+.kid .s{width:88px}
+.kid .t{color:var(--muted);font-weight:400;font-size:12px}
+.kid.unread .t{color:var(--fg)}
+.kid::after{content:"";position:absolute;left:17px;top:-1px;bottom:-1px;width:1px;background:var(--border)}
+.tc{color:var(--muted)} .thread:not(.exp) .tc{transform:rotate(-90deg)}
+/* narrow (<480px list): shorter sender, no inline preview, icons capped at 3 */
+.narrow .s{width:80px} .narrow .t em{display:none} .narrow .kid .s{width:72px}
+</style>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+<symbol id="newspaper" viewBox="0 0 24 24"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2M18 14h-8M15 18h-5M10 6h8v4h-8V6Z"/></symbol>
+<symbol id="receipt" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 17.5v-11"/></symbol>
+<symbol id="bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+<symbol id="user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1zM12 8v4M12 16h.01"/></symbol>
+<symbol id="userplus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M19 8v6M22 11h-6"/><circle cx="9" cy="7" r="4"/></symbol>
+<symbol id="belloff" viewBox="0 0 24 24"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="folderinput" viewBox="0 0 24 24"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1M2 13h10m-3-3 3 3-3 3"/></symbol>
+<symbol id="siren" viewBox="0 0 24 24"><path d="M7 18v-6a5 5 0 1 1 10 0v6M5 21a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2zM21 12h1M18.5 4.5 18 5M2 12h1M12 2v1M4.929 4.929l.707.707M12 12v6"/></symbol>
+<symbol id="flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+<symbol id="home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="work" viewBox="0 0 24 24"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></symbol>
+<symbol id="school" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0zM22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+</defs></svg>
+<script>
+const ACCT = {personal:['home','var(--cyan)'], work:['work','var(--primary)'], school:['school','var(--purple)']};
+const KIND = {news:['newspaper','k'], receipt:['receipt','k'], notif:['bell','k'], person:['user','k']};
+const ic = (n, c='') => `<svg class="ic ${c}"><use href="#${n}"/></svg>`;
+const MSGS = [
+ {day:'Today', time:'9:41', acct:'personal', unread:1, kind:'news', attach:1, folder:1, subj:'helumi just got its first big update 🎉', from:'helumi', pre:'your files on every device, and more'},
+ {day:'Oct 13', time:'17:02', acct:'work', unread:1, kind:'receipt', folder:1, urgency:'urgent', subj:'Updated Apple Developer Program License Agreement', from:'Apple Developer', pre:'Hello, The Apple Developer Program License Agreement has been revised'},
+ {time:'14:20', acct:'school', kind:'notif', muted:1, folder:1, subj:'You have been tagged in a post', from:'First Tee Alumni Network', pre:'(https://us.links.graduway.com/ls/click?upn=u001'},
+ {time:'11:08', acct:'personal', kind:'news', newsender:1, spam:1, attach:1, urgency:'very', subj:'Forget your bench press', from:'Trevor Shan', pre:'"How much do you bench?" Worst question in fitness.'},
+ {thread:1, time:'20:31', acct:'personal', kind:'person', subj:'Dinner Sunday?', unread:2, msgs:[
+   {time:'20:31', from:'Mom', unread:1, pre:'Sounds good, see you then! Dad says to bring the good wine'},
+   {time:'19:58', from:'You', pre:"Great, I'll bring dessert"},
+   {time:'19:40', from:'Dad', unread:1, attach:1, pre:'I can pick up the wine on the way'},
+   {time:'19:12', from:'Mom', pre:'Are you free around 6 on Sunday?'}]},
+ {time:'9:15', acct:'school', kind:'news', snoozed:1, subj:'October 2026 Messiah University Alumni Newsletter', from:'Office of Alumni and Parent Relations', pre:"Welcome to this month's alumni update!"},
+ {time:'8:02', acct:'work', kind:'notif', subj:'Build passed', from:'GitHub', pre:'All checks have passed on main'},
+];
+// severity: lower = kept first when space is tight; the kind icon is always kept
+function icons(m,narrow){
+  const g=[];
+  if(m.folder) g.push(['folderinput','k',5]);
+  if(m.spam) g.push(['shield','sp',0]);
+  if(m.urgency) g.push(m.urgency=='very'?['siren','sp',1]:['flame','ns',3]);
+  if(m.newsender) g.push(['userplus','ns',2]);
+  if(m.snoozed) g.push(['clock','m',7]);
+  if(m.muted) g.push(['belloff','m',6]);
+  if(m.attach) g.push(['paperclip','m',4]);
+  const keep=narrow?new Set([...g].sort((a,b)=>a[2]-b[2]).slice(0,2)):null;
+  const shown=g.filter(x=>!keep||keep.has(x));
+  shown.push(KIND[m.kind]);
+  return shown.map(([n,c])=>ic(n,c)).join('');
+}
+function row(m,o){
+  const [ai,ac]=ACCT[m.acct];
+  const acct=o.all?`<svg class="ac ic" style="color:${ac}"><use href="#${ai}"/></svg>`:'';
+  const cls=['row',m.unread?'unread':'',...(o.cls||[])].join(' ');
+  const check=(o.cls||[]).includes('sel')?ic('check'):'';
+  return `<div class="${cls}" style="--c:${o.all?ac:'var(--primary)'}"><div class="mark"><i class="dot">${check}</i></div><span class="tm">${m.time}</span>${acct}<span class="s">${m.from}</span><span class="t">${m.subj} <em>— ${m.pre}</em></span><span class="icons">${icons(m,o.w<480)}</span></div>`;
+}
+function thread(T,o){
+  const [ai,ac]=ACCT[T.acct], n=T.msgs.length, names=[...new Set(T.msgs.map(m=>m.from))];
+  const acct=o.all?`<svg class="ac ic" style="color:${ac}"><use href="#${ai}"/></svg>`:'';
+  const head=`<div class="row thread unread ${o.expanded?'exp':''}" style="--c:${o.all?ac:'var(--primary)'}"><div class="mark"><i class="node">${n}</i></div><span class="tm">${T.time}</span>${acct}<span class="s">${names.slice(0,2).join(', ')}</span><span class="t">${T.subj}${o.expanded?'':` <em>— ${T.msgs[0].pre}</em>`}</span><span class="cnt2" title="${T.unread} unread">${T.unread}</span><span class="icons">${icons({kind:T.kind,attach:1},o.w<480)}${ic('chevron','tc')}</span></div>`;
+  const kids=o.expanded?T.msgs.map((m,i)=>`<div class="row kid ${m.unread?'unread':''} ${i==o.cur?'cur':''}"><div class="mark"><i class="dot"></i></div><span class="tm">${m.time}</span><span class="s">${m.from}</span><span class="t">${m.pre}</span><span class="icons">${m.attach?ic('paperclip','m'):''}</span></div>`).join(''):'';
+  return head+kids;
+}
+function list(title,o){
+  let h='',day;
+  MSGS.forEach((m,i)=>{ if(m.day&&m.day!==day){day=m.day;h+=`<div class="day">${day}${ic('chevron','chev')}</div>`}
+    h+=m.thread?thread(m,o):row(m,{...o,cls:i==0?['cur']:[]}); });
+  document.body.insertAdjacentHTML('beforeend',`<div><h2>${title}</h2><div class="list${o.w<480?' narrow':''}" style="width:${o.w}px">${h}</div></div>`);
+}
+document.body.insertAdjacentHTML('beforeend','<div class="sec">Compact · single account / All Inboxes (list width 420 and 560)</div>');
+list('420 · single account',{w:420});
+list('420 · All Inboxes',{w:420,all:true});
+list('560 · All Inboxes (max list width)',{w:560,all:true});
+document.body.insertAdjacentHTML('beforeend','<div class="sec">Compact · thread expanded, row states</div>');
+list('Thread expanded',{w:420,expanded:1,cur:2});
+let h='';
+[['normal',[]],['hover',['hv']],['cursor',['cur']],['open',['open']],['selected',['sel']],['cursor + selected',['cur','sel']]].forEach(([n,c])=>h+=`<div style="font:10px/16px ui-monospace,monospace;color:var(--muted);padding:0 11px">${n}</div>`+row(MSGS[1],{cls:c}));
+document.body.insertAdjacentHTML('beforeend',`<div><h2>States</h2><div class="list" style="width:420px">${h}</div></div>`);
+document.querySelector('.hv').style.setProperty('--rowbg','var(--hover)');
+</script>
