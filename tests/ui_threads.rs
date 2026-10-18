@@ -156,6 +156,17 @@ fn expand_and_collapse_with_arrows_and_enter(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn clicking_a_collapsed_thread_header_expands_and_opens_it(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, threaded());
+    h.keys("ctrl-g");
+    assert_eq!(h.rows().len(), 2);
+    h.cx.update_window(h.window, |_, window, cx| window.click(("thread-row", 1usize), cx)).expect("window open");
+    h.cx.run_until_parked();
+    assert_eq!(h.rows().len(), 5, "the click expanded the thread");
+    assert_eq!(h.opened(), Some(3), "and opened its newest message");
+}
+
+#[gpui_kit::gpui::test]
 fn actions_apply_to_the_whole_thread_and_undo_restores(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, threaded());
     h.keys("ctrl-g j e");

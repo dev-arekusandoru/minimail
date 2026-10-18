@@ -327,7 +327,7 @@ impl MailApp {
                     .text_size(px(if small { 8. } else { 9. }))
                     .line_height(px(9.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(if visual.unread { t.background } else { t.muted_foreground })
+                    .text_color(if visual.unread { t.primary_foreground } else { t.foreground })
                     .child(label),
             );
         let mark = div().w(px(7.)).h(px(row::LINE_H)).flex_none().relative().child(node);

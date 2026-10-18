@@ -32,6 +32,7 @@ impl MailApp {
         } else {
             self.triage_mut().clear_selection();
             self.cursor_to(ix);
+            self.expand_cursor_header();
             if let Some(id) = self.cursor_id() {
                 self.open_message(id, event.click_count() >= 2);
             }

@@ -136,13 +136,18 @@ impl MailApp {
         self.view_mut().row_cursor = self.row_cursor().min(len.saturating_sub(1));
     }
 
-    /// `enter`: open the cursor message; a collapsed thread header also expands.
-    pub(super) fn open_cursor(&mut self) {
+    /// Expand the cursor row's thread when it is a collapsed header (view state, no undo step).
+    pub(super) fn expand_cursor_header(&mut self) {
         if self.grouped()
             && let Some(Row::Header { expanded: false, thread_id, .. }) = self.cursor_row()
         {
             self.expanded.insert(thread_id);
         }
+    }
+
+    /// `enter`: open the cursor message; a collapsed thread header also expands.
+    pub(super) fn open_cursor(&mut self) {
+        self.expand_cursor_header();
         if let Some(id) = self.cursor_id() {
             self.open_message(id, true);
         }
