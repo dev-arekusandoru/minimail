@@ -53,6 +53,8 @@ struct SignIn {
 impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
     pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
+        // Merge duplicate and blank folders the cache may have collected, before anything syncs.
+        sync::heal_folders(&mut self.mailbox, &cache);
         self.cache = Some(cache);
         cx.on_app_quit(|this, _| {
             if let Some(cache) = &this.cache {

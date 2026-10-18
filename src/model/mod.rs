@@ -15,6 +15,7 @@ use crate::search::{Field, Query};
 use crate::spam_senders::{SpamSenders, SpamVerdict};
 use crate::tz::Now;
 
+mod folders;
 mod replies;
 mod states;
 mod suggestions;
@@ -24,6 +25,7 @@ mod triage;
 mod undo;
 mod visibility;
 
+pub use folders::FolderNameError;
 pub use triage::Triage;
 pub use visibility::blocked_ago;
 
@@ -241,6 +243,10 @@ enum Change {
     PostSend(u64, Option<TriageState>, TriageState),
     SentPush,
     FolderPush(FolderId),
+    /// A folder was renamed; holds the name it had.
+    FolderRename(FolderId, String),
+    /// Folders a delete removed, with the positions they held; undo puts them back.
+    FolderRestore(Vec<(usize, Folder)>),
     Materialised(MessageId),
 }
 
@@ -297,6 +303,9 @@ pub struct Mailbox {
     pending: Vec<Suggestion>,
     accounts: Vec<Account>,
     folders: Vec<Folder>,
+    /// Highest folder id ever handed out or deleted, so an id never comes back while the cache
+    /// may still hold a row for it.
+    folder_floor: FolderId,
     follow_up_timeout: Timestamp,
     /// State a still-queued reply should materialise with (post-send filing), by outbox seq.
     post_send: HashMap<u64, TriageState>,
@@ -393,6 +402,7 @@ impl Mailbox {
             pending: Vec::new(),
             accounts,
             folders,
+            folder_floor: 0,
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
             post_send: HashMap::new(),
             sent_ids: HashMap::new(),

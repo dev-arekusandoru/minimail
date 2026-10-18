@@ -124,6 +124,12 @@ impl std::error::Error for ProviderError {}
 pub trait MailProvider: Send + 'static {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>, ProviderError>;
     fn create_folder(&mut self, path: &str) -> Result<RemoteFolder, ProviderError>;
+    /// Give the folder `remote_id` the full path `new_path`. Descendants are separate folders
+    /// with their own ids and are renamed by their own calls.
+    fn rename_folder(&mut self, remote_id: &str, new_path: &str) -> Result<RemoteFolder, ProviderError>;
+    /// Delete the folder itself. Mail in it is not deleted, it just loses the folder, and
+    /// subfolders are separate folders deleted by their own calls.
+    fn delete_folder(&mut self, remote_id: &str) -> Result<(), ProviderError>;
     /// Current change cursor. Take it *before* listing so nothing slips between.
     fn cursor(&mut self) -> Result<String, ProviderError>;
     /// One page (at most `max` ids, newest first) of `scope` within `window`.

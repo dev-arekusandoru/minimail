@@ -395,6 +395,8 @@ impl MailApp {
     }
 
     pub(super) fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // An undone rename, delete or folder creation changes what tabs point at.
+        let anchors = self.tab_anchors();
         if let Some(reply) = self.mailbox.recall_last(self.now()) {
             if let Some(msg) = self.mailbox.get(reply.in_reply_to).cloned() {
                 self.close_modals(window, cx);
@@ -402,6 +404,7 @@ impl MailApp {
             }
             self.show_toast("Send recalled · editing draft".into(), window, cx);
         } else if self.mailbox.undo() {
+            self.follow_folders(anchors, window, cx);
             self.show_toast("Undone".into(), window, cx);
         }
         self.scroll_to_cursor();

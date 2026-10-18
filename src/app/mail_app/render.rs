@@ -215,6 +215,8 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, a: &SetUrgency, _, cx| {
                 this.set_urgency_action(a.message, a.level, cx)
             }))
+            .on_action(cx.listener(|this, a: &RenameFolder, w, cx| this.open_rename_folder(a.folder, w, cx)))
+            .on_action(cx.listener(|this, a: &DeleteFolder, w, cx| this.confirm_delete_folder(a.folder, w, cx)))
             .on_action(cx.listener(|this, a: &SetSpam, w, cx| {
                 this.set_spam_action(a.message, a.spam, w, cx)
             }))

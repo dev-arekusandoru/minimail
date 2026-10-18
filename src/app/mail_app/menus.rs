@@ -24,6 +24,8 @@ pub(super) enum MenuKind {
     Classifier(MessageId),
     /// Actions for the list's selection.
     Selection,
+    /// Rename and delete for one sidebar folder row, opened by a right-click.
+    Folder(FolderId),
 }
 
 impl MailApp {
@@ -122,6 +124,13 @@ impl MailApp {
             MenuKind::Message(id) => (self.message_items(id), Some(vec![id])),
             MenuKind::Classifier(id) => (self.classifier_items(id), Some(vec![id])),
             MenuKind::Selection => (self.selection_items(), None),
+            MenuKind::Folder(id) => (
+                vec![
+                    MenuItem::action_fn("Rename…", move || Box::new(RenameFolder { folder: Some(id) })),
+                    MenuItem::action_fn("Delete…", move || Box::new(DeleteFolder { folder: Some(id) })),
+                ],
+                None,
+            ),
         }
     }
 

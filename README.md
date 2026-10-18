@@ -102,6 +102,8 @@ The chrome stays out of the way: a sidebar of locations, one titlebar, a bottom 
 
 **Sidebar** — an account rail (56px, a shade darker than the sidebar) beside a folder panel; the sidebar opens at 288px and the panel never drags narrower than ~176px. The rail holds, top to bottom: a dimmed **New message** button (there is no composer for new mail yet; its tooltip says so), one tile per account — *All* first, then each account's icon in its color, with its Inbox count on the corner (compact: `2285` reads `2.3k`; hidden on the selected tile, whose number the panel's Inbox tile shows) — a dashed **add account** tile (opens Settings → Accounts), and ghost tool buttons pinned to the bottom: **Fetch mail** (`cmd-shift-n`; only with a linked Gmail account; the icon spins while fetching, an amber dot means no completed check for over an hour, a red dot a failed sync or an expired sign-in), the **classifier** (a progress ring while it works, a red dot after an error, a dimmed icon when it is off or paused; a click stops, starts or opens Settings → AI, as the status bar's text does), sender **Rules** (`shift-r`) and **Settings** (`cmd-,`). Only the account tiles scroll when there are many. A rail click only chooses what the **panel** shows (All, or one account); the list stays where it is. Otherwise the panel follows the list: opening a location, a `g` jump or switching tabs shows that location's account, and the `g` jumps land in the account the panel shows. The panel has a title, then a 3-column grid of tiles — Inbox, Snoozed, Sent, Archive, Trash (the cross-account locations in the All view), each with the location's icon, its `g` shortcut in the tooltip and, on Inbox and Snoozed, a count on the corner — and a dashed **New folder** tile (in the All view it asks which account). Below come the folders. An account's view shows its whole folder tree: parents fold with a chevron, a folder row carries its unread count as a pill (a parent counts its whole subtree) and turns bold while it has unread mail, and any folder row can be dragged onto the list strip. The All view instead shows one section per account (its icon and name; a chevron on hover folds it) with its top-level folders, parents collapsed. A click opens a location in the list strip's preview tab; cmd-click or double-click pins it. `g`-prefixed jumps and the Filter ▾ menu reach every location.
 
+**Renaming and deleting folders** — right-click a folder row in the sidebar for **Rename…** and **Delete…**, or run the same two commands from the palette (`cmd-k`; no key binding, offered while the list shows a folder). Rename opens the name prompt prefilled with the current name selected: `enter` renames (a blank name or a sibling's name, compared case-insensitively, keeps the prompt open and a clash toasts), `escape` cancels; subfolders follow because a folder's path is derived. Delete asks first (`enter` cancels, `1` deletes): the folder and its subfolders are deleted, but their messages are **not** — they move to Archive, as removing a Gmail label leaves mail in All Mail. Each is one undo step that restores the folders and the mail's states. If the list or a list tab was on a deleted folder it moves to the account's Inbox (a tab whose Inbox view is already open closes instead); a tab on a renamed folder follows it. Duplicate and blank-named folders in the cache are merged or dropped once at startup.
+
 **Titlebar** — the current view on the left, `Search…` in the middle (`/`), then **Triage** (`t`) on the right. Below 800px wide Triage shows only its icon.
 
 **Bottom bar** — the sidebar toggle (`cmd-b`), the palette (`cmd-k`), **Undo** (`u`), **Classify** (`shift-c`), sender **Rules** (`shift-r`) and **Settings** (`cmd-,`) on the left; after the status text, the pane-layout toggle (`alt-l`) and the shortcut sheet (`?`) on the right. The key hints fill the middle.
@@ -249,6 +251,15 @@ incremental rather than a full refresh:
 Triage pushes back to Gmail as before: archive removes `INBOX`, delete moves
 the message to Trash, filing applies a label (created if missing; nested
 folders become `Parent/Child`), and snooze archives remotely and wakes locally.
+Renaming a folder renames its label (and every descendant label, parents first);
+deleting one first archives its mail remotely, then deletes the labels children
+first. Both are derived from state, so they survive a restart: the cache keeps
+each folder's last confirmed label path (`synced_path`) and a tombstone for a
+folder deleted while its label still exists, and an undo before the next round
+simply makes the pending change disappear (an undo after the label was deleted
+files the mail into a re-created folder). On startup, duplicate folders (same
+account, parent and name) are merged into the one holding the most mail, and
+empty blank-named folders are dropped.
 Not supported yet: sending from Gmail.
 
 ### Project layout

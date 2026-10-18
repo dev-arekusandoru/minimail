@@ -8,7 +8,7 @@ impl Mailbox {
     }
 
     pub fn next_folder_id(&self) -> FolderId {
-        self.folders.iter().map(|f| f.id).max().map_or(1, |m| m + 1)
+        self.folders.iter().map(|f| f.id).max().unwrap_or(0).max(self.folder_floor) + 1
     }
 
     pub fn next_thread_id(&self) -> u32 {

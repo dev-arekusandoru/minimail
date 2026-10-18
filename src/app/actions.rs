@@ -7,7 +7,7 @@ use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConf
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
 use crate::judge::{Kind, QuestionKey};
-use crate::model::MessageId;
+use crate::model::{FolderId, MessageId};
 use gpui_kit::*;
 
 gpui_kit::actions!(
@@ -140,6 +140,24 @@ pub struct SetNeedsReply {
 pub struct ResetLabel {
     pub message: Option<MessageId>,
     pub key: QuestionKey,
+}
+
+// ---------------------------------------------------------------- Folder editing
+
+/// Rename a folder, from its sidebar row's menu or the palette. `folder: None` acts on the
+/// folder the list is showing.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct RenameFolder {
+    pub folder: Option<FolderId>,
+}
+
+/// Delete a folder and its subfolders after a confirmation; their mail moves to Archive.
+/// `folder: None` acts on the folder the list is showing.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct DeleteFolder {
+    pub folder: Option<FolderId>,
 }
 
 /// Key context of the root view.
@@ -481,6 +499,20 @@ pub fn commands() -> Vec<CommandSpec> {
     for (name, action) in labels {
         cmds.push(CommandSpec { category: Category::Classify, name, key: "", action });
     }
+    // Folder editing acts on the folder the list is showing (the sidebar row menu passes its
+    // own); it has no key binding.
+    cmds.push(CommandSpec {
+        category: Category::Navigate,
+        name: "Rename folder…",
+        key: "",
+        action: || Box::new(RenameFolder { folder: None }),
+    });
+    cmds.push(CommandSpec {
+        category: Category::Navigate,
+        name: "Delete folder…",
+        key: "",
+        action: || Box::new(DeleteFolder { folder: None }),
+    });
     // The number keys toggle the quick filter pills (all, needs reply, follow up, urgent,
     // new senders, possible spam), in that order.
     const QUICK: [fn() -> Box<dyn Action>; 6] =

@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS folders(
     account TEXT NOT NULL,
     remote_id TEXT,
     name TEXT NOT NULL,
-    parent INTEGER
+    parent INTEGER,
+    synced_path TEXT,
+    deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS threads(
     id INTEGER PRIMARY KEY,
@@ -148,6 +150,41 @@ impl Cache {
         if !has_synced_at {
             conn.execute_batch("ALTER TABLE accounts ADD COLUMN synced_at INTEGER")?;
         }
+        // Folders: `synced_path` is the label path the provider last confirmed (so a rename
+        // shows as a difference from the path the folder spells now), `deleted` tombstones a
+        // folder the user removed whose label the provider still has.
+        let has_synced_path: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('folders') WHERE name='synced_path'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_synced_path {
+            conn.execute_batch(
+                "ALTER TABLE folders ADD COLUMN synced_path TEXT;
+                 ALTER TABLE folders ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
+            )?;
+            // Every label the old rows map to was in sync when they were written.
+            let mut stmt = conn.prepare("SELECT id, name, parent, remote_id FROM folders")?;
+            let rows: Vec<CachedFolder> = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)? as FolderId,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?.map(|p| p as FolderId),
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for (id, _, _, remote) in &rows {
+                if remote.is_some() {
+                    conn.execute(
+                        "UPDATE folders SET synced_path=?2 WHERE id=?1",
+                        params![*id as i64, cached_path(&rows, *id)],
+                    )?;
+                }
+            }
+        }
         Ok(Self { conn })
     }
 
@@ -174,7 +211,7 @@ impl Cache {
 
         let mut stmt = self
             .conn
-            .prepare("SELECT id, account, name, parent FROM folders ORDER BY id")?;
+            .prepare("SELECT id, account, name, parent FROM folders WHERE deleted=0 ORDER BY id")?;
         let folders = stmt
             .query_map([], |row| {
                 Ok(Folder {
@@ -291,6 +328,61 @@ impl Cache {
         Ok(())
     }
 
+    /// Tombstone a folder the mailbox no longer has but whose label the provider still does:
+    /// the label is deleted remotely next round.
+    pub fn tombstone_folder(&self, id: FolderId) -> rusqlite::Result<()> {
+        self.conn.execute("UPDATE folders SET deleted=1 WHERE id=?1", [id as i64])?;
+        Ok(())
+    }
+
+    /// Bring a tombstoned folder back (its deletion was undone before the label went).
+    pub fn restore_folder(&self, id: FolderId) -> rusqlite::Result<()> {
+        self.conn.execute("UPDATE folders SET deleted=0 WHERE id=?1", [id as i64])?;
+        Ok(())
+    }
+
+    /// Record the label path the provider confirmed for a folder.
+    pub fn set_folder_synced(&self, id: FolderId, path: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE folders SET synced_path=?2 WHERE id=?1 AND synced_path IS NOT ?2",
+            params![id as i64, path],
+        )?;
+        Ok(())
+    }
+
+    /// The provider deleted a folder's label. A tombstone row goes; a live row (the deletion was
+    /// undone while the round ran) forgets the label, so filing into it creates a new one.
+    pub fn finish_folder_delete(&self, id: FolderId) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM folders WHERE id=?1 AND deleted=1", [id as i64])?;
+        self.conn.execute(
+            "UPDATE folders SET remote_id=NULL, synced_path=NULL WHERE id=?1",
+            [id as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Drop folder row `dup` outright (no tombstone: its label stays). Its subfolders move to
+    /// `into`, or to its own parent when `None`; with `into`, the label passes on to `into`
+    /// if that has none.
+    pub fn fold_folder(&self, dup: FolderId, into: Option<FolderId>) -> rusqlite::Result<()> {
+        let dup = dup as i64;
+        if let Some(into) = into {
+            self.conn.execute(
+                "UPDATE folders SET remote_id=(SELECT remote_id FROM folders WHERE id=?1),
+                    synced_path=(SELECT synced_path FROM folders WHERE id=?1)
+                 WHERE id=?2 AND remote_id IS NULL",
+                params![dup, into as i64],
+            )?;
+        }
+        self.conn.execute(
+            "UPDATE folders SET parent=COALESCE(?2, (SELECT parent FROM folders WHERE id=?1))
+             WHERE parent=?1",
+            params![dup, into.map(|i| i as i64)],
+        )?;
+        self.conn.execute("DELETE FROM folders WHERE id=?1", [dup])?;
+        Ok(())
+    }
+
     pub fn folder_by_remote(
         &self,
         account: &str,
@@ -299,7 +391,7 @@ impl Cache {
         Ok(self
             .conn
             .query_row(
-                "SELECT id FROM folders WHERE account=?1 AND remote_id=?2",
+                "SELECT id FROM folders WHERE account=?1 AND remote_id=?2 AND deleted=0",
                 params![account, remote_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -457,10 +549,10 @@ impl Cache {
             .collect())
     }
 
-    /// Cached folders of `account` with the remote label they map to, if any.
+    /// Live cached folders of `account` with the remote label they map to, if any.
     pub fn folder_list(&self, account: &str) -> rusqlite::Result<Vec<CachedFolder>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, parent, remote_id FROM folders WHERE account=?1 ORDER BY id",
+            "SELECT id, name, parent, remote_id FROM folders WHERE account=?1 AND deleted=0 ORDER BY id",
         )?;
         let rows = stmt.query_map([account], |row| {
             Ok((
@@ -469,6 +561,25 @@ impl Cache {
                 row.get::<_, Option<i64>>(2)?.map(|p| p as FolderId),
                 row.get::<_, Option<String>>(3)?,
             ))
+        })?;
+        rows.collect()
+    }
+
+    /// Every folder row of `account`, tombstones included.
+    pub fn folder_rows(&self, account: &str) -> rusqlite::Result<Vec<FolderRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, parent, remote_id, synced_path, deleted FROM folders
+             WHERE account=?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([account], |row| {
+            Ok(FolderRow {
+                id: row.get::<_, i64>(0)? as FolderId,
+                name: row.get(1)?,
+                parent: row.get::<_, Option<i64>>(2)?.map(|p| p as FolderId),
+                remote_id: row.get(3)?,
+                synced_path: row.get(4)?,
+                deleted: row.get(5)?,
+            })
         })?;
         rows.collect()
     }
@@ -617,4 +728,31 @@ pub type CachedFolder = (FolderId, String, Option<FolderId>, Option<String>);
 /// [`Scope`] as the JSON stored in the `backfill` table's key.
 fn scope_json(scope: &Scope) -> String {
     serde_json::to_string(scope).unwrap_or_default()
+}
+
+/// One `folders` row, tombstones included.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderRow {
+    pub id: FolderId,
+    pub name: String,
+    pub parent: Option<FolderId>,
+    pub remote_id: Option<String>,
+    /// The label path the provider last confirmed; `None` while it has no label.
+    pub synced_path: Option<String>,
+    /// The folder is gone locally and only its label still needs deleting.
+    pub deleted: bool,
+}
+
+/// Path of `id` spelled by the rows' names and parents, root first.
+fn cached_path(rows: &[CachedFolder], id: FolderId) -> String {
+    let mut names = Vec::new();
+    let mut at = Some(id);
+    // Bounded by the row count, so a parent cycle cannot hang the migration.
+    while let Some(next) = at.filter(|_| names.len() <= rows.len()) {
+        let Some((_, name, parent, _)) = rows.iter().find(|r| r.0 == next) else { break };
+        names.push(name.as_str());
+        at = *parent;
+    }
+    names.reverse();
+    names.join("/")
 }

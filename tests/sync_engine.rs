@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use mail_classifier::clock::{Clock, DAY, FakeClock, Timestamp};
 use mail_classifier::contacts;
 use mail_classifier::model::{
-    Account, Folder, Location, Mailbox, Message, MessageId, ProviderKind, TriageState,
+    Account, Folder, FolderId, Location, Mailbox, Message, MessageId, ProviderKind, TriageState,
 };
 use mail_classifier::provider::{
     Body, Changes, MailProvider, Page, ProviderError, RemoteFlags, RemoteFolder, RemoteId,
@@ -15,9 +15,9 @@ use mail_classifier::provider::{
 use mail_classifier::sync::cache::Cache;
 use mail_classifier::tz::{Now, Utc};
 use mail_classifier::sync::{
-    RoundSummary, SharedProvider, apply_body, apply_moves, apply_reads, apply_round, body_request,
-    has_older, pending_moves, pending_reads, persist_local, plan_round, run_body, run_moves,
-    run_reads, run_round, scopes_for,
+    FolderOp, RoundSummary, SharedProvider, apply_body, apply_moves, apply_reads, apply_round,
+    body_request, has_older, heal_folders, pending_folder_ops, pending_moves, pending_reads,
+    persist_local, plan_round, run_body, run_moves, run_reads, run_round, scopes_for,
 };
 use parking_lot::Mutex as TestMutex;
 
@@ -55,6 +55,11 @@ struct State {
     next_label: usize,
     moves: Vec<(RemoteId, RemoteState, RemoteState)>,
     created: Vec<String>,
+    renamed: Vec<(RemoteId, String)>,
+    deleted: Vec<RemoteId>,
+    /// Every write the provider took, in order: `move m1`, `rename Label_1`, `delete Label_1`.
+    ops: Vec<String>,
+    fail_folder_op: Option<ProviderError>,
     reads: Vec<(RemoteId, bool)>,
     fail_move: Option<ProviderError>,
     expire_cursor: bool,
@@ -91,6 +96,10 @@ impl FakeProvider {
             next_label: 0,
             moves: Vec::new(),
             created: Vec::new(),
+            renamed: Vec::new(),
+            deleted: Vec::new(),
+            ops: Vec::new(),
+            fail_folder_op: None,
             reads: Vec::new(),
             fail_move: None,
             expire_cursor: false,
@@ -249,6 +258,36 @@ impl MailProvider for FakeProvider {
         Ok(folder)
     }
 
+    fn rename_folder(&mut self, remote_id: &str, new_path: &str) -> Result<RemoteFolder, ProviderError> {
+        let mut s = self.state.lock();
+        if let Some(e) = &s.fail_folder_op {
+            return Err(clone_error(e));
+        }
+        let Some(folder) = s.folders.iter_mut().find(|f| f.id == remote_id) else {
+            return Err(ProviderError::Api { status: 404, message: "no such label".into() });
+        };
+        folder.path = new_path.to_owned();
+        let folder = folder.clone();
+        s.renamed.push((remote_id.to_owned(), new_path.to_owned()));
+        s.ops.push(format!("rename {remote_id}"));
+        Ok(folder)
+    }
+
+    fn delete_folder(&mut self, remote_id: &str) -> Result<(), ProviderError> {
+        let mut s = self.state.lock();
+        if let Some(e) = &s.fail_folder_op {
+            return Err(clone_error(e));
+        }
+        s.folders.retain(|f| f.id != remote_id);
+        // Mail keeps its place in All Mail: it just loses the label.
+        for m in s.messages.iter_mut().filter(|m| m.state == RemoteState::Folder(remote_id.to_owned())) {
+            m.state = RemoteState::Archived;
+        }
+        s.deleted.push(remote_id.to_owned());
+        s.ops.push(format!("delete {remote_id}"));
+        Ok(())
+    }
+
     fn cursor(&mut self) -> Result<String, ProviderError> {
         let mut s = self.state.lock();
         s.recorded.cursors += 1;
@@ -322,6 +361,7 @@ impl MailProvider for FakeProvider {
             return Err(clone_error(e));
         }
         s.moves.push((id.clone(), from.clone(), to.clone()));
+        s.ops.push(format!("move {id}"));
         if let Some(m) = s.messages.iter_mut().find(|m| &m.id == id) {
             m.state = to.clone();
         }
@@ -1329,4 +1369,513 @@ fn bulk_survives_the_cache_and_old_rows_default_to_false() {
     let mut old = serde_json::to_value(local(2, "personal")).unwrap();
     old.as_object_mut().unwrap().remove("bulk");
     assert!(!serde_json::from_value::<Message>(old).unwrap().bulk);
+}
+
+// ------------------------------------------------------ folder integrity
+
+fn ops(state: &Handle) -> Vec<String> {
+    state.lock().ops.clone()
+}
+
+fn renamed(state: &Handle) -> Vec<(RemoteId, String)> {
+    state.lock().renamed.clone()
+}
+
+fn deleted(state: &Handle) -> Vec<RemoteId> {
+    state.lock().deleted.clone()
+}
+
+fn remote_paths(state: &Handle) -> Vec<String> {
+    state.lock().folders.iter().map(|f| f.path.clone()).collect()
+}
+
+fn live_folder_names(mb: &Mailbox) -> Vec<String> {
+    mb.folders(ACCOUNT).iter().map(|f| mb.folder_path(f.id)).collect()
+}
+
+fn cached_folder_names(cache: &Cache) -> Vec<String> {
+    cache.load().unwrap().1.iter().map(|f| f.name.clone()).collect()
+}
+
+/// One round as the app runs it: local changes are persisted first, then the round is planned.
+fn sync_round(mb: &mut Mailbox, cache: &Cache, p: &SharedProvider, check: bool) -> RoundSummary {
+    persist_local(mb, cache);
+    round(mb, cache, p, check, &[])
+}
+
+/// A fresh account with one inbox message per name, drained, and the provider's handle.
+fn synced_with(messages: &[&str]) -> (Mailbox, Cache, Handle, SharedProvider) {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let (state, provider) = FakeProvider::without_folders(
+        messages.iter().enumerate().map(|(i, id)| remote(id, id, 1_790_000_000 + i as i64)).collect(),
+    );
+    drain(&mut mb, &cache, &provider, true);
+    (mb, cache, state, provider)
+}
+
+/// Create `path` locally (one folder per segment), file `ids` into the last one and push it,
+/// so the provider has a label for it.
+fn filed_and_pushed(
+    mb: &mut Mailbox,
+    cache: &Cache,
+    p: &SharedProvider,
+    path: &str,
+    ids: &[MessageId],
+) -> FolderId {
+    let mut parent = None;
+    let mut names = path.split('/').peekable();
+    while let Some(name) = names.next() {
+        let existing = mb.folders(ACCOUNT).iter().find(|f| f.parent == parent && f.name == name).map(|f| f.id);
+        parent = Some(match (existing, names.peek()) {
+            (Some(id), _) => id,
+            (None, Some(_)) => mb.create_folder(ACCOUNT, name, parent),
+            (None, None) => mb.create_folder_and_file(ACCOUNT, name, parent, ids).0,
+        });
+    }
+    let id = parent.unwrap();
+    mb.set_state(ids, TriageState::Filed(id));
+    sync_round(mb, cache, p, false);
+    id
+}
+
+/// The user's cache as it stood: one account, four rows for one label (`Church` twice and two
+/// blank ones), and only the last `Church` holding mail.
+fn the_four_rows() -> (Cache, Mailbox) {
+    let cache = seeded();
+    let rows = [(12, "Church"), (13, ""), (14, ""), (15, "Church")];
+    for (id, name) in rows {
+        let folder = Folder { id, account: ACCOUNT.to_owned(), name: name.to_owned(), parent: None };
+        cache.upsert_folder(&folder, Some("Label_1")).unwrap();
+        cache.set_folder_synced(id, name).unwrap();
+    }
+    for (id, remote_id, folder) in [(1, "m1", 15), (2, "m2", 15)] {
+        let mut message = local(id, ACCOUNT);
+        message.state = TriageState::Filed(folder);
+        cache.upsert_message(&message, remote_id, &RemoteState::Folder("Label_1".to_owned()), true).unwrap();
+    }
+    let (accounts, folders, messages) = cache.load().unwrap();
+    let mb = Mailbox::from_parts(messages, accounts, folders, Rc::new(contacts::open_seeded_in_memory().unwrap()));
+    (cache, mb)
+}
+
+#[test]
+fn the_four_church_rows_heal_to_the_one_that_holds_the_mail() {
+    let (cache, mut mb) = the_four_rows();
+    assert_eq!(mb.folders(ACCOUNT).len(), 4);
+
+    assert_eq!(heal_folders(&mut mb, &cache), 3);
+
+    let folders: Vec<(FolderId, String)> = mb.folders(ACCOUNT).iter().map(|f| (f.id, f.name.clone())).collect();
+    assert_eq!(folders, [(15, "Church".to_owned())]);
+    assert_eq!(cache.load().unwrap().1.len(), 1, "the cache agrees, so a restart stays healed");
+    assert_eq!(cached_folder_names(&cache), ["Church"]);
+    assert_eq!(cache.folder_remote_id(15).unwrap().as_deref(), Some("Label_1"));
+    assert!(!mb.undo(), "a repair is not a user action");
+    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty(), "the mail did not move remotely");
+    assert_eq!(heal_folders(&mut mb, &cache), 0, "healing is idempotent");
+}
+
+#[test]
+fn merging_refiles_mail_and_rewrites_its_cached_state() {
+    let (cache, mut mb) = the_four_rows();
+    // One message sits in the duplicate that loses; the other folder has more mail.
+    let mut stray = local(3, ACCOUNT);
+    stray.state = TriageState::Filed(12);
+    mb.upsert_remote(stray.clone());
+    cache.upsert_message(&stray, "m3", &RemoteState::Folder("Label_1".to_owned()), true).unwrap();
+
+    heal_folders(&mut mb, &cache);
+
+    assert_eq!(mb.state_of(3), Some(TriageState::Filed(15)));
+    let cached = cache.cached_messages().unwrap();
+    let stored = cached.iter().find(|m| m.id == 3).unwrap();
+    assert_eq!(stored.state, TriageState::Filed(15), "the stored copy was rewritten");
+    assert_eq!(mb.folders(ACCOUNT).len(), 1);
+    assert!(!mb.undo());
+}
+
+#[test]
+fn merging_keeps_the_lowest_id_on_a_tie_and_lets_subfolders_follow() {
+    let cache = seeded();
+    let store = Rc::new(contacts::open_seeded_in_memory().unwrap());
+    let folder = |id, name: &str, parent| Folder { id, account: ACCOUNT.to_owned(), name: name.to_owned(), parent };
+    let all = vec![folder(1, "Work", None), folder(2, "Work", None), folder(3, "Q3", Some(2))];
+    for f in &all {
+        cache.upsert_folder(f, None).unwrap();
+    }
+    let mut mb = Mailbox::from_parts(Vec::new(), vec![account()], all, store);
+
+    heal_folders(&mut mb, &cache);
+
+    assert_eq!(live_folder_names(&mb), ["Work", "Work/Q3"]);
+    assert_eq!(mb.folder(3).unwrap().parent, Some(1));
+    assert_eq!(cache.load().unwrap().1.iter().find(|f| f.id == 3).unwrap().parent, Some(1));
+}
+
+#[test]
+fn a_blank_folder_that_holds_mail_is_left_for_the_user_to_rename() {
+    let cache = seeded();
+    let blank = Folder { id: 1, account: ACCOUNT.to_owned(), name: String::new(), parent: None };
+    cache.upsert_folder(&blank, None).unwrap();
+    let mut message = local(1, ACCOUNT);
+    message.state = TriageState::Filed(1);
+    cache.upsert_message(&message, "m1", &RemoteState::Folder("L".to_owned()), true).unwrap();
+    let (accounts, folders, messages) = cache.load().unwrap();
+    let mut mb = Mailbox::from_parts(messages, accounts, folders, Rc::new(contacts::open_seeded_in_memory().unwrap()));
+
+    assert_eq!(heal_folders(&mut mb, &cache), 0);
+    assert_eq!(mb.folders(ACCOUNT).len(), 1);
+}
+
+#[test]
+fn undoing_a_pushed_folder_never_leaves_a_blank_or_duplicate_folder() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let church = filed_and_pushed(&mut mb, &cache, &provider, "Church", &[m1]);
+    assert_eq!(cache.folder_remote_id(church).unwrap().as_deref(), Some("Label_1"));
+
+    // The user undoes the filing after the label was made: the folder leaves the mailbox.
+    assert!(mb.undo());
+    assert!(mb.folder(church).is_none());
+
+    // A round without a check used to mint a blank folder carrying the label.
+    sync_round(&mut mb, &cache, &provider, false);
+    assert!(mb.folders(ACCOUNT).is_empty(), "no blank-named stand-in: {:?}", live_folder_names(&mb));
+    assert_eq!(mb.state_of(m1), Some(TriageState::Inbox));
+    // The stale row's label is deleted once the mail is back, and the row goes with it.
+    assert_eq!(ops(&state), ["move m1", "move m1", "delete Label_1"]);
+    assert!(cache.folder_rows(ACCOUNT).unwrap().is_empty());
+
+    // A check afterwards imports nothing and restarts clean.
+    sync_round(&mut mb, &cache, &provider, true);
+    assert!(mb.folders(ACCOUNT).is_empty());
+    assert!(cache.load().unwrap().1.is_empty());
+}
+
+#[test]
+fn a_listed_label_of_an_undone_folder_does_not_come_back_while_its_delete_is_pending() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let church = filed_and_pushed(&mut mb, &cache, &provider, "Church", &[m1]);
+    assert!(mb.undo());
+    state.lock().fail_folder_op = Some(ProviderError::Api { status: 500, message: "later".to_owned() });
+
+    let summary = sync_round(&mut mb, &cache, &provider, true);
+
+    assert!(summary.error.is_some(), "the failed delete is reported");
+    assert_eq!(remote_paths(&state), ["Church"], "the label is still on the server and listed");
+    assert!(mb.folders(ACCOUNT).is_empty(), "but it is not imported again");
+    assert_eq!(mb.state_of(m1), Some(TriageState::Inbox));
+    assert!(cache.folder_rows(ACCOUNT).unwrap().iter().any(|r| r.id == church && r.deleted));
+
+    state.lock().fail_folder_op = None;
+    sync_round(&mut mb, &cache, &provider, true);
+    assert!(remote_paths(&state).is_empty());
+    assert!(mb.folders(ACCOUNT).is_empty());
+}
+
+#[test]
+fn a_label_under_a_local_only_parent_is_not_duplicated_by_a_round_without_a_check() {
+    let (mut mb, cache, _state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    filed_and_pushed(&mut mb, &cache, &provider, "Work/Reports", &[m1]);
+    assert_eq!(live_folder_names(&mb), ["Work", "Work/Reports"]);
+
+    sync_round(&mut mb, &cache, &provider, false);
+    sync_round(&mut mb, &cache, &provider, true);
+
+    assert_eq!(live_folder_names(&mb), ["Work", "Work/Reports"], "no twin carrying the same label");
+}
+
+#[test]
+fn a_blank_remote_folder_name_never_becomes_a_folder() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let (_state, provider) = FakeProvider::with_folders(
+        Vec::new(),
+        vec![
+            RemoteFolder { id: "Label_1".to_owned(), path: String::new() },
+            RemoteFolder { id: "Label_2".to_owned(), path: "Work/ ".to_owned() },
+        ],
+    );
+
+    let summary = round(&mut mb, &cache, &provider, true, &[]);
+
+    assert!(summary.error.is_some(), "the bad label is reported, not imported");
+    assert!(mb.folders(ACCOUNT).iter().all(|f| !f.name.trim().is_empty()));
+}
+
+#[test]
+fn a_folder_never_pushes_a_label_with_a_blank_name() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let blank = mb.create_folder(ACCOUNT, " ", None);
+    mb.set_state(&[m1], TriageState::Filed(blank));
+    persist_local(&mb, &cache);
+
+    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty());
+    sync_round(&mut mb, &cache, &provider, false);
+    assert!(created(&state).is_empty());
+}
+
+#[test]
+fn a_cache_from_before_folder_sync_gets_confirmed_paths() {
+    let path = std::env::temp_dir().join(format!("mc-folder-migration-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE folders(id INTEGER PRIMARY KEY, account TEXT NOT NULL, remote_id TEXT,
+                name TEXT NOT NULL, parent INTEGER);
+             INSERT INTO folders VALUES(1, 'a', 'L1', 'Work', NULL);
+             INSERT INTO folders VALUES(2, 'a', 'L2', 'Reports', 1);
+             INSERT INTO folders VALUES(3, 'a', NULL, 'Local', NULL);",
+        )
+        .unwrap();
+    }
+    let cache = Cache::open(&path).unwrap();
+    let rows = cache.folder_rows("a").unwrap();
+    let synced: Vec<Option<&str>> = rows.iter().map(|r| r.synced_path.as_deref()).collect();
+    assert_eq!(synced, [Some("Work"), Some("Work/Reports"), None]);
+    assert!(rows.iter().all(|r| !r.deleted));
+    let _ = std::fs::remove_file(&path);
+}
+
+// ------------------------------------------------- folder rename and delete
+
+#[test]
+fn renaming_a_folder_pushes_the_label_rename_once() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty(), "a push confirmed the path");
+
+    mb.rename_folder(id, "Jobs").unwrap();
+    persist_local(&mb, &cache);
+    assert_eq!(
+        pending_folder_ops(&mb, &cache, ACCOUNT),
+        [FolderOp::Rename { id, remote_id: "Label_1".to_owned(), path: "Jobs".to_owned() }]
+    );
+    let summary = round(&mut mb, &cache, &provider, false, &[]);
+
+    assert_eq!(summary.error, None);
+    assert_eq!(renamed(&state), [("Label_1".to_owned(), "Jobs".to_owned())]);
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty());
+    // The next check lists the new name: still one folder, still the same one.
+    sync_round(&mut mb, &cache, &provider, true);
+    assert_eq!(renamed(&state).len(), 1);
+    assert_eq!(live_folder_names(&mb), ["Jobs"]);
+    assert_eq!(mb.state_of(m1), Some(TriageState::Filed(id)));
+}
+
+#[test]
+fn renaming_a_parent_renames_every_descendant_label_parent_first() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1", "m2"]);
+    let ids = inbox(&mb);
+    let work = filed_and_pushed(&mut mb, &cache, &provider, "Work", &ids[..1]);
+    filed_and_pushed(&mut mb, &cache, &provider, "Work/Reports", &ids[1..]);
+    assert_eq!(remote_paths(&state), ["Work", "Work/Reports"]);
+
+    mb.rename_folder(work, "Jobs").unwrap();
+    sync_round(&mut mb, &cache, &provider, false);
+
+    assert_eq!(
+        renamed(&state),
+        [("Label_1".to_owned(), "Jobs".to_owned()), ("Label_2".to_owned(), "Jobs/Reports".to_owned())]
+    );
+    assert_eq!(remote_paths(&state), ["Jobs", "Jobs/Reports"]);
+}
+
+#[test]
+fn a_rename_is_retried_until_the_provider_takes_it() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    mb.rename_folder(id, "Jobs").unwrap();
+    state.lock().fail_folder_op = Some(ProviderError::Api { status: 500, message: "later".to_owned() });
+
+    assert!(sync_round(&mut mb, &cache, &provider, false).error.is_some());
+    assert_eq!(pending_folder_ops(&mb, &cache, ACCOUNT).len(), 1, "still pending");
+    // The local name wins over what a check lists meanwhile.
+    sync_round(&mut mb, &cache, &provider, true);
+    assert_eq!(live_folder_names(&mb), ["Jobs"]);
+
+    state.lock().fail_folder_op = None;
+    sync_round(&mut mb, &cache, &provider, false);
+    assert_eq!(renamed(&state), [("Label_1".to_owned(), "Jobs".to_owned())]);
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty());
+}
+
+#[test]
+fn undoing_a_rename_before_the_push_cancels_it_and_after_it_pushes_the_old_name_back() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+
+    mb.rename_folder(id, "Jobs").unwrap();
+    assert!(mb.undo());
+    persist_local(&mb, &cache);
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty(), "nothing to push");
+    sync_round(&mut mb, &cache, &provider, false);
+    assert!(renamed(&state).is_empty());
+
+    mb.rename_folder(id, "Jobs").unwrap();
+    sync_round(&mut mb, &cache, &provider, false);
+    assert!(mb.undo());
+    sync_round(&mut mb, &cache, &provider, false);
+    assert_eq!(remote_paths(&state), ["Work"]);
+    assert_eq!(renamed(&state).len(), 2);
+}
+
+#[test]
+fn a_rename_on_the_server_is_followed_without_a_twin() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    state.lock().folders[0].path = "Jobs".to_owned();
+
+    sync_round(&mut mb, &cache, &provider, true);
+
+    assert_eq!(live_folder_names(&mb), ["Jobs"]);
+    assert_eq!(mb.state_of(m1), Some(TriageState::Filed(id)));
+    assert!(renamed(&state).is_empty(), "the server's rename is not echoed back");
+}
+
+#[test]
+fn deleting_a_folder_archives_its_mail_remotely_then_deletes_the_labels_children_first() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1", "m2"]);
+    let ids = inbox(&mb);
+    let work = filed_and_pushed(&mut mb, &cache, &provider, "Work", &ids[..1]);
+    filed_and_pushed(&mut mb, &cache, &provider, "Work/Reports", &ids[1..]);
+    let before = ops(&state).len();
+
+    assert_eq!(mb.delete_folder(work), 2);
+    let summary = sync_round(&mut mb, &cache, &provider, false);
+
+    assert_eq!(summary.error, None);
+    let pushed = ops(&state)[before..].to_vec();
+    assert_eq!(pushed.len(), 4);
+    assert!(pushed[..2].iter().all(|op| op.starts_with("move")), "the mail leaves first: {pushed:?}");
+    assert_eq!(pushed[2..], ["delete Label_2", "delete Label_1"], "children first");
+    assert_eq!(flags(&state, "m1").state, RemoteState::Archived);
+    assert_eq!(flags(&state, "m2").state, RemoteState::Archived);
+    assert!(cache.folder_rows(ACCOUNT).unwrap().is_empty(), "the tombstones are gone");
+    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty());
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty());
+
+    // Later checks neither resurrect the folders nor move the mail.
+    sync_round(&mut mb, &cache, &provider, true);
+    assert!(mb.folders(ACCOUNT).is_empty());
+    assert_eq!(mb.state_of(ids[0]), Some(TriageState::Archived));
+}
+
+#[test]
+fn a_label_is_deleted_only_after_every_move_out_of_it_succeeded() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    mb.delete_folder(id);
+    state.lock().fail_move = Some(ProviderError::Api { status: 500, message: "later".to_owned() });
+
+    assert!(sync_round(&mut mb, &cache, &provider, false).error.is_some());
+    assert!(deleted(&state).is_empty(), "the mail has not left yet");
+    assert_eq!(pending_folder_ops(&mb, &cache, ACCOUNT).len(), 1, "the delete stays pending");
+
+    state.lock().fail_move = None;
+    sync_round(&mut mb, &cache, &provider, false);
+    assert_eq!(deleted(&state), ["Label_1".to_owned()]);
+}
+
+#[test]
+fn a_failed_label_delete_is_retried_on_the_next_round() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    mb.delete_folder(id);
+    state.lock().fail_folder_op = Some(ProviderError::Network("offline".to_owned()));
+
+    let summary = sync_round(&mut mb, &cache, &provider, false);
+    assert!(summary.error.unwrap().contains("offline"));
+    assert!(deleted(&state).is_empty());
+
+    state.lock().fail_folder_op = None;
+    assert_eq!(sync_round(&mut mb, &cache, &provider, false).error, None);
+    assert_eq!(deleted(&state), ["Label_1".to_owned()]);
+}
+
+#[test]
+fn undoing_a_delete_before_the_push_cancels_it() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    let before = ops(&state);
+
+    mb.delete_folder(id);
+    persist_local(&mb, &cache);
+    assert_eq!(pending_folder_ops(&mb, &cache, ACCOUNT).len(), 1, "the tombstone is a pending delete");
+    assert!(mb.undo());
+    persist_local(&mb, &cache);
+
+    assert!(pending_folder_ops(&mb, &cache, ACCOUNT).is_empty());
+    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty(), "the mail is filed where the server has it");
+    sync_round(&mut mb, &cache, &provider, true);
+    assert_eq!(ops(&state), before, "nothing was sent");
+    assert_eq!(live_folder_names(&mb), ["Work"]);
+    assert_eq!(mb.state_of(m1), Some(TriageState::Filed(id)));
+}
+
+#[test]
+fn undoing_a_delete_after_the_push_files_the_mail_into_a_recreated_folder() {
+    let (mut mb, cache, state, provider) = synced_with(&["m1"]);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Church", &[m1]);
+    mb.delete_folder(id);
+    sync_round(&mut mb, &cache, &provider, false);
+    assert!(remote_paths(&state).is_empty());
+
+    assert!(mb.undo());
+    sync_round(&mut mb, &cache, &provider, false);
+    sync_round(&mut mb, &cache, &provider, true);
+
+    assert_eq!(live_folder_names(&mb), ["Church"], "one folder, not blank, not duplicated");
+    assert_eq!(mb.state_of(m1), Some(TriageState::Filed(id)));
+    assert_eq!(remote_paths(&state), ["Church"]);
+    assert_eq!(flags(&state, "m1").state, RemoteState::Folder("Label_2".to_owned()));
+    assert_eq!(cached_folder_names(&cache), ["Church"]);
+}
+
+#[test]
+fn a_pending_folder_delete_survives_a_restart() {
+    let path = std::env::temp_dir().join(format!("mc-folder-restart-{}.db", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let cache = Cache::open(&path).unwrap();
+    cache.upsert_account(&account()).unwrap();
+    let mut mb = mailbox(Vec::new());
+    let (state, provider) = FakeProvider::without_folders(vec![remote("m1", "t1", 1_790_000_000)]);
+    drain(&mut mb, &cache, &provider, true);
+    let m1 = inbox(&mb)[0];
+    let id = filed_and_pushed(&mut mb, &cache, &provider, "Work", &[m1]);
+    mb.delete_folder(id);
+    persist_local(&mb, &cache);
+    drop(cache);
+
+    let cache = Cache::open(&path).unwrap();
+    let (accounts, folders, messages) = cache.load().unwrap();
+    assert!(folders.is_empty(), "a deleted folder is not loaded again");
+    let mut mb = Mailbox::from_parts(messages, accounts, folders, Rc::new(contacts::open_seeded_in_memory().unwrap()));
+    heal_folders(&mut mb, &cache);
+    assert_eq!(
+        pending_folder_ops(&mb, &cache, ACCOUNT),
+        [FolderOp::Delete { id, remote_id: "Label_1".to_owned() }]
+    );
+    let fresh = mb.create_folder(ACCOUNT, "Fresh", None);
+    assert!(fresh > id, "the tombstone's id is not reused");
+
+    sync_round(&mut mb, &cache, &provider, false);
+    assert_eq!(deleted(&state), ["Label_1".to_owned()]);
+    assert_eq!(mb.state_of(m1), Some(TriageState::Archived));
+    assert_eq!(flags(&state, "m1").state, RemoteState::Archived);
+    drop(cache);
+    let _ = std::fs::remove_file(&path);
 }

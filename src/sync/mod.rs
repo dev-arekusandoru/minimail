@@ -83,10 +83,14 @@ pub fn pending_moves(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<Move> {
             TriageState::Filed(folder) => {
                 match cache.folder_remote_id(folder).ok().flatten() {
                     Some(rid) => (RemoteState::Folder(rid), None),
-                    None => (
-                        RemoteState::Folder(String::new()),
-                        Some((folder, folder_path(mb, folder))),
-                    ),
+                    None => {
+                        let path = mb.folder_path(folder);
+                        // A folder without a usable name must never mint a label.
+                        if !valid_path(&path) {
+                            continue;
+                        }
+                        (RemoteState::Folder(String::new()), Some((folder, path)))
+                    }
                 }
             }
             _ => match to_remote(message.state, |f| {
@@ -108,19 +112,6 @@ pub fn pending_moves(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<Move> {
         });
     }
     moves
-}
-
-/// Parent chain of `folder`, root first, joined by '/'.
-fn folder_path(mb: &Mailbox, folder: FolderId) -> String {
-    let mut names = Vec::new();
-    let mut current = Some(folder);
-    while let Some(id) = current {
-        let Some(f) = mb.folder(id) else { break };
-        names.push(f.name.clone());
-        current = f.parent;
-    }
-    names.reverse();
-    names.join("/")
 }
 
 /// Push `moves`, creating any needed labels once per folder per batch.
@@ -202,13 +193,121 @@ pub fn apply_moves(
             _ => None,
         };
         if let Some((folder, remote)) = folder {
-            let stored = cache.upsert_folder(folder, Some(&remote.id));
+            let stored = cache
+                .upsert_folder(folder, Some(&remote.id))
+                .and_then(|()| cache.set_folder_synced(folder.id, &remote.path));
             if let Err(e) = stored {
                 first.get_or_insert_with(|| e.to_string());
                 continue;
             }
         }
         if let Err(e) = cache.set_remote_state(mv.id, mv.to()) {
+            first.get_or_insert_with(|| e.to_string());
+        }
+    }
+    first
+}
+
+// ----------------------------------------------------------------- folders
+
+/// A folder change waiting to be pushed to the provider. Both are derived from state, so they
+/// survive a restart and an undo before the push simply makes them disappear: a rename is a
+/// folder whose path differs from the one the provider confirmed, a delete is a tombstoned
+/// cache row (a folder the mailbox no longer has) that still has its label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderOp {
+    Rename { id: FolderId, remote_id: RemoteId, path: String },
+    Delete { id: FolderId, remote_id: RemoteId },
+}
+
+impl FolderOp {
+    fn id(&self) -> FolderId {
+        match self {
+            Self::Rename { id, .. } | Self::Delete { id, .. } => *id,
+        }
+    }
+}
+
+/// A path every segment of which is a name.
+fn valid_path(path: &str) -> bool {
+    path.split('/').all(|name| !name.trim().is_empty())
+}
+
+/// Renames, then deletes, for `account`. Renames go parents first (a child's new path names its
+/// parent); deletes go children first. Gmail label names are full paths, so a renamed parent
+/// shows up as a rename of every descendant label too.
+pub fn pending_folder_ops(mb: &Mailbox, cache: &Cache, account: &str) -> Vec<FolderOp> {
+    let rows = cache.folder_rows(account).unwrap_or_default();
+    // A label a live folder still uses is never deleted.
+    let in_use: HashSet<&str> =
+        rows.iter().filter(|r| !r.deleted).filter_map(|r| r.remote_id.as_deref()).collect();
+    let depth = |path: &str| path.matches('/').count();
+    let mut renames = Vec::new();
+    let mut deletes = Vec::new();
+    for row in &rows {
+        let Some(remote_id) = row.remote_id.clone() else { continue };
+        if row.deleted {
+            if !in_use.contains(remote_id.as_str()) {
+                let synced = row.synced_path.clone().unwrap_or_default();
+                deletes.push((depth(&synced), FolderOp::Delete { id: row.id, remote_id }));
+            }
+        } else if mb.folder(row.id).is_some() {
+            let path = mb.folder_path(row.id);
+            if row.synced_path.as_deref().is_some_and(|synced| synced != path) && valid_path(&path) {
+                renames.push((depth(&path), FolderOp::Rename { id: row.id, remote_id, path }));
+            }
+        }
+    }
+    renames.sort_by_key(|(depth, _)| *depth);
+    deletes.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
+    renames.into_iter().chain(deletes).map(|(_, op)| op).collect()
+}
+
+/// Push `ops`, stopping at the first fatal failure. Deletes are held back unless `deletes` is
+/// set: a label goes only once every move out of it has been confirmed. A label that is
+/// already gone counts as deleted.
+pub fn run_folder_ops(
+    p: &mut dyn MailProvider,
+    ops: Vec<FolderOp>,
+    deletes: bool,
+) -> Vec<(FolderOp, Result<Option<RemoteFolder>, ProviderError>)> {
+    let mut results = Vec::with_capacity(ops.len());
+    for op in ops {
+        let result = match &op {
+            FolderOp::Rename { remote_id, path, .. } => p.rename_folder(remote_id, path).map(Some),
+            FolderOp::Delete { .. } if !deletes => continue,
+            FolderOp::Delete { remote_id, .. } => match p.delete_folder(remote_id) {
+                Ok(()) | Err(ProviderError::Api { status: 404, .. }) => Ok(None),
+                Err(e) => Err(e),
+            },
+        };
+        let stop = result.as_ref().is_err_and(is_fatal);
+        results.push((op, result));
+        if stop {
+            break;
+        }
+    }
+    results
+}
+
+/// Record the folder changes the provider confirmed. Returns the first error text.
+pub fn apply_folder_ops(
+    cache: &Cache,
+    results: &[(FolderOp, Result<Option<RemoteFolder>, ProviderError>)],
+) -> Option<String> {
+    let mut first = None;
+    for (op, outcome) in results {
+        let stored = match (op, outcome) {
+            (_, Err(e)) => {
+                first.get_or_insert_with(|| e.to_string());
+                continue;
+            }
+            (FolderOp::Rename { path, .. }, Ok(confirmed)) => {
+                cache.set_folder_synced(op.id(), confirmed.as_ref().map_or(path, |c| &c.path))
+            }
+            (FolderOp::Delete { .. }, Ok(_)) => cache.finish_folder_delete(op.id()),
+        };
+        if let Err(e) = stored {
             first.get_or_insert_with(|| e.to_string());
         }
     }
@@ -290,6 +389,7 @@ pub struct Round {
     account: String,
     moves: Vec<Move>,
     reads: Vec<ReadChange>,
+    folder_ops: Vec<FolderOp>,
     /// Run the server change check this round.
     check: bool,
     /// Re-list the 30-day window instead of trusting the cursor.
@@ -320,6 +420,7 @@ impl Round {
     pub fn is_empty(&self) -> bool {
         self.moves.is_empty()
             && self.reads.is_empty()
+            && self.folder_ops.is_empty()
             && !self.check
             && self.older.is_empty()
             && self.backfill.is_none()
@@ -372,6 +473,7 @@ pub fn plan_round(
 ) -> Round {
     let moves = pending_moves(mb, cache, account);
     let reads = pending_reads(mb, cache, account);
+    let folder_ops = pending_folder_ops(mb, cache, account);
     let cursor = cache.cursor(account).ok().flatten();
     let since = cache.window_since(account, now).unwrap_or(now - WINDOW_DAYS * DAY);
     // Rows cached before read sync existed have no server read state; only a
@@ -421,6 +523,7 @@ pub fn plan_round(
         account: account.to_owned(),
         moves,
         reads,
+        folder_ops,
         check: check || reconcile,
         reconcile,
         cursor,
@@ -437,6 +540,7 @@ pub struct RoundResult {
     account: String,
     moves: Vec<(Move, Result<Option<RemoteFolder>, ProviderError>)>,
     reads: Vec<(ReadChange, Result<(), ProviderError>)>,
+    folder_ops: Vec<(FolderOp, Result<Option<RemoteFolder>, ProviderError>)>,
     folders: Option<Vec<RemoteFolder>>,
     since: Timestamp,
     cursor: Option<String>,
@@ -482,6 +586,7 @@ pub fn run_round(provider: &SharedProvider, round: Round) -> RoundResult {
         account,
         moves,
         reads,
+        folder_ops,
         check: run_check,
         reconcile: reconcile_first,
         cursor,
@@ -496,6 +601,7 @@ pub fn run_round(provider: &SharedProvider, round: Round) -> RoundResult {
         since,
         moves: Vec::new(),
         reads: Vec::new(),
+        folder_ops: Vec::new(),
         folders: None,
         cursor: None,
         changes: None,
@@ -509,11 +615,14 @@ pub fn run_round(provider: &SharedProvider, round: Round) -> RoundResult {
         error: None,
     };
 
-    // Push: moves first, so a message is filed before it is marked read.
-    if !moves.is_empty() || !reads.is_empty() {
+    // Push: moves first, so a message is filed before it is marked read, and a label is
+    // deleted only after everything that was in it has moved out.
+    if !moves.is_empty() || !reads.is_empty() || !folder_ops.is_empty() {
         let stop = match lock(provider) {
             Ok(mut p) => {
+                let planned = moves.len();
                 let moves = run_moves(p.as_mut(), moves);
+                let all_moved = moves.len() == planned && moves.iter().all(|(_, r)| r.is_ok());
                 let stop = first_fatal(&mut result, &moves);
                 result.moves = moves;
                 if stop {
@@ -522,7 +631,14 @@ pub fn run_round(provider: &SharedProvider, round: Round) -> RoundResult {
                     let reads = run_reads(p.as_mut(), reads);
                     let stop = first_fatal(&mut result, &reads);
                     result.reads = reads;
-                    stop
+                    if stop {
+                        true
+                    } else {
+                        let ops = run_folder_ops(p.as_mut(), folder_ops, all_moved);
+                        let stop = first_fatal(&mut result, &ops);
+                        result.folder_ops = ops;
+                        stop
+                    }
                 }
             }
             Err(e) => stop_error(&mut result, &e),
@@ -765,30 +881,19 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
     if let Some(e) = apply_reads(cache, &result.reads) {
         error(e);
     }
+    if let Some(e) = apply_folder_ops(cache, &result.folder_ops) {
+        error(e);
+    }
 
-    // Without a check this round there is no fresh folder list, so the mapping
-    // the cache already holds stands in for it.
-    let folders = result.folders.clone().unwrap_or_else(|| {
-        cache
-            .folder_list(&result.account)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(id, _, _, remote)| {
-                Some(RemoteFolder { id: remote?, path: folder_path(mb, id) })
-            })
-            .collect()
-    });
-    let by_path: HashMap<&str, &str> =
-        folders.iter().map(|f| (f.path.as_str(), f.id.as_str())).collect();
-    let by_id: HashMap<&str, &str> = folders.iter().map(|f| (f.id.as_str(), f.path.as_str())).collect();
-    for folder in &folders {
-        if let Err(e) = ensure_folder(mb, cache, &result.account, &by_path, &folder.path) {
-            error(e);
-        }
+    // Every label the server lists gets a local folder, even when no message is in it.
+    if let Some(listed) = &result.folders
+        && let Some(e) = import_folders(mb, cache, &result.account, listed)
+    {
+        error(e);
     }
 
     if let Some(changes) = &result.changes {
-        if let Err(e) = apply_flags(mb, cache, &result.account, &by_path, &by_id, &changes.updated) {
+        if let Err(e) = apply_flags(mb, cache, &result.account, &changes.updated) {
             error(e);
         }
         if let Err(e) = remove_ids(mb, cache, &result.account, &changes.removed) {
@@ -796,7 +901,7 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
         }
     }
     if let Some(snapshot) = &result.snapshot {
-        if let Err(e) = apply_flags(mb, cache, &result.account, &by_path, &by_id, snapshot) {
+        if let Err(e) = apply_flags(mb, cache, &result.account, snapshot) {
             error(e);
         }
         if let Err(e) = drop_vanished(mb, cache, &result.account, result.since, snapshot) {
@@ -810,7 +915,7 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
     }
 
     for remote in &result.fetched {
-        match apply_message(mb, cache, &result.account, &by_path, &by_id, remote) {
+        match apply_message(mb, cache, &result.account, remote) {
             Ok(new) => summary.new_messages += usize::from(new),
             Err(e) => error(e),
         }
@@ -831,23 +936,21 @@ pub fn apply_round(mb: &mut Mailbox, cache: &Cache, result: RoundResult) -> Roun
 
 /// The local state behind a remote one.
 fn from_remote(
-    mb: &mut Mailbox,
+    mb: &Mailbox,
     cache: &Cache,
     account: &str,
-    by_path: &HashMap<&str, &str>,
-    by_id: &HashMap<&str, &str>,
     state: &RemoteState,
 ) -> Result<TriageState, String> {
     match state {
         RemoteState::Inbox => Ok(TriageState::Inbox),
         RemoteState::Archived => Ok(TriageState::Archived),
         RemoteState::Trash => Ok(TriageState::Deleted),
-        RemoteState::Folder(rid) => match by_id.get(rid.as_str()).copied() {
-            Some(path) => Ok(TriageState::Filed(ensure_folder(
-                mb, cache, account, by_path, path,
-            )?)),
-            None => Ok(TriageState::Archived),
-        },
+        // A label the cache has no live folder for (deleted, or never listed) holds no mail here.
+        RemoteState::Folder(rid) => Ok(cache
+            .folder_by_remote(account, rid)
+            .map_err(err)?
+            .filter(|f| mb.folder(*f).is_some())
+            .map_or(TriageState::Archived, TriageState::Filed)),
     }
 }
 
@@ -883,8 +986,6 @@ fn apply_flags(
     mb: &mut Mailbox,
     cache: &Cache,
     account: &str,
-    by_path: &HashMap<&str, &str>,
-    by_id: &HashMap<&str, &str>,
     flags: &[(RemoteId, RemoteFlags)],
 ) -> Result<(), String> {
     for (remote_id, remote) in flags {
@@ -898,7 +999,7 @@ fn apply_flags(
         let state = if pending || existing.state == TriageState::Snoozed {
             merged_state(&existing, &remote.state, pending)
         } else {
-            from_remote(mb, cache, account, by_path, by_id, &remote.state)?
+            from_remote(mb, cache, account, &remote.state)?
         };
         let read = match cache.remote_read(id).map_err(err)? {
             Some(confirmed) if confirmed != existing.read => existing.read,
@@ -958,20 +1059,18 @@ fn apply_message(
     mb: &mut Mailbox,
     cache: &Cache,
     account: &str,
-    by_path: &HashMap<&str, &str>,
-    by_id: &HashMap<&str, &str>,
     remote: &RemoteMessage,
 ) -> Result<bool, String> {
     let cached = cache.message_by_remote(account, &remote.id).map_err(err)?;
     let existing = cached.and_then(|id| mb.get(id).cloned());
     let state = match &existing {
-        None => from_remote(mb, cache, account, by_path, by_id, &remote.state)?,
+        None => from_remote(mb, cache, account, &remote.state)?,
         Some(existing) => {
             let pending = has_pending(cache, existing);
             if pending || existing.state == TriageState::Snoozed {
                 merged_state(existing, &remote.state, pending)
             } else {
-                from_remote(mb, cache, account, by_path, by_id, &remote.state)?
+                from_remote(mb, cache, account, &remote.state)?
             }
         }
     };
@@ -1028,8 +1127,48 @@ fn apply_message(
     Ok(cached.is_none())
 }
 
+/// Give every label in the provider's list a local folder, creating it (and any missing
+/// ancestor) when the cache has never seen it. Returns the first error text.
+///
+/// A label the user deleted (tombstoned) is skipped, so it does not come back before its
+/// delete has been pushed; so is one whose rename is still pending, since the local name wins
+/// until the provider has heard of it. One the server renamed is followed.
+fn import_folders(mb: &mut Mailbox, cache: &Cache, account: &str, listed: &[RemoteFolder]) -> Option<String> {
+    let rows = match cache.folder_rows(account) {
+        Ok(rows) => rows,
+        Err(e) => return Some(e.to_string()),
+    };
+    let by_path: HashMap<&str, &str> = listed.iter().map(|f| (f.path.as_str(), f.id.as_str())).collect();
+    // Parents first, so a renamed parent is followed before the children that name it.
+    let mut order: Vec<&RemoteFolder> = listed.iter().collect();
+    order.sort_by_key(|f| f.path.matches('/').count());
+    let mut first = None;
+    for folder in order {
+        let known = rows.iter().filter(|r| r.remote_id.as_deref() == Some(folder.id.as_str())).min_by_key(|r| r.deleted);
+        let outcome = match known {
+            // The cache has a folder for this label that the mailbox lost, or the user deleted.
+            Some(row) if row.deleted || mb.folder(row.id).is_none() => continue,
+            Some(row) => {
+                let local = mb.folder_path(row.id);
+                if local == folder.path {
+                    cache.set_folder_synced(row.id, &local).map_err(err)
+                } else if row.synced_path.as_deref().is_some_and(|synced| synced != local) {
+                    continue;
+                } else {
+                    ensure_folder(mb, cache, account, &by_path, &folder.path).map(|_| ())
+                }
+            }
+            None => ensure_folder(mb, cache, account, &by_path, &folder.path).map(|_| ()),
+        };
+        if let Err(e) = outcome {
+            first.get_or_insert(e);
+        }
+    }
+    first
+}
+
 /// The local folder for a remote path, creating it (and any missing ancestor)
-/// on the way.
+/// on the way. A blank name never becomes a folder.
 fn ensure_folder(
     mb: &mut Mailbox,
     cache: &Cache,
@@ -1041,9 +1180,17 @@ fn ensure_folder(
         Some(slash) => (&path[slash + 1..], Some(&path[..slash])),
         None => (path, None),
     };
+    if name.trim().is_empty() {
+        return Err(format!("the provider lists a folder with a blank name (“{path}”)"));
+    }
     // The parent path is only a parent when the provider lists it too.
     let parent = match parent_path.filter(|p| by_path.contains_key(*p)) {
         Some(parent) => Some(ensure_folder(mb, cache, account, by_path, parent)?),
+        None => None,
+    };
+    let label = by_path.get(path).copied();
+    let owner = match label {
+        Some(rid) => cache.folder_by_remote(account, rid).map_err(err)?.filter(|f| mb.folder(*f).is_some()),
         None => None,
     };
     let existing = mb
@@ -1052,25 +1199,26 @@ fn ensure_folder(
         .find(|f| f.parent == parent && f.name == name)
         .map(|f| f.id);
     if let Some(id) = existing {
-        // A folder made locally gets its label's id once the provider lists the same path.
-        if let (Some(rid), Some(folder)) = (by_path.get(path), mb.folder(id))
+        // A folder made locally gets its label's id once the provider lists the same path,
+        // unless another folder already holds that label.
+        if let (Some(rid), Some(folder), None) = (label, mb.folder(id), owner)
             && cache.folder_remote_id(id).map_err(err)?.is_none()
         {
             cache.upsert_folder(folder, Some(rid)).map_err(err)?;
+            cache.set_folder_synced(id, &mb.folder_path(id)).map_err(err)?;
         }
         return Ok(id);
     }
-    let folder = Folder {
-        id: mb.next_folder_id().max(cache.next_folder_id().map_err(err)?),
-        account: account.to_owned(),
-        name: name.to_owned(),
-        parent,
-    };
+    // The label is already a folder here, so the server renamed or moved it: follow it
+    // instead of growing a twin that carries the same label.
+    let id = owner.unwrap_or_else(|| mb.next_folder_id().max(cache.next_folder_id().unwrap_or(1)));
+    let folder = Folder { id, account: account.to_owned(), name: name.to_owned(), parent };
     mb.upsert_folder(folder.clone());
-    if let Some(rid) = by_path.get(path) {
+    if let Some(rid) = label {
         cache.upsert_folder(&folder, Some(rid)).map_err(err)?;
+        cache.set_folder_synced(id, &mb.folder_path(id)).map_err(err)?;
     }
-    Ok(folder.id)
+    Ok(id)
 }
 
 // -------------------------------------------------------------- load-more
@@ -1187,21 +1335,75 @@ pub fn persist_local(mb: &Mailbox, cache: &Cache) {
     }
 }
 
-/// Keep the cache's provider-unknown folders equal to the mailbox's: a new folder is stored
-/// without a remote label (the provider hears of it when the first message is filed), and one
-/// that is gone from the mailbox (its creation undone) is dropped.
+/// Keep the cache's folder rows equal to the mailbox's folders: a new folder is stored without
+/// a remote label (the provider hears of it when the first message is filed); a rename is
+/// stored (the confirmed path stays behind as the pending rename); a folder gone from the
+/// mailbox is dropped when the provider never saw it and tombstoned when it did, so its
+/// label is deleted remotely; and a tombstoned folder the mailbox has again (its deletion was
+/// undone) comes back.
 fn persist_local_folders(mb: &Mailbox, cache: &Cache) {
     for account in cache.account_ids().unwrap_or_default() {
-        let cached = cache.folder_list(&account).unwrap_or_default();
+        let Ok(rows) = cache.folder_rows(&account) else { continue };
         for folder in mb.folders(&account) {
-            if !cached.iter().any(|(id, ..)| *id == folder.id) {
-                let _ = cache.upsert_folder(folder, None);
+            match rows.iter().find(|r| r.id == folder.id) {
+                None => {
+                    let _ = cache.upsert_folder(folder, None);
+                }
+                Some(row) => {
+                    if row.deleted {
+                        let _ = cache.restore_folder(row.id);
+                    }
+                    if row.name != folder.name || row.parent != folder.parent {
+                        let _ = cache.upsert_folder(folder, None);
+                    }
+                }
             }
         }
-        for (id, _, _, remote) in &cached {
-            if remote.is_none() && mb.folder(*id).is_none() {
-                let _ = cache.delete_local_folder(*id);
-            }
+        // A mailbox that never loaded this account has no folders to compare against.
+        if mb.account(&account).is_none() {
+            continue;
+        }
+        for row in rows.iter().filter(|r| !r.deleted && mb.folder(r.id).is_none()) {
+            let _ = match row.remote_id {
+                None => cache.delete_local_folder(row.id),
+                Some(_) => cache.tombstone_folder(row.id),
+            };
         }
     }
+}
+
+/// Repair the folder set the cache handed over, once at startup, before anything syncs.
+///
+/// Folders with the same account, parent and name are merged: the one holding the most mail
+/// stays (ties: the lowest id), mail filed in the others is re-filed into it with no undo
+/// step, and the others leave the mailbox and the cache (their label, if any, is the
+/// keeper's). Blank-named folders holding no mail are removed. Returns how many folders went.
+pub fn heal_folders(mb: &mut Mailbox, cache: &Cache) -> usize {
+    let mut removed = 0;
+    for account in mb.accounts().iter().map(|a| a.id.clone()).collect::<Vec<_>>() {
+        loop {
+            let folders: Vec<Folder> = mb.folders(&account).into_iter().cloned().collect();
+            let filed = |id: FolderId| mb.messages().iter().filter(|m| m.state == TriageState::Filed(id)).count();
+            let rank = |id: FolderId| (filed(id), std::cmp::Reverse(id));
+            let twin = folders.iter().find_map(|f| {
+                folders
+                    .iter()
+                    .filter(|k| k.id != f.id && k.parent == f.parent && k.name == f.name)
+                    .find(|k| rank(k.id) > rank(f.id))
+                    .map(|k| (f.id, Some(k.id)))
+            });
+            let blank = || folders.iter().find(|f| f.name.trim().is_empty() && filed(f.id) == 0).map(|f| (f.id, None));
+            let Some((gone, into)) = twin.or_else(blank) else { break };
+            for id in mb.fold_folder(gone, into) {
+                if let Some(message) = mb.get(id) {
+                    let _ = cache.save_local(message);
+                }
+            }
+            let _ = cache.fold_folder(gone, into);
+            removed += 1;
+        }
+    }
+    // Ids still held by the cache (tombstones included) are never handed out again.
+    mb.reserve_folder_ids(cache.next_folder_id().unwrap_or(1).saturating_sub(1));
+    removed
 }

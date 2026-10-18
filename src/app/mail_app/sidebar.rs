@@ -15,6 +15,7 @@
 //! too, remembered per folder and per account section in `MailApp::sidebar_folds`. The app
 //! owns the pane's width and visibility through the resizable panel and `cmd-b`.
 use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::menu::ContextMenuExt as _;
 
 use super::drag::FolderDragPreview;
 use super::*;
@@ -192,7 +193,7 @@ fn row_id(loc: &Location) -> ElementId {
 
 /// The key a folder's fold state is stored under. A folder folds on its own in each view: the
 /// account view opens parents by default, the All view keeps them closed.
-fn folder_fold_key(id: FolderId, in_all: bool) -> String {
+pub(super) fn folder_fold_key(id: FolderId, in_all: bool) -> String {
     format!("{}-folder-{id}", if in_all { "all" } else { "account" })
 }
 
@@ -459,6 +460,7 @@ impl MailApp {
         });
         let drag = FolderDrag { location: loc.clone(), label: folder.name.clone() };
         let preview_label = SharedString::from(drag.label.clone());
+        let menu = self.context_menu(MenuKind::Folder(folder.id), cx);
         div()
             .id(row_id(&loc))
             .test_support()
@@ -484,6 +486,7 @@ impl MailApp {
             .on_drag(DockDrag::new(drag), move |_drag: &DockDrag, _offset, _window, cx| {
                 cx.new(|_| FolderDragPreview::new(preview_label.clone()))
             })
+            .context_menu(menu)
             .into_any_element()
     }
 

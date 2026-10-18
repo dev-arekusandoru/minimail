@@ -46,13 +46,17 @@ impl MailApp {
 
     pub(super) fn open_palette(&mut self, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         let targets = self.label_targets(None);
+        // Rename and Delete folder act on the folder the list is showing: only offered then.
+        let in_folder = self.target_folder(None).is_some();
         let commands = crate::app::actions::commands()
             .into_iter()
             .filter(|spec| {
                 let action = (spec.action)();
-                action.as_any().downcast_ref::<ResetLabel>().is_none_or(|reset| {
-                    targets.iter().any(|id| self.mailbox.is_overridden(*id, reset.key))
-                })
+                let any = action.as_any();
+                (in_folder || !(any.is::<RenameFolder>() || any.is::<DeleteFolder>()))
+                    && any.downcast_ref::<ResetLabel>().is_none_or(|reset| {
+                        targets.iter().any(|id| self.mailbox.is_overridden(*id, reset.key))
+                    })
             })
             .collect();
         let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), commands, window, cx));
@@ -934,7 +938,7 @@ impl MailApp {
             || account.clone(),
             |a| crate::account_style::display_name(a).to_owned(),
         );
-        let prompt = cx.new(|cx| NamePrompt::new(label, window, cx));
+        let prompt = cx.new(|cx| NamePrompt::new(format!("New folder in {label}"), "", window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &prompt,
             window,
@@ -1408,6 +1412,48 @@ impl MailApp {
         self.open_dialog(
             DialogSpec::new(title, String::new(), vec![DialogOption::new("", "Confirm", "")], 0),
             move |this, _, window, cx| on_confirm(this, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// `Delete…` on a folder: ask first. The folder and its subfolders go, but their mail is
+    /// archived, not deleted (as removing a Gmail label leaves the mail in All Mail). `enter`
+    /// cancels, `1` deletes.
+    pub(super) fn confirm_delete_folder(
+        &mut self,
+        folder: Option<FolderId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.modal_open() {
+            return;
+        }
+        let Some(id) = self.target_folder(folder) else { return };
+        let Some(name) = self.mailbox.folder(id).map(|f| f.name.clone()) else { return };
+        let n = self.mailbox.folder_message_count(id);
+        let tree = if self.mailbox.folder_subtree(id).len() > 1 { " and its subfolders" } else { "" };
+        let mail = match n {
+            0 => "It holds no messages.".to_owned(),
+            1 => "Its 1 message is not deleted: it moves to Archive.".to_owned(),
+            n => format!("Its {n} messages are not deleted: they move to Archive."),
+        };
+        let options = vec![
+            DialogOption::new("1", "Delete folder", "Mail moves to Archive"),
+            DialogOption::new("2", "Cancel", "Keep the folder"),
+        ];
+        self.open_dialog(
+            DialogSpec::new(
+                format!("Delete “{name}”?"),
+                format!("“{name}”{tree} will be deleted. {mail}"),
+                options,
+                1,
+            ),
+            move |this, ix, window, cx| {
+                if ix == 0 {
+                    this.delete_folder_now(id, window, cx);
+                }
+            },
             window,
             cx,
         );

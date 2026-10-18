@@ -96,6 +96,16 @@ impl Mailbox {
                 }
                 Change::Unsubscribed(e) => self.unsubscribed.retain(|u| *u != e),
                 Change::FolderPush(id) => self.folders.retain(|f| f.id != id),
+                Change::FolderRename(id, name) => {
+                    if let Some(f) = self.folders.iter_mut().find(|f| f.id == id) {
+                        f.name = name;
+                    }
+                }
+                Change::FolderRestore(removed) => {
+                    for (at, folder) in removed {
+                        self.folders.insert(at.min(self.folders.len()), folder);
+                    }
+                }
                 Change::Materialised(id) => {
                     if let Some(&i) = self.index.get(&id) {
                         self.messages.remove(i);

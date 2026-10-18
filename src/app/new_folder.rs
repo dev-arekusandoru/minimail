@@ -71,22 +71,33 @@ impl Render for AccountPicker {
     }
 }
 
-/// A single text field; enter submits the typed name.
+/// A single text field, optionally prefilled and selected; enter submits the typed name.
 pub struct NamePrompt {
     input: Entity<InputState>,
-    account: SharedString,
+    title: SharedString,
     _sub: Subscription,
 }
 
 impl NamePrompt {
-    pub fn new(account: impl Into<SharedString>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        title: impl Into<SharedString>,
+        initial: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Folder name"));
+        if !initial.is_empty() {
+            input.update(cx, |input, cx| {
+                input.set_value(initial, window, cx);
+                input.select_all(window, cx);
+            });
+        }
         let _sub = cx.subscribe(&input, |_, input, event: &InputEvent, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
                 cx.emit(NewFolderEvent::Name(input.read(cx).value().to_string()));
             }
         });
-        Self { input, account: account.into(), _sub }
+        Self { input, title: title.into(), _sub }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -106,7 +117,7 @@ impl Render for NamePrompt {
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
-                    .child(format!("New folder in {}", self.account)),
+                    .child(self.title.clone()),
             )
             .child(Input::new(&self.input))
     }

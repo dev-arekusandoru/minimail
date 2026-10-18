@@ -51,6 +51,7 @@ use self::judging::JudgeJob;
 
 mod accessors;
 mod actions;
+mod folder_edit;
 mod bottombar;
 mod dock;
 mod drag;

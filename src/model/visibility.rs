@@ -237,7 +237,8 @@ impl Mailbox {
         name: &str,
         parent: Option<FolderId>,
     ) -> FolderId {
-        let id = self.folders.iter().map(|f| f.id).max().unwrap_or(0) + 1;
+        let id = self.next_folder_id();
+        self.folder_floor = id;
         self.folders.push(Folder {
             id,
             account: account.to_owned(),
