@@ -9,7 +9,7 @@ use mail_classifier::app::icons::{
     Glyph, GlyphInputs, glyphs_for, legend, max_icons, split_overflow,
 };
 use mail_classifier::app::actions::SetUrgency;
-use mail_classifier::app::row::{BarState, RowVisual, sender_label, shows_account_icon};
+use mail_classifier::app::row::{RowVisual, sender_label, shows_account_icon};
 use mail_classifier::row_style::Chips;
 use mail_classifier::app::MailApp;
 use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
@@ -214,26 +214,17 @@ fn row_is_selectable_and_openable(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn open_and_cursor_states_are_independent_and_combine(cx: &mut TestAppContext) {
+fn cursor_and_open_row_are_the_same_row_once_a_tab_is_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     let (first, second) = (ids[0], ids[1]);
     h.keys("enter");
-    assert_eq!(cues(&mut h, first), (true, true, false), "cursor on the open row combines both cues");
-    assert!(h.read(|a| a.row_visual(first).combined()));
+    assert_eq!(cues(&mut h, first), (true, true, false));
 
     h.keys("j");
-    let open_only = h.read(|a| a.row_visual(first));
-    let cursor_only = h.read(|a| a.row_visual(second));
-    assert!(open_only.open && !open_only.cursor && !open_only.selected);
-    assert!(cursor_only.cursor && !cursor_only.open && !cursor_only.selected);
-    assert_ne!(open_only, cursor_only);
-    assert_eq!(h.read(|a| a.opened()), Some(first), "moving the cursor keeps the reader open");
-
-    h.keys("k");
-    assert!(h.read(|a| a.row_visual(first).combined()));
-    let second_after_return = h.read(|a| a.row_visual(second));
-    assert!(second_after_return.unread, "moving the cursor does not mark other rows read");
+    assert_eq!(h.read(|a| a.opened()), Some(second), "moving the cursor opens the row");
+    assert_eq!(cues(&mut h, second), (true, true, false));
+    assert!(!h.read(|a| a.row_visual(first)).open);
 }
 
 #[gpui_kit::gpui::test]
@@ -241,7 +232,7 @@ fn selected_state_is_separate_from_cursor_and_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     h.keys("enter x j");
-    assert_eq!(cues(&mut h, ids[0]), (false, true, true));
+    assert_eq!(cues(&mut h, ids[0]), (false, false, true));
 }
 
 #[gpui_kit::gpui::test]
@@ -254,7 +245,7 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
 
     h.keys("x");
     let selected = h.read(|a| a.row_visual(first));
-    assert!(selected.selected, "selection uses the full accent bar");
+    assert!(selected.selected);
     assert!(selected.unread, "unread remains in the visual state while selected");
 
     h.keys("enter");
@@ -264,12 +255,10 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
     h.keys("x");
     let open_deselected_cursor = h.read(|a| a.row_visual(first));
     assert!(open_deselected_cursor.open && open_deselected_cursor.cursor && !open_deselected_cursor.selected);
-    assert_eq!(open_deselected_cursor.bar_state(), BarState::Selected);
     h.keys("j");
-    let open_deselected = h.read(|a| a.row_visual(first));
-    assert!(open_deselected.open && !open_deselected.selected && !open_deselected.cursor);
-    assert_eq!(open_deselected.bar_state(), BarState::Selected);
-    assert!(!open_deselected.unread, "opening marks the message read without restoring the unread bar");
+    let left = h.read(|a| a.row_visual(first));
+    assert!(!left.open && !left.selected && !left.cursor);
+    assert!(!left.unread, "opening marks the message read");
 }
 
 #[test]
@@ -355,23 +344,13 @@ fn outgoing_rows_are_labelled_by_recipient() {
 }
 
 #[test]
-fn row_bar_state_uses_the_required_precedence() {
-    let state = |selected, open| RowVisual { selected, open, ..RowVisual::default() }.bar_state();
-    assert_eq!(state(false, false), BarState::None);
-    assert_eq!(state(true, false), BarState::Selected);
-    assert_eq!(state(false, true), BarState::Selected);
-    assert_eq!(state(true, true), BarState::Selected);
-    assert_eq!(
-        RowVisual { partial: true, ..RowVisual::default() }.bar_state(),
-        BarState::Partial
-    );
-    for bar in [
-        RowVisual::default(),
-        RowVisual { selected: true, ..RowVisual::default() },
+fn selected_open_and_cursor_rows_share_the_active_background() {
+    assert!(!RowVisual::default().active());
+    for v in [
+        RowVisual { cursor: true, ..RowVisual::default() },
         RowVisual { open: true, ..RowVisual::default() },
+        RowVisual { selected: true, ..RowVisual::default() },
     ] {
-        let focused = RowVisual { cursor: true, ..bar };
-        assert_eq!(focused.bar_state(), bar.bar_state(), "cursor does not replace bar state");
-        assert_ne!(focused, bar, "cursor remains independently represented");
+        assert!(v.active());
     }
 }

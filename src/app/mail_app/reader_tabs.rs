@@ -112,6 +112,26 @@ impl MailApp {
         if let Some(id) = self.tabs.opened() {
             self.focus_message(id, false);
             self.scroll_to_cursor();
+            // The cursor moved because of the tab: `follow_cursor` must not open it back.
+            self.followed_cursor = self.cursor_id();
+        }
+    }
+
+    /// Cursor and open message are one thing: while a reader tab is open, a cursor that moved
+    /// opens its message (preview updated in place, or a new preview beside a pinned tab). With
+    /// no tab open the cursor just moves. Runs every frame; acts only when the cursor changed.
+    pub(super) fn follow_cursor(&mut self) {
+        let cursor = self.cursor_id();
+        let moved = cursor != self.followed_cursor;
+        self.followed_cursor = cursor;
+        if !moved || self.tabs_locked() || self.tabs.active().is_none() {
+            return;
+        }
+        if let Some(id) = cursor {
+            let pane = self.pane_focus;
+            self.open_message(id, false);
+            // Following the cursor is not the user turning to the reader.
+            self.focus_pane(pane);
         }
     }
 

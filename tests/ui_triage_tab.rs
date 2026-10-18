@@ -126,7 +126,9 @@ fn the_end_summary_goes_with_the_group(cx: &mut TestAppContext) {
     assert_eq!(h.read(|a| a.session_end()), None);
     assert_eq!(h.groups(), 2);
     assert_eq!(h.zoomed(), None);
-    assert_eq!(h.arranged(), before);
+    // Archiving the cursor message moved the cursor, and the preview follows it.
+    let after = h.arranged();
+    assert_eq!((after.tabs, after.active), (before.tabs, before.active));
 }
 
 #[gpui_kit::gpui::test]

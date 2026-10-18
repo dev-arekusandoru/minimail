@@ -316,9 +316,8 @@ impl MailApp {
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
         let visual = RowVisual {
             cursor: ix == self.cursor_ix(),
-            open: self.opened().is_some_and(|id| ids.contains(&id)),
+            open: !*expanded && self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
-            partial: selected_count > 0 && selected_count < ids.len(),
             unread: unread_n > 0,
         };
         let (account, accent) = latest.map_or((None, t.primary), |m| self.compact_account(m, t));

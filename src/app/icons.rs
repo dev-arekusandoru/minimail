@@ -406,8 +406,8 @@ pub fn cluster(
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
-        ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
+        ("Cursor / open", t.list_hover.blend(t.foreground.opacity(0.06)), "Grey row: the cursor and the open message are the same row."),
+        ("Selected", t.primary, "Checked dot or tile on the left."),
     ];
     let row_state_section = div()
         .flex()
@@ -420,7 +420,7 @@ pub fn legend_view(t: &ThemeColor) -> Div {
                 .items_center()
                 .gap_2()
                 .text_xs()
-                .child(div().w(px(3.)).h(px(12.)).bg(color))
+                .child(div().w(px(12.)).h(px(12.)).rounded_sm().bg(color))
                 .child(div().w(px(112.)).flex_none().text_color(t.foreground).child(label))
                 .child(div().flex_1().text_color(t.muted_foreground).child(description))
         }))
@@ -428,7 +428,7 @@ pub fn legend_view(t: &ThemeColor) -> Div {
             div()
                 .text_xs()
                 .text_color(t.muted_foreground)
-                .child("Cursor: row_cursor background and outline. Click the left edge to select; cmd-click toggles and shift-click range-selects."),
+                .child("Click the left edge to select; cmd-click toggles and shift-click range-selects."),
         );
     let sections = legend().into_iter().map(|(group, glyphs)| {
         div()

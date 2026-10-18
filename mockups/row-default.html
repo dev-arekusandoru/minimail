@@ -22,11 +22,7 @@ h2{font:600 12px/16px ui-monospace,monospace;color:var(--muted);margin:0 0 8px;t
 
 .row{--rowbg:var(--bg);position:relative;display:flex;align-items:center;width:100%;border:1px solid transparent;padding:0 8px 0 10px;background:var(--rowbg)}
 .row:hover{--rowbg:var(--hover)}
-.row.cur{--rowbg:var(--active);border-color:rgba(97,175,239,.8)}
-.row.open,.row.sel{--rowbg:#2f3a4a} /* primary @ .14 over bg */
-.row.cur.open,.row.cur.sel{--rowbg:var(--active)}
-.row.partial::before,.row.open::before,.row.sel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary)}
-.row.partial::before{opacity:.45}
+.row.cur,.row.open,.row.sel{--rowbg:#393f49} /* hover blended 6% toward fg; same step for cursor/open/selected */
 .in{display:flex;gap:8px;align-items:flex-start;width:100%;min-width:0;padding:4px 0}
 .gut{width:40px;flex:none;text-align:right;font-size:11px;line-height:18px;color:var(--muted);position:relative;z-index:1}
 .unread .gut{color:var(--primary)}
@@ -144,7 +140,7 @@ list('Chips above · All Inboxes', {id:'c', chips:'above', all:true});
 list('Chips below · single account', {id:'d', chips:'below'});
 
 // states column: same message in every state
-const S = [['normal',[]],['hover',['hv']],['cursor',['cur']],['open (in reader)',['open']],['selected (bulk)',['sel']],['cursor + selected',['cur','sel']],['partial (thread)',['partial']]];
+const S = [['normal',[]],['hover',['hv']],['cursor',['cur']],['open (in reader)',['open']],['selected (bulk)',['sel']],['cursor + selected',['cur','sel']]];
 let h='';
 S.forEach(([n,c])=>{ h+=`<div class="cap">${n}</div>`+row(MSGS[1], {chips:'off', cls:c}); });
 document.body.insertAdjacentHTML('beforeend', `<div class="col" id="e"><h2>States</h2><div class="list">${h}</div></div>`);

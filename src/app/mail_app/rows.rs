@@ -102,7 +102,6 @@ impl MailApp {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
             selected: self.triage().is_selected(id),
-            partial: false,
             unread,
         }
     }

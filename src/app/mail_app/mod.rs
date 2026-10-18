@@ -109,6 +109,8 @@ pub struct MailApp {
     list_views: Vec<ListView>,
     /// Which pane the tab keys act on.
     pane_focus: Pane,
+    /// The cursor message the reader last followed (see `follow_cursor`).
+    followed_cursor: Option<MessageId>,
     /// The account tile the user clicked in the sidebar rail (`None` = All) and the view it
     /// was clicked in. The panel shows that account only while that view is still the active
     /// one; any other view makes the panel follow its own location (see
@@ -307,6 +309,7 @@ impl MailApp {
             list_tabs: ListTabs::new(all_inboxes.clone()),
             list_views: vec![ListView::new(all_inboxes, Location::AllInboxes)],
             pane_focus: Pane::default(),
+            followed_cursor: None,
             sidebar_pick: None,
             sidebar_folds: HashMap::new(),
             tabs: Tabs::default(),

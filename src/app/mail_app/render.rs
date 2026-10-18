@@ -9,6 +9,7 @@ impl Focusable for MailApp {
 
 impl Render for MailApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.follow_cursor();
         self.reconcile_tabs();
         self.sync_webviews(cx);
         self.sync_settings_blocked(cx);

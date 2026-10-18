@@ -44,7 +44,7 @@ fn count_chip(text: String, color: Hsla, t: &ThemeColor) -> Div {
 
 /// The background of a child row at rest: darker than the list, so children read as nested.
 fn child_bg(v: RowVisual, t: &ThemeColor) -> Hsla {
-    if v.cursor || v.selected || v.open {
+    if v.active() {
         row::row_bg(v, t)
     } else {
         t.background.blend(black().opacity(0.1))
@@ -158,9 +158,9 @@ impl MailApp {
         let unread_n = ids.iter().filter(|id| self.unread_in(**id)).count();
         let visual = RowVisual {
             cursor: ix == self.cursor_ix(),
-            open: self.opened().is_some_and(|id| ids.contains(&id)),
+            // An expanded header does not light up: the open message's own child row does.
+            open: !*expanded && self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
-            partial: selected_count > 0 && selected_count < ids.len(),
             unread: unread_n > 0,
         };
         let style = self.row_style;
@@ -327,7 +327,7 @@ impl MailApp {
                     .text_size(px(if small { 8. } else { 9. }))
                     .line_height(px(9.))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(if visual.unread { t.primary_foreground } else { t.foreground })
+                    .text_color(if visual.unread { t.background } else { ring })
                     .child(label),
             );
         let mark = div().w(px(7.)).h(px(row::LINE_H)).flex_none().relative().child(node);
@@ -390,7 +390,7 @@ impl MailApp {
         let label = (SharedString::from(sender.clone()), SharedString::from(msg.subject.clone()));
         let container = self.draggable(container, &[*id], Some(*thread_id), label);
         let menu = self.context_menu(MenuKind::Message(*id), cx);
-        let plain = !visual.cursor && !visual.selected && !visual.open;
+        let plain = !visual.active();
         let frame = row::frame(container, visual, t)
             .when(plain, move |d| d.bg(bg))
             .child(self.row_selection_target(ix, cx));
