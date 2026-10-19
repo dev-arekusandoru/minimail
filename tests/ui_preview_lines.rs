@@ -9,13 +9,16 @@ mod harness;
 use harness::{Harness, harness_with, mailbox, msg};
 
 fn app(cx: &mut TestAppContext) -> Harness<'_> {
-    harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]))
+    let long = "A preview sentence that repeats across enough width to wrap. ".repeat(50);
+    let message = msg(1, 1, "alice@example.com", "Question", 1, "Inbox")
+        .replace("Just checking in about this.", &long);
+    harness_with(cx, mailbox(&[message]))
 }
 
 fn row_height(h: &mut Harness<'_>) -> f32 {
     h.cx.update_window(h.window, |_, window, cx| {
         window.render_frame(cx);
-        window.try_find(("row", 1usize)).expect("message row").bounds().size.height.0
+        f32::from(window.try_find(("row", 1usize)).expect("message row").bounds().size.height)
     }).unwrap()
 }
 
