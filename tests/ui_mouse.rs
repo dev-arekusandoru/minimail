@@ -431,12 +431,15 @@ fn rail_settings_and_bottom_bar_help_buttons_toggle_their_panels(cx: &mut TestAp
 }
 
 #[gpui_kit::gpui::test]
-fn session_button_starts_a_session(cx: &mut TestAppContext) {
+fn session_button_opens_the_start_screen(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.click("btn-session");
+    assert!(h.read(|a| a.session_setup().is_some()));
+    h.keys("enter");
     assert!(h.read(|a| a.session_progress()).is_some());
-    h.click("session-end");
-    assert!(h.read(|a| a.session_progress()).is_none());
+    h.keys("escape");
+    h.keys("escape");
+    assert!(h.read(|a| !a.triage_open()));
 }
 
 #[gpui_kit::gpui::test]

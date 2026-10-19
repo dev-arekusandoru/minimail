@@ -29,6 +29,8 @@ gpui_kit::assets::icon_assets!(
         SquarePen, FolderPlus, ListFilter,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
         ReplyAll, Forward, Regex, WholeWord, ScanSearch,
+        // Triage Focus Reader.
+        SkipForward, MessageSquare,
         // Per-message classification state (not classified / in progress / failed).
         CircleDashed, LoaderCircle, CircleAlert
     ]

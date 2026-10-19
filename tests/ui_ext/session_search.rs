@@ -17,6 +17,10 @@ pub fn triage_session_auto_advances_and_ends_with_summary(cx: &mut TestAppContex
         ]),
     );
     h.keys("t");
+    assert_eq!(h.read(|a| a.session_progress()), None, "t opens the Start screen, nothing runs yet");
+    assert_eq!(h.read(|a| a.session_setup().map(|v| v.queue_len)), Some(3));
+    h.keys("enter");
+    assert!(h.read(|a| a.session_setup().is_none()));
     assert_eq!(h.read(|a| a.session_progress()), Some((1, 3)));
     assert_eq!(h.read(|a| a.opened()), Some(1), "session shows the current message");
 
@@ -31,27 +35,32 @@ pub fn triage_session_auto_advances_and_ends_with_summary(cx: &mut TestAppContex
     assert_eq!(h.state_of(3), Inbox);
 
     assert_eq!(h.read(|a| a.session_progress()), None, "session is over");
-    assert_eq!(h.read(|a| a.session_end()), Some((3, 65)), "3 handled · 1m 5s");
+    let summary = h.read(|a| a.session_summary().copied()).expect("summary is up");
+    assert_eq!((summary.handled, summary.elapsed_secs, summary.tally.archived), (3, 65, 2));
+    assert_eq!(summary.remaining, 1, "message 3 is back in the inbox");
 
     h.keys("escape");
-    assert_eq!(h.read(|a| a.session_end()), None);
+    assert_eq!(h.read(|a| a.session_summary().copied()), None);
     h.assert_invariant("session");
 }
 
 #[gpui_kit::gpui::test]
 pub fn triage_session_escape_ends_early(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
-    h.keys("t e");
+    h.keys("t enter e");
     assert_eq!(h.read(|a| a.session_progress()), Some((2, 3)));
     h.keys("escape");
     assert_eq!(h.read(|a| a.session_progress()), None);
     assert_eq!(h.state_of(1), Archived);
     assert_eq!(h.state_of(2), Inbox);
-    assert_eq!(h.read(|a| a.session_end()), Some((1, 0)), "escape after handling shows the end card");
+    let summary = h.read(|a| a.session_summary().copied()).expect("escape after handling shows the summary");
+    assert_eq!((summary.handled, summary.elapsed_secs), (1, 0));
     h.keys("escape");
-    assert_eq!(h.read(|a| a.session_end()), None, "a second escape dismisses the card");
+    assert_eq!(h.read(|a| a.session_summary().copied()), None, "a second escape closes the summary");
     h.keys("t escape");
-    assert_eq!(h.read(|a| a.session_end()), None, "nothing handled: no card");
+    assert!(h.read(|a| a.session_setup().is_none()), "escape cancels the Start screen");
+    h.keys("t enter escape");
+    assert!(h.read(|a| !a.triage_open()), "nothing handled: no summary");
 }
 
 // ---------------------------------------------------------------- Search

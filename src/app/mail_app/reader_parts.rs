@@ -19,16 +19,24 @@ pub(super) enum Role {
     Thread,
 }
 
-/// Per-frame look shared by every reader piece: theme and mono family.
+/// Per-frame look shared by every reader piece: theme and mono family. `focus` is the Triage
+/// Focus Reader variant of the message header, chips, rows and attachments.
 pub(super) struct Look<'a> {
     pub t: &'a ThemeColor,
     pub mono: SharedString,
+    pub focus: bool,
     dark: bool,
 }
 
 impl<'a> Look<'a> {
     pub fn new(cx: &'a App) -> Self {
-        Self { t: &cx.theme().colors, mono: mono_font(cx), dark: cx.theme().is_dark() }
+        Self { t: &cx.theme().colors, mono: mono_font(cx), focus: false, dark: cx.theme().is_dark() }
+    }
+
+    /// This look in its focus variant when `on`.
+    pub fn focused(mut self, on: bool) -> Self {
+        self.focus = on;
+        self
     }
 
     /// The sender's monogram at `size` px: the one avatar the reader has, shared by the message
@@ -102,16 +110,20 @@ impl<'a> Look<'a> {
         b
     }
 
-    /// Row-badge look (see `icons.rs`): tinted border and fill, UI label, optional glyph.
+    /// Row-badge look (see `icons.rs`): tinted border and fill, UI label, optional glyph. The
+    /// focus variant is the Focus Reader's chip: hover-surface fill, no border, 20px.
     pub fn badge(&self, label: impl Into<SharedString>, color: Hsla, glyph: Option<Glyph>) -> Tag {
-        Tag::custom(color.opacity(0.1), color, color.opacity(0.5))
+        let focus = self.focus;
+        let (fill, border) =
+            if focus { (self.t.list_hover, self.t.list_hover) } else { (color.opacity(0.1), color.opacity(0.5)) };
+        Tag::custom(fill, color, border)
             .rounded(px(4.))
             .flex_none()
             .gap_1()
-            .h(px(18.))
-            .px(px(6.))
-            .text_size(px(10.5))
-            .when_some(glyph, |d, g| d.child(icons::icon(g, self.t, 11.)))
+            .h(px(if focus { 20. } else { 18. }))
+            .px(px(if focus { 8. } else { 6. }))
+            .text_size(px(if focus { 11. } else { 10.5 }))
+            .when_some(glyph, |d, g| d.child(icons::icon(g, self.t, if focus { 12. } else { 11. })))
             .child(label.into())
     }
 

@@ -18,8 +18,6 @@ impl MailApp {
             HintMode::Settings
         } else if self.rules_panel.is_some() {
             HintMode::Rules
-        } else if self.in_session() || self.session_end.is_some() {
-            HintMode::Session(self.session_end.is_some())
         } else if self.new_senders_open() {
             HintMode::NewSenders
         } else {

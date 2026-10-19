@@ -128,3 +128,28 @@ Every user action is one undo step.
 | `g` + letter | Jump to sidebar location |
 
 Sender-wide variants use `shift-` and confirm first.
+
+## Triage mode
+
+`t` opens a full-window mode with three screens; logic lives in `src/triage_session.rs`
+and `src/triage_suggest.rs`.
+
+- **Start** (`t`): pick the inbox, a filter chip (with counts), session size (25/50/100/All),
+  order (newest/oldest first) and the AI-suggestions toggle. `enter` starts, `esc` cancels.
+  An empty queue does not start.
+- **Running**: one message at a time, a progress bar of position/total. `e f s d r m` act as
+  usual; `space` skips; `enter` takes the suggestion (nothing without one); `esc` ends the
+  session, to the Summary when anything was handled, else straight back.
+- **Summary**: counts per action, handled / time / average per message, suggestions taken, and
+  what is left in the inbox. `esc` closes, `enter` keeps going (same options, new queue).
+
+Counting: every action that takes the current message out of the queue (archive, file,
+snooze, delete, reply sent, move to inbox, mute) handles it once and bumps its own tally
+(the last two have none). Skip moves the message to the queue's end and bumps *skipped*;
+it handles nothing and is not an undo step, and the message counts only when finally acted
+on. Progress is `(handled + 1, queue length)`; the total never changes.
+
+Suggestion (a deterministic stub, no AI): Possible Spam → Delete; else with at least 3
+earlier decided messages (archived, filed or deleted) from the sender, ≥ 80% archived →
+Archive, ≥ 80% filed to one folder → File to it. Otherwise none, and the card is hidden.
+Every action, suggested or not, is one undo step.

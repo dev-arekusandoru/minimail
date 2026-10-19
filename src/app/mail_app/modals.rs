@@ -54,6 +54,7 @@ impl MailApp {
                 let action = (spec.action)();
                 let any = action.as_any();
                 (in_folder || !(any.is::<RenameFolder>() || any.is::<DeleteFolder>()))
+                    && (self.in_session() || !(any.is::<SkipMessage>() || any.is::<AcceptSessionSuggestion>()))
                     && any.downcast_ref::<ResetLabel>().is_none_or(|reset| {
                         targets.iter().any(|id| self.mailbox.is_overridden(*id, reset.key))
                     })
@@ -185,6 +186,7 @@ impl MailApp {
                             this.judge_reply(*in_reply_to, seq, now, body.clone(), cx);
                         }
                         this.close_modals(window, cx);
+                        this.session_advance(Outcome::Replied);
                         this.open_post_send_dialog(*in_reply_to, window, cx);
                         this.show_undo_toast("Reply queued".into(), window, cx);
                     }
@@ -217,7 +219,7 @@ impl MailApp {
             if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
                 self.mailbox.snooze(&ids, until, now.at());
                 self.triage_mut().clear_selection();
-                self.session_advance();
+                self.session_advance(Outcome::Snoozed);
             }
             cx.notify();
             return;
@@ -688,7 +690,7 @@ impl MailApp {
         };
         self.mailbox.mute_thread(thread);
         self.show_undo_toast("Thread muted".into(), window, cx);
-        self.session_advance();
+        self.session_advance(Outcome::Other);
         cx.notify();
     }
 
@@ -725,13 +727,9 @@ impl MailApp {
             self.close_filter_popover();
         } else if self.is_filtered() {
             self.clear_filters(cx);
-        } else if let Some(s) = self.session.take() {
-            if s.handled > 0 {
-                self.session_end = Some((s.handled, self.now() - s.started));
-            } else {
-                self.session_view = None;
-            }
-        } else if self.session_end.is_some() {
+        } else if self.session.is_some() {
+            self.end_run();
+        } else if self.triage_open() {
             self.end_session();
         } else {
             self.triage_mut().clear_selection();
@@ -1076,7 +1074,7 @@ impl MailApp {
             _ => format!("Filed {n}"),
         };
         self.show_undo_toast(text, window, cx);
-        self.session_advance();
+        self.session_advance(Outcome::Filed);
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1212,7 +1210,7 @@ impl MailApp {
             None => String::new(),
         };
         self.show_undo_toast(format!("{verb} {email}{tail}"), window, cx);
-        self.session_advance();
+        self.session_advance(state.map_or(Outcome::Other, Outcome::of));
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1261,7 +1259,7 @@ impl MailApp {
             format!("Marked {n} as spam")
         };
         self.show_undo_toast(text, window, cx);
-        self.session_advance();
+        self.session_advance(Outcome::Deleted);
         self.scroll_to_cursor();
         cx.notify();
         // Blocking already swept the sender; a plain delete asks what to do about the rest.
@@ -1312,7 +1310,7 @@ impl MailApp {
                     m.set_state_for_sender(&email, TriageState::Inbox, TriageState::Deleted)
                 });
                 this.show_undo_toast(format!("Deleted {n} more from {email}"), window, cx);
-                this.session_advance();
+                this.session_advance(Outcome::Deleted);
                 this.scroll_to_cursor();
                 this.ask_always_spam(email.clone(), depth, window, cx);
             },

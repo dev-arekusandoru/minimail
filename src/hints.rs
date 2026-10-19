@@ -18,8 +18,6 @@ pub enum HintMode {
     Reader,
     Compose,
     Palette,
-    /// Triage session; `true` once the end card is showing.
-    Session(bool),
     NewSenders,
     Settings,
     Rules,
@@ -130,14 +128,6 @@ fn ranked(ctx: &HintContext) -> Vec<Ranked> {
             v.push(h("enter", "run", 0));
             v.push(ESC_CLOSE);
         }
-        HintMode::Session(true) => v.push(ESC_CLOSE),
-        HintMode::Session(false) => {
-            v.extend(verbs(false));
-            if ctx.outside_inbox {
-                v.push(h("i", "inbox", 3));
-            }
-            v.push(h("escape", "end", 0));
-        }
         HintMode::NewSenders if ctx.empty => v.push(HELP),
         HintMode::NewSenders => {
             v.push(h("a", "allow", 0));
@@ -247,7 +237,6 @@ mod tests {
             HintMode::List,
             HintMode::Selection(3),
             HintMode::Reader,
-            HintMode::Session(false),
             HintMode::Settings,
             HintMode::Snooze,
             HintMode::NewSenders,

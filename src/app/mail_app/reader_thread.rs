@@ -4,6 +4,8 @@
 use super::super::*;
 use super::parts::{Look, Role};
 use crate::reading;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{Icon, Sizable as _};
 
 /// Height of a collapsed thread line.
 pub(super) const COLLAPSED_H: f32 = 46.;
@@ -43,7 +45,7 @@ impl MailApp {
         cx: &Context<Self>,
     ) -> AnyElement {
         if expanded {
-            self.message_surface(m, Role::Thread, look, cx)
+            self.message_surface(m, Role::Thread, look, None, cx)
         } else {
             self.collapsed_line(m, newest, look, cx)
         }
@@ -51,6 +53,9 @@ impl MailApp {
 
     /// One compact line: sender, muted snippet, paperclip when it has attachments, mono date.
     pub(super) fn collapsed_line(&self, m: &Message, newest: &str, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+        if look.focus {
+            return self.focus_line(m, newest, look, cx);
+        }
         let t = &look.t;
         let mid = m.id;
         let hover = t.list_hover;
@@ -91,6 +96,108 @@ impl MailApp {
             )
             .when(!m.attachments.is_empty(), |d| d.child(icons::icon(Glyph::Attachment, t, 13.)))
             .child(look.mono(self.clock_label(&m.received, newest, &self.local_now()), t.muted_foreground).flex_none())
+            .into_any_element()
+    }
+
+    /// The Focus Reader's collapsed row: 24px avatar, sender, muted snippet, date, on a 40px
+    /// hover-surface band.
+    fn focus_line(&self, m: &Message, newest: &str, look: &Look<'_>, cx: &Context<Self>) -> AnyElement {
+        let p = super::super::triage_screen::Pal::new(look.t);
+        let mid = m.id;
+        let hover = p.active;
+        div()
+            .id(("reader-thread-msg", m.id as usize))
+            .test_support()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_3()
+            .h(px(40.))
+            .px_3()
+            .rounded_lg()
+            .bg(p.hover)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .text_size(px(13.))
+            .text_color(p.fg)
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_reader_expanded(mid, cx)))
+            .child(look.monogram(&m.from_name, &m.from_email, 24.))
+            .child(
+                div()
+                    .w(px(140.))
+                    .flex_none()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.fg)
+                    .child(row::sender_label(m)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.))
+                    .text_color(p.muted)
+                    .child(crate::preview::snippet(&reading::reader_text(m))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.))
+                    .text_color(p.muted)
+                    .child(self.clock_label(&m.received, newest, &self.local_now())),
+            )
+            .into_any_element()
+    }
+
+    /// The Focus Reader's thread block: `THREAD · N EARLIER MESSAGES` with the `t` key, then
+    /// the thread's other messages in order, collapsed or expanded.
+    pub(super) fn focus_thread(
+        &self,
+        opened: &Message,
+        order: &[MessageId],
+        newest: &str,
+        look: &Look<'_>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let p = super::super::triage_screen::Pal::new(look.t);
+        let others: Vec<&Message> =
+            order.iter().filter(|id| **id != opened.id).filter_map(|id| self.mailbox.get(*id)).collect();
+        let at = order.iter().position(|id| *id == opened.id).unwrap_or(0);
+        let word = if at == order.len() - 1 { "EARLIER" } else { "OTHER" };
+        let label = format!(
+            "THREAD · {} {word} MESSAGE{}",
+            others.len(),
+            if others.len() == 1 { "" } else { "S" }
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .id("reader-thread-toggle")
+                    .test_support()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(28.))
+                    .px_1()
+                    .cursor_pointer()
+                    .font_family(look.mono.clone())
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_size(px(10.))
+                    .line_height(px(14.))
+                    .text_color(p.muted)
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_thread_expansion(cx)))
+                    .child(Icon::new(IconName::MessageSquare).with_size(px(16.)).text_color(p.muted))
+                    .child(label)
+                    .child(div().ml_auto().child(super::super::triage_screen::key_badge(&p, &look.mono, "t", false))),
+            )
+            .children(others.into_iter().map(|m| {
+                let expanded = self.reader.is_expanded(m.thread_id, m.id);
+                self.thread_message(m, expanded, newest, look, cx)
+            }))
             .into_any_element()
     }
 }

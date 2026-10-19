@@ -19,11 +19,6 @@
 //! The reader group mirrors [`crate::tabs::Tabs`]: one panel per open thread, in tab
 //! order, with the active tab displayed. A panel standing for "nothing is open" keeps the
 //! group alive, so the group never disappears out from under the layout.
-//!
-//! A triage session adds a third group, holding one [`TriagePanel`] that draws the session's
-//! list and reader together. The group exists only while the session does, and is zoomed
-//! over the whole dock for as long as it is wanted; the other two groups are rebuilt as they
-//! were, so nothing the user arranged is touched.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -54,8 +49,6 @@ pub(super) struct Dock {
     blank: Entity<ReaderPanel>,
     /// One panel per open thread, in [`crate::tabs::Tabs`] order.
     readers: Vec<Entity<ReaderPanel>>,
-    /// The Triage tab's panel, in a group of its own, while a session is running.
-    triage: Option<Entity<TriagePanel>>,
     /// Which way the centre splits.
     orientation: Orientation,
     /// The centre split's list slot, remembered per orientation so each keeps its own.
@@ -79,8 +72,6 @@ struct Built {
     threads: Vec<u32>,
     /// The views the list group is showing, in tab order.
     views: Vec<Query>,
-    /// Whether the Triage group is there.
-    triage: bool,
 }
 
 impl Dock {
@@ -119,7 +110,6 @@ impl Dock {
             measured,
             blank,
             readers: Vec::new(),
-            triage: None,
             orientation: Orientation::default(),
             sizes: default_sizes(window),
             list_w_default: Cell::new(available_width(
@@ -146,7 +136,6 @@ impl Dock {
             reader: None,
             views: vec![initial.clone()],
             list: 0,
-            triage: false,
         };
         dock.rebuild_now(&tabs, window, cx);
         dock
@@ -178,13 +167,12 @@ impl Dock {
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) -> Dragged {
-        let TabSets { readers: threads, reader: active, views, list: list_active, triage } = tabs;
+        let TabSets { readers: threads, reader: active, views, list: list_active } = tabs;
         let mut dragged = Dragged { readers: None, lists: None };
         let wanted = Built {
             orientation: self.orientation,
             threads: threads.clone(),
             views: views.clone(),
-            triage: *triage,
         };
         if self.built.as_ref() != Some(&wanted) {
             let ix = active.and_then(|thread| self.reader_ix(thread, cx));
@@ -208,7 +196,6 @@ impl Dock {
                 orientation: self.orientation,
                 threads: order,
                 views: views.clone(),
-                triage: *triage,
             });
         }
         if let Some(order) = dragged.lists.as_ref().map(|dragged| dragged.order.clone()) {
@@ -225,7 +212,6 @@ impl Dock {
                 orientation: self.orientation,
                 threads: threads.clone(),
                 views: order,
-                triage: *triage,
             });
         }
         // The active tab may have moved with the panels — or the drag may have opened it — so
@@ -415,11 +401,10 @@ impl Dock {
                 .chain(std::iter::once(&self.blank))
                 .map(|panel| PanelId::from(panel.entity_id()))
                 .collect(),
-            Zoom::Triage => self.triage.iter().map(|panel| PanelId::from(panel.entity_id())).collect(),
         }
     }
 
-    /// How many tab groups the centre holds: the list, the reader, and the Triage tab's.
+    /// How many tab groups the centre holds: the list and the reader.
     pub(super) fn group_count(&self, cx: &App) -> usize {
         let area = self.area.read(cx);
         let mut groups = 0;
@@ -436,7 +421,7 @@ impl Dock {
     /// The group that fills the dock now, if one does.
     pub(super) fn zoomed(&self, cx: &App) -> Option<Zoom> {
         let node = self.area.read(cx).zoomed_group()?;
-        [Zoom::Triage, Zoom::List, Zoom::Reader]
+        [Zoom::List, Zoom::Reader]
             .into_iter()
             .find(|zoom| self.node_holds(node, &self.zoom_panels(*zoom, cx), cx))
     }
@@ -524,11 +509,9 @@ impl Dock {
         window: &mut Window,
         cx: &mut Context<MailApp>,
     ) {
-        let TabSets { readers: threads, views, triage, .. } = tabs;
-        // A rebuild replaces the groups, so a zoom has to be put back on the new one — or, as the
-        // Triage group comes and goes, given to it or taken away.
+        let TabSets { readers: threads, views, .. } = tabs;
+        // A rebuild replaces the groups, so a zoom has to be put back on the new one.
         let zoomed = self.zoomed(cx);
-        let had_triage = self.triage.is_some();
         if zoomed.is_some() {
             self.area.update(cx, |area, cx| area.set_zoomed_out(window, cx));
         }
@@ -579,24 +562,9 @@ impl Dock {
         }
         self.lists = lists;
         self.blank.update(cx, |panel, _| panel.standalone = self.readers.is_empty());
-        self.triage = match (*triage, self.triage.take()) {
-            (true, Some(panel)) => Some(panel),
-            (true, None) => {
-                let app = self.app.clone();
-                let app_entity = cx.entity();
-                Some(cx.new(|cx| TriagePanel {
-                    app,
-                    measured: Rc::new(Cell::new((0., 0.))),
-                    focus: cx.focus_handle(),
-                    _app_sub: watch_app(&app_entity, cx),
-                }))
-            }
-            (false, _) => None,
-        };
 
         let list = list_layout(self, list_active, cx);
         let reader = self.reader_layout(active, cx);
-        let triage_group = self.triage.as_ref().map(|panel| DockLayout::tabs().panel_view(panel_handle(panel.clone()), cx));
         let orientation = self.orientation;
         let size = Some(px(self.sizes[orientation.ix()]));
 
@@ -605,10 +573,7 @@ impl Dock {
                 Orientation::SideBySide => DockLayout::h_split(),
                 Orientation::Stacked => DockLayout::v_split(),
             };
-            let mut split = split.child(list, size).child(reader, None);
-            if let Some(group) = triage_group {
-                split = split.child(group, None);
-            }
+            let split = split.child(list, size).child(reader, None);
             area.set_center(split, window, cx);
         });
         self.active = (active < self.readers.len()).then_some(active);
@@ -617,16 +582,8 @@ impl Dock {
             orientation,
             threads: threads.to_vec(),
             views: views.clone(),
-            triage: *triage,
         });
-        let zoom = match (had_triage, *triage) {
-            // A session just began: its tab takes the view.
-            (false, true) => Some(Zoom::Triage),
-            // It just ended: the dock is given back whole.
-            (true, false) => None,
-            _ => zoomed,
-        };
-        if let Some(zoom) = zoom {
+        if let Some(zoom) = zoomed {
             self.zoom_in(zoom, window, cx);
         }
     }
@@ -680,8 +637,6 @@ pub(super) struct TabSets {
     pub views: Vec<Query>,
     /// The list tab to display, as an index into `views`.
     pub list: usize,
-    /// Whether a session's Triage tab exists, and so its group.
-    pub triage: bool,
 }
 
 /// A tab group that can fill the dock.
@@ -689,7 +644,6 @@ pub(super) struct TabSets {
 pub(super) enum Zoom {
     List,
     Reader,
-    Triage,
 }
 
 impl Zoom {
@@ -697,7 +651,6 @@ impl Zoom {
         match self {
             Zoom::List => "list",
             Zoom::Reader => "reader",
-            Zoom::Triage => "triage",
         }
     }
 }
@@ -858,8 +811,8 @@ impl Render for ReaderPanel {
 }
 
 /// The reader `slot` draws: the composer when it is open and this is the reader it replies
-/// from — the Triage tab's while one exists — otherwise the opened thread.
-fn reader_content(app: &mut MailApp, slot: Slot, cx: &mut Context<MailApp>) -> AnyElement {
+/// from — the Triage takeover's while Triage mode is open — otherwise the opened thread.
+pub(super) fn reader_content(app: &mut MailApp, slot: Slot, cx: &mut Context<MailApp>) -> AnyElement {
     let before = app.enter_slot(slot);
     let triage = slot == Slot::Triage;
     // The email views this pass draws stay; the others (another tab's, or all when the composer
@@ -875,79 +828,4 @@ fn reader_content(app: &mut MailApp, slot: Slot, cx: &mut Context<MailApp>) -> A
     webviews.end_pass(triage);
     app.leave_slot(before);
     content
-}
-
-/// The Triage tab: the session's list and the session's reader side by side (or stacked, like
-/// the centre), in a group of its own that lives as long as the session does. It is the only
-/// tab in its strip and is never closed or pinned: ending the session is what removes it.
-pub(super) struct TriagePanel {
-    app: WeakEntity<MailApp>,
-    /// The list half as last painted, so its rows size themselves from the real pane.
-    measured: Rc<Cell<(f32, f32)>>,
-    focus: FocusHandle,
-    _app_sub: Subscription,
-}
-
-impl BasePanel for TriagePanel {
-    fn panel_name(&self) -> &'static str {
-        "mail.triage"
-    }
-    fn closable(&self, _: &App) -> bool {
-        false
-    }
-    fn zoomable(&self, _: &App) -> bool {
-        true
-    }
-}
-
-impl Panel for TriagePanel {
-    fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().child("Triage")
-    }
-
-    fn inner_padding(&self, _: &App) -> bool {
-        false
-    }
-
-    fn zoom_control(&self, _: &App) -> Option<PanelControl> {
-        Some(PanelControl::Toolbar)
-    }
-}
-
-impl EventEmitter<PanelEvent> for TriagePanel {}
-
-impl Focusable for TriagePanel {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
-
-impl Render for TriagePanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(app) = self.app.upgrade() else { return div() };
-        let measured = self.measured.clone();
-        let (list, reader, stacked) = app.update(cx, |app, cx| {
-            let before = app.enter_slot(Slot::Triage);
-            let painted = measured.get().0;
-            app.list_w = if painted > 0. { painted } else { app.list_width() };
-            let list = app.render_list(cx);
-            app.leave_slot(before);
-            let reader = reader_content(app, Slot::Triage, cx);
-            (list, reader, app.orientation() == Orientation::Stacked)
-        });
-        let share = |d: Div| if stacked { d.w_full().h(relative(0.45)) } else { d.h_full().w(relative(0.42)) };
-        div()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .flex()
-            .when(stacked, |d| d.flex_col())
-            .child(
-                share(div().flex_none().min_w_0().min_h_0().on_prepaint(move |bounds, _, _| {
-                    measured.set((f32::from(bounds.size.width), f32::from(bounds.size.height)))
-                }))
-                .child(list),
-            )
-            .child(div().flex_1().min_w_0().min_h_0().flex().flex_col().child(reader))
-    }
 }

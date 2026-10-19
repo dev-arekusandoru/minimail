@@ -97,11 +97,13 @@ impl MailApp {
             || self.toast.is_some()
             || self.fetch_toast;
         self.webviews.set_overlay(overlay);
+        // Triage mode takes the whole window: the tabs' email views hide while it is open, and
+        // the Triage slot's show only then.
+        let triage = self.triage_open();
         let zoomed = self.zoomed_group(cx);
-        self.webviews.set_slot_visible(false, matches!(zoomed, None | Some("reader")));
-        self.webviews
-            .set_slot_visible(true, self.triage_open() && matches!(zoomed, None | Some("triage")));
-        if !self.triage_open() {
+        self.webviews.set_slot_visible(false, !triage && matches!(zoomed, None | Some("reader")));
+        self.webviews.set_slot_visible(true, triage);
+        if !triage {
             self.webviews.forget(|key| key.triage);
         }
     }
@@ -184,14 +186,14 @@ impl MailApp {
 
     /// Tab shortcuts do nothing behind a modal or menu, or while a session hides the tabs.
     pub(super) fn tabs_locked(&self) -> bool {
-        self.modal_open() || self.menu_open() || self.in_session() || self.session_end.is_some()
+        self.modal_open() || self.menu_open() || self.triage_open()
     }
 
     /// Close preview tabs whose thread has no message in the list any more (triaged away, or
     /// the view changed); pinned tabs stay. Runs every frame but costs nothing without a
     /// preview, and never during a session, which hides the tabs.
     pub(super) fn reconcile_tabs(&mut self) {
-        if !self.tabs.has_preview() || self.in_session() || self.session_end.is_some() {
+        if !self.tabs.has_preview() || self.triage_open() {
             return;
         }
         let shown: HashSet<u32> =

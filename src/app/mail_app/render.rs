@@ -33,6 +33,8 @@ impl Render for MailApp {
         if self.find_placement_pending() {
             window.request_animation_frame();
         }
+        let triage = self.triage_open();
+        let triage_body = triage.then(|| self.render_triage(cx));
         let banner = self.pending_rule.clone();
         let t = cx.theme();
         let (bg, fg) = (t.background, t.foreground);
@@ -102,10 +104,14 @@ impl Render for MailApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ClearSelection, window, cx| this.escape(window, cx)))
-            .on_action(cx.listener(|this, _: &OpenMessage, _, cx| {
-                this.open_cursor();
+            .on_action(cx.listener(|this, _: &OpenMessage, w, cx| {
+                if !this.triage_enter(w, cx) {
+                    this.open_cursor();
+                }
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &SkipMessage, w, cx| this.skip_current(w, cx)))
+            .on_action(cx.listener(|this, _: &AcceptSessionSuggestion, w, cx| this.accept_session_suggestion(w, cx)))
             .on_action(cx.listener(|this, _: &Archive, w, cx| this.mark(TriageState::Archived, w, cx)))
             .on_action(cx.listener(|this, _: &Delete, w, cx| this.mark(TriageState::Deleted, w, cx)))
             .on_action(cx.listener(|this, _: &File, w, cx| {
@@ -298,20 +304,24 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &ToggleSidebar, w, cx| this.toggle_sidebar(w, cx)))
             .on_action(cx.listener(|this, _: &ZoomGroup, w, cx| this.toggle_zoom(w, cx)))
             .child(self.render_titlebar(window, cx))
-            .child(self.render_panes(cx))
-            .when_some(banner, |d, rule| {
-                d.child(div().flex_none().child(RuleBanner::new(&rule)))
+            .child(match triage_body {
+                Some(body) => body,
+                None => self.render_panes(cx),
             })
-            .child(div().flex_none().child(
-                HintBar::new(hint)
-                    .status(self.judge_status().clone())
-                    .on_status_click(cx.listener(|this, _, window, cx| match this.judge_status() {
-                        JudgeStatus::Working { .. } => this.stop_classifying(cx),
-                        JudgeStatus::Paused => this.start_classifying(cx),
-                        _ => this.open_settings_ai(window, cx),
-                    }))
-                    .leading(leading, leading_w)
-                    .trailing(trailing, trailing_w),
-            ))
+            // Triage mode owns the whole window under the title bar: no banner, no hint bar.
+            .when(!triage, |d| {
+                d.when_some(banner, |d, rule| d.child(div().flex_none().child(RuleBanner::new(&rule))))
+                    .child(div().flex_none().child(
+                        HintBar::new(hint)
+                            .status(self.judge_status().clone())
+                            .on_status_click(cx.listener(|this, _, window, cx| match this.judge_status() {
+                                JudgeStatus::Working { .. } => this.stop_classifying(cx),
+                                JudgeStatus::Paused => this.start_classifying(cx),
+                                _ => this.open_settings_ai(window, cx),
+                            }))
+                            .leading(leading, leading_w)
+                            .trailing(trailing, trailing_w),
+                    ))
+            })
     }
 }

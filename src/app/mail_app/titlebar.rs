@@ -17,6 +17,27 @@ const SEARCH_SIDE: f32 = 190.;
 impl MailApp {
     pub(super) fn render_titlebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
+        // Triage mode: just the bar with a centred title, no search box or Triage button.
+        if self.triage_open() {
+            return div()
+                .id("mail-titlebar")
+                .test_support()
+                .relative()
+                .flex_none()
+                .child(TitleBar::new().pl_0().child(div().flex_1()))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(13.))
+                        .text_color(t.muted_foreground)
+                        .child("Triage"),
+                )
+                .into_any_element();
+        }
         let searching = self.is_filtered();
         let title_fg = if window.is_window_active() { t.foreground } else { t.muted_foreground };
         let search_text = self.search_header().unwrap_or_else(|| "Search…".into());

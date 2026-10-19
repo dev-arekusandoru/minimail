@@ -1,16 +1,15 @@
-//! Small presentational panels: rules list, session card, summary card, rule banner.
+//! Small presentational panels: rules list, summary card, rule banner.
 use gpui_kit::component::ActiveTheme as _;
 
 use gpui_kit::assets::IconName;
 
-use crate::clock::Timestamp;
 use crate::model::TriageState;
 use crate::rules::Rule;
-use crate::app::actions::{AcceptRule, ClearSelection, DismissRule};
-use crate::app::ui::{button, run, shortcut};
+use crate::app::actions::{AcceptRule, DismissRule};
+use crate::app::ui::{button, run};
 use crate::summary::ThreadSummary;
 use gpui_kit::{
-    component::{alert::Alert, progress::Progress, scroll::ScrollableElement as _, separator::Separator},
+    component::{alert::Alert, scroll::ScrollableElement as _, separator::Separator},
     prelude::FluentBuilder as _,
     *,
 };
@@ -147,87 +146,6 @@ impl Render for RulesPanel {
                             ),
                     )
             }))
-    }
-}
-
-/// Session progress, or the end card once finished.
-#[derive(IntoElement)]
-pub struct SessionCard {
-    /// `(position, total)` while running, `(handled, seconds)` once finished.
-    progress: Option<(usize, usize)>,
-    finished: Option<(usize, Timestamp)>,
-}
-
-impl SessionCard {
-    /// Progress label `"{position}/{total}"` (position is 1-based).
-    pub fn new(position: usize, total: usize) -> Self {
-        Self {
-            progress: Some((position, total)),
-            finished: None,
-        }
-    }
-
-    /// End card: `"N handled · Mm Ss"`.
-    pub fn finished(handled: usize, secs: Timestamp) -> Self {
-        Self {
-            progress: None,
-            finished: Some((handled, secs)),
-        }
-    }
-}
-
-impl RenderOnce for SessionCard {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let t = cx.theme();
-        match (self.finished, self.progress) {
-            (Some((handled, secs)), _) => div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_1()
-                .p_6()
-                .child(div().text_color(t.success).child("Session complete"))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(t.foreground)
-                        .child(SharedString::from(format!(
-                            "{handled} handled · {}m {}s",
-                            secs / 60,
-                            secs % 60
-                        ))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .text_xs()
-                        .text_color(t.muted_foreground)
-                        .child("Press")
-                        .child(shortcut("escape"))
-                        .child("to close"),
-                )
-                .child(button("session-close", "Close", "Close session summary", "escape", cx).on_click(run(ClearSelection))),
-            (None, progress) => {
-                let (pos, total) = progress.unwrap_or((0, 0));
-                let pct = if total == 0 { 0. } else { pos as f32 / total as f32 * 100. };
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_1()
-                    .text_xs()
-                    .text_color(t.muted_foreground)
-                    .child(div().flex_1().min_w_0().child(
-                        Progress::new("session-progress")
-                            .value(pct)
-                            .accessibility_label(SharedString::from(format!("{pos}/{total}"))),
-                    ))
-                    .child(button("session-end", "End session", "End the triage session", "escape", cx).on_click(run(ClearSelection)))
-            }
-        }
     }
 }
 

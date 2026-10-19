@@ -195,6 +195,8 @@ fn a_session_hides_the_tabs_and_they_return_afterwards(cx: &mut TestAppContext) 
     h.keys("enter");
     assert!(h.exists(("reader-tab", 2usize)));
     h.keys("t");
+    assert!(!h.exists(("reader-tab", 2usize)), "the Start screen takes the window too");
+    h.keys("enter");
     assert_eq!(h.opened(), Some(4), "the session shows its own message");
     assert!(!h.exists(("reader-tab", 2usize)), "no tab bar during a session");
     assert_eq!(h.tabs(), vec![(2, true)], "the tabs are untouched");

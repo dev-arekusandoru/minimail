@@ -244,23 +244,21 @@ impl MailApp {
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
-    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. While the
-    /// Triage tab exists it is the group in focus — a session takes the keyboard — otherwise
-    /// it is the list or the reader, whichever the tab keys are acting on.
+    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. Triage mode
+    /// has no dock, so it does nothing there.
     pub(super) fn toggle_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal_open() {
+        if self.modal_open() || self.triage_open() {
             return;
         }
-        let group = match (self.triage_open(), self.focused_pane()) {
-            (true, _) => Zoom::Triage,
-            (false, Pane::List) => Zoom::List,
-            (false, Pane::Reader) => Zoom::Reader,
+        let group = match self.focused_pane() {
+            Pane::List => Zoom::List,
+            Pane::Reader => Zoom::Reader,
         };
         self.panes.dock_mut().toggle_zoom(group, window, cx);
         cx.notify();
     }
 
-    /// The group filling the dock — `"list"`, `"reader"` or `"triage"` — if one does.
+    /// The group filling the dock — `"list"` or `"reader"` — if one does.
     pub fn zoomed_group(&self, cx: &App) -> Option<&'static str> {
         self.panes.dock_ref().zoomed(cx).map(Zoom::name)
     }
@@ -305,7 +303,6 @@ impl MailApp {
         TabSets {
             readers: self.tabs.tabs().iter().map(|tab| tab.thread).collect(),
             reader: active_thread(self),
-            triage: self.triage_open() && self.session_view.is_some(),
             views: self.list_tabs.tabs().iter().map(|tab| tab.query.clone()).collect(),
             list: self.list_tabs.active_index(),
         }

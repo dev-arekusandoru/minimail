@@ -31,9 +31,9 @@ pub(super) enum Slot {
 impl MailApp {
     // ------------------------------------------------------------------ the active view
 
-    /// Whether the Triage tab exists: a session is running or its end card is up.
-    pub(super) fn triage_open(&self) -> bool {
-        self.session.is_some() || self.session_end.is_some()
+    /// Whether Triage mode has the window: its Start screen, a running session or its Summary.
+    pub fn triage_open(&self) -> bool {
+        self.session.is_some() || self.session_setup.is_some() || self.session_summary.is_some()
     }
 
     /// Whose list the app speaks for now. Outside a render that is the Triage tab while it

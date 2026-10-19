@@ -25,7 +25,11 @@ use crate::app::email_webview::EmailWebViews;
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::new_folder::{AccountPicker, NamePrompt, NewFolderEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
-use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
+use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SummaryCard};
+use crate::triage_session::{
+    Outcome, Run, SessionFilter, SessionOptions, SessionOrder, SessionSize, SessionSummary, SetupView,
+};
+use crate::triage_suggest::{ActionSuggestion, SuggestedAction};
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::clock::{Clock, DAY, SystemClock, Timestamp};
@@ -76,6 +80,7 @@ mod reader_tabs;
 mod sidebar;
 mod rail;
 mod titlebar;
+mod triage_screen;
 mod sync;
 mod compact;
 mod rows;
@@ -94,10 +99,12 @@ struct FetchToastId;
 
 /// A triage session: one inbox message at a time.
 struct Session {
-    ids: Vec<MessageId>,
-    index: usize,
-    handled: usize,
-    started: Timestamp,
+    run: Run,
+    /// The suggestion for the current message (see [`crate::triage_suggest`]); `None` when the
+    /// session turned them off or history has nothing to say.
+    suggestion: Option<ActionSuggestion>,
+    /// The action being run is the suggested one (set by accepting it).
+    taking: bool,
 }
 
 pub struct MailApp {
@@ -209,10 +216,13 @@ pub struct MailApp {
     rules_panel: Option<Entity<RulesPanel>>,
     pending_rule: Option<Rule>,
     session: Option<Session>,
-    session_end: Option<(usize, i64)>,
+    /// The Start screen, while it is up.
+    session_setup: Option<SetupView>,
+    /// The Summary screen, while it is up, with the options "Keep going" starts over with.
+    session_summary: Option<(SessionSummary, SessionOptions)>,
     /// The list a session works through: its own cursor, selection and scroll over the queue,
-    /// so a session never touches the user's list tabs. Present exactly while `session` or
-    /// `session_end` is (see [`MailApp::triage_open`]).
+    /// so a session never touches the user's list tabs. Present exactly while `session`,
+    /// `session_setup` or `session_summary` is (see [`MailApp::triage_open`]).
     session_view: Option<ListView>,
     /// Which list and reader the render in flight draws, when it is not the default
     /// ([`MailApp::slot`]). Set only while a panel renders, so the user's own tabs and the
@@ -366,7 +376,8 @@ impl MailApp {
             rules_panel: None,
             pending_rule: None,
             session: None,
-            session_end: None,
+            session_setup: None,
+            session_summary: None,
             session_view: None,
             drawing: std::cell::Cell::new(None),
             summary: None,
