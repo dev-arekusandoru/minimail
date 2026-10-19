@@ -94,8 +94,7 @@ impl MailApp {
 
     /// Cursor / open / selected / unread state of the row for message `id`.
     pub fn row_visual(&self, id: MessageId) -> RowVisual {
-        let unread = !self.mailbox.is_read(id)
-            && self.mailbox.state_of(id) == Some(TriageState::Inbox);
+        let unread = !self.mailbox.is_read(id);
         RowVisual {
             cursor: self.cursor_id() == Some(id),
             open: self.opened() == Some(id),
@@ -247,7 +246,7 @@ impl MailApp {
             (
                 row_parts::title(msg.subject.clone(), unread, t),
                 None,
-                row_parts::text_block(Some(&sender), &snippet, lines.max(1), unread, t),
+                row_parts::text_block(Some(&sender), &snippet, if lines == 0 { 1 } else { lines }, unread, t),
             )
         } else {
             (
