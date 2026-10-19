@@ -311,7 +311,7 @@ impl MailApp {
         let latest = self.mailbox.get(ids[0]);
         let unread_n = ids
             .iter()
-            .filter(|id| !self.mailbox.is_read(**id) && self.mailbox.state_of(**id) == Some(TriageState::Inbox))
+            .filter(|id| !self.mailbox.is_read(**id))
             .count();
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
         let visual = RowVisual {

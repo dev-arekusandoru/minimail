@@ -100,10 +100,6 @@ fn child_marker(v: RowVisual, account: Option<Hsla>, t: &ThemeColor) -> Div {
 }
 
 impl MailApp {
-    fn unread_in(&self, id: MessageId) -> bool {
-        !self.mailbox.is_read(id) && self.mailbox.state_of(id) == Some(TriageState::Inbox)
-    }
-
     /// The people line of a header: `names` joined, bold, then the muted `+N`, then the newest
     /// preview unless expanded. `lead` replaces the names (sender-first rows lead with them
     /// on line 1 and put the subject here).
@@ -155,7 +151,7 @@ impl MailApp {
             return row::frame(container, RowVisual::default(), t);
         };
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
-        let unread_n = ids.iter().filter(|id| self.unread_in(**id)).count();
+        let unread_n = ids.iter().filter(|id| !self.mailbox.is_read(**id)).count();
         let visual = RowVisual {
             cursor: ix == self.cursor_ix(),
             // An expanded header does not light up: the open message's own child row does.
