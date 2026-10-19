@@ -246,7 +246,7 @@ impl MailApp {
             (
                 row_parts::title(msg.subject.clone(), unread, t),
                 None,
-                row_parts::text_block(Some(&sender), &snippet, if lines == 0 { 1 } else { lines }, unread, t),
+                row_parts::text_block(Some(&sender), &snippet, lines.max(1), unread, t),
             )
         } else {
             (

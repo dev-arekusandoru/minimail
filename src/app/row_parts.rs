@@ -155,6 +155,7 @@ pub fn text_block(
     });
     Some(
         div()
+            .h(px(row::PREVIEW_LINE_H * f32::from(lines)))
             .line_clamp(lines as usize)
             .text_size(px(12.))
             .line_height(px(row::PREVIEW_LINE_H))
