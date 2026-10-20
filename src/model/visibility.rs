@@ -127,14 +127,38 @@ impl Mailbox {
         self.blocked.contains_key(&email.trim().to_ascii_lowercase())
     }
     /// Record the user's spam verdict for `email` (`None` clears it); one undo step. The
-    /// address leaves the other list. False when nothing changed.
+    /// address leaves the other list. Never-spam also clears the spam warning on the
+    /// sender's Inbox mail in every account. False when nothing changed.
     pub fn set_spam_sender(&mut self, email: &str, verdict: Option<SpamVerdict>) -> bool {
         let before = self.spam_senders.verdict(email);
-        if before == verdict || email.trim().is_empty() {
+        let e = email.trim().to_ascii_lowercase();
+        if before == verdict || e.is_empty() {
             return false;
         }
-        self.spam_senders.set(email, verdict);
-        self.push_undo(vec![Change::SpamSender(email.trim().to_ascii_lowercase(), before)]);
+        self.spam_senders.set(&e, verdict);
+        let mut changes = vec![Change::SpamSender(e.clone(), before)];
+        if verdict == Some(SpamVerdict::Never) {
+            let flagged: Vec<MessageId> = self
+                .messages
+                .iter()
+                .filter(|m| {
+                    m.state == TriageState::Inbox
+                        && m.from_email.eq_ignore_ascii_case(&e)
+                        && self
+                            .meta
+                            .get(&m.id)
+                            .is_some_and(|meta| meta.tags.contains(&Tag::PossibleSpam))
+                })
+                .map(|m| m.id)
+                .collect();
+            for id in flagged {
+                changes.push(self.snapshot(id));
+                if let Some(meta) = self.meta.get_mut(&id) {
+                    meta.tags.retain(|tag| *tag != Tag::PossibleSpam);
+                }
+            }
+        }
+        self.push_undo(changes);
         true
     }
     pub fn spam_senders(&self) -> &SpamSenders {

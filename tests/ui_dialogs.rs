@@ -690,6 +690,33 @@ fn not_spam_yes_records_never_spam_and_undoes_with_the_flag(cx: &mut TestAppCont
 }
 
 #[gpui_kit::gpui::test]
+fn never_spam_clears_the_warning_on_the_senders_inbox_mail(cx: &mut TestAppContext) {
+    let mut mb = mailbox(&[
+        msg(1, 1, SPAMMER, "Offer", 1),
+        msg(2, 2, SPAMMER, "More", 2),
+        msg(3, 3, "other@example.com", "Hi", 3),
+    ]);
+    for id in 1..=3 {
+        tag_possible_spam(&mut mb, id);
+    }
+    let mut h = harness_with(cx, mb);
+    h.goto(1);
+    h.keys("enter");
+    h.click("btn-banner-spam-not");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Never));
+    assert!(!h.has_tag(1, Tag::PossibleSpam));
+    assert!(!h.has_tag(2, Tag::PossibleSpam), "every Inbox message from the sender loses the warning");
+    assert!(h.has_tag(3, Tag::PossibleSpam), "another sender keeps it");
+
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::PossibleSpam));
+    assert!(h.has_tag(2, Tag::PossibleSpam), "one undo restores them all");
+    assert!(h.has_tag(3, Tag::PossibleSpam));
+    assert_eq!(verdict(&mut h, SPAMMER), None, "and the verdict");
+}
+
+#[gpui_kit::gpui::test]
 fn not_spam_cancel_only_clears_the_flag(cx: &mut TestAppContext) {
     let mut h = flagged_pair(cx, None);
     h.click("btn-banner-spam-not");
