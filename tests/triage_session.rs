@@ -100,21 +100,33 @@ fn each_action_counts_once_and_advances() {
 }
 
 #[test]
-fn skipping_defers_without_handling_and_each_message_is_counted_once() {
+fn skipping_removes_the_message_without_handling_it_and_never_brings_it_back() {
     let mut run = Run::new(options(), vec![3, 2, 1], 0);
     assert_eq!((run.current(), run.progress()), (Some(3), (1, 3)));
     run.skip();
-    assert_eq!((run.current(), run.progress(), run.handled()), (Some(2), (1, 3), 0));
+    assert_eq!((run.current(), run.progress(), run.handled(), run.skipped()), (Some(2), (1, 2), 0, 1));
     run.handle(Outcome::Archived, true);
     run.handle(Outcome::Archived, false);
-    assert_eq!((run.current(), run.progress()), (Some(3), (3, 3)), "the skipped one comes round last");
-    run.skip();
-    assert_eq!(run.current(), Some(3), "a lone message skips onto itself");
-    run.handle(Outcome::Deleted, false);
+    assert!(run.is_finished(), "the skipped message does not come round again");
     let s = run.summary(10, 0);
-    assert_eq!(s.handled, 3);
+    assert_eq!((s.handled, s.tally.skipped), (2, 1));
     let t = s.tally;
-    assert_eq!((t.archived, t.deleted, t.skipped, t.suggestions_taken), (2, 1, 2, 1));
+    assert_eq!((t.archived, t.deleted, t.suggestions_taken), (2, 0, 1));
+    assert_eq!(s.handled + t.skipped, 3, "handled and skipped add up to the session size");
+}
+
+#[test]
+fn skipping_every_message_finishes_the_session_and_counts_each_once() {
+    let mut run = Run::new(options(), vec![3, 2, 1], 0);
+    for _ in 0..3 {
+        run.skip();
+    }
+    assert!(run.is_finished());
+    assert_eq!(run.current(), None);
+    let s = run.summary(10, 3);
+    assert_eq!((s.handled, s.tally.skipped), (0, 3));
+    assert_eq!(s.handled + s.tally.skipped, 3);
+    assert_eq!(run.summary(10, 3).tally.skipped, 3, "no message is skipped twice");
 }
 
 #[test]

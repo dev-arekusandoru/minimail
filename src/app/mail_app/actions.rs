@@ -110,23 +110,27 @@ impl MailApp {
         }
     }
 
-    /// Stop the running session: its Summary when anything was handled, else straight back to
-    /// the user's own views.
+    /// Stop the running session: its Summary when anything was handled or skipped, else
+    /// straight back to the user's own views.
     pub(super) fn end_run(&mut self) {
         let Some(s) = self.session.take() else { return };
-        if s.run.handled() == 0 {
+        if s.run.handled() == 0 && s.run.skipped() == 0 {
             return self.end_session();
         }
         let remaining = self.mailbox.ids_matching(&self.mailbox.location_query(&s.run.options.location), &self.local_now()).len();
         self.session_summary = Some((s.run.summary(self.now(), remaining), s.run.options));
     }
 
-    /// `space`: defer the current message to the end of the queue. Not a mailbox change, so
-    /// no undo step.
+    /// `space`: drop the current message from this session's queue. Not a mailbox change, so
+    /// no undo step; the message stays where it is. The Summary follows when it was the last.
     pub fn skip_current(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(s) = self.session.as_mut() else { return };
         s.run.skip();
-        self.refresh_suggestion();
+        if s.run.is_finished() {
+            self.end_run();
+        } else {
+            self.refresh_suggestion();
+        }
         self.scroll_to_cursor();
         cx.notify();
     }

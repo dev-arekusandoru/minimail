@@ -1074,7 +1074,11 @@ impl MailApp {
             _ => format!("Filed {n}"),
         };
         self.show_undo_toast(text, window, cx);
-        self.session_advance(Outcome::Filed);
+        // Sending the reply already handled this session message; the post-send move must not
+        // handle the next one too.
+        if !matches!(action, FileAction::AfterReply(_)) {
+            self.session_advance(Outcome::Filed);
+        }
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1310,7 +1314,8 @@ impl MailApp {
                     m.set_state_for_sender(&email, TriageState::Inbox, TriageState::Deleted)
                 });
                 this.show_undo_toast(format!("Deleted {n} more from {email}"), window, cx);
-                this.session_advance(Outcome::Deleted);
+                // The delete that opened this offer already advanced the session; this sweep
+                // touches other messages and must not handle the next one too.
                 this.scroll_to_cursor();
                 this.ask_always_spam(email.clone(), depth, window, cx);
             },

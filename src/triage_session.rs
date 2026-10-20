@@ -5,11 +5,11 @@
 //! * Acting on the current message (archive, file, snooze, delete, reply sent, or anything
 //!   else that takes it out of the queue) handles it: `handled` goes up by one and the matching
 //!   [`Tally`] field by one, exactly once per message.
-//! * Skip moves the current message to the queue's end and bumps `skipped`; nothing is
-//!   handled and the queue length does not change. A skipped message comes round again and
-//!   counts as handled only when it is acted on.
-//! * Progress is `(handled + 1, queue length)`: the position of the message on screen, in a
-//!   total that skipping never changes.
+//! * Skip takes the current message out of the queue and bumps `skipped`; nothing is handled,
+//!   the message keeps its state, and it never comes round again in this session. Each message
+//!   is therefore skipped at most once, and `handled + skipped` is the session's queue size.
+//! * Progress is `(handled + 1, queue length)`: the position of the message on screen in what
+//!   is left of the queue.
 //!
 //! No UI types live here, so all of it is headlessly testable. Time is passed in, never read.
 
@@ -260,6 +260,10 @@ impl Run {
         self.handled
     }
 
+    pub fn skipped(&self) -> usize {
+        self.tally.skipped
+    }
+
     pub fn is_finished(&self) -> bool {
         self.handled >= self.ids.len()
     }
@@ -274,13 +278,12 @@ impl Run {
         self.handled += 1;
     }
 
-    /// Defer the current message to the queue's end.
+    /// Drop the current message from this session's queue: its mailbox state is untouched.
     pub fn skip(&mut self) {
         if self.is_finished() {
             return;
         }
-        let id = self.ids.remove(self.handled);
-        self.ids.push(id);
+        self.ids.remove(self.handled);
         self.tally.skipped += 1;
     }
 

@@ -2,6 +2,8 @@
 
 use gpui_kit::{AppContext, TestAppContext};
 use gpui_kit::test::TestWindowExt;
+use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
+use mail_classifier::model::{Mailbox, MessageId};
 use mail_classifier::model::TriageState::*;
 use mail_classifier::triage_session::{SessionOrder, SessionSize};
 use mail_classifier::triage_suggest::SuggestedAction;
@@ -21,7 +23,7 @@ fn inbox() -> mail_classifier::model::Mailbox {
 }
 
 /// Sender `s@x.io` archived three times before; their newest mail (id 9) and one other (id 8).
-fn habit() -> mail_classifier::model::Mailbox {
+fn habit() -> Mailbox {
     mailbox(&[
         msg(1, 1, "s@x.io", "old", 1, "Archived"),
         msg(2, 2, "s@x.io", "old", 2, "Archived"),
@@ -29,6 +31,16 @@ fn habit() -> mail_classifier::model::Mailbox {
         msg(8, 8, "o@x.io", "other", 20, "Inbox"),
         msg(9, 9, "s@x.io", "new", 21, "Inbox"),
     ])
+}
+
+/// Tag `id` PossibleSpam through the classifier's own path.
+fn tag_possible_spam(mb: &mut Mailbox, id: MessageId) {
+    mb.add_suggestions(vec![Suggestion {
+        message: id,
+        key: QuestionKey::Spam,
+        answer: Answer { probabilities: vec![], value: AnswerValue::Bool(true), confidence: 1.0 },
+    }]);
+    mb.accept_suggestions(id, 0);
 }
 
 #[gpui_kit::gpui::test]
@@ -48,23 +60,105 @@ fn the_start_screen_options_shape_the_session(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn skip_defers_a_message_without_a_state_change_or_undo_step(cx: &mut TestAppContext) {
+fn skip_drops_the_message_from_the_session_without_a_state_change_or_undo_step(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, inbox());
     h.keys("t enter");
     let depth = h.read(|a| a.mailbox.undo_depth());
     h.keys("space");
     assert_eq!(h.read(|a| a.opened()), Some(3), "the next message is up");
-    assert_eq!(h.read(|a| a.session_progress()), Some((1, 3)), "the total stays the queue length");
+    assert_eq!(h.read(|a| a.session_progress()), Some((1, 2)), "the queue no longer holds it");
     assert_eq!(h.state_of(4), Inbox);
     assert_eq!(h.read(|a| a.mailbox.undo_depth()), depth, "skipping is not an undo step");
 
     h.keys("e e");
-    assert_eq!(h.read(|a| a.opened()), Some(4), "the skipped message comes round again");
-    assert_eq!(h.read(|a| a.session_progress()), Some((3, 3)));
+    let s = h.read(|a| a.session_summary().copied()).expect("summary");
+    assert_eq!((s.handled, s.tally.skipped, s.tally.archived), (2, 1, 2));
+    assert_eq!(s.remaining, 1, "the skipped message is still in the Inbox");
+}
+
+#[gpui_kit::gpui::test]
+fn skipping_every_message_finishes_with_a_summary_of_distinct_skips(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, inbox());
+    h.keys("t enter");
+    let depth = h.read(|a| a.mailbox.undo_depth());
+    h.keys("space space space");
+    let s = h.read(|a| a.session_summary().copied()).expect("all skipped: summary");
+    assert_eq!((s.handled, s.tally.skipped, s.remaining), (0, 3, 3));
+    assert_eq!(s.handled + s.tally.skipped, 3, "counts add up to the session size");
+    assert_eq!(h.read(|a| a.session_progress()), None);
+    assert_eq!(h.read(|a| a.mailbox.undo_depth()), depth, "skipping changes no mailbox state");
+    assert_eq!(h.visible(), vec![4, 3, 2], "skipped mail stays in the Inbox");
+
+    h.keys("escape");
+    assert_eq!(h.visible(), vec![4, 3, 2]);
+}
+
+#[gpui_kit::gpui::test]
+fn archived_and_filed_messages_leave_the_inbox_after_a_session(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, inbox());
+    h.keys("t enter");
+    h.keys("e");
+    assert_eq!(h.state_of(4), Archived);
+    h.keys("f enter");
+    assert_eq!(h.state_of(3), Filed(1));
     h.keys("e");
     let s = h.read(|a| a.session_summary().copied()).expect("summary");
-    assert_eq!((s.handled, s.tally.skipped, s.tally.archived), (3, 1, 3));
-    assert_eq!(s.remaining, 0);
+    assert_eq!((s.handled, s.tally.archived, s.tally.filed, s.remaining), (3, 2, 1, 0));
+
+    h.keys("escape");
+    assert!(h.visible().is_empty(), "the triaged mail no longer lists in the Inbox");
+}
+
+/// Sending a reply handles the message; filing the original afterwards must not also handle
+/// the next one, or the session finishes with a message nobody decided still in the Inbox.
+#[gpui_kit::gpui::test]
+fn filing_the_original_after_a_reply_does_not_handle_the_next_message(cx: &mut TestAppContext) {
+    let mut h = harness_with(
+        cx,
+        mailbox(&[msg(3, 3, "c@a.io", "three", 23, "Inbox"), msg(4, 4, "d@a.io", "four", 24, "Inbox")]),
+    );
+    h.keys("t enter");
+    assert_eq!(h.read(|a| a.opened()), Some(4));
+    h.send_reply("thanks");
+    assert_eq!(h.read(|a| a.opened()), Some(3), "the reply handled message 4");
+    h.keys("2");
+    h.keys("enter");
+    assert_eq!(h.state_of(4), Filed(1), "the original and the reply are filed");
+
+    assert_eq!(h.read(|a| a.session_progress()), Some((2, 2)), "message 3 is still the session's own");
+    assert_eq!(h.state_of(3), Inbox, "the post-send filing did not handle it");
+    h.keys("e");
+    let s = h.read(|a| a.session_summary().copied()).expect("summary");
+    assert_eq!((s.handled, s.tally.replied, s.tally.archived, s.remaining), (2, 1, 1, 0));
+    h.keys("escape");
+    assert!(h.visible().is_empty(), "only decisions that were applied left the Inbox");
+}
+
+/// Deleting a spam message and then sweeping the sender's other mail must not handle the
+/// session's next, unrelated message: it was never decided and must stay in the Inbox.
+#[gpui_kit::gpui::test]
+fn the_spam_sweep_after_a_delete_does_not_handle_the_next_message(cx: &mut TestAppContext) {
+    let mut mb = mailbox(&[
+        msg(2, 2, "s@x.io", "older", 22, "Inbox"),
+        msg(3, 3, "o@x.io", "other", 23, "Inbox"),
+        msg(4, 4, "s@x.io", "spam", 24, "Inbox"),
+    ]);
+    tag_possible_spam(&mut mb, 4);
+    let mut h = harness_with(cx, mb);
+    h.keys("t enter");
+    assert_eq!(h.read(|a| a.opened()), Some(4));
+    h.keys("d");
+    h.keys("enter");
+    assert_eq!(h.state_of(2), Deleted, "the sender's other mail is swept");
+    h.keys("escape");
+    assert_eq!(h.read(|a| a.opened()), Some(3), "message 3 is still the session's own");
+    assert_eq!(h.state_of(3), Inbox);
+
+    h.keys("d d");
+    let s = h.read(|a| a.session_summary().copied()).expect("summary");
+    assert_eq!((s.handled, s.tally.deleted, s.remaining), (3, 3, 0));
+    h.keys("escape");
+    assert!(h.visible().is_empty());
 }
 
 #[gpui_kit::gpui::test]

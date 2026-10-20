@@ -1879,3 +1879,45 @@ fn a_pending_folder_delete_survives_a_restart() {
     drop(cache);
     let _ = std::fs::remove_file(&path);
 }
+
+// ------------------------------------------------------ triage session push
+
+#[test]
+fn a_session_archive_is_pushed_and_survives_the_next_check() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let (state, provider) = FakeProvider::without_folders(vec![remote("m1", "t1", 1_790_000_000)]);
+    drain(&mut mb, &cache, &provider, true);
+    let id = local_id(&cache, "m1");
+
+    // What a triage decision does: mutate the real mailbox and persist it.
+    assert_eq!(mb.set_state(&[id], TriageState::Archived), 1);
+    persist_local(&mb, &cache);
+
+    // The next round pushes the archive, then checks the server.
+    let summary = round(&mut mb, &cache, &provider, true, &[]);
+    assert_eq!(summary.error, None);
+    assert_eq!(moves(&state), vec![("m1".to_owned(), RemoteState::Inbox, RemoteState::Archived)]);
+    assert_eq!(mb.state_of(id), Some(TriageState::Archived), "the push must not undo the triage decision");
+    assert!(pending_moves(&mb, &cache, ACCOUNT).is_empty(), "the confirmed move is not pushed twice");
+
+    // A later check with the server reporting the archive keeps it archived.
+    with_updates(&state, &[], &[("m1", flags(&state, "m1"))], &[]);
+    round(&mut mb, &cache, &provider, true, &[]);
+    assert_eq!(mb.state_of(id), Some(TriageState::Archived));
+}
+
+#[test]
+fn a_session_archive_persists_locally_across_a_restart() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let (_state, provider) = FakeProvider::without_folders(vec![remote("m1", "t1", 1_790_000_000)]);
+    drain(&mut mb, &cache, &provider, true);
+    let id = local_id(&cache, "m1");
+    mb.set_state(&[id], TriageState::Archived);
+    persist_local(&mb, &cache);
+
+    let (_accounts, _folders, messages) = cache.load().unwrap();
+    let restored = messages.into_iter().find(|m| m.id == id).expect("cached message");
+    assert_eq!(restored.state, TriageState::Archived, "a restart must not put it back in the Inbox");
+}

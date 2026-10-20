@@ -145,9 +145,10 @@ and `src/triage_suggest.rs`.
 
 Counting: every action that takes the current message out of the queue (archive, file,
 snooze, delete, reply sent, move to inbox, mute) handles it once and bumps its own tally
-(the last two have none). Skip moves the message to the queue's end and bumps *skipped*;
-it handles nothing and is not an undo step, and the message counts only when finally acted
-on. Progress is `(handled + 1, queue length)`; the total never changes.
+(the last two have none). Skip takes the message out of this session's queue and bumps
+*skipped*; it handles nothing, leaves the message where it is, and is not an undo step, so
+each message is skipped at most once and `handled + skipped` is the session's queue size.
+Progress is `(handled + 1, queue length)` over what is left of the queue.
 
 Suggestion (a deterministic stub, no AI): Possible Spam → Delete; else with at least 3
 earlier decided messages (archived, filed or deleted) from the sender, ≥ 80% archived →
