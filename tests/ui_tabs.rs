@@ -282,3 +282,31 @@ fn clicking_a_tab_moves_the_cursor_to_its_message(cx: &mut TestAppContext) {
     assert_eq!(h.opened(), Some(4));
     assert_eq!(h.read(|a| a.cursor_message()), Some(4));
 }
+
+/// With no tabs open the reader group must not draw the dock's empty tab strip, and its
+/// empty state must actually have an icon rather than a blank frame.
+#[gpui_kit::gpui::test]
+fn no_tabs_means_no_tab_strip_and_the_empty_state_icon_is_drawn(cx: &mut TestAppContext) {
+    use gpui_kit::AssetSource as _;
+    use gpui_kit::assets::IconName;
+
+    let mut h = harness_with(cx, mailbox());
+    assert_eq!(h.opened(), None, "nothing is open at startup");
+    assert!(
+        mail_classifier::app::icons::AppAssets
+            .load(&IconName::MailOpen.path())
+            .unwrap()
+            .is_some(),
+        "the reader's empty-state icon must be embedded in the app's assets"
+    );
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("reader-tab-strip").is_none(), "no tab strip without tabs");
+        let icon = window.try_find("empty-icon").expect("the reader's empty-state icon");
+        let size = icon.bounds().size;
+        assert!(
+            size.width > gpui_kit::px(0.) && size.height > gpui_kit::px(0.),
+            "empty-state icon has no size: {size:?}"
+        );
+    }).unwrap();
+}

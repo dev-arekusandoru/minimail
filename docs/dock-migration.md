@@ -41,11 +41,11 @@ A real app-side usage example ships in the kit: `gpui-kit-0.7.0/tests/dock.rs` (
 - `DockSkin::dock_area("mail", None, window, cx)` for the body region; it stays a child of the
   existing root div, in the same slot `render_panes` occupies today
   (`src/app/mail_app/render.rs:237`), under the titlebar and above the hint bar.
-- Skin config: `set_panel_style(PanelStyle::TabBar, cx)`,
+- Skin config: `set_panel_style(PanelStyle::Auto, cx)`,
   `set_close_button_visible(false, cx)` (we draw our own close button inside `Panel::title`, so
   the existing close behaviour and its test survive), `set_toggle_button_visible(false, cx)`.
-  This applies to singleton groups too; `Panel::title_bar()` only controls the plain title
-  under `Auto` and is not needed for these panels. The sidebar now lives outside Dock.
+  `Panel::title_bar()` then decides whether a lone panel draws the skin's plain title; the
+  list and the reader's no-tab stand-in both decline it. The sidebar now lives outside Dock.
 - Sidebar stays in the outer Resizable, outside Dock, so centre-group zoom preserves it.
 - Center = `h_split` (side by side) or `v_split` (stacked) of two tab groups: list, reader.
 

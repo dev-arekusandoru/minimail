@@ -22,8 +22,8 @@ gpui_kit::assets::icon_assets!(
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
-        // Account icons.
-        Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
+        // Account icons, and the reader's empty state (not in gpui-kit's default bundle).
+        Mail, MailOpen, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
         // Sidebar rail and panel (not in gpui-kit's default bundle).
         SquarePen, FolderPlus, ListFilter,

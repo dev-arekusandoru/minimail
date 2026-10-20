@@ -31,7 +31,12 @@ pub fn empty(
 ) -> Empty {
     Empty::new().header(
         EmptyHeader::new()
-            .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::new(icon)))
+            .media(
+                EmptyMedia::new()
+                    .with_variant(EmptyMediaVariant::Icon)
+                    // Observed so a headless test can check the icon is laid out.
+                    .child(div().id("empty-icon").test_support().child(Icon::new(icon))),
+            )
             .title(EmptyTitle::new().child(title.into()))
             .description(EmptyDescription::new().child(hint)),
     )

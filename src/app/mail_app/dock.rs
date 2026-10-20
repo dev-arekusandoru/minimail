@@ -83,8 +83,9 @@ impl Dock {
     ) -> Self {
         let app_entity = cx.entity();
         let (area, skin) = DockSkin::dock_area("mail", None, window, cx);
-        // Keep the same tab chrome even when a group contains only one panel.
-        skin.set_panel_style(PanelStyle::TabBar, cx);
+        // A singleton group asks for its bar: `Auto` hides the bar of a panel that declines
+        // one (`title_bar`), which is how the reader's stand-in group stays bare with no tabs.
+        skin.set_panel_style(PanelStyle::Auto, cx);
         // Our own close button lives in the reader tab's title, where it already was.
         skin.set_close_button_visible(false, cx);
         skin.set_toggle_button_visible(false, cx);
@@ -715,6 +716,12 @@ impl Panel for ListPanel {
         app.update(cx, |app, cx| app.list_tab(query.clone(), cx))
     }
 
+    /// The strip only when there is more than one view open: a group of one panel would
+    /// otherwise draw a title bar repeating the list's own header.
+    fn title_bar(&self, cx: &App) -> bool {
+        self.app.read_with(cx, |app, _| app.list_tabs.len() > 1).unwrap_or(false)
+    }
+
     fn inner_padding(&self, _: &App) -> bool {
         false
     }
@@ -780,9 +787,16 @@ impl Panel for ReaderPanel {
     /// The tab itself: monogram, italic-while-preview title and our own close button.
     fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (Some(thread), Some(app)) = (self.thread, self.app.upgrade()) else {
-            return div().into_any_element();
+            // Only reachable if a style draws a tab for the stand-in panel: its title is
+            // what an empty tab strip would show. Observed so a test can prove it is gone.
+            return div().id("reader-tab-strip").test_support().into_any_element();
         };
         app.update(cx, |app, cx| app.reader_tab(thread, cx))
+    }
+
+    /// The stand-in draws no title bar when the reader has no tabs.
+    fn title_bar(&self, _: &App) -> bool {
+        self.thread.is_some()
     }
 
     fn inner_padding(&self, _: &App) -> bool {
