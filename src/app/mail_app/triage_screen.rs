@@ -3,10 +3,10 @@
 //! `mockups/triage-focus.html`; colors are theme tokens, and the suggestion card's tints are
 //! the primary color blended over the background.
 //!
-//! The running view is: a 3px progress bar, the End / count / Undo row, the reader (the shared
-//! message components in their focus variant) and a fixed bottom dock. The email body is a
-//! native view that paints over GPUI, so the dock is a reserved band below the scroll area
-//! rather than something laid over it.
+//! The running view is: a 3px progress bar, the End / count / Undo row, the normal reader
+//! (the same thread, rail and message surface every tab renders) and a fixed bottom dock. The
+//! email body is a native view that paints over GPUI, so the dock is a reserved band below the
+//! scroll area rather than something laid over it.
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -25,7 +25,6 @@ pub(super) struct Pal {
     pub muted: Hsla,
     pub border: Hsla,
     pub active: Hsla,
-    pub hover: Hsla,
     pub surface: Hsla,
     pub primary: Hsla,
     pub on_primary: Hsla,
@@ -49,7 +48,6 @@ impl Pal {
             muted: t.muted_foreground,
             border: t.border,
             active: t.list_active,
-            hover: t.list_hover,
             surface: t.secondary,
             primary: t.primary,
             on_primary: t.primary_foreground,

@@ -91,19 +91,15 @@ impl MailApp {
                 ))
                 .into_any_element();
         };
-        let look = Look::new(cx).focused(self.slot() == Slot::Triage);
+        let look = Look::new(cx);
         let newest = self.newest();
         let others = crate::reading::thread_others(self.mailbox.messages(), msg);
         let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
-        if look.focus {
-            return self.focus_reader(msg, &others, &order, &newest, &look, cx);
-        }
-
         // Thread messages in timeline order (oldest first). The opened one is the expanded
         // surface wherever it falls; it is never moved.
         let (title, rows): (Option<AnyElement>, Vec<AnyElement>) = if others.is_empty() {
             // A lone message has no thread, so no rail: the surface takes the full width.
-            (None, vec![self.message_surface(msg, Role::Opened, &look, None, cx)])
+            (None, vec![self.message_surface(msg, Role::Opened, &look, cx)])
         } else {
             let count = order.len();
             let rows = order
@@ -113,7 +109,7 @@ impl MailApp {
                 .map(|(i, m)| {
                     let color = theme::state_color(t, m.state);
                     let (dot, el) = if m.id == msg.id {
-                        (DOT_FULL, self.message_surface(m, Role::Opened, &look, None, cx))
+                        (DOT_FULL, self.message_surface(m, Role::Opened, &look, cx))
                     } else {
                         let expanded = self.reader.is_expanded(m.thread_id, m.id);
                         let dot = if expanded { DOT_FULL } else { DOT_COLLAPSED };
@@ -199,53 +195,6 @@ impl MailApp {
                             .inset_0()
                             .child(Scrollbar::vertical(&scroll).id("reader-scrollbar").viewport_from_layout()),
                     ),
-            )
-            .into_any_element()
-    }
-
-    /// The Focus Reader: the session's message in a centred 680px column (thread block between
-    /// the subject and the body), scrolling in the area above the dock. The wheel works across
-    /// the whole width; the email body is clipped to this viewport like any reader's.
-    fn focus_reader(
-        &self,
-        msg: &Message,
-        others: &[MessageId],
-        order: &[MessageId],
-        newest: &str,
-        look: &Look<'_>,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let thread = (!others.is_empty()).then(|| self.focus_thread(msg, order, newest, look, cx));
-        let surface = self.message_surface(msg, Role::Opened, look, thread, cx);
-        let scroll = {
-            let mut panes = self.reader_panes.borrow_mut();
-            let pane = panes.entry(msg.thread_id).or_default();
-            if pane.revealed.replace(msg.id) != Some(msg.id) {
-                pane.scroll.scroll_to_top_of_item(0);
-            }
-            pane.scroll.clone()
-        };
-        div()
-            .relative()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .child(
-                div()
-                    .id("reader-scroll")
-                    .track_scroll(&scroll)
-                    .size_full()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .child(div().w_full().max_w(px(680.)).flex_none().py_5().child(surface)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .child(Scrollbar::vertical(&scroll).id("reader-scrollbar").viewport_from_layout()),
             )
             .into_any_element()
     }

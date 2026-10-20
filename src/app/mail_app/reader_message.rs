@@ -59,19 +59,14 @@ impl MailApp {
             )))
     }
 
-    /// One message. `between` is what the Focus Reader slots between the subject and the body
-    /// (the thread's earlier messages); the reader's own layout ignores it.
+    /// One message, as the opened surface or a thread's expanded one.
     pub(super) fn message_surface(
         &self,
         m: &Message,
         role: Role,
         look: &Look<'_>,
-        between: Option<AnyElement>,
         cx: &Context<Self>,
     ) -> AnyElement {
-        if look.focus {
-            return self.focus_surface(m, role, look, between, cx);
-        }
         let t = &look.t;
         let opened = role == Role::Opened;
         let (id, mid) = (m.id as usize, m.id);
@@ -251,107 +246,6 @@ impl MailApp {
             .into_any_element()
     }
 
-    /// The Focus Reader's message: avatar header row (sender, labels, date), the 28px subject
-    /// for the opened message, the thread block (`between`), then body and attachments. The body,
-    /// chips and attachment chips are the shared pieces in their focus look.
-    fn focus_surface(
-        &self,
-        m: &Message,
-        role: Role,
-        look: &Look<'_>,
-        between: Option<AnyElement>,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let t = &look.t;
-        let p = super::super::triage_screen::Pal::new(t);
-        let opened = role == Role::Opened;
-        let (id, mid) = (m.id as usize, m.id);
-        let me = self.mailbox.account(&m.account).map_or("", |a| a.email.as_str());
-        let who = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .child(
-                div()
-                    .truncate()
-                    .text_size(px(14.))
-                    .line_height(px(20.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(p.fg)
-                    .child(SelectableText::new(("reader-sel-name", id), m.from_name.clone())),
-            )
-            .child(
-                div().truncate().text_size(px(12.)).line_height(px(16.)).text_color(p.muted).child(
-                    SelectableText::new(
-                        ("reader-sel-email", id),
-                        format!("{} · {}", m.from_email, reading::recipient_line(m, me)),
-                    ),
-                ),
-            );
-        let when = div()
-            .flex_none()
-            .text_size(px(12.))
-            .line_height(px(20.))
-            .text_color(p.muted)
-            .child(SelectableText::new(
-                ("reader-sel-stamp", id),
-                reading::received_label(&m.received, &self.local_now()),
-            ));
-        let head_id: ElementId =
-            if opened { ("reader-msg-head", id).into() } else { ("reader-thread-head", id).into() };
-        let meta = div()
-            .id(head_id)
-            .test_support()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_3()
-            .h(px(36.))
-            .when(!opened, |d| {
-                d.cursor_pointer().on_click(cx.listener(move |this, _, window, cx| {
-                    // A drag that selected text is not a click on the header.
-                    if TextSelection::selected_text(window, cx).is_empty() {
-                        this.toggle_reader_expanded(mid, cx);
-                    }
-                }))
-            })
-            .child(look.monogram(&m.from_name, &m.from_email, 36.))
-            .child(who)
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap_2()
-                    .child(self.labels_row(m, look, cx))
-                    .child(when),
-            );
-        let subject = div()
-            .text_size(px(28.))
-            .line_height(px(36.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(p.fg)
-            .child(SelectableText::new(("reader-sel-subject", id), reading::display_subject(m)));
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(if opened { 20. } else { 12. }))
-            .min_w_0()
-            .when(!opened, |d| {
-                d.p_4().rounded_lg().border_1().border_color(t.border).bg(message_card_bg(t))
-            })
-            .child(meta)
-            .when(opened, |d| d.child(subject))
-            .children(between)
-            .child(self.message_body(m, role, !opened, look, cx))
-            .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
-            .when(m.partial, |d| {
-                d.child(div().text_size(px(12.)).text_color(p.muted).child("Loading message…"))
-            })
-            .into_any_element()
-    }
-
     /// State badge (with snooze wake time or folder name), tag badges, category and sender label.
     /// The Kind, Urgency and Spam chips are clickable and open their own override menu.
     fn labels_row(&self, m: &Message, look: &Look<'_>, cx: &Context<Self>) -> Div {
@@ -371,7 +265,7 @@ impl MailApp {
             .flex()
             .flex_wrap()
             .items_center()
-            .gap(px(if look.focus { 8. } else { 4. }))
+            .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
             let (label, glyph, key, action) = match tag {
@@ -677,8 +571,8 @@ impl MailApp {
             .flex_col()
             .gap_2()
             .min_w_0()
-            .text_size(px(if look.focus { 15. } else { 13.5 }))
-            .line_height(if look.focus { DefiniteLength::from(px(24.)) } else { relative(1.55) })
+            .text_size(px(13.5))
+            .line_height(relative(1.55))
             .text_color(t.foreground);
 
         let mut blocked = 0;
@@ -772,12 +666,12 @@ impl MailApp {
                 .flex()
                 .items_center()
                 .gap_2()
-                .h(px(if look.focus { 32. } else { 24. }))
-                .px(px(if look.focus { 12. } else { 8. }))
-                .rounded(px(if look.focus { 6. } else { 2. }))
+                .h(px(24.))
+                .px(px(8.))
+                .rounded(px(2.))
                 .border_1()
                 .border_color(t.border)
-                .child(icons::icon(Glyph::Attachment, t, if look.focus { 16. } else { 12. }))
+                .child(icons::icon(Glyph::Attachment, t, 12.))
                 .child(
                     div()
                         .text_size(px(12.))
