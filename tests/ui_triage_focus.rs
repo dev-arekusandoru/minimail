@@ -1,6 +1,7 @@
 //! Triage mode's flow: the Start screen, skipping, taking the suggestion, and the Summary.
 
-use gpui_kit::TestAppContext;
+use gpui_kit::{AppContext, TestAppContext};
+use gpui_kit::test::TestWindowExt;
 use mail_classifier::model::TriageState::*;
 use mail_classifier::triage_session::{SessionOrder, SessionSize};
 use mail_classifier::triage_suggest::SuggestedAction;
@@ -90,6 +91,16 @@ fn accepting_the_suggestion_is_one_undo_step_and_is_tallied(cx: &mut TestAppCont
     h.keys("u");
     assert_eq!(h.state_of(8), Inbox);
     h.assert_invariant("suggestion");
+}
+
+#[gpui_kit::gpui::test]
+fn the_sender_history_suggestion_is_visible_in_the_triage_dock(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, habit());
+    h.keys("t enter");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("triage-accept").is_some(), "suggestion card accept control is rendered");
+    }).expect("window alive");
 }
 
 #[gpui_kit::gpui::test]
