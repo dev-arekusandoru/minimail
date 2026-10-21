@@ -17,7 +17,7 @@ const APPEARANCE: usize = 1;
 const INBOX: usize = 2;
 const READER: usize = 3;
 const AI: usize = 4;
-const SENDERS: usize = 5;
+const UPDATES: usize = 6;
 
 fn app(cx: &mut TestAppContext) -> Harness<'_> {
     harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Question", 1, "Inbox")]))
@@ -140,7 +140,7 @@ fn the_arrows_walk_the_sidebar(cx: &mut TestAppContext) {
     h.settings_keys("up up up up");
     assert_eq!(h.settings_page(), ACCOUNTS, "up walks back to the first page");
     h.settings_keys("up");
-    assert_eq!(h.settings_page(), SENDERS, "and wraps around to the last one");
+    assert_eq!(h.settings_page(), UPDATES, "and wraps around to the last one");
 }
 
 #[gpui_kit::gpui::test]

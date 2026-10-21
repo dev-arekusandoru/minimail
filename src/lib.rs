@@ -34,3 +34,4 @@ pub mod triage_session;
 pub mod triage_suggest;
 pub mod threads;
 pub mod tz;
+pub mod update;

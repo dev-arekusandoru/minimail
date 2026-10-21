@@ -82,6 +82,8 @@ pub enum SettingsEvent {
     TabAvatars(bool),
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
     BlockRemoteImages(bool),
+    /// Whether to check for updates once a day.
+    AutoUpdateCheck(bool),
     PreviewLines(u8),
     /// The row style changed (density, leading element, group tile, chips, subject first).
     RowStyle(crate::row_style::RowStyle),
@@ -253,6 +255,8 @@ pub struct SettingsPanel {
     tab_avatars: bool,
     /// Block remote images in the reader (opt in; images load by default).
     block_remote_images: bool,
+    /// Check for updates once a day (on by default).
+    auto_update_check: bool,
     preview_lines: u8,
     row_style: crate::row_style::RowStyle,
     orientation: Orientation,
@@ -373,6 +377,7 @@ impl SettingsPanel {
             group,
             tab_avatars: true,
             block_remote_images: false,
+            auto_update_check: true,
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
             row_style: crate::row_style::RowStyle::default(),
             orientation,
@@ -420,6 +425,12 @@ impl SettingsPanel {
     /// Whether the reader blocks remote images (the switch's initial value).
     pub fn block_remote_images(mut self, on: bool) -> Self {
         self.block_remote_images = on;
+        self
+    }
+
+    /// Whether updates are checked daily (the switch's initial value).
+    pub fn auto_update_check(mut self, on: bool) -> Self {
+        self.auto_update_check = on;
         self
     }
 
@@ -645,6 +656,7 @@ impl SettingsPanel {
         self.group = false;
         self.tab_avatars = true;
         self.block_remote_images = false;
+        self.auto_update_check = true;
         self.preview_lines = preview::DEFAULT_LINES;
         self.row_style = crate::row_style::RowStyle::default();
         self.orientation = Orientation::SideBySide;
@@ -745,6 +757,18 @@ impl SettingsPanel {
     /// Restore loading remote images.
     fn reset_block_remote_images(&mut self, cx: &mut Context<Self>) {
         self.set_block_remote_images(false, cx);
+    }
+
+    fn set_auto_update_check(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_update_check {
+            self.auto_update_check = on;
+            cx.emit(SettingsEvent::AutoUpdateCheck(on));
+            cx.notify();
+        }
+    }
+
+    fn reset_auto_update_check(&mut self, cx: &mut Context<Self>) {
+        self.set_auto_update_check(true, cx);
     }
 
     fn set_summaries(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -982,6 +1006,7 @@ impl SettingsPanel {
             self.reader_page(weak),
             self.classifier_page(weak),
             self.blocked_page(weak),
+            self.updates_page(weak),
         ]
     }
 }

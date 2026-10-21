@@ -70,3 +70,25 @@ impl SettingsPanel {
         )
     }
 }
+
+/// The Updates row's description: this build's version and channel.
+static UPDATES_ABOUT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| match crate::update::current() {
+        Some(build) => format!("Minimail {} ({}). Checks once a day.", build.version, build.channel.label()),
+        None => "Development builds don't check for updates.".to_owned(),
+    });
+
+impl SettingsPanel {
+    /// The daily update check.
+    pub(super) fn updates_page(&self, weak: &Weak) -> SettingPage {
+        SettingPage::new("Updates").resettable(true).group(
+            SettingGroup::new().item(row(
+                "Check for updates automatically",
+                &UPDATES_ABOUT,
+                &["update", "version", "nightly", "release", "upgrade"],
+                Undo::of_panel(weak, |this| !this.auto_update_check, SettingsPanel::reset_auto_update_check),
+                switch(weak, |this| this.auto_update_check, SettingsPanel::set_auto_update_check),
+            )),
+        )
+    }
+}

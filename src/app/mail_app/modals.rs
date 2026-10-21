@@ -348,6 +348,7 @@ impl MailApp {
         let dark_theme = self.dark_theme.clone();
         let tab_avatars = self.tab_avatars;
         let block_remote_images = self.block_remote_images;
+        let auto_update_check = self.auto_update_check;
         let blocked = self.mailbox.blocked();
         let spam_senders = self.mailbox.spam_senders().clone();
         let now = self.local_now();
@@ -393,6 +394,7 @@ impl MailApp {
                     .tab_avatars(tab_avatars)
                     .row_style(row_style)
                     .block_remote_images(block_remote_images)
+                    .auto_update_check(auto_update_check)
                     .mailbox_state(blocked, now, follow_up)
                     .spam_senders(spam_senders)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
@@ -422,6 +424,7 @@ impl MailApp {
                         crate::app_settings::PANE_LAYOUT.reset(store.as_ref(), &scope);
                         crate::app_settings::TAB_AVATARS.reset(store.as_ref(), &scope);
                         crate::app_settings::BLOCK_REMOTE_IMAGES.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_UPDATE_CHECK.reset(store.as_ref(), &scope);
                         crate::app_settings::GROUP_THREADS.reset(store.as_ref(), &scope);
                         crate::app_settings::PREVIEW_LINES.reset(store.as_ref(), &scope);
                         crate::app_settings::save_row_style(
@@ -455,6 +458,7 @@ impl MailApp {
                     this.group_threads = false;
                     this.tab_avatars = true;
                     this.block_remote_images = false;
+                    this.auto_update_check = true;
                     this.preview_lines = crate::preview::DEFAULT_LINES;
                     this.row_style = crate::row_style::RowStyle::default();
                     this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
@@ -528,6 +532,10 @@ impl MailApp {
                     this.block_remote_images = *on;
                     this.save_setting(&crate::app_settings::BLOCK_REMOTE_IMAGES, *on);
                     cx.notify();
+                }
+                SettingsEvent::AutoUpdateCheck(on) => {
+                    this.auto_update_check = *on;
+                    this.save_setting(&crate::app_settings::AUTO_UPDATE_CHECK, *on);
                 }
                 SettingsEvent::Grouping(on) => {
                     this.set_grouping(*on);

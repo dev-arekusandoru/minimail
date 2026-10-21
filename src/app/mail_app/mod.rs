@@ -86,6 +86,9 @@ mod sync;
 mod compact;
 mod rows;
 mod thread_rows;
+mod update;
+use actions::ToastAction;
+use update::UpdateState;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
@@ -289,8 +292,13 @@ pub struct MailApp {
     bodies_paused: bool,
     /// Wakes the sync loop when work is queued.
     sync_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
-    /// Toast text queued from a background task, shown on the next frame.
-    pending_toast: Option<String>,
+    /// Toast queued from a background task, shown on the next frame.
+    pending_toast: Option<(String, Option<ToastAction>)>,
+    /// Check for updates once a day (`AUTO_UPDATE_CHECK`).
+    auto_update_check: bool,
+    /// When the last update check started this session.
+    update_checked_at: Option<Timestamp>,
+    update_state: UpdateState,
 }
 
 impl MailApp {
@@ -417,6 +425,9 @@ impl MailApp {
             bodies_paused: false,
             sync_wake: None,
             pending_toast: None,
+            auto_update_check: true,
+            update_checked_at: None,
+            update_state: UpdateState::Idle,
         };
         app.classify_visible(cx);
         app
@@ -466,6 +477,7 @@ impl MailApp {
             QuestionKey::Folder,
             crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
         );
+        self.auto_update_check = crate::app_settings::AUTO_UPDATE_CHECK.get(store.as_ref(), &scope);
         self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
         self.auto_max_age_days =
             crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
@@ -505,6 +517,7 @@ impl MailApp {
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         let now = self.now();
         self.mailbox.tick(now);
+        self.auto_check_update(now, cx);
         cx.notify();
     }
 

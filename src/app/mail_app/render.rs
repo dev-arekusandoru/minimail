@@ -23,8 +23,8 @@ impl Render for MailApp {
             let targets = self.body_targets();
             self.fetch_bodies(targets, cx);
         }
-        if let Some(text) = self.pending_toast.take() {
-            self.show_toast(text, window, cx);
+        if let Some((text, action)) = self.pending_toast.take() {
+            self.push_toast(text, action, window, cx);
         }
         self.settle_fetch_toast(window, cx);
         // The dock's panel set follows the tab model, and the reader it shows follows the
@@ -256,6 +256,8 @@ impl Render for MailApp {
                 this.open_settings(crate::app::settings::ACCOUNTS_PAGE, w, cx)
             }))
             .on_action(cx.listener(|this, _: &FetchMail, w, cx| this.fetch_mail(w, cx)))
+            .on_action(cx.listener(|this, _: &CheckForUpdates, w, cx| this.check_for_updates(w, cx)))
+            .on_action(cx.listener(|this, _: &InstallUpdate, w, cx| this.install_update(w, cx)))
             .on_action(cx.listener(|this, _: &StartSession, _, cx| this.start_session(cx)))
             .on_action(cx.listener(|this, _: &ClassifyVisible, w, cx| {
                 if this.judge_status() == &JudgeStatus::NoKey {

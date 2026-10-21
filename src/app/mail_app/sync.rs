@@ -502,7 +502,7 @@ impl MailApp {
             return;
         }
         self.sync_error = Some(e.clone());
-        self.pending_toast = Some(format!("Gmail sync: {e}"));
+        self.pending_toast = Some((format!("Gmail sync: {e}"), None));
     }
 
     /// Reset the list, tabs and reader to a fresh state after accounts were removed.

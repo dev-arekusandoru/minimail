@@ -1,12 +1,33 @@
 use super::*;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 
+/// A button beside a toast's message, dispatching `action`.
+#[derive(Clone, Copy)]
+pub(super) struct ToastAction {
+    /// The button's element id, which tests click.
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Shortcut hint drawn on the button.
+    pub key: Option<&'static str>,
+    pub action: fn() -> Box<dyn Action>,
+    /// An action slot turns the kit's autohide off; this turns it back on.
+    pub autohide: bool,
+}
+
+const UNDO_ACTION: ToastAction = ToastAction {
+    id: "toast-undo",
+    label: "Undo",
+    key: Some("u"),
+    action: || Box::new(Undo),
+    autohide: true,
+};
+
 impl MailApp {
     /// Show `text` as a kit notification at the bottom of the window. A new toast replaces the
     /// previous one. `self.toast` mirrors the visible message because the kit keeps its
     /// notification text private.
     pub(super) fn show_toast(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.push_toast(text, false, window, cx);
+        self.push_toast(text, None, window, cx);
     }
 
     /// Same, with an Undo action: the one undo step `u` performs. While a session runs the
@@ -22,14 +43,14 @@ impl MailApp {
             cx.notify();
             return;
         }
-        self.push_toast(text, true, window, cx);
+        self.push_toast(text, Some(UNDO_ACTION), window, cx);
     }
 
-    /// One row: status icon, message, then the Undo action the kit lays beside it.
-    fn push_toast(
+    /// One row: status icon, message, then the action button the kit lays beside it.
+    pub(super) fn push_toast(
         &mut self,
         text: String,
-        undo: bool,
+        action: Option<ToastAction>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -50,20 +71,19 @@ impl MailApp {
                 })
                 .ok();
             });
-        if undo {
+        if let Some(action) = action {
             note = note
-                .action(|_, _, cx| {
-                    Button::new("toast-undo")
-                        .label("Undo")
+                .action(move |_, _, cx| {
+                    Button::new(action.id)
+                        .label(action.label)
                         .ghost()
-                        .child(crate::app::ui::shortcut("u"))
-                        .on_click(cx.listener(|note, _, window, cx| {
-                            window.dispatch_action(Box::new(Undo), cx);
+                        .when_some(action.key, |b, key| b.child(crate::app::ui::shortcut(key)))
+                        .on_click(cx.listener(move |note, _, window, cx| {
+                            window.dispatch_action((action.action)(), cx);
                             note.dismiss(window, cx);
                         }))
                 })
-                // The action slot turns autohide off; the toast still goes on its own.
-                .autohide(true);
+                .autohide(action.autohide);
         }
         window.push_notification(note, cx);
         cx.notify();
