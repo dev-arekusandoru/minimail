@@ -214,7 +214,8 @@ impl MailApp {
             .child(sender)
             .child(self.labels_row(m, look, cx).ml(px(52.)));
 
-        let strip = if opened { self.folder_strip(m, look, cx) } else { None };
+        let show_reader_banners = self.slot() != Slot::Triage;
+        let strip = if opened && show_reader_banners { self.folder_strip(m, look, cx) } else { None };
         let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
 
         div()
@@ -229,7 +230,7 @@ impl MailApp {
             })
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
-            .when(opened, |d| d.children(self.banners(m, look, cx)))
+            .when(opened && show_reader_banners, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
             .when_some(dev, |d, el| d.child(el))
             .child(self.message_body(m, role, in_thread, look, cx))

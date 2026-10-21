@@ -83,3 +83,35 @@ fn the_triage_reader_renders_each_current_message_body(cx: &mut TestAppContext) 
     assert!(second.size.height > gpui_kit::px(0.));
     assert!(first.size.height > gpui_kit::px(0.));
 }
+
+#[gpui_kit::gpui::test]
+fn possible_spam_banner_is_hidden_only_in_triage(cx: &mut TestAppContext) {
+    let mut messages = thread(1);
+    messages.add_suggestions(vec![mail_classifier::judge::Suggestion {
+        message: 1,
+        key: mail_classifier::judge::QuestionKey::Spam,
+        answer: mail_classifier::judge::Answer {
+            probabilities: vec![],
+            value: mail_classifier::judge::AnswerValue::Bool(true),
+            confidence: 1.0,
+        },
+    }]);
+    messages.accept_suggestions(1, 0);
+    let mut h = harness_with(cx, messages);
+    h.keys("enter");
+
+    let normal_banner = h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("banner-possible-spam").is_some()
+    }).expect("window alive");
+    assert!(normal_banner, "normal reader shows the Possible-Spam banner");
+
+    h.keys("t enter");
+    let triage_banner = h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("banner-possible-spam").is_some()
+    }).expect("window alive");
+    assert!(!triage_banner, "triage reader hides the Possible-Spam banner");
+}
+
+
