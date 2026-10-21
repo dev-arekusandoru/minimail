@@ -141,6 +141,8 @@ struct ViewState {
     measured: Cell<bool>,
     /// Loaded and measured (or out of patience): the native view may be shown.
     ready: Cell<bool>,
+    /// The reveal cap passed for this document; a page that never reports a height may show.
+    cap_passed: Cell<bool>,
     /// Counts documents, so a reveal timer for an old one does nothing.
     doc: Cell<u64>,
     /// A snapshot is wanted once the view has settled.
@@ -164,6 +166,7 @@ impl ViewState {
             loaded: Cell::new(false),
             measured: Cell::new(false),
             ready: Cell::new(false),
+            cap_passed: Cell::new(false),
             doc: Cell::new(0),
             want_snapshot: Cell::new(false),
             watching: Cell::new(false),
@@ -196,12 +199,14 @@ impl ViewState {
         self.loaded.set(false);
         self.measured.set(false);
         self.ready.set(false);
+        self.cap_passed.set(false);
         self.want_snapshot.set(false);
     }
 
-    /// Show the view once it is both loaded and measured.
+    /// Show the view once it is loaded and measured, or loaded after the reveal cap passed (a
+    /// page that never reports a height still gets shown, just never before it has loaded).
     fn settle_ready(&self) -> bool {
-        let ready = self.loaded.get() && self.measured.get();
+        let ready = self.loaded.get() && (self.measured.get() || self.cap_passed.get());
         if ready && !self.ready.replace(true) {
             self.want_snapshot.set(false);
             return true;
@@ -625,12 +630,17 @@ impl Inner {
                 }
             }
         }
-        // Out of patience: show the page even if it never reported a height. Only once it has
-        // loaded, though — a revealed page that has not loaded yet paints nothing, which is
-        // exactly the blank flash the skeleton exists to avoid.
+        // Out of patience: show the page even if it never reports a height, but never before it
+        // has loaded — an unloaded revealed page paints nothing, which is exactly the blank
+        // flash the skeleton exists to avoid. `settle_ready` also runs from `on_finished`, so a
+        // document that outlives this timer is still revealed when it loads.
         let (state, doc, notifier) = (e.state.clone(), e.state.doc.get(), self.notifier.clone());
         self.notifier.after(REVEAL_CAP, move || {
-            if state.doc.get() == doc && state.loaded.get() && !state.ready.replace(true) {
+            if state.doc.get() != doc || state.ready.get() {
+                return;
+            }
+            state.cap_passed.set(true);
+            if state.settle_ready() {
                 notifier.notify();
             }
         });
@@ -830,5 +840,30 @@ impl Element for EmailView {
             }
             None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ViewState;
+
+    /// A page that loads after the reveal cap and never reports a height still shows: the cap
+    /// only lets it through once it has loaded, and the load itself reveals it.
+    #[test]
+    fn a_page_that_loads_without_a_height_is_revealed_after_the_cap() {
+        let state = ViewState::new();
+        state.cap_passed.set(true);
+        assert!(!state.settle_ready(), "an unloaded page is never revealed");
+        state.loaded.set(true);
+        assert!(state.settle_ready(), "a loaded page is revealed once the cap has passed");
+        assert!(!state.settle_ready(), "and only once");
+    }
+
+    #[test]
+    fn a_measured_page_is_revealed_without_waiting_for_the_cap() {
+        let state = ViewState::new();
+        state.loaded.set(true);
+        state.measured.set(true);
+        assert!(state.settle_ready());
     }
 }
