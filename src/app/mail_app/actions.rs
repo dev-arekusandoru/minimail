@@ -9,13 +9,19 @@ impl MailApp {
         self.push_toast(text, false, window, cx);
     }
 
-    /// Same, with an Undo action: the one undo step `u` performs.
+    /// Same, with an Undo action: the one undo step `u` performs. While a session runs the
+    /// message goes to the top row instead of a bottom toast, which would cover the toolbar.
     pub(super) fn show_undo_toast(
         &mut self,
         text: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session.is_some() {
+            self.triage_undo = Some(text.into());
+            cx.notify();
+            return;
+        }
         self.push_toast(text, true, window, cx);
     }
 
@@ -114,6 +120,7 @@ impl MailApp {
     /// straight back to the user's own views.
     pub(super) fn end_run(&mut self) {
         let Some(s) = self.session.take() else { return };
+        self.triage_undo = None;
         if s.run.handled() == 0 && s.run.skipped() == 0 {
             return self.end_session();
         }
@@ -376,6 +383,7 @@ impl MailApp {
     /// Close Triage mode, whichever screen it is on; the user's own views were never touched.
     pub(super) fn end_session(&mut self) {
         self.session = None;
+        self.triage_undo = None;
         self.session_setup = None;
         self.session_summary = None;
         self.session_view = None;
@@ -464,6 +472,7 @@ impl MailApp {
         self.session_view = Some(ListView::new(query, options.location.clone()));
         self.session_setup = None;
         self.session_summary = None;
+        self.triage_undo = None;
         self.session = Some(Session { run: Run::new(options, ids, self.now()), suggestion: None, taking: false });
         self.refresh_suggestion();
         cx.notify();
@@ -543,7 +552,11 @@ impl MailApp {
         } else if self.mailbox.undo() {
             self.refresh_suggestion();
             self.follow_folders(anchors, window, cx);
-            self.show_toast("Undone".into(), window, cx);
+            if self.session.is_some() {
+                self.triage_undo = None;
+            } else {
+                self.show_toast("Undone".into(), window, cx);
+            }
         }
         self.scroll_to_cursor();
         cx.notify();

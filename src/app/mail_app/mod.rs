@@ -221,6 +221,9 @@ pub struct MailApp {
     session_setup: Option<SetupView>,
     /// The Summary screen, while it is up, with the options "Keep going" starts over with.
     session_summary: Option<(SessionSummary, SessionOptions)>,
+    /// The last action's message while a session runs: shown with an Undo in the top row
+    /// instead of a bottom toast.
+    triage_undo: Option<SharedString>,
     /// The list a session works through: its own cursor, selection and scroll over the queue,
     /// so a session never touches the user's list tabs. Present exactly while `session`,
     /// `session_setup` or `session_summary` is (see [`MailApp::triage_open`]).
@@ -379,6 +382,7 @@ impl MailApp {
             session: None,
             session_setup: None,
             session_summary: None,
+            triage_undo: None,
             session_view: None,
             drawing: std::cell::Cell::new(None),
             summary: None,

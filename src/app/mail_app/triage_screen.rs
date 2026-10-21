@@ -283,8 +283,8 @@ impl MailApp {
         self.webviews.end_pass(true);
     }
 
-    /// The End/Cancel · count · Undo row.
-    fn top_row(&self, left: Option<&'static str>, mid: Option<Div>, undo: bool, p: &Pal, mono: &SharedString) -> Div {
+    /// The End/Cancel · count row.
+    fn top_row(&self, left: Option<&'static str>, mid: Option<Div>, p: &Pal, mono: &SharedString) -> Div {
         let side = || div().flex().flex_none().w(px(120.));
         div()
             .flex()
@@ -304,16 +304,7 @@ impl MailApp {
                 )
             }))
             .child(div().text_size(px(12.)).line_height(px(16.)).text_color(p.muted).children(mid))
-            .child(side().justify_end().when(undo, |d| {
-                d.child(
-                    btn("triage-undo", p.muted, p)
-                        .px(px(8.))
-                        .on_click(crate::app::ui::run(Undo))
-                        .child(ic(IconName::Undo2, 16., p.muted))
-                        .child("Undo")
-                        .child(key_badge(p, mono, "⌘Z", false)),
-                )
-            }))
+            .child(side())
     }
 
     // ------------------------------------------------------------------ Start
@@ -455,7 +446,7 @@ impl MailApp {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.top_row(Some("Cancel"), None, false, p, mono))
+            .child(self.top_row(Some("Cancel"), None, p, mono))
             .child(centered(card))
             .into_any_element()
     }
@@ -563,7 +554,7 @@ impl MailApp {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.top_row(None, None, false, p, mono))
+            .child(self.top_row(None, None, p, mono))
             .child(centered(card))
             .into_any_element()
     }
@@ -578,9 +569,22 @@ impl MailApp {
             .unwrap_or_default();
         let count = div()
             .flex()
+            .items_center()
             .gap(px(4.))
             .child(bold(group(pos), p))
-            .child(format!("of {} · {place}", group(total)));
+            .child(format!("of {} · {place}", group(total)))
+            .when_some(self.triage_undo.clone(), |d, msg| {
+                d.child(div().ml(px(8.)).child(msg))
+                    .child(
+                        btn("triage-undo", p.muted, p)
+                            .ml(px(4.))
+                            .px(px(8.))
+                            .on_click(crate::app::ui::run(Undo))
+                            .child(ic(IconName::Undo2, 16., p.muted))
+                            .child("Undo")
+                            .child(key_badge(p, mono, "u", false)),
+                    )
+            });
         let composing = self.compose.is_some();
         let reader = dock::reader_content(self, Slot::Triage, cx);
         let dock = (!composing).then(|| self.dock_band(p, mono, cx));
@@ -589,7 +593,7 @@ impl MailApp {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.top_row(Some("End"), Some(count), true, p, mono))
+            .child(self.top_row(Some("End"), Some(count), p, mono))
             .child(
                 div()
                     .flex_1()

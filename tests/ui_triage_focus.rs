@@ -287,3 +287,35 @@ fn snoozing_from_triage_asks_when_and_advances_the_session(cx: &mut TestAppConte
     assert_eq!(h.state_of(4), Inbox);
     assert_eq!(h.read(|a| a.mailbox.snoozed_until(4)), None, "one undo restores the message");
 }
+
+/// Inside a session the undo offer lives in the top row, not a bottom toast over the toolbar.
+/// Clicking it runs the same Undo `u` does and clears the inline offer.
+#[gpui_kit::gpui::test]
+fn archiving_in_a_session_undoes_inline_without_a_toast(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, inbox());
+    h.keys("t enter");
+    assert_eq!(h.read(|a| a.opened()), Some(4));
+
+    h.keys("e");
+    assert_eq!(h.state_of(4), Archived);
+    assert_eq!(h.toast(), "", "no toast covers the triage toolbar");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("triage-undo").is_some(), "the top row offers Undo");
+    }).expect("window alive");
+
+    h.click("triage-undo");
+    assert_eq!(h.state_of(4), Inbox, "Undo restores the message");
+    assert!(h.read(|a| a.session_progress()).is_some(), "the session keeps running");
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("triage-undo").is_none(), "the inline Undo clears");
+    }).expect("window alive");
+}
+
+#[gpui_kit::gpui::test]
+fn archiving_outside_a_session_still_shows_the_undo_toast(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, inbox());
+    h.keys("e");
+    assert!(h.toast().contains("Marked 1 archived"), "toast: {}", h.toast());
+}
