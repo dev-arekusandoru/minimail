@@ -28,7 +28,7 @@ use std::hash::{Hash, Hasher};
 use std::panic::Location;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui_kit::*;
 
@@ -143,7 +143,6 @@ struct ViewState {
     ready: Cell<bool>,
     /// Counts documents, so a reveal timer for an old one does nothing.
     doc: Cell<u64>,
-    born: Instant,
     /// A snapshot is wanted once the view has settled.
     want_snapshot: Cell<bool>,
     watching: Cell<bool>,
@@ -166,7 +165,6 @@ impl ViewState {
             measured: Cell::new(false),
             ready: Cell::new(false),
             doc: Cell::new(0),
-            born: Instant::now(),
             want_snapshot: Cell::new(false),
             watching: Cell::new(false),
             geom: Cell::new([0.; 8]),
@@ -348,6 +346,12 @@ impl EmailWebViews {
         (EmailView { views: self.clone(), key, state: e.state.clone() }, e.blocked)
     }
 
+    /// Whether `key`'s view has a document it can show yet; until then the reader draws the
+    /// skeleton instead of an empty native view.
+    pub fn ready(&self, key: ViewKey) -> bool {
+        self.0.entries.borrow().get(&key).is_some_and(|e| e.state.ready.get())
+    }
+
     /// A reader slot is about to draw its message views.
     pub fn begin_pass(&self, triage: bool) {
         self.0.passes[usize::from(triage)].borrow_mut().clear();
@@ -437,13 +441,10 @@ impl EmailWebViews {
             inner.realize(key, e, window, cx);
         }
         let style = e.sig.style;
-        let skeleton = Paint::Skeleton { bounds, fg: style.fg, bg: style.bg };
         let Some(native) = e.native.as_ref() else {
-            // No view yet (waiting for the rules to compile): the placeholder holds the place.
-            return (e.phase == Phase::Pending).then(|| {
-                window.request_animation_frame();
-                skeleton
-            });
+            // No view yet (waiting for the rules to compile): the skeleton element holds the
+            // place above this view.
+            return None;
         };
         let state = &e.state;
         let ready = state.ready.get();
@@ -469,8 +470,7 @@ impl EmailWebViews {
         }
         if !ready {
             native.set_visible(true);
-            window.request_animation_frame();
-            return Some(skeleton);
+            return None;
         }
         if overlay {
             native.set_visible(false);
@@ -549,11 +549,18 @@ impl Inner {
         };
         if !native::available(window) {
             e.phase = Phase::Headless;
-            e.state.ready.set(true);
             self.loads.borrow_mut().push(LoadedDoc {
                 key,
                 style: e.sig.style,
                 document: pending.document,
+            });
+            // Nothing is displayable on the headless platform either: reveal on the next turn,
+            // so the frame a view is first laid out keeps its skeleton, as a real view does.
+            let (state, notifier) = (e.state.clone(), self.notifier.clone());
+            self.notifier.after(Duration::ZERO, move || {
+                if !state.ready.replace(true) {
+                    notifier.notify();
+                }
             });
             return;
         }
@@ -618,10 +625,12 @@ impl Inner {
                 }
             }
         }
-        // Out of patience: show whatever has rendered by then.
+        // Out of patience: show the page even if it never reported a height. Only once it has
+        // loaded, though — a revealed page that has not loaded yet paints nothing, which is
+        // exactly the blank flash the skeleton exists to avoid.
         let (state, doc, notifier) = (e.state.clone(), e.state.doc.get(), self.notifier.clone());
         self.notifier.after(REVEAL_CAP, move || {
-            if state.doc.get() == doc && !state.ready.replace(true) {
+            if state.doc.get() == doc && state.loaded.get() && !state.ready.replace(true) {
                 notifier.notify();
             }
         });
@@ -740,8 +749,6 @@ pub struct Swap {
 
 /// What the element paints in place of (or under) the native view.
 pub enum Paint {
-    /// The loading placeholder.
-    Skeleton { bounds: Bounds<Pixels>, fg: u32, bg: u32 },
     /// A snapshot standing in for the hidden native view during an overlay.
     Swap(Swap),
     /// The page background, when an overlay opened before any snapshot was ready.
@@ -820,24 +827,6 @@ impl Element for EmailView {
             }
             Some(Paint::Blank { bounds, bg }) => {
                 window.paint_quad(fill(bounds, gpui_kit::gpui::rgb(bg)));
-            }
-            Some(Paint::Skeleton { bounds, fg, bg }) => {
-                let pulse = (self.state.born.elapsed().as_secs_f32() * 3.).sin() * 0.5 + 0.5;
-                let line = Rgba { a: 0.07 + 0.05 * pulse, ..gpui_kit::gpui::rgb(fg) };
-                window.paint_quad(fill(bounds, gpui_kit::gpui::rgb(bg)));
-                // A heading, then paragraph lines of uneven length.
-                let rows = [(0.45, 20.), (1.0, 12.), (0.96, 12.), (0.9, 12.), (0.62, 12.), (0., 0.), (1.0, 12.), (0.93, 12.), (0.7, 12.)];
-                let mut y = 8.;
-                for (fraction, h) in rows {
-                    if h > 0. {
-                        let line_bounds = Bounds {
-                            origin: point(bounds.left(), bounds.top() + px(y)),
-                            size: size(bounds.size.width * fraction, px(h)),
-                        };
-                        window.paint_quad(fill(line_bounds, line).corner_radii(px(4.)));
-                    }
-                    y += h + 12.;
-                }
             }
             None => {}
         }

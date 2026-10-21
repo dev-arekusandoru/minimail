@@ -589,13 +589,26 @@ impl MailApp {
                 let key = ViewKey { msg: mid, triage: self.slot() == Slot::Triage };
                 let (view, count) = self.webviews.body(key, h, style);
                 blocked = count;
-                div()
-                    .id(("reader-html", id))
-                    .test_support()
-                    .w_full()
-                    .min_w_0()
-                    .child(view)
-                    .into_any_element()
+                if self.webviews.ready(key) {
+                    div()
+                        .id(("reader-html", id))
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .child(view)
+                        .into_any_element()
+                } else {
+                    // The view is mounted so it can load, but nothing of it may show yet: the
+                    // skeleton covers it until the document is ready, so the card never flashes
+                    // blank between the two.
+                    div()
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .child(view)
+                        .child(body_skeleton(if in_thread { message_card_bg(t) } else { t.background }, t.foreground))
+                        .into_any_element()
+                }
             }
             _ => self.text_content(m, look, cx),
         };
@@ -730,6 +743,26 @@ fn suggestion_banner(
 /// them; the token keeps light and dark in step.
 fn message_card_bg(t: &ThemeColor) -> Hsla {
     t.secondary
+}
+
+/// The loading placeholder over an email view that has no document to show yet: the card colour
+/// with a heading and body lines, so the card never seams into the page that replaces it.
+fn body_skeleton(bg: Hsla, fg: Hsla) -> impl IntoElement {
+    div()
+        .id("reader-body-skeleton")
+        .test_support()
+        .absolute()
+        .inset_0()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_4()
+        .bg(bg)
+        .child(div().h(px(20.)).w(relative(0.45)).rounded(px(4.)).bg(fg.opacity(0.09)))
+        .children(
+            [1., 0.96, 0.9, 0.62, 1., 0.93, 0.7]
+                .map(|w| div().h(px(12.)).w(relative(w)).rounded(px(4.)).bg(fg.opacity(0.07))),
+        )
 }
 
 /// The reader chip word for urgency `level`; the raw `n/5` is never shown.

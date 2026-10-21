@@ -130,6 +130,14 @@ impl MailApp {
         self.providers.insert(account.to_owned(), Arc::new(Mutex::new(provider)));
     }
 
+    /// Adopt a cache and one provider without the sign-in flow: the `fixtures` tests drive the
+    /// real body queue with a fake provider.
+    #[cfg(feature = "fixtures")]
+    pub fn attach_test_sync(&mut self, cache: Rc<Cache>, account: &str, provider: Box<dyn MailProvider>) {
+        self.cache = Some(cache);
+        self.register_provider(account, provider);
+    }
+
     /// Main-thread half of one loop iteration: persist local state, then plan
     /// every account's round. `None` means there is nothing to do.
     fn sync_prepare(&mut self) -> Option<Vec<AccountJob>> {
@@ -345,6 +353,13 @@ impl MailApp {
 
     /// The opened message and the next few rows of the list.
     pub(super) fn body_targets(&self) -> Vec<MessageId> {
+        // A session's queue is its own order and filter, not the list's: prefetch what the
+        // session will show next, not the rows the list happens to draw under it.
+        if self.slot() == Slot::Triage
+            && let Some(run) = self.session.as_ref().map(|s| &s.run)
+        {
+            return run.upcoming(BODY_PREFETCH + 1).to_vec();
+        }
         let opened = self.opened();
         let visible = self.visible_ids();
         let start = opened.and_then(|id| visible.iter().position(|v| *v == id)).unwrap_or(0);

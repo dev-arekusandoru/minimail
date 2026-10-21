@@ -251,6 +251,12 @@ impl Run {
         self.ids.get(self.handled).copied()
     }
 
+    /// The current message and the next `n` still queued, in the order the session shows them.
+    pub fn upcoming(&self, n: usize) -> &[MessageId] {
+        let rest = &self.ids[self.handled.min(self.ids.len())..];
+        &rest[..rest.len().min(n)]
+    }
+
     /// `(1-based position, queue length)`.
     pub fn progress(&self) -> (usize, usize) {
         ((self.handled + 1).min(self.ids.len()), self.ids.len())
