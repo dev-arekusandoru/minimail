@@ -258,3 +258,32 @@ fn keep_going_restarts_with_the_same_options_and_a_sent_reply_counts(cx: &mut Te
     assert_eq!(h.read(|a| a.session_options().map(|o| o.order)), Some(SessionOrder::OldestFirst));
     assert_eq!(h.read(|a| a.session_progress()), Some((1, 3)), "a new session over what is still inbox");
 }
+
+/// `s` in triage asks when to snooze, like the list; picking a time handles the current
+/// message and moves on, cancelling changes nothing.
+#[gpui_kit::gpui::test]
+fn snoozing_from_triage_asks_when_and_advances_the_session(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, inbox());
+    h.keys("t enter");
+    assert_eq!(h.read(|a| a.opened()), Some(4));
+    let until = h.read(|a| a.mailbox.snooze_presets(&a.local_now())[0].1);
+    let depth = h.read(|a| a.mailbox.undo_depth());
+
+    h.keys("s");
+    assert!(h.read(|a| a.snooze_open()), "s asks when, as in the list");
+    h.keys("escape");
+    assert!(!h.read(|a| a.snooze_open()));
+    assert_eq!(h.state_of(4), Inbox, "cancelling changes nothing");
+    assert_eq!(h.read(|a| a.opened()), Some(4), "and keeps the message current");
+
+    h.keys("s 1");
+    assert_eq!(h.state_of(4), Snoozed);
+    assert_eq!(h.read(|a| a.mailbox.snoozed_until(4)), Some(until));
+    assert_eq!(h.read(|a| a.opened()), Some(3), "the session moved on");
+    assert_eq!(h.read(|a| a.session_progress()), Some((2, 3)));
+    assert_eq!(h.read(|a| a.mailbox.undo_depth()), depth + 1, "one undo step");
+
+    h.keys("u");
+    assert_eq!(h.state_of(4), Inbox);
+    assert_eq!(h.read(|a| a.mailbox.snoozed_until(4)), None, "one undo restores the message");
+}

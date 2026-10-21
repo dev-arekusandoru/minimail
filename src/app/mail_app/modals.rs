@@ -211,19 +211,8 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let quick = self.in_session() && ids.is_none();
         // Captured now: a message menu's target only lives for its own dispatch.
         let ids = ids.unwrap_or_else(|| self.target_ids());
-        if quick {
-            let now = self.local_now();
-            if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
-                self.mailbox.snooze(&ids, until, now.at());
-                self.triage_mut().clear_selection();
-                self.session_advance(Outcome::Snoozed);
-            }
-            cx.notify();
-            return;
-        }
         if ids.is_empty() {
             return;
         }
@@ -253,6 +242,10 @@ impl MailApp {
                     window,
                     cx,
                 );
+                // A snoozed session message is handled; snoozing other mail is not.
+                if this.session_current().is_some_and(|current| ids.contains(&current)) {
+                    this.session_advance(Outcome::Snoozed);
+                }
                 this.scroll_to_cursor();
             },
         ));
