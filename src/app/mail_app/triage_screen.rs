@@ -574,7 +574,7 @@ impl MailApp {
             .child(bold(group(pos), p))
             .child(format!("of {} · {place}", group(total)))
             .when_some(self.triage_undo.clone(), |d, msg| {
-                d.child(div().ml(px(8.)).child(msg))
+                d.child(div().ml(px(8.)).min_w_0().truncate().text_color(p.muted).child(msg))
                     .child(
                         btn("triage-undo", p.muted, p)
                             .ml(px(4.))
