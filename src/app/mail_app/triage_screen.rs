@@ -17,6 +17,8 @@ use crate::app::ui::{mono_font, Observable};
 use crate::theme::ThemeColor;
 use crate::triage_session::{SessionFilter, SessionOrder, SessionSize};
 
+const TRIAGE_READER_MAX_W: f32 = 720.;
+
 /// The mockup's palette, mapped onto theme tokens.
 pub(super) struct Pal {
     pub bg: Hsla,
@@ -588,7 +590,22 @@ impl MailApp {
             .flex()
             .flex_col()
             .child(self.top_row(Some("End"), Some(count), true, p, mono))
-            .child(div().flex_1().min_h_0().flex().flex_col().child(reader))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .max_w(px(TRIAGE_READER_MAX_W))
+                            .flex()
+                            .flex_col()
+                            .child(reader),
+                    ),
+            )
             .children(dock)
             .into_any_element()
     }

@@ -51,6 +51,22 @@ impl harness::Harness<'_> {
 }
 
 #[gpui_kit::gpui::test]
+fn triage_reader_body_is_narrower_than_normal_reader(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, thread(1));
+    h.cx.simulate_window_resize(h.window, gpui_kit::size(gpui_kit::px(1800.), gpui_kit::px(900.)));
+    h.keys("t");
+    h.keys("enter");
+    let triage_width = h.body_bounds().size.width;
+    assert!(triage_width <= gpui_kit::px(720.), "triage body width: {triage_width:?}");
+
+    h.keys("escape");
+    h.keys("escape");
+    h.keys("enter");
+    let reader_width = h.body_bounds().size.width;
+    assert!(reader_width > gpui_kit::px(720.), "reader body width: {reader_width:?}");
+}
+
+#[gpui_kit::gpui::test]
 fn the_triage_reader_renders_each_current_message_body(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, thread(12));
     h.keys("t");
