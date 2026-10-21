@@ -114,4 +114,20 @@ fn possible_spam_banner_is_hidden_only_in_triage(cx: &mut TestAppContext) {
     assert!(!triage_banner, "triage reader hides the Possible-Spam banner");
 }
 
+#[gpui_kit::gpui::test]
+fn new_sender_banner_remains_visible_in_triage(cx: &mut TestAppContext) {
+    if !mail_classifier::known_senders::KNOWN_SENDERS_ENABLED {
+        return;
+    }
+    let mut h = harness_with(cx, thread(1));
+    h.keys("enter");
+    h.keys("t enter");
+
+    let visible = h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("banner-new-sender").is_some()
+    }).expect("window alive");
+    assert!(visible, "triage retains the New sender banner");
+}
+
 

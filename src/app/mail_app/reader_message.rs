@@ -230,7 +230,7 @@ impl MailApp {
             })
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
-            .when(opened && show_reader_banners, |d| d.children(self.banners(m, look, cx)))
+            .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
             .when_some(dev, |d, el| d.child(el))
             .child(self.message_body(m, role, in_thread, look, cx))
@@ -407,7 +407,7 @@ impl MailApp {
                 actions,
             ));
         }
-        if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
+        if self.slot() != Slot::Triage && self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
             out.push(self.spam_banner(m.id, look, cx));
         }
         out
