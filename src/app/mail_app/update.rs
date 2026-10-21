@@ -1,5 +1,6 @@
 use super::*;
 use crate::update::{self, Build, Manifest};
+use std::path::PathBuf;
 
 #[derive(Default)]
 pub(super) enum UpdateState {
@@ -7,6 +8,10 @@ pub(super) enum UpdateState {
     Idle,
     Checking,
     Available(Manifest),
+    /// Downloading and verifying the new build.
+    Downloading,
+    /// The new build sits verified beside the app, swapped in on restart.
+    Ready { staged: PathBuf, version: String },
 }
 
 impl MailApp {
@@ -24,9 +29,14 @@ impl MailApp {
     pub(super) fn check_for_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = match &self.update_state {
             UpdateState::Checking => "Already checking for updates".to_owned(),
+            UpdateState::Downloading => "Downloading the update…".to_owned(),
             UpdateState::Available(manifest) => {
-                let text = format!("Minimail {} is available", manifest.version);
+                let text = available_text(manifest);
                 return self.push_toast(text, Some(UPDATE_ACTION), window, cx);
+            }
+            UpdateState::Ready { version, .. } => {
+                let text = ready_text(version);
+                return self.push_toast(text, Some(RESTART_ACTION), window, cx);
             }
             UpdateState::Idle if update::current().is_none() => "Development builds don't update".to_owned(),
             UpdateState::Idle => {
@@ -62,8 +72,7 @@ impl MailApp {
         self.update_state = UpdateState::Idle;
         match result {
             Ok(manifest) if manifest.is_newer_than(&build) => {
-                let text = format!("Minimail {} is available", manifest.version);
-                self.pending_toast = Some((text, Some(UPDATE_ACTION)));
+                self.pending_toast = Some((available_text(&manifest), Some(UPDATE_ACTION)));
                 self.update_state = UpdateState::Available(manifest);
             }
             Ok(_) if manual => self.pending_toast = Some((format!("Minimail {} is up to date", build.version), None)),
@@ -74,18 +83,84 @@ impl MailApp {
         cx.notify();
     }
 
-    /// The toast's "Update" button: open the release page to download the new build.
+    /// The toasts' "Update" and "Restart" buttons: download and verify the new build, then swap
+    /// it in and relaunch.
     pub(super) fn install_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match (&self.update_state, update::current()) {
-            (UpdateState::Available(_), Some(build)) => cx.open_url(&build.channel.release_page()),
-            _ => self.show_toast("No update available".to_owned(), window, cx),
+        let (Some(build), Some(target)) = (update::current(), update::running_app()) else {
+            return self.show_toast("No update available".to_owned(), window, cx);
+        };
+        match std::mem::take(&mut self.update_state) {
+            UpdateState::Available(manifest) => {
+                self.show_toast(format!("Downloading Minimail {}…", manifest.version), window, cx);
+                self.update_state = UpdateState::Downloading;
+                let task = cx.background_spawn(async move {
+                    let dir = std::env::temp_dir().join("minimail-update");
+                    let staged = update::download(build.channel, &manifest, &dir)
+                        .and_then(|dmg| update::stage(&dmg, &target));
+                    (manifest, staged)
+                });
+                cx.spawn(async move |this, cx| {
+                    let (manifest, staged) = task.await;
+                    this.update(cx, |this, cx| this.finish_download(manifest, staged, cx)).ok();
+                })
+                .detach();
+            }
+            UpdateState::Ready { staged, version } => match update::install(&staged, &target, std::process::id()) {
+                Ok(()) => window.dispatch_action(Box::new(Quit), cx),
+                Err(e) => {
+                    self.update_state = UpdateState::Ready { staged, version };
+                    self.show_toast(format!("Update failed: {e}"), window, cx);
+                }
+            },
+            state => {
+                let text = match state {
+                    UpdateState::Downloading => "Downloading the update…",
+                    _ => "No update available",
+                };
+                self.update_state = state;
+                self.show_toast(text.to_owned(), window, cx);
+            }
         }
     }
+
+    fn finish_download(&mut self, manifest: Manifest, staged: Result<PathBuf, String>, cx: &mut Context<Self>) {
+        match staged {
+            Ok(staged) => {
+                self.pending_toast = Some((ready_text(&manifest.version), Some(RESTART_ACTION)));
+                self.update_state = UpdateState::Ready { staged, version: manifest.version };
+            }
+            // Can't install in place (say, /Applications isn't writable): fall back to the page.
+            Err(e) => {
+                self.pending_toast = Some((format!("Update failed: {e} · opening the download page"), None));
+                if let Some(build) = update::current() {
+                    cx.open_url(&build.channel.release_page());
+                }
+                self.update_state = UpdateState::Available(manifest);
+            }
+        }
+        cx.notify();
+    }
+}
+
+fn available_text(manifest: &Manifest) -> String {
+    format!("Minimail {} is available", manifest.version)
+}
+
+fn ready_text(version: &str) -> String {
+    format!("Minimail {version} is ready · restart to update")
 }
 
 const UPDATE_ACTION: ToastAction = ToastAction {
     id: "toast-update",
     label: "Update",
+    key: None,
+    action: || Box::new(InstallUpdate),
+    autohide: false,
+};
+
+const RESTART_ACTION: ToastAction = ToastAction {
+    id: "toast-restart",
+    label: "Restart",
     key: None,
     action: || Box::new(InstallUpdate),
     autohide: false,

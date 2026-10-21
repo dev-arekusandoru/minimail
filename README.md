@@ -195,6 +195,11 @@ prerelease. Repo secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
 `APPLE_APP_PASSWORD`.
 
+Packaged builds update themselves from their channel's release: they check daily
+(Settings → Updates) or on "Check for updates", then download, verify and swap in
+the new build on restart. The release must carry `dist/latest.json` next to the
+DMG; see `docs/in-app-update.md`.
+
 ### Gmail accounts
 
 Gmail is optional; without a linked account the app starts with an empty mailbox. To connect it,

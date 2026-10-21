@@ -1,37 +1,33 @@
-# In-app update (plan, not built)
+# In-app update
 
-Goal: nightly testers learn about new builds without checking GitHub, and later
-can install them from inside the app.
+Packaged builds check their release channel for a newer build, download and verify it,
+and swap it in on restart.
 
-## Pieces
+## Channels
 
-- **`src/update.rs`**, pure logic, no GPUI. Takes `now: Timestamp` and the
-  running version; the HTTP fetch sits behind a trait so tests use a fake.
-- **Check**: on launch, then every 24 h, on a background thread via `ureq`:
-  `GET https://api.github.com/repos/dev-arekusandoru/minimail/releases/tags/nightly`.
-  Compare against the running version (`CFBundleShortVersionString`, or bake it
-  in with `env!`/`option_env!`).
-- **`latest.json` release asset**: the nightly workflow is a rolling release, so
-  the asset URL doesn't say which build it is. Have the workflow upload
-  `latest.json` (`version`, `build`, `dmg_url`, `sha256`) next to the DMG and
-  have the client read that instead of parsing release titles.
-- **UI**: a toast with an "Update" action when a newer build exists, plus a
-  palette command "Check for updates". New actions go in `src/app/actions.rs`
-  (`bind_keys` + `commands()` with a palette `Category`).
+`scripts/package.sh` bakes `MAIL_CLASSIFIER_CHANNEL`, `_BUILD` and `_VERSION` into the
+binary (`update::current()`); dev builds have none and never check. Each channel reads a
+`latest.json` (`version`, `build`, `dmg`, `sha256`) that `package.sh` writes next to the DMG:
 
-## Stages
+| Channel | Manifest |
+|---|---|
+| nightly | `releases/download/nightly/latest.json` (the rolling prerelease) |
+| release | `releases/latest/download/latest.json` (latest non-prerelease) |
 
-1. **Notify only.** The action opens the release page in the browser. Small.
-2. **Full auto-update.** Download the DMG to a temp dir, verify the sha256 and
-   `codesign --verify` / `spctl -a`, mount it, and replace the running `.app`
-   from a small detached helper script (a running app can't overwrite itself),
-   then relaunch. The helper is the hard part; Sparkle isn't usable from GPUI.
+A manifest is newer when its `build` is higher, so `BUILD_NUMBER` must increase within a
+channel; CI passes its run number. A release workflow only has to run `package.sh` with
+`CHANNEL=release` and upload the DMG and `dist/latest.json` to a normal (non-pre) release.
 
-Do stage 1 first; stage 2 once the pipeline has proven stable.
+## Flow
 
-## Notes
+- **Check**: on launch, then every 24 h while the app runs (Settings → Updates turns this
+  off), or via the palette's "Check for updates". A found build shows a toast with Update.
+- **Update** (`update::download` + `update::stage`): download the DMG, check its sha256,
+  mount it, require the app inside to meet the running app's own designated requirement
+  (same bundle id and Developer ID team) and pass `spctl`, then `ditto` it beside the
+  running app as `.Minimail-update.app`. Failure opens the release page instead.
+- **Restart** (`update::install`): a detached `sh` waits for the app to exit, moves the
+  old bundle aside, moves the staged one in (restoring the old one if that fails) and
+  relaunches it.
 
-- Tests use a fake fetcher, never the network.
-- Respect the repo's no-system-clock rule: pass `now` in.
-- Version ordering: nightlies are `<cargo version>-nightly.<YYYYMMDD>`, so
-  compare the date suffix (or the build number from `latest.json`), not semver.
+Ad-hoc signed builds can't verify an update and refuse to install one.
