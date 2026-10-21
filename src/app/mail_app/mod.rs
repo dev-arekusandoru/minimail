@@ -52,6 +52,7 @@ use crate::list_tabs::ListTabs;
 use self::list_strip::{Pane, Slot};
 use self::list_view::ListView;
 use self::judging::JudgeJob;
+use self::list::ListFrame;
 
 mod accessors;
 mod actions;

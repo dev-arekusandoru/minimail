@@ -94,12 +94,16 @@ impl MailApp {
 
     /// Cursor / open / selected / unread state of the row for message `id`.
     pub fn row_visual(&self, id: MessageId) -> RowVisual {
-        let unread = !self.mailbox.is_read(id);
+        self.row_state(id, self.cursor_id() == Some(id))
+    }
+
+    /// [`Self::row_visual`] with the cursor already known, so list rows skip resolving it.
+    pub(super) fn row_state(&self, id: MessageId, cursor: bool) -> RowVisual {
         RowVisual {
-            cursor: self.cursor_id() == Some(id),
+            cursor,
             open: self.opened() == Some(id),
             selected: self.triage().is_selected(id),
-            unread,
+            unread: !self.mailbox.is_read(id),
         }
     }
 
@@ -214,11 +218,10 @@ impl MailApp {
 
     /// Standard message row: rail (gutter time | marker) or sender tile + time column, then the
     /// body: optional chips, subject line, `sender · preview` block, optional chips.
-    pub(super) fn render_row(&self, msg: &Message, ix: usize, _newest: &str, cx: &Context<Self>) -> crate::app::ui::Observable {
+    pub(super) fn render_row(&self, msg: &Message, ix: usize, list: &ListFrame, cx: &Context<Self>) -> crate::app::ui::Observable {
         let t = cx.theme();
         let style = self.row_style;
-        let mut visual = self.row_visual(msg.id);
-        visual.cursor = ix == self.cursor_ix();
+        let visual = self.row_state(msg.id, ix == list.cursor);
         let unread = visual.unread;
         let (shown, hidden) = self.row_icons(msg.id, self.list_w);
         let ix_id = msg.id as usize;

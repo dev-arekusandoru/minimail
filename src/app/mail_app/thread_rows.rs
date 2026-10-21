@@ -138,7 +138,7 @@ impl MailApp {
         &self,
         row: &Row,
         ix: usize,
-        _newest: &str,
+        list: &ListFrame,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
         let Row::Header { thread_id, ids, expanded } = row else {
@@ -153,7 +153,7 @@ impl MailApp {
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
         let unread_n = ids.iter().filter(|id| !self.mailbox.is_read(**id)).count();
         let visual = RowVisual {
-            cursor: ix == self.cursor_ix(),
+            cursor: ix == list.cursor,
             // An expanded header does not light up: the open message's own child row does.
             open: !*expanded && self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
@@ -366,7 +366,7 @@ impl MailApp {
         &self,
         row: &Row,
         ix: usize,
-        _newest: &str,
+        list: &ListFrame,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
         let Row::Child { thread_id, id } = row else {
@@ -378,8 +378,7 @@ impl MailApp {
         let Some(msg) = self.mailbox.get(*id) else {
             return row::frame(container, RowVisual::default(), t);
         };
-        let mut visual = self.row_visual(*id);
-        visual.cursor = ix == self.cursor_ix();
+        let visual = self.row_state(*id, ix == list.cursor);
         let style = self.row_style;
         let bg = child_bg(visual, t);
         let sender = row::sender_label(msg);
@@ -463,7 +462,7 @@ impl MailApp {
             );
         }
 
-        let (first, last) = threads::child_position(&self.rows(), ix);
+        let (first, last) = threads::child_position(&list.rows, ix);
         let account_color = self
             .account_slot(msg, t)
             .and_then(|_| self.mailbox.account(&msg.account))

@@ -263,12 +263,11 @@ impl MailApp {
         &self,
         msg: &Message,
         ix: usize,
-        _newest: &str,
+        list: &ListFrame,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
         let t = cx.theme();
-        let mut visual = self.row_visual(msg.id);
-        visual.cursor = ix == self.cursor_ix();
+        let visual = self.row_state(msg.id, ix == list.cursor);
         let (account, accent) = self.compact_account(msg, t);
         let sender = row::sender_label(msg);
         let id = msg.id as usize;
@@ -300,7 +299,7 @@ impl MailApp {
         &self,
         row: &Row,
         ix: usize,
-        _newest: &str,
+        list: &ListFrame,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
         let Row::Header { thread_id, ids, expanded } = row else {
@@ -315,7 +314,7 @@ impl MailApp {
             .count();
         let selected_count = ids.iter().filter(|id| self.triage().is_selected(**id)).count();
         let visual = RowVisual {
-            cursor: ix == self.cursor_ix(),
+            cursor: ix == list.cursor,
             open: !*expanded && self.opened().is_some_and(|id| ids.contains(&id)),
             selected: selected_count == ids.len() && selected_count > 0,
             unread: unread_n > 0,
@@ -354,16 +353,15 @@ impl MailApp {
         &self,
         row: &Row,
         ix: usize,
-        _newest: &str,
+        list: &ListFrame,
         cx: &Context<Self>,
     ) -> crate::app::ui::Observable {
         let t = cx.theme();
         let Some(msg) = self.mailbox.get(row.primary()) else {
             return row::frame(div().id(("row", ix)).h(px(ROW_H)), RowVisual::default(), t);
         };
-        let mut visual = self.row_visual(msg.id);
-        visual.cursor = ix == self.cursor_ix();
-        let rows = self.rows();
+        let visual = self.row_state(msg.id, ix == list.cursor);
+        let rows = &list.rows;
         let first = ix.checked_sub(1).and_then(|p| rows.get(p)).is_some_and(|r| matches!(r, Row::Header { .. }));
         let last = !matches!(rows.get(ix + 1), Some(Row::Child { .. }));
         let sender = row::sender_label(msg);

@@ -46,6 +46,12 @@ impl MailApp {
         let near_end = self.view().list_visible_end.get().saturating_add(LOAD_MORE_MARGIN) >= count
             || model.item_of_row(cursor) + LOAD_MORE_MARGIN >= count;
         self.maybe_load_older(near_end);
+        let frame = std::rc::Rc::new(ListFrame {
+            model,
+            rows: self.rows(),
+            ids: if self.grouped() { Vec::new() } else { self.visible_ids() },
+            cursor,
+        });
         let selected = self.triage().selected().len();
         let pills = self.render_pills(cx);
         let t = cx.theme();
@@ -109,7 +115,7 @@ impl MailApp {
                             // Rows are drawn later, outside this panel's render: whose list
                             // they belong to has to come with them.
                             let before = this.enter_slot(slot);
-                            let row = this.render_list_row(ix, cx);
+                            let row = this.render_list_row(ix, &frame, cx);
                             this.leave_slot(before);
                             row
                         }),
@@ -181,54 +187,64 @@ impl MailApp {
 
     /// Item `list_ix` of the list: a day header, a thread header or a message row, measured to
     /// its own content. `ix` handed to the row renderers is the row (cursor) index.
-    fn render_list_row(&self, list_ix: usize, cx: &Context<Self>) -> AnyElement {
-        let model = self.list_model();
-        match model.items.get(list_ix) {
-            Some(Item::Header(day)) => self.render_day_header(*day, &model.days[*day], cx),
-            Some(Item::Row(ix)) => self.render_list_item(*ix, cx),
+    fn render_list_row(&self, list_ix: usize, list: &ListFrame, cx: &Context<Self>) -> AnyElement {
+        match list.model.items.get(list_ix) {
+            Some(Item::Header(day)) => self.render_day_header(*day, &list.model.days[*day], cx),
+            Some(Item::Row(ix)) => self.render_list_item(*ix, list, cx),
             // The list shrank under this index between the layout pass and rendering.
             None => div().into_any_element(),
         }
     }
 
     /// Row `ix` (cursor space), by density and by kind (message, thread header, thread child).
-    fn render_list_item(&self, ix: usize, cx: &Context<Self>) -> AnyElement {
-        let newest = self.newest();
+    fn render_list_item(&self, ix: usize, list: &ListFrame, cx: &Context<Self>) -> AnyElement {
         let compact = self.row_style.compact();
         if self.grouped() {
-            match self.rows().get(ix) {
+            match list.rows.get(ix) {
                 Some(row @ Row::Header { .. }) if compact => {
-                    return self.render_compact_header(row, ix, &newest, cx).into_any_element();
+                    return self.render_compact_header(row, ix, list, cx).into_any_element();
                 }
                 Some(row @ Row::Header { .. }) => {
-                    return self.render_group_header(row, ix, &newest, cx).into_any_element();
+                    return self.render_group_header(row, ix, list, cx).into_any_element();
                 }
                 Some(row @ Row::Child { .. }) if compact => {
-                    return self.render_compact_child(row, ix, &newest, cx).into_any_element();
+                    return self.render_compact_child(row, ix, list, cx).into_any_element();
                 }
                 Some(row @ Row::Child { .. }) => {
-                    return self.render_thread_child(row, ix, &newest, cx).into_any_element();
+                    return self.render_thread_child(row, ix, list, cx).into_any_element();
                 }
                 Some(Row::Single(id)) => {
                     if let Some(msg) = self.mailbox.get(*id) {
-                        return self.render_message_row(msg, ix, &newest, cx);
+                        return self.render_message_row(msg, ix, list, cx);
                     }
                 }
                 None => {}
             }
-        } else if let Some(msg) = self.visible_ids().get(ix).and_then(|id| self.mailbox.get(*id)) {
-            return self.render_message_row(msg, ix, &newest, cx);
+        } else if let Some(msg) = list.ids.get(ix).and_then(|id| self.mailbox.get(*id)) {
+            return self.render_message_row(msg, ix, list, cx);
         }
         div().into_any_element()
     }
 
-    fn render_message_row(&self, msg: &Message, ix: usize, newest: &str, cx: &Context<Self>) -> AnyElement {
+    fn render_message_row(&self, msg: &Message, ix: usize, list: &ListFrame, cx: &Context<Self>) -> AnyElement {
         if self.row_style.compact() {
-            self.render_compact_row(msg, ix, newest, cx).into_any_element()
+            self.render_compact_row(msg, ix, list, cx).into_any_element()
         } else {
-            self.render_row(msg, ix, newest, cx).into_any_element()
+            self.render_row(msg, ix, list, cx).into_any_element()
         }
     }
+}
+
+/// What every row of one render reads, derived once in `render_list`: re-deriving it per row
+/// re-filtered (and re-grouped) the whole mailbox for each visible row, making scrolling laggy.
+pub(super) struct ListFrame {
+    model: super::day::ListModel,
+    /// Grouped rows; empty when ungrouped.
+    pub rows: Vec<Row>,
+    /// Visible message ids; empty when grouped.
+    ids: Vec<MessageId>,
+    /// Cursor row index.
+    pub cursor: usize,
 }
 
 /// What the list is currently measured against. A difference in any field means the cached
