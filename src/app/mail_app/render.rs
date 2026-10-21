@@ -214,7 +214,15 @@ impl Render for MailApp {
                     this.open_snooze(w, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &AcceptSuggestions, _, cx| this.accept_suggestions(cx)))
+            .on_action(cx.listener(|this, _: &AcceptSuggestions, w, cx| {
+                // In a running session `y` takes the suggestion card's action, like its
+                // button and `enter`; the classifier's pending suggestions are not on screen.
+                if this.in_session() {
+                    this.accept_session_suggestion(w, cx);
+                } else {
+                    this.accept_suggestions(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &RejectSuggestions, _, cx| this.reject_suggestions(cx)))
             .on_action(cx.listener(|this, a: &SetKind, _, cx| {
                 this.set_kind_action(a.message, a.kind, cx)

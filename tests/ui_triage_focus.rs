@@ -187,6 +187,37 @@ fn accepting_the_suggestion_is_one_undo_step_and_is_tallied(cx: &mut TestAppCont
     h.assert_invariant("suggestion");
 }
 
+/// Sender `s@x.io` filed three earlier messages into folder 1; their newest message is in the
+/// Inbox, alone, so taking the suggestion for it finishes the session.
+fn filed_habit() -> Mailbox {
+    let filed = |id: u32, day: u32| {
+        msg(id, id, "s@x.io", "old", day, "Inbox")
+            .replace(r#""state":"Inbox""#, r#""state":{"Filed":1}"#)
+    };
+    mailbox(&[filed(1, 1), filed(2, 2), filed(3, 3), msg(9, 9, "s@x.io", "new", 21, "Inbox")])
+}
+
+#[gpui_kit::gpui::test]
+fn y_files_a_filed_history_suggestion_advances_the_session_and_undoes_once(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, filed_habit());
+    h.keys("t enter");
+    assert_eq!(h.read(|a| a.opened()), Some(9));
+    let suggestion = h.read(|a| a.session_suggestion().cloned()).expect("history says file");
+    assert_eq!(suggestion.action, SuggestedAction::File(1));
+
+    let depth = h.read(|a| a.mailbox.undo_depth());
+    h.keys("y");
+    assert_eq!(h.state_of(9), Filed(1), "y takes the card's suggestion");
+    assert_eq!(h.read(|a| a.mailbox.undo_depth()), depth + 1, "one undo step");
+    assert_eq!(h.read(|a| a.session_progress()), None);
+    let s = h.read(|a| a.session_summary().copied()).expect("the last message finishes the session");
+    assert_eq!((s.handled, s.tally.filed, s.tally.suggestions_taken, s.remaining), (1, 1, 1, 0));
+
+    h.keys("escape");
+    h.keys("u");
+    assert_eq!(h.state_of(9), Inbox, "one undo puts it back");
+}
+
 #[gpui_kit::gpui::test]
 fn the_sender_history_suggestion_is_visible_in_the_triage_dock(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, habit());
