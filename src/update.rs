@@ -27,13 +27,6 @@ pub enum Channel {
 }
 
 impl Channel {
-    pub fn label(self) -> &'static str {
-        match self {
-            Channel::Nightly => "nightly",
-            Channel::Release => "release",
-        }
-    }
-
     /// Where the channel's assets download from; `latest/download` skips prereleases.
     fn download_base(self) -> String {
         match self {
@@ -97,6 +90,93 @@ impl Manifest {
 /// Whether an automatic check is due, given when the last one ran.
 pub fn check_due(last: Option<Timestamp>, now: Timestamp) -> bool {
     last.is_none_or(|last| now - last >= CHECK_EVERY)
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    /// The last check failed.
+    Failed,
+    Available(Manifest),
+    /// Downloading and verifying this version.
+    Downloading(String),
+    /// The new build sits verified beside the app, swapped in on restart.
+    Ready { staged: PathBuf, version: String },
+}
+
+/// How the status line's lead text is coloured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Muted,
+    Success,
+    Accent,
+    Error,
+}
+
+/// The Settings → Updates row's button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateButton {
+    Check,
+    Checking,
+    Retry,
+    Update,
+    Downloading,
+    Restart,
+    /// Dev builds: "Check now", disabled.
+    Unavailable,
+}
+
+impl UpdateButton {
+    pub fn label(self) -> &'static str {
+        match self {
+            UpdateButton::Check | UpdateButton::Unavailable => "Check now",
+            UpdateButton::Checking => "Checking…",
+            UpdateButton::Retry => "Try again",
+            UpdateButton::Update => "Update",
+            UpdateButton::Downloading => "Downloading…",
+            UpdateButton::Restart => "Restart",
+        }
+    }
+
+    /// Shows a spinner and ignores clicks.
+    pub fn busy(self) -> bool {
+        matches!(self, UpdateButton::Checking | UpdateButton::Downloading)
+    }
+
+    /// Moves the update forward (download or restart) rather than checking.
+    pub fn installs(self) -> bool {
+        matches!(self, UpdateButton::Update | UpdateButton::Restart)
+    }
+}
+
+/// The Settings → Updates status row (`mockups/updates-default.html`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Status {
+    pub title: String,
+    pub lead: String,
+    pub tone: Tone,
+    /// Muted text after the lead, joined with " · ".
+    pub detail: Option<String>,
+    pub button: UpdateButton,
+}
+
+/// The status row for `build` (`None` = dev build) in `state`, last checked at `checked_at`.
+pub fn status(build: Option<&Build>, state: &UpdateState, checked_at: Option<Timestamp>, now: Timestamp) -> Status {
+    let title = format!("Minimail {}", build.map_or(env!("CARGO_PKG_VERSION"), |b| b.version));
+    let checked = |prefix: &str| checked_at.map(|at| format!("{prefix}{}", crate::sync_status::ago(now - at)));
+    let (lead, tone, detail, button) = match state {
+        _ if build.is_none() => ("Development builds don’t update".into(), Tone::Muted, None, UpdateButton::Unavailable),
+        UpdateState::Idle if checked_at.is_none() => ("Not checked yet".into(), Tone::Muted, None, UpdateButton::Check),
+        UpdateState::Idle => ("Up to date".into(), Tone::Success, checked("checked "), UpdateButton::Check),
+        UpdateState::Checking => ("Checking…".into(), Tone::Muted, None, UpdateButton::Checking),
+        UpdateState::Failed => ("Check failed".into(), Tone::Error, checked(""), UpdateButton::Retry),
+        UpdateState::Available(m) => (format!("{} is available", m.version), Tone::Accent, None, UpdateButton::Update),
+        UpdateState::Downloading(v) => (format!("Downloading {v}…"), Tone::Muted, None, UpdateButton::Downloading),
+        UpdateState::Ready { version, .. } => (format!("{version} is ready"), Tone::Accent, None, UpdateButton::Restart),
+    };
+    Status { title, lead, tone, detail, button }
 }
 
 fn agent() -> ureq::Agent {
@@ -208,7 +288,8 @@ open "$3"
 
 #[cfg(test)]
 mod tests {
-    use super::{Build, CHECK_EVERY, Channel, Manifest, check_due};
+    use super::{Build, CHECK_EVERY, Channel, Manifest, Tone, UpdateButton, UpdateState, check_due, status};
+    use crate::clock::HOUR;
 
     #[test]
     fn checks_are_due_first_and_then_once_a_day() {
@@ -227,5 +308,20 @@ mod tests {
         assert!(manifest.is_newer_than(&build(41)));
         assert!(!manifest.is_newer_than(&build(42)));
         assert!(!manifest.is_newer_than(&build(43)));
+    }
+
+    #[test]
+    fn status_row_follows_the_state_and_last_check() {
+        let build = Build { channel: Channel::Nightly, number: 1, version: "0.1.0-nightly.20261020" };
+        let now = 10 * HOUR;
+        let s = status(Some(&build), &UpdateState::Idle, None, now);
+        assert_eq!((s.title.as_str(), s.lead.as_str(), s.button), ("Minimail 0.1.0-nightly.20261020", "Not checked yet", UpdateButton::Check));
+        let s = status(Some(&build), &UpdateState::Idle, Some(now - 2 * HOUR), now);
+        assert_eq!((s.lead.as_str(), s.tone, s.detail.as_deref()), ("Up to date", Tone::Success, Some("checked 2 h ago")));
+        let s = status(Some(&build), &UpdateState::Failed, Some(now - 2 * HOUR), now);
+        assert_eq!((s.tone, s.detail.as_deref(), s.button), (Tone::Error, Some("2 h ago"), UpdateButton::Retry));
+        // A dev build never offers a check, whatever the state says.
+        let s = status(None, &UpdateState::Checking, None, now);
+        assert_eq!((s.lead.as_str(), s.button), ("Development builds don’t update", UpdateButton::Unavailable));
     }
 }

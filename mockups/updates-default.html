@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Settings → Updates</title>
+<style>
+/* Geometry mirrors gpui-component 0.7.3 setting/: sidebar 190, page header p 16 gap 12 border-b,
+   groups px 16 py 16, items gap 16, row = text (flex 1, max 60%) + control, gap 12, text_sm. */
+:root{--bg:#282c34;--fg:#abb2bf;--strong:#d7dae0;--muted:#7f848e;--border:#3b4048;--active:#3e4451;--hover:#323842;--primary:#61afef;--danger:#e06c75;--warn:#d19a66;--success:#98c379;--radius:6px}
+*{box-sizing:border-box;margin:0}
+body{background:#1e2127;color:var(--fg);font:14px/20px -apple-system,system-ui,sans-serif;padding:24px}
+.bar{display:flex;gap:6px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+.bar span{font:600 11px/16px ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-right:6px}
+.bar button{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:var(--radius);font:12px/22px -apple-system,system-ui;padding:0 10px;cursor:pointer}
+.bar button.on{border-color:var(--primary);color:var(--primary)}
+.cols{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+h2{font:600 12px/16px ui-monospace,monospace;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em}
+h2 small{display:block;font:12px/16px -apple-system,system-ui;text-transform:none;letter-spacing:0;color:var(--muted);opacity:.8;margin-top:2px}
+.win{width:660px;height:300px;background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.title{height:32px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding-left:78px;font-size:13px;color:var(--muted)}
+.main{flex:1;display:flex;min-height:0}
+.side{width:190px;border-right:1px solid var(--border);padding:8px;display:flex;flex-direction:column;gap:2px}
+.search{height:28px;border:1px solid var(--border);border-radius:var(--radius);color:var(--muted);font-size:13px;padding:0 8px;line-height:26px;margin-bottom:6px}
+.nav{height:28px;line-height:28px;padding:0 8px;border-radius:var(--radius);font-size:13px}
+.nav.cur{background:var(--active);color:var(--strong)}
+.page{flex:1;min-width:0}
+.head{padding:16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:12px}
+.head .t{color:var(--strong);display:flex;justify-content:space-between;align-items:center}
+.head .d{font-size:14px;color:var(--muted)}
+.group{padding:16px;display:flex;flex-direction:column;gap:16px}
+.group+.group{padding-top:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.txt{flex:1;max-width:60%}
+.txt .l{color:var(--fg)}
+.txt .d{color:var(--muted)}
+.ctl{display:flex;gap:8px;align-items:center;flex:none}
+.foot{font-size:14px;color:var(--muted);margin-top:-4px}
+.foot a{color:var(--primary);text-decoration:none;cursor:pointer}
+.btn{height:24px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:transparent;color:var(--fg);font:13px/22px -apple-system,system-ui;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#282c34}
+.btn[disabled]{opacity:.5}
+.spin{width:11px;height:11px;border:1.5px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(1turn)}}
+.sw{width:32px;height:18px;border-radius:9px;background:var(--primary);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:16px;width:14px;height:14px;border-radius:50%;background:#fff}
+.ok{color:var(--success)} .new{color:var(--primary)} .err{color:var(--danger)}
+</style>
+
+<div class="bar"><span>State</span></div>
+<div class="cols" id="cols"></div>
+
+<script>
+// Locked design: direction A. The status row shows this build's version, its update status and
+// one button; the auto-check switch is its own group below. Ages use sync_status::ago.
+const STATES = {
+  'up to date': {status:'<span class="ok">Up to date</span> · checked 2 h ago', btn:'<button class="btn">Check now</button>'},
+  'never checked': {status:'Not checked yet', btn:'<button class="btn">Check now</button>'},
+  'checking': {status:'Checking…', btn:'<button class="btn" disabled><i class="spin"></i>Checking…</button>'},
+  'available': {status:'<span class="new">0.1.0-nightly.20261022 is available</span>', btn:'<button class="btn primary">Update</button>'},
+  'downloading': {status:'Downloading 0.1.0-nightly.20261022…', btn:'<button class="btn" disabled><i class="spin"></i>Downloading…</button>'},
+  'ready': {status:'<span class="new">0.1.0-nightly.20261022 is ready</span>', btn:'<button class="btn primary">Restart</button>'},
+  'failed': {status:'<span class="err">Check failed</span> · 5 min ago', btn:'<button class="btn">Try again</button>'},
+  'dev build': {title:'Minimail 0.1.0', status:'Development builds don’t update', btn:'<button class="btn" disabled>Check now</button>'},
+};
+const VERSION = 'Minimail 0.1.0-nightly.20261020';
+const PAGES = ['Accounts','Appearance','Inbox','Reader','AI','Senders','Updates'];
+const AUTO = `<div class="row"><div class="txt"><div class="l">Check for updates automatically</div><div class="d">Once a day, in the background.</div></div><div class="ctl"><i class="sw"></i></div></div>`;
+
+const DIRS = {
+  'Updates': {note:'Locked design (direction A).', body:s => `
+    <div class="group"><div class="row"><div class="txt"><div class="l">${s.title ?? VERSION}</div><div class="d">${s.status}</div></div><div class="ctl">${s.btn}</div></div></div>
+    <div class="group">${AUTO}</div>`},
+};
+
+const bar = document.querySelector('.bar'), cols = document.getElementById('cols');
+let cur = 'up to date';
+for (const name of Object.keys(STATES)) {
+  const b = document.createElement('button'); b.textContent = name;
+  b.onclick = () => { cur = name; render(); }; bar.appendChild(b);
+}
+function render(){
+  bar.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === cur));
+  cols.innerHTML = Object.entries(DIRS).map(([name, d]) => `<div><h2>${name}<small>${d.note}</small></h2>
+    <div class="win"><div class="title">Settings</div><div class="main">
+      <div class="side"><div class="search">Search…</div>${PAGES.map(p => `<div class="nav ${p==='Updates'?'cur':''}">${p}</div>`).join('')}</div>
+      <div class="page"><div class="head"><div class="t">Updates</div>${d.desc ? `<div class="d">${d.desc}</div>` : ''}</div>${d.body(STATES[cur])}</div>
+    </div></div></div>`).join('');
+}
+render();
+</script>

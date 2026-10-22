@@ -349,6 +349,7 @@ impl MailApp {
         let tab_avatars = self.tab_avatars;
         let block_remote_images = self.block_remote_images;
         let auto_update_check = self.auto_update_check;
+        let update_status = self.update_status();
         let blocked = self.mailbox.blocked();
         let spam_senders = self.mailbox.spam_senders().clone();
         let now = self.local_now();
@@ -395,6 +396,7 @@ impl MailApp {
                     .row_style(row_style)
                     .block_remote_images(block_remote_images)
                     .auto_update_check(auto_update_check)
+                    .update_status(update_status)
                     .mailbox_state(blocked, now, follow_up)
                     .spam_senders(spam_senders)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
@@ -537,6 +539,7 @@ impl MailApp {
                     this.auto_update_check = *on;
                     this.save_setting(&crate::app_settings::AUTO_UPDATE_CHECK, *on);
                 }
+                SettingsEvent::UpdateButton => this.settings_update_button(window, cx),
                 SettingsEvent::Grouping(on) => {
                     this.set_grouping(*on);
                     this.save_setting(&crate::app_settings::GROUP_THREADS, *on);

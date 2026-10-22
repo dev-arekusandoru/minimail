@@ -71,6 +71,8 @@ pub const JEV_MODEL: Setting<String> =
     Setting::with_default_fn("jev_model", String::new(), default_jev_model);
 /// Check this build's release channel for a newer build once a day.
 pub const AUTO_UPDATE_CHECK: Setting<bool> = Setting::new("auto_update_check", true);
+/// When the last update check started. State, not a preference: "Reset all" leaves it.
+pub const UPDATE_CHECKED_AT: Setting<Option<crate::clock::Timestamp>> = Setting::new("update_checked_at", None);
 
 pub const DEFAULT_LIGHT_THEME: &str = "Default Light";
 pub const DEFAULT_DARK_THEME: &str = crate::theme::DEFAULT_THEME;

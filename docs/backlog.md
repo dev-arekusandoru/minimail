@@ -94,7 +94,9 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 ## Release, build and crashes
 
 - **Run the first nightly** (not started). Land `nightly-build`, then confirm certificate import, notarization and Gatekeeper on a real run.
-- **In-app updates** (not started). The plan is in `docs/in-app-update.md` on `nightly-build`: stage 1 checks every 24 h and shows a toast plus a "Check for updates" command; stage 2 auto-updates via `latest.json`.
+- **In-app updates: download automatically** (not started). Fetch and verify the update in the background and swap it in on the next quit, instead of waiting for the Update button. A setting on the Updates page.
+- **In-app updates: what's new** (not started). Link to (or show) the release notes for the running and the available build from Settings → Updates.
+- **In-app updates: channel picker** (not started). Stable / Nightly on the Updates page once stable releases exist; needs a rule for moving from nightly to an older stable build.
 - **App icon** (not started). Add `AppIcon.icns` and `CFBundleIconFile`; about 5 lines in `package.sh`.
 - **Proper `.app` bundle for local builds** (not started). Covered by `package.sh` if `nightly-build` lands.
 - **SIGILL hardening** (not started). Make `scripts/sign-and-run.sh` abort when `codesign --verify --strict` fails instead of warning and running anyway; give concurrent agents separate `CARGO_TARGET_DIR`s; read the `.ips` report. The email-HTML stack overflows are fixed by the WebKit reader.

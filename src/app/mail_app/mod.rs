@@ -88,7 +88,7 @@ mod rows;
 mod thread_rows;
 mod update;
 use actions::ToastAction;
-use update::UpdateState;
+use crate::update::UpdateState;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
@@ -296,7 +296,7 @@ pub struct MailApp {
     pending_toast: Option<(String, Option<ToastAction>)>,
     /// Check for updates once a day (`AUTO_UPDATE_CHECK`).
     auto_update_check: bool,
-    /// When the last update check started this session.
+    /// When the last update check started (`UPDATE_CHECKED_AT`).
     update_checked_at: Option<Timestamp>,
     update_state: UpdateState,
 }
@@ -478,6 +478,7 @@ impl MailApp {
             crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
         );
         self.auto_update_check = crate::app_settings::AUTO_UPDATE_CHECK.get(store.as_ref(), &scope);
+        self.update_checked_at = crate::app_settings::UPDATE_CHECKED_AT.get(store.as_ref(), &scope);
         self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
         self.auto_max_age_days =
             crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
@@ -518,6 +519,7 @@ impl MailApp {
         let now = self.now();
         self.mailbox.tick(now);
         self.auto_check_update(now, cx);
+        self.sync_settings_update(cx); // keeps "checked 2 h ago" current
         cx.notify();
     }
 

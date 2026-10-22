@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::base::component_traits::Disableable as _;
 
 impl SettingsPanel {
     pub(super) fn inbox_page(&self, weak: &Weak) -> SettingPage {
@@ -71,24 +72,68 @@ impl SettingsPanel {
     }
 }
 
-/// The Updates row's description: this build's version and channel.
-static UPDATES_ABOUT: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| match crate::update::current() {
-        Some(build) => format!("Minimail {} ({}). Checks once a day.", build.version, build.channel.label()),
-        None => "Development builds don't check for updates.".to_owned(),
-    });
-
 impl SettingsPanel {
-    /// The daily update check.
+    /// This build's update status with its button (`mockups/updates-default.html`), then the
+    /// daily check.
     pub(super) fn updates_page(&self, weak: &Weak) -> SettingPage {
-        SettingPage::new("Updates").resettable(true).group(
+        let status = self.update_status.clone();
+        let button_weak = weak.clone();
+        let status_row = SettingItem::render(move |_, _, cx| {
+            use crate::update::Tone;
+            let theme = cx.theme();
+            let lead_color = match status.tone {
+                Tone::Muted => theme.muted_foreground,
+                Tone::Success => theme.success,
+                Tone::Accent => theme.primary,
+                Tone::Error => theme.danger,
+            };
+            let button = status.button;
+            let weak = button_weak.clone();
+            // Same text column + control as `row`, minus the ↺: the status isn't a preference.
+            div()
+                .w_full()
+                .h_flex()
+                .justify_between()
+                .items_center()
+                .gap_3()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .max_w_3_5()
+                        .child(Label::new(status.title.clone()).text_sm())
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(div().text_color(lead_color).child(status.lead.clone()))
+                                .when_some(status.detail.clone(), |this, detail| this.child(format!(" · {detail}")))
+                                .h_flex(),
+                        ),
+                )
+                .child(
+                    div().id("field").child(
+                        Button::new("update-button")
+                            .label(button.label())
+                            .small()
+                            .when(button.installs(), |b| b.primary())
+                            .loading(button.busy())
+                            .disabled(button.busy() || button == crate::update::UpdateButton::Unavailable)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |_, cx| cx.emit(SettingsEvent::UpdateButton)).ok();
+                            }),
+                    ),
+                )
+        })
+        .keywords(["update", "version", "check", "nightly", "release", "upgrade"]);
+        SettingPage::new("Updates").resettable(true).groups([
+            SettingGroup::new().item(status_row),
             SettingGroup::new().item(row(
                 "Check for updates automatically",
-                &UPDATES_ABOUT,
-                &["update", "version", "nightly", "release", "upgrade"],
+                "Once a day, in the background.",
+                &["update", "nightly", "release", "upgrade"],
                 Undo::of_panel(weak, |this| !this.auto_update_check, SettingsPanel::reset_auto_update_check),
                 switch(weak, |this| this.auto_update_check, SettingsPanel::set_auto_update_check),
             )),
-        )
+        ])
     }
 }

@@ -84,6 +84,8 @@ pub enum SettingsEvent {
     BlockRemoteImages(bool),
     /// Whether to check for updates once a day.
     AutoUpdateCheck(bool),
+    /// The Updates row's button: check, or move a found update forward.
+    UpdateButton,
     PreviewLines(u8),
     /// The row style changed (density, leading element, group tile, chips, subject first).
     RowStyle(crate::row_style::RowStyle),
@@ -257,6 +259,8 @@ pub struct SettingsPanel {
     block_remote_images: bool,
     /// Check for updates once a day (on by default).
     auto_update_check: bool,
+    /// The Updates status row, pushed by the app.
+    update_status: crate::update::Status,
     preview_lines: u8,
     row_style: crate::row_style::RowStyle,
     orientation: Orientation,
@@ -378,6 +382,7 @@ impl SettingsPanel {
             tab_avatars: true,
             block_remote_images: false,
             auto_update_check: true,
+            update_status: crate::update::status(None, &crate::update::UpdateState::Idle, None, 0),
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
             row_style: crate::row_style::RowStyle::default(),
             orientation,
@@ -431,6 +436,12 @@ impl SettingsPanel {
     /// Whether updates are checked daily (the switch's initial value).
     pub fn auto_update_check(mut self, on: bool) -> Self {
         self.auto_update_check = on;
+        self
+    }
+
+    /// The Updates status row (version, status, button).
+    pub fn update_status(mut self, status: crate::update::Status) -> Self {
+        self.update_status = status;
         self
     }
 
@@ -797,6 +808,14 @@ impl SettingsPanel {
     pub fn show_auto_classify(&mut self, on: bool, cx: &mut Context<Self>) {
         if on != self.auto_classify {
             self.auto_classify = on;
+            cx.notify();
+        }
+    }
+
+    /// Show the app's current update status.
+    pub fn show_update_status(&mut self, status: crate::update::Status, cx: &mut Context<Self>) {
+        if status != self.update_status {
+            self.update_status = status;
             cx.notify();
         }
     }

@@ -21,7 +21,12 @@ channel; CI passes its run number. A release workflow only has to run `package.s
 ## Flow
 
 - **Check**: on launch, then every 24 h while the app runs (Settings → Updates turns this
-  off), or via the palette's "Check for updates". A found build shows a toast with Update.
+  off), or via the palette's "Check for updates". The last check time persists
+  (`UPDATE_CHECKED_AT`), so a relaunch doesn't re-check early. A found build shows a toast
+  with Update.
+- **Settings → Updates** (`mockups/updates-default.html`): the version, the status
+  (`update::status`: up to date · checked 2 h ago, available, ready, failed…) and one button
+  that checks, updates or restarts, then the auto-check switch.
 - **Update** (`update::download` + `update::stage`): download the DMG, check its sha256,
   mount it, require the app inside to meet the running app's own designated requirement
   (same bundle id and Developer ID team) and pass `spctl`, then `ditto` it beside the
