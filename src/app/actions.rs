@@ -7,12 +7,13 @@ use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::judge::{Kind, QuestionKey};
-use crate::model::{Location, MessageId};
+use crate::model::{FolderId, MessageId};
 use gpui_kit::*;
 
 gpui_kit::actions!(
     mail,
     [
+        Quit,
         SelectNext,
         SelectPrev,
         ExtendNext,
@@ -29,6 +30,7 @@ gpui_kit::actions!(
         SenderFile,
         SenderSnooze,
         SenderInbox,
+        OpenSenderTab,
         Undo,
         ToggleCommandPalette,
         Reply,
@@ -77,13 +79,21 @@ gpui_kit::actions!(
         ToggleSettings,
         AddGmailAccount,
         ManageAccounts,
+        NewFolder,
         FetchMail,
+        CheckForUpdates,
+        InstallUpdate,
         StartSession,
+        SkipMessage,
+        AcceptSessionSuggestion,
         OpenSearch,
         ClassifyVisible,
         ClassifyMessage,
+        StopClassifying,
+        StartClassifying,
         ToggleGrouping,
         CyclePreviewLines,
+        ToggleDay,
         ExpandThread,
         CollapseThread,
         NextInThread,
@@ -159,6 +169,24 @@ pub struct ResetLabel {
     pub key: QuestionKey,
 }
 
+// ---------------------------------------------------------------- Folder editing
+
+/// Rename a folder, from its sidebar row's menu or the palette. `folder: None` acts on the
+/// folder the list is showing.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct RenameFolder {
+    pub folder: Option<FolderId>,
+}
+
+/// Delete a folder and its subfolders after a confirmation; their mail moves to Archive.
+/// `folder: None` acts on the folder the list is showing.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = mail, no_json)]
+pub struct DeleteFolder {
+    pub folder: Option<FolderId>,
+}
+
 /// Key context of the root view.
 pub const MAIL_CONTEXT: &str = "MailApp";
 /// Binding predicate for the list keymap: `MailApp` but not while a text input has focus
@@ -183,6 +211,7 @@ pub fn bind_keys(cx: &mut App) {
     // Enter/Escape bindings win and can edit the selection before sending or closing.
     let c = Some("Compose > Input || Compose");
     cx.bind_keys([
+        KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", SelectNext, m),
         KeyBinding::new("down", SelectNext, m),
         KeyBinding::new("k", SelectPrev, m),
@@ -194,9 +223,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", OpenMessage, m),
         KeyBinding::new("o", OpenMessage, m),
         KeyBinding::new("e", Archive, m),
-        KeyBinding::new("d", Delete, m),
-        // `#` (shift-3 on most layouts) is the second Delete key from the key table.
         KeyBinding::new("#", Delete, m),
+        // GPUI displays the last binding; keep `d` canonical and `#` as an alias.
+        KeyBinding::new("d", Delete, m),
         KeyBinding::new("f", File, m),
         KeyBinding::new("s", OpenSnoozePicker, m),
         KeyBinding::new("i", MoveToInbox, m),
@@ -205,6 +234,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-f", SenderFile, m),
         KeyBinding::new("shift-s", SenderSnooze, m),
         KeyBinding::new("shift-i", SenderInbox, m),
+        KeyBinding::new("p", OpenSenderTab, m),
         KeyBinding::new("u", Undo, m),
         KeyBinding::new("cmd-z", Undo, m),
         KeyBinding::new("cmd-k", ToggleCommandPalette, m),
@@ -241,6 +271,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-,", ToggleSettings, m),
         KeyBinding::new("cmd-shift-n", FetchMail, m),
         KeyBinding::new("t", StartSession, m),
+        KeyBinding::new("space", SkipMessage, m),
         KeyBinding::new("/", OpenSearch, m),
         KeyBinding::new("c", ClassifyMessage, m),
         KeyBinding::new("shift-c", ClassifyVisible, m),
@@ -421,6 +452,7 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Navigate, "Toggle select", "x", ToggleSelect),
         cmd!(Navigate, "Clear selection", "escape", ClearSelection),
         cmd!(Navigate, "Open message", "enter", OpenMessage),
+        cmd!(Navigate, "New folder", "", NewFolder),
         cmd!(Triage, "Archive", "e", Archive),
         cmd!(Triage, "Delete", "d", Delete),
         cmd!(Triage, "File…", "f", File),
@@ -435,6 +467,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "shift-i",
             SenderInbox
         ),
+        cmd!(Sender, "Open sender in new tab", "p", OpenSenderTab),
         cmd!(Triage, "Undo", "u", Undo),
         cmd!(Triage, "Reply", "r", Reply),
         cmd!(Triage, "Reply all", "shift-a", ReplyAll),
@@ -495,12 +528,20 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(App, "Add Gmail account", "", AddGmailAccount),
         cmd!(App, "Manage accounts", "", ManageAccounts),
         cmd!(App, "Fetch mail", "cmd-shift-n", FetchMail),
+        cmd!(App, "Check for updates", "", CheckForUpdates),
+        cmd!(App, "Install update", "", InstallUpdate),
         cmd!(App, "Start triage session", "t", StartSession),
+        cmd!(Triage, "Skip message (triage session)", "space", SkipMessage),
+        cmd!(Triage, "Accept suggested action (triage session)", "enter", AcceptSessionSuggestion),
+        cmd!(App, "Quit", "cmd-q", Quit),
         cmd!(Navigate, "Search", "/", OpenSearch),
         cmd!(Classify, "Classify selected messages", "c", ClassifyMessage),
         cmd!(Classify, "Classify every message in this list…", "shift-c", ClassifyVisible),
+        cmd!(Classify, "Stop classifying (pause auto-classify)", "", StopClassifying),
+        cmd!(Classify, "Start classifying (resume auto-classify)", "", StartClassifying),
         cmd!(View, "Toggle group by thread", "ctrl-g", ToggleGrouping),
         cmd!(View, "Cycle preview lines", "", CyclePreviewLines),
+        cmd!(View, "Collapse or expand the day of the cursor row", "", ToggleDay),
         cmd!(Navigate, "Expand thread", "right", ExpandThread),
         cmd!(Navigate, "Collapse thread", "left", CollapseThread),
         cmd!(Navigate, "Next message in thread", "]", NextInThread),
@@ -567,6 +608,20 @@ pub fn commands() -> Vec<CommandSpec> {
     for (name, action) in labels {
         cmds.push(CommandSpec { category: Category::Classify, name, key: "", action });
     }
+    // Folder editing acts on the folder the list is showing (the sidebar row menu passes its
+    // own); it has no key binding.
+    cmds.push(CommandSpec {
+        category: Category::Navigate,
+        name: "Rename folder…",
+        key: "",
+        action: || Box::new(RenameFolder { folder: None }),
+    });
+    cmds.push(CommandSpec {
+        category: Category::Navigate,
+        name: "Delete folder…",
+        key: "",
+        action: || Box::new(DeleteFolder { folder: None }),
+    });
     // The number keys toggle the quick filter pills (all, needs reply, follow up, urgent,
     // new senders, possible spam), in that order.
     const QUICK: [fn() -> Box<dyn Action>; 6] = [
@@ -616,13 +671,6 @@ gpui_kit::actions!(
     ]
 );
 
-/// Jump the sidebar to one location (a sidebar row click).
-#[derive(Clone, PartialEq, gpui_kit::Action)]
-#[action(namespace = mail, no_json)]
-pub struct ShowLocation {
-    pub location: Location,
-}
-
 // ---------------------------------------------------------------- Composer
 
 /// Drop one attachment from the draft it belongs to (the composer's × on a chip).
@@ -645,4 +693,17 @@ pub struct UndoSendHold {
 #[action(namespace = mail, no_json)]
 pub struct ComposeAccount {
     pub account: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Category, Quit, commands};
+
+    #[test]
+    fn quit_is_listed_with_its_shortcut() {
+        let command = commands().into_iter().find(|command| (command.action)().as_any().is::<Quit>())
+            .expect("Quit belongs in the command palette and help");
+        assert_eq!(command.category, Category::App);
+        assert_eq!(command.key, "cmd-q");
+    }
 }

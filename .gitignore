@@ -8,3 +8,4 @@ skills-lock.json
 .omp/
 .DS_Store
 /dist
+~/.cache/cargo/minimail/

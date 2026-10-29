@@ -151,7 +151,7 @@ impl MailApp {
             return;
         }
         if let Some(drag) = item.value().downcast_ref::<FolderDrag>() {
-            self.show_location(drag.location.clone(), true, cx);
+            self.show_location_in_panel(drag.location.clone(), true, cx);
         } else if let Some(drag) = item.value().downcast_ref::<MailDrag>() {
             let location = self.list_views[self.list_tabs.active_index()].location().clone();
             self.drop_messages(&drag.ids, &location, window, cx);

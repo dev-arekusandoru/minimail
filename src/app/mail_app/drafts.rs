@@ -45,18 +45,14 @@ impl MailApp {
         let click = cx.listener(move |this, _: &ClickEvent, window, cx| {
             this.open_draft_at(ix, window, cx);
         });
-        row::frame(
-            div().id(("draft-row", ix)).h(px(self.message_row_h())),
-            visual,
-            t,
-        )
+        row::frame(div().id(("draft-row", ix)), visual, t)
         .on_click(click)
         .child(
             div()
                 .id(("draft-body", ix))
                 .flex_1()
                 .min_w_0()
-                .h_full()
+                .py(px(4.))
                 .flex()
                 .flex_col()
                 .justify_center()

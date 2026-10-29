@@ -206,13 +206,8 @@ fn list_header_menu_shows_with_two_selected_and_acts_on_all_of_them(cx: &mut Tes
         (start.0 - 2, start.1 + 2)
     );
     assert!(!h.has("btn-selection-more"), "the selection is spent");
-    h.click("btn-more");
-    h.click_row("Undo");
-    assert_eq!(
-        (h.count(Inbox), h.count(Archived)),
-        (start.0, start.1),
-        "one undo step for both"
-    );
+    h.click("btn-undo");
+    assert_eq!((h.count(Inbox), h.count(Archived)), (start.0, start.1), "one undo step for both");
 }
 
 /// The toast after an action carries an Undo button that is the same step as `u`.
@@ -247,8 +242,7 @@ fn delete_menu_row_moves_message_to_trash_and_undo_restores(cx: &mut TestAppCont
     h.click_row("Delete");
     assert_eq!(h.state_of(id), Deleted);
     assert_eq!(h.count(Deleted), start + 1);
-    h.click("btn-more");
-    h.click_row("Undo");
+    h.click("btn-undo");
     assert_eq!(h.state_of(id), Inbox);
     assert_eq!(h.count(Deleted), start);
 }
@@ -259,7 +253,7 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
     let mut h = harness(cx);
     let id = h.ids()[0];
     h.click(("row", id as usize));
-    let cases: [ElementId; 2] = [("btn-message-more", id as usize).into(), "btn-more".into()];
+    let cases: [ElementId; 1] = [("btn-message-more", id as usize).into()];
     for trigger in cases {
         h.click(trigger.clone());
         let (button, row, viewport) =
@@ -289,17 +283,12 @@ fn menus_anchor_to_their_trigger_and_stay_inside_the_window(cx: &mut TestAppCont
 }
 
 #[gpui_kit::gpui::test]
-fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(
-    cx: &mut TestAppContext,
-) {
+fn commands_button_opens_palette_and_runs_the_highlighted_command(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    for id in ["btn-session", "btn-layout", "tb-settings", "btn-more"] {
+    for id in ["btn-session", "btn-layout", "btn-commands", "btn-undo"] {
         assert!(h.has(id), "{id}");
     }
-    assert!(
-        !h.read(|a| a.menu_open()),
-        "the More menu's rows exist only while it is open"
-    );
+
     h.click("search-box");
     assert!(
         h.read(|a| a.palette_open()),
@@ -308,8 +297,7 @@ fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(
     // The first escape clears the prefilled `/`, the second closes.
     h.keys("escape escape");
     assert!(!h.read(|a| a.palette_open()));
-    h.click("btn-more");
-    h.click_row("Commands…");
+    h.click("btn-commands");
     assert!(h.read(|a| a.palette_open()));
     h.keys("s n o o z e d");
     h.keys("enter");
@@ -325,22 +313,18 @@ fn titlebar_commands_button_opens_palette_and_runs_the_highlighted_command(
 #[gpui_kit::gpui::test]
 fn an_open_menu_is_navigated_with_j_and_enter(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    let id = h.cursor().unwrap();
+    let id = h.ids()[0];
+    h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
+    assert!(h.read(|a| a.menu_open()));
     h.keys("e");
-    assert_eq!(h.state_of(id), Archived);
-    h.click("btn-more");
-    h.keys("e");
-    assert_eq!(
-        h.state_of(id),
-        Archived,
-        "bare list keys are inert while a menu is open"
-    );
-    // Rows: Commands…, Undo, … — `j` twice lands on Undo.
+    assert_eq!(h.state_of(id), Inbox, "bare list keys are inert while a menu is open");
+    // Rows for an inbox message: Archive, Delete, Snooze…. The first `j` highlights Archive.
     h.keys("j");
     h.keys("j");
     h.keys("enter");
     assert!(!h.read(|a| a.menu_open()), "running a row closes the menu");
-    assert_eq!(h.state_of(id), Inbox, "enter ran Undo");
+    assert_eq!(h.state_of(id), Deleted, "enter ran Delete");
 }
 
 /// Escape must dismiss without running anything — the menu takes focus, so this is the
@@ -350,14 +334,15 @@ fn escape_dismisses_a_menu_without_running_a_row(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     h.click(("row-select", 0usize));
-    h.click("btn-more");
+    h.click(("row-select", 1usize));
+    h.click("btn-selection-more");
     assert!(h.read(|a| a.menu_open()));
     h.keys("escape");
     assert!(!h.read(|a| a.menu_open()));
     assert_eq!(h.state_of(ids[0]), Inbox, "dismissing ran no menu row");
     assert_eq!(
-        h.read(|a| a.triage().selected()),
-        vec![ids[0]],
+        h.read(|a| a.triage().selected().len()),
+        2,
         "escape went to the menu, not on to clearing the selection"
     );
     h.keys("e");
@@ -373,7 +358,8 @@ fn escape_dismisses_a_menu_without_running_a_row(cx: &mut TestAppContext) {
 fn a_menu_dismisses_when_the_backdrop_is_clicked(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let id = h.ids()[0];
-    h.click("btn-more");
+    h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
     assert!(h.read(|a| a.menu_open()));
     h.click(("row", id as usize));
     assert!(!h.read(|a| a.menu_open()), "clicking away dismisses");
@@ -424,15 +410,9 @@ fn sender_actions_submenu_bulk_marks_one_sender(cx: &mut TestAppContext) {
         "hovering the submenu row opens its level"
     );
     h.click_row("Archive from sender");
-    assert!(
-        !h.read(|a| a.menu_open()),
-        "the whole menu stack closes after a choice"
-    );
-    assert!(
-        h.read(|a| a.dialog_open()),
-        "sender-wide actions confirm first"
-    );
-    h.keys("1");
+    assert!(!h.read(|a| a.menu_open()), "the whole menu stack closes after a choice");
+    assert!(h.read(|a| a.dialog_open()), "sender-wide actions confirm first");
+    h.keys("enter");
 
     assert_eq!(h.state_of(id), Archived);
     for other in inbox.iter().filter(|other| **other != id) {
@@ -523,9 +503,9 @@ fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
+fn rail_settings_and_bottom_bar_help_buttons_toggle_their_panels(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("tb-settings");
+    h.click("sidebar-settings");
     assert!(h.read(|a| a.settings_open()));
     let settings = h
         .read(|a| a.settings_window())
@@ -533,20 +513,22 @@ fn titlebar_settings_and_help_buttons_toggle_their_panels(cx: &mut TestAppContex
     h.cx.simulate_keystrokes(settings, "escape");
     h.cx.run_until_parked();
     assert!(!h.read(|a| a.settings_open()));
-    h.click("btn-more");
-    h.click_row("Shortcuts");
+    h.click("btn-help");
     assert!(h.read(|a| a.help_open()));
     h.keys("escape");
     assert!(!h.read(|a| a.help_open()));
 }
 
 #[gpui_kit::gpui::test]
-fn session_button_starts_a_session(cx: &mut TestAppContext) {
+fn session_button_opens_the_start_screen(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.click("btn-session");
+    assert!(h.read(|a| a.session_setup().is_some()));
+    h.keys("enter");
     assert!(h.read(|a| a.session_progress()).is_some());
-    h.click("session-end");
-    assert!(h.read(|a| a.session_progress()).is_none());
+    h.keys("escape");
+    h.keys("escape");
+    assert!(h.read(|a| !a.triage_open()));
 }
 
 #[gpui_kit::gpui::test]
@@ -613,18 +595,13 @@ fn titlebar_search_box_stays_centered_in_fullscreen(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn menu_keycaps_stay_visible_while_the_menu_is_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.click("btn-more");
+    let id = h.ids()[0];
+    h.click(("row", id as usize));
+    h.click(("btn-message-more", id as usize));
     for frame in 0..4 {
         h.cx.run_until_parked();
         let mut vcx = gpui_kit::VisualTestContext::from_window(h.window, h.cx);
         vcx.update(|window, cx| window.draw(cx).clear(cx));
-        assert!(
-            vcx.debug_bounds("kbd:cmd-z").is_some(),
-            "Undo keycap missing on frame {frame}"
-        );
-        assert!(
-            vcx.debug_bounds("kbd:cmd-,").is_some(),
-            "Settings keycap missing on frame {frame}"
-        );
+        assert!(vcx.debug_bounds("kbd:e").is_some(), "Archive keycap missing on frame {frame}");
     }
 }

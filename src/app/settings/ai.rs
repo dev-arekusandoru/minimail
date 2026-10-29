@@ -1,4 +1,5 @@
 use super::*;
+use crate::judge::{AGE_CHOICES, DEFAULT_MAX_AGE_DAYS};
 
 /// The questions the page offers; `Expects reply` stays hidden.
 const TAGGED: [QuestionKey; 4] = [
@@ -23,14 +24,6 @@ fn tag_line(question: QuestionKey) -> &'static str {
 /// The judge policy's shipped mode for `question`.
 fn default_mode(question: QuestionKey) -> Mode {
     JudgePolicy::default().mode(question)
-}
-
-/// `mode`'s segment in [`CLASSIFIER_MODES`], which lists Auto, Off.
-fn mode_index(mode: Mode) -> usize {
-    match mode {
-        Mode::Auto(_) => 0,
-        Mode::Review | Mode::Off => 1,
-    }
 }
 
 impl SettingsPanel {
@@ -159,20 +152,17 @@ impl SettingsPanel {
             tagging = tagging.item(row(
                 question.label(),
                 tag_line(question),
-                &["classifier", "auto off", "tagging"],
-                Undo::of_panel(
+                &["classifier", "on off", "ask", "tagging"],
+                switch_undo(
                     weak,
-                    move |this| this.policy.mode(question) != default_mode(question),
-                    move |this, cx| this.set_mode(question, default_mode(question), cx),
+                    move |this| this.policy.mode(question) != Mode::Off,
+                    true,
+                    move |this, on, cx| this.set_question_asked(question, on, cx),
                 ),
-                segmented(
-                    format!("ai-mode-group-{}", question.label()),
-                    mode_entries(question),
+                switch(
                     weak,
-                    move |this| mode_index(this.policy.mode(question)),
-                    move |this, index, cx| {
-                        this.set_classifier_mode(question, CLASSIFIER_MODES[index].0, cx)
-                    },
+                    move |this| this.policy.mode(question) != Mode::Off,
+                    move |this, on, cx| this.set_question_asked(question, on, cx),
                 ),
             ));
         }
@@ -208,6 +198,17 @@ impl SettingsPanel {
                 &["classifier", "automatic", "auto classify", "tagging"],
                 switch_undo(weak, |this| this.auto_classify, false, SettingsPanel::set_auto_classify),
                 switch(weak, |this| this.auto_classify, SettingsPanel::set_auto_classify),
+            ))
+            .item(row(
+                "Don't auto-classify mail older than",
+                "Older mail is skipped by automatic classification; classify it by hand.",
+                &["classifier", "automatic", "age", "old", "cutoff", "cost", "tagging"],
+                Undo::of_panel(
+                    weak,
+                    |this| this.auto_max_age_days != DEFAULT_MAX_AGE_DAYS,
+                    |this, cx| this.set_auto_max_age(DEFAULT_MAX_AGE_DAYS, cx),
+                ),
+                age_select(weak),
             ))
             .item(row(
                 "Count cold outreach as spam",
@@ -254,21 +255,26 @@ fn jev_message(error: Option<String>, test: Option<JevTest>, theme: &gpui_kit::c
         ),
     }
 }
+
+/// The age cutoff dropdown: entries are the day counts as text.
+fn age_select(weak: &Weak) -> Control {
+    let entries = AGE_CHOICES.iter().map(|(d, l)| (d.to_string().into(), (*l).into())).collect();
+    let reader = weak.clone();
+    let writer = weak.clone();
+    select(
+        entries,
+        Rc::new(move |cx| {
+            reader.read_with(cx, |this, _| this.auto_max_age_days.to_string().into()).unwrap_or_default()
+        }),
+        Rc::new(move |value: SharedString, cx: &mut App| {
+            if let Ok(days) = value.parse() {
+                writer.update(cx, |this, cx| this.set_auto_max_age(days, cx)).ok();
+            }
+        }),
+    )
+}
+
 /// No row ↺: the Jev rows are not values with a default the page reset puts back.
 fn no_reset(weak: &Weak) -> Undo {
     Undo::of_panel(weak, |_| false, |_, _| {})
-}
-
-/// The Auto / Off buttons of one question, each with an id no other row uses.
-fn mode_entries(question: QuestionKey) -> Vec<(String, String)> {
-    CLASSIFIER_MODES
-        .iter()
-        .enumerate()
-        .map(|(index, (_, label))| {
-            (
-                format!("ai-mode-{}-{index}", question.label()),
-                (*label).to_owned(),
-            )
-        })
-        .collect()
 }

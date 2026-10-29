@@ -127,35 +127,30 @@ impl MailApp {
             .py_4()
             .when(!stacked, |d| d.h_full())
             .when(stacked, |d| d.w_full());
-        let triage = self.slot() == Slot::Triage;
-        if let Some((handled, secs)) = self.session_end.filter(|_| triage) {
-            return pane
-                .items_center()
-                .justify_center()
-                .child(SessionCard::finished(handled, secs))
-                .into_any_element();
-        }
         let Some(msg) = self.opened().and_then(|id| self.mailbox.get(id)) else {
             if self.mailbox.accounts().is_empty() {
                 return pane.into_any_element();
             }
             return pane
-                .items_center()
-                .justify_center()
-                .flex()
-                .gap_1()
-                .text_size(px(13.))
-                .text_color(t.muted_foreground)
-                .child("Click a message or press")
-                .child(crate::app::ui::shortcut("enter"))
-                .child("to open")
+                .child(crate::app::ui::empty(
+                    gpui_kit::assets::IconName::MailOpen,
+                    "No message open",
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .child("Click a message or press")
+                        .child(crate::app::ui::shortcut("enter"))
+                        .child("to open"),
+                ))
                 .into_any_element();
         };
         let look = Look::new(cx);
         let newest = self.newest();
         let others = crate::reading::thread_others(self.mailbox.messages(), msg);
         let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
-
         // Thread messages in timeline order (oldest first). The opened one is the expanded
         // surface wherever it falls; it is never moved.
         let (title, rows): (Option<AnyElement>, Vec<AnyElement>) = if others.is_empty() {
@@ -222,9 +217,6 @@ impl MailApp {
         let count = usize::from(summary.is_some()) + usize::from(title.is_some()) + rows.len();
         let edges = move |el: Div, i: usize| el.when(i == 0, |d| d.pt_4()).when(i + 1 == count, |d| d.pb_4());
         pane.p_0()
-            .when_some(self.session.as_ref().filter(|_| triage), |d, s| {
-                d.child(div().px_5().pt_4().pb_3().child(SessionCard::new(s.index + 1, s.ids.len())))
-            })
             .child(
                 // The scrollbar is a sibling of the scrolled area, over a relative wrapper the
                 // same size as it: as a child it would ride the content's scroll offset, so the

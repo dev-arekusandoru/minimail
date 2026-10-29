@@ -53,7 +53,16 @@ struct SignIn {
 impl MailApp {
     /// Adopt the cache and start the sync loop for every cached Gmail account.
     pub fn attach_sync(&mut self, cache: Rc<Cache>, window: &mut Window, cx: &mut Context<Self>) {
+        // Merge duplicate and blank folders the cache may have collected, before anything syncs.
+        sync::heal_folders(&mut self.mailbox, &cache);
         self.cache = Some(cache);
+        cx.on_app_quit(|this, _| {
+            if let Some(cache) = &this.cache {
+                sync::persist_local(&this.mailbox, cache);
+            }
+            async {}
+        })
+        .detach();
         let client = ClientConfig::load();
         let accounts: Vec<Account> = self
             .mailbox
@@ -138,6 +147,20 @@ impl MailApp {
         // A new account can send and receive drafts, so the composer learns about it now
         // rather than at the next restart.
         self.refresh_composer_accounts(cx);
+    }
+
+    /// Adopt a cache and one provider without the sign-in flow: the `fixtures` tests drive the
+    /// real body queue with a fake provider.
+    #[cfg(feature = "fixtures")]
+    pub fn attach_test_sync(
+        &mut self,
+        cache: Rc<Cache>,
+        account: &str,
+        provider: Box<dyn MailProvider>,
+        cx: &mut Context<Self>,
+    ) {
+        self.cache = Some(cache);
+        self.register_provider(account, provider, cx);
     }
 
     /// Main-thread half of one loop iteration: persist local state, then plan
@@ -261,6 +284,33 @@ impl MailApp {
         !self.providers.is_empty()
     }
 
+    /// How `account` is syncing, from what the app tracks per account (the settings Accounts
+    /// page shows the same). Accounts without a provider of their own have nothing to sync.
+    pub(super) fn account_sync_status(&self, account: &crate::model::Account) -> crate::sync_status::SyncStatus {
+        if account.provider != crate::model::ProviderKind::Gmail {
+            return crate::sync_status::SyncStatus::Synced(None);
+        }
+        let facts = crate::sync_status::SyncFacts {
+            last_synced: self.cache.as_ref().and_then(|c| c.synced_at(&account.id).ok().flatten()),
+            syncing: self.older_in_flight.contains(&account.id),
+            signed_in: self.providers.contains_key(&account.id),
+            error: self.account_errors.get(&account.id).map(String::as_str),
+        };
+        crate::sync_status::status(&facts)
+    }
+
+    /// The worst attention any syncing account asks for: what the sidebar's fetch button flags.
+    pub(super) fn sync_attention(&self) -> crate::sync_status::Attention {
+        let now = self.now();
+        self.mailbox
+            .accounts()
+            .iter()
+            .filter(|a| a.provider == crate::model::ProviderKind::Gmail)
+            .map(|a| crate::sync_status::attention(&self.account_sync_status(a), now))
+            .max()
+            .unwrap_or(crate::sync_status::Attention::Fine)
+    }
+
     /// Ask the server for changes on the next round (within ~2 s), then report the result.
     pub(super) fn fetch_mail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.providers.is_empty() {
@@ -338,6 +388,13 @@ impl MailApp {
 
     /// The opened message and the next few rows of the list.
     pub(super) fn body_targets(&self) -> Vec<MessageId> {
+        // A session's queue is its own order and filter, not the list's: prefetch what the
+        // session will show next, not the rows the list happens to draw under it.
+        if self.slot() == Slot::Triage
+            && let Some(run) = self.session.as_ref().map(|s| &s.run)
+        {
+            return run.upcoming(BODY_PREFETCH + 1).to_vec();
+        }
         let opened = self.opened();
         let visible = self.visible_in_frame();
         let start = opened
@@ -487,7 +544,7 @@ impl MailApp {
             return;
         }
         self.sync_error = Some(e.clone());
-        self.pending_toast = Some(format!("Gmail sync: {e}"));
+        self.pending_toast = Some((format!("Gmail sync: {e}"), None));
     }
 
     /// Reset the list, tabs and reader to a fresh state after accounts were removed.

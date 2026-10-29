@@ -73,10 +73,21 @@ Every user action is one undo step.
   provider concern (out of scope for mock data).
 - **Unblock**: Settings → Blocked senders list. Unsubscribe is one-way (resubscribe
   happens at the original subscription).
-- **Mark spam**: dialog *Block & Delete / Delete*.
+- **Mark spam**: dialog *Block & Delete / Delete*. Accepting spam without blocking (that dialog's
+  Delete, or Delete on a Possible-spam message) then asks *Delete all mail from <address>?*
+  (only if more Inbox mail remains) and *Always mark mail from <address> as spam?*; Not spam asks
+  *Never mark mail from <address> as spam?*. Prompts are for the first message's sender only, skip
+  blocked and already-listed senders, and fold into the action's undo step. Yes stores the exact
+  address (case-insensitive) in the never-spam / always-spam list (preferences; Settings → Senders;
+  the last choice wins). Listed senders are not asked the spam question; always-spam mail arrives
+  flagged. Logic: `src/spam_senders.rs`.
 - **New sender**: off in v1 (see `src/known_senders.rs`). When enabled, Allow removes
   New Sender (and records the contact); Block runs the block dialog.
 - **Sender-wide actions** always confirm first.
+- **Dialog keys**: `enter` picks the default option (shown with an enter keycap), `esc`
+  cancels; options other than the default keep their digit keys (by position, `1`–`5`).
+  Defaults: Archive (reply sent), Leave (block/unsubscribe), Block & Delete
+  (spam); sender-wide and classify confirms have only the confirm option.
 
 ## Accounts & folders
 
@@ -108,7 +119,7 @@ Every user action is one undo step.
 |---|---|
 | `e` | Archive |
 | `f` | File (folder picker) |
-| `d` / `#` | Delete |
+| `d` | Delete |
 | `s` | Snooze |
 | `r` | Reply |
 | `a` / `b` | Allow / Block sender |
@@ -117,3 +128,29 @@ Every user action is one undo step.
 | `g` + letter | Jump to sidebar location |
 
 Sender-wide variants use `shift-` and confirm first.
+
+## Triage mode
+
+`t` opens a full-window mode with three screens; logic lives in `src/triage_session.rs`
+and `src/triage_suggest.rs`.
+
+- **Start** (`t`): pick the inbox, a filter chip (with counts), session size (25/50/100/All),
+  order (newest/oldest first) and the AI-suggestions toggle. `enter` starts, `esc` cancels.
+  An empty queue does not start.
+- **Running**: one message at a time, a progress bar of position/total. `e f s d r m` act as
+  usual; `space` skips; `enter` takes the suggestion (nothing without one); `esc` ends the
+  session, to the Summary when anything was handled, else straight back.
+- **Summary**: counts per action, handled / time / average per message, suggestions taken, and
+  what is left in the inbox. `esc` closes, `enter` keeps going (same options, new queue).
+
+Counting: every action that takes the current message out of the queue (archive, file,
+snooze, delete, reply sent, move to inbox, mute) handles it once and bumps its own tally
+(the last two have none). Skip takes the message out of this session's queue and bumps
+*skipped*; it handles nothing, leaves the message where it is, and is not an undo step, so
+each message is skipped at most once and `handled + skipped` is the session's queue size.
+Progress is `(handled + 1, queue length)` over what is left of the queue.
+
+Suggestion (a deterministic stub, no AI): Possible Spam → Delete; else with at least 3
+earlier decided messages (archived, filed or deleted) from the sender, ≥ 80% archived →
+Archive, ≥ 80% filed to one folder → File to it. Otherwise none, and the card is hidden.
+Every action, suggested or not, is one undo step.

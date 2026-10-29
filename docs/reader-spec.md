@@ -29,7 +29,7 @@ Status: implemented 2026-09-30 (`src/reading.rs`, `src/app/mail_app/reader*.rs`)
 ## Body
 
 - Plain text and HTML are both first-class. Emails may be text only, HTML only, or both.
-- Branded HTML, such as newsletters, renders as HTML by default. Per-message **Reader mode** (`v`) swaps it for the text part (or text extracted from the HTML) in reader typography.
+- Branded HTML, such as newsletters, renders as HTML by default. Per-message **Reader mode** (`v`, or the *Reader mode* row of the message menu) swaps it for the text part (or text extracted from the HTML) in reader typography.
   - Original HTML is drawn by a native `WKWebView` (see `src/app/email_webview/`), loaded once per message and kept while its tab lives (at most 8 views; hidden, not reloaded, on tab switches). It is as tall as its document (measured by a ResizeObserver script in an isolated content world) so the reader's scroll container scrolls it; it is hidden behind a skeleton until loaded and measured. The app theme sets default colors and `color-scheme`; authored colors are not inverted. Text is selectable with the mouse and copied with `cmd-c`; the view never takes key focus.
 - Safety: page JavaScript never runs; navigation inside the view is cancelled and HTTP(S)/`mailto:` links open externally; downloads and new windows are refused; the document has no base URL. Remote images load by default. **Settings → Reader → Block remote images** opts into blocking (session-scoped) with a WebKit content rule list over all remote subresources, reloads open readers, and shows a blocked-image note. Data images remain available.
 - Quoted history inside a body is collapsed ("Show quoted text").
@@ -82,7 +82,7 @@ Known limitations:
 
 - **Per message** (every expanded surface, in the header's right cluster; they act on that message, not on the opened one):
   - Reply `r`, Reply all `shift-a`, Forward `w`: icon buttons, in that order.
-  - `⋯` menu: Archive `e`, Delete `d`, Snooze… `s`, Move to inbox `i` (each only when it changes something), Accept / Reject AI `y` / `n` while suggestions are pending, File… `f`, Mark spam… `!`, Toggle select `x`, Summarize `z`, Mute `m`, Unsubscribe `shift-u`, Sender actions ▸. It hangs under the button.
+  - `⋯` menu: Archive `e`, Delete `d`, Snooze… `s`, Move to inbox `i` (each only when it changes something), Accept / Reject AI `y` / `n` while suggestions are pending, File… `f`, Mark spam… `!`, Toggle select `x`, Summarize `z`, Mute `m`, Unsubscribe `shift-u`, Open sender in new tab `p`, Sender actions ▸. It hangs under the button.
 - Banner and suggestion buttons sit in their banners; each shows its shortcut key.
 - Keyboard shortcuts also appear in the footer hint bar (`HintMode::Reader`, currently unreachable and must be wired): `r` reply, `e` archive, `f` file, `d` delete, `s` snooze, `]`/`[` thread, `v` reader mode, `shift-o` expand thread, `u` undo, `?` help; plus `y`/`n` while suggestions are pending. Keys act on the opened message or the list selection.
 - Keys come from `src/app/actions.rs`; never hard-code a second map.

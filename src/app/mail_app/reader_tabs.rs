@@ -15,7 +15,7 @@ impl MailApp {
         self.last_opened = Some(id);
         // A partial body is downloaded next; classification waits for it.
         self.prioritize_body(id, cx);
-        if !self.auto_classify() || self.judge.is_none() {
+        if !self.auto_wanted(id) || self.judge.is_none() {
             return;
         }
         let Some(m) = self.mailbox.get(id) else { return };
@@ -109,11 +109,13 @@ impl MailApp {
             || self.toast.is_some()
             || self.fetch_toast;
         self.webviews.set_overlay(overlay);
+        // Triage mode takes the whole window: the tabs' email views hide while it is open, and
+        // the Triage slot's show only then.
+        let triage = self.triage_open();
         let zoomed = self.zoomed_group(cx);
-        self.webviews.set_slot_visible(false, matches!(zoomed, None | Some("reader")));
-        self.webviews
-            .set_slot_visible(true, self.triage_open() && matches!(zoomed, None | Some("triage")));
-        if !self.triage_open() {
+        self.webviews.set_slot_visible(false, !triage && matches!(zoomed, None | Some("reader")));
+        self.webviews.set_slot_visible(true, triage);
+        if !triage {
             self.webviews.forget(|key| key.triage);
         }
     }
@@ -124,8 +126,28 @@ impl MailApp {
         if let Some(id) = self.tabs.opened() {
             self.focus_message(id, false);
             self.scroll_to_cursor();
+            // The cursor moved because of the tab: `follow_cursor` must not open it back.
+            self.followed_cursor = self.cursor_id();
         }
         self.park_inline_composer(cx);
+    }
+
+    /// Cursor and open message are one thing: while a reader tab is open, a cursor that moved
+    /// opens its message (preview updated in place, or a new preview beside a pinned tab). With
+    /// no tab open the cursor just moves. Runs every frame; acts only when the cursor changed.
+    pub(super) fn follow_cursor(&mut self, cx: &mut Context<Self>) {
+        let cursor = self.cursor_id();
+        let moved = cursor != self.followed_cursor;
+        self.followed_cursor = cursor;
+        if !moved || self.tabs_locked() || self.tabs.active().is_none() {
+            return;
+        }
+        if let Some(id) = cursor {
+            let pane = self.pane_focus;
+            self.open_message(id, false, cx);
+            // Following the cursor is not the user turning to the reader.
+            self.focus_pane(pane);
+        }
     }
 
     /// Click on tab `ix`: show it; a double-click pins it.
@@ -195,14 +217,14 @@ impl MailApp {
 
     /// Tab shortcuts do nothing behind a modal or menu, or while a session hides the tabs.
     pub(super) fn tabs_locked(&self) -> bool {
-        self.modal_open() || self.menu_open() || self.in_session() || self.session_end.is_some()
+        self.modal_open() || self.menu_open() || self.triage_open()
     }
 
     /// Close preview tabs whose thread has no message in the list any more (triaged away, or
     /// the view changed); pinned tabs stay. Runs every frame but costs nothing without a
     /// preview, and never during a session, which hides the tabs.
     pub(super) fn reconcile_tabs(&mut self) {
-        if !self.tabs.has_preview() || self.in_session() || self.session_end.is_some() {
+        if !self.tabs.has_preview() || self.triage_open() {
             return;
         }
         let shown: HashSet<u32> = self

@@ -125,3 +125,19 @@ fn an_order_that_is_not_exactly_these_tabs_is_refused() {
     assert!(t.reorder_to(&[q("in:archived"), q("in:inbox")]));
     assert_eq!(views(&t)[0].0, "in:archived");
 }
+
+#[test]
+fn retargeting_changes_a_tab_in_place_but_never_duplicates_a_view() {
+    let mut t = strip();
+    t.open_pinned(q("in:archived"));
+    t.open_pinned(q("in:sent"));
+    t.activate(1);
+
+    assert!(t.retarget(1, q("in:deleted")));
+    assert_eq!(views(&t)[1], ("in:deleted".to_owned(), true), "same slot, same pin");
+    assert_eq!(t.active_index(), 1);
+
+    assert!(!t.retarget(1, q("in:sent")), "another tab already shows it");
+    assert!(!t.retarget(9, q("in:inbox")), "unknown slot");
+    assert_eq!(views(&t)[1].0, "in:deleted");
+}

@@ -18,14 +18,14 @@ use gpui_kit::component::menu::PopupMenu;
 /// open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum MenuKind {
-    /// Overflow of the quiet header.
-    Global,
     /// Actions for one message of the reader; they apply to that message only.
     Message(MessageId),
     /// The classifier labels of one message, opened from its row's icons or a right-click.
     Classifier(MessageId),
     /// Actions for the list's selection.
     Selection,
+    /// Rename and delete for one sidebar folder row, opened by a right-click.
+    Folder(FolderId),
 }
 
 impl MailApp {
@@ -52,6 +52,17 @@ impl MailApp {
                     })
                     .ok();
             })
+    }
+
+    /// The `context_menu` builder for a right-click on some element: exactly the rows and
+    /// dispatch [`Self::menu_trigger`] gives, reached by a right-click instead of a button.
+    pub(super) fn context_menu(
+        &self,
+        kind: MenuKind,
+        cx: &Context<Self>,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let owner = cx.weak_entity();
+        move |menu, window, cx| Self::populate_menu(owner.clone(), kind, menu, window, cx)
     }
 
     /// Fill `menu` with the rows `kind` holds right now. Any trigger can use this as its builder:
@@ -110,18 +121,37 @@ impl MailApp {
     /// the usual cursor/selection targets).
     pub(super) fn menu_items(&self, kind: MenuKind) -> (Vec<MenuItem>, Option<Vec<MessageId>>) {
         match kind {
-            MenuKind::Global => (global_items(), None),
             MenuKind::Message(id) => (self.message_items(id), Some(vec![id])),
             MenuKind::Classifier(id) => (self.classifier_items(id), Some(vec![id])),
             MenuKind::Selection => (self.selection_items(), None),
+            MenuKind::Folder(id) => (
+                vec![
+                    MenuItem::action_fn("Rename…", move || Box::new(RenameFolder { folder: Some(id) })),
+                    MenuItem::action_fn("Delete…", move || Box::new(DeleteFolder { folder: Some(id) })),
+                ],
+                None,
+            ),
         }
     }
 
-    /// The whole classifier menu of one message: Kind, Urgency, needs reply, spam, then a pending
-    /// folder suggestion.
-    pub(super) fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
-        let mut items = self.kind_items(id);
-        for section in [self.urgency_items(id), self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
+    /// The whole classifier menu of one message: a `Kind` and an `Urgency` submenu, each labelled
+    /// with the value in force, to keep the list of options off this level; then needs reply,
+    /// spam, and a pending folder suggestion. Every surface that shows these options — the
+    /// reader's `⋯`, a row's right-click, a row's classifier icons, a reader chip — builds from
+    /// here, so they mark the current choice alike.
+    pub fn classifier_items(&self, id: MessageId) -> Vec<MenuItem> {
+        let mut items = vec![
+            MenuItem::submenu(
+                labeled("Kind", self.kind_of(id).map(Self::kind_name)),
+                self.kind_items(id),
+            ),
+            MenuItem::separator(),
+            MenuItem::submenu(
+                labeled("Urgency", self.urgency_of(id).map(urgency_label)),
+                self.urgency_items(id),
+            ),
+        ];
+        for section in [self.needs_reply_items(id), self.spam_items(id), self.folder_items(id)] {
             if !section.is_empty() {
                 items.push(MenuItem::separator());
                 items.extend(section);
@@ -130,10 +160,17 @@ impl MailApp {
         items
     }
 
-    /// The Kind section: the five kinds, then the reset/clear actions.
+    /// `items` under a header, for a menu that opens one section on its own (a reader chip);
+    /// the classifier menu's submenus carry their own label instead.
+    pub(super) fn section(header: &'static str, items: Vec<MenuItem>) -> Vec<MenuItem> {
+        std::iter::once(MenuItem::header(header)).chain(items).collect()
+    }
+
+    /// The Kind options: the five kinds, then the reset/clear actions. Headerless: the caller
+    /// labels the section. No kind is marked while the message carries none.
     pub(super) fn kind_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.kind_of(id);
-        let mut items = vec![MenuItem::header("Kind")];
+        let mut items = Vec::new();
         for kind in Kind::ALL {
             items.push(
                 MenuItem::action_fn(Self::kind_name(kind), move || {
@@ -144,20 +181,21 @@ impl MailApp {
             );
         }
         items.push(MenuItem::separator());
-        items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
-            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
+        if self.mailbox.is_overridden(id, QuestionKey::Kind) {
+            items.push(MenuItem::action_fn("Reset Kind to suggestion", move || {
+                Box::new(ResetLabel { message: Some(id), key: QuestionKey::Kind })
+            }));
+        }
+        items.push(MenuItem::action_fn("No kind", move || {
+            Box::new(SetKind { message: Some(id), kind: None })
         }));
-        items.push(
-            MenuItem::action_fn("No kind", move || Box::new(SetKind { message: Some(id), kind: None }))
-                .checked(current.is_none()),
-        );
         items
     }
 
-    /// The Urgency section: levels 1..=5, then reset to suggestion.
+    /// The Urgency options: levels 1..=5, then reset to suggestion. Headerless, like `kind_items`.
     pub(super) fn urgency_items(&self, id: MessageId) -> Vec<MenuItem> {
         let current = self.urgency_of(id);
-        let mut items = vec![MenuItem::header("Urgency")];
+        let mut items = Vec::new();
         for level in 1..=5 {
             let glyph = match level {
                 5 => Glyph::UrgentHigh,
@@ -169,30 +207,30 @@ impl MailApp {
                     Box::new(SetUrgency { message: Some(id), level })
                 })
                 .icon(glyph.spec().icon)
-                .checked(current == level),
+                .checked(current == Some(level)),
             );
         }
-        items.push(MenuItem::separator());
-        items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
-            Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
-        }));
+        if self.mailbox.is_overridden(id, QuestionKey::Urgency) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::action_fn("Reset Urgency to suggestion", move || {
+                Box::new(ResetLabel { message: Some(id), key: QuestionKey::Urgency })
+            }));
+        }
         items
     }
 
-    /// The needs-reply section: one row, which way round depends on the tag.
+    /// The needs-reply row: the one that clears the flag, shown only while the message carries it.
+    /// Setting it again is the palette's or the classifier's job.
     pub(super) fn needs_reply_items(&self, id: MessageId) -> Vec<MenuItem> {
-        let needs = self.mailbox.tags(id).contains(&Tag::NeedsReply);
-        vec![if needs {
+        if !self.mailbox.tags(id).contains(&Tag::NeedsReply) {
+            return Vec::new();
+        }
+        vec![
             MenuItem::action_fn("Doesn't need reply", move || {
                 Box::new(SetNeedsReply { message: Some(id), needs_reply: false })
             })
-            .icon(Glyph::NeedsReply.spec().icon)
-        } else {
-            MenuItem::action_fn("Needs reply", move || {
-                Box::new(SetNeedsReply { message: Some(id), needs_reply: true })
-            })
-            .icon(Glyph::NeedsReply.spec().icon)
-        }]
+            .icon(Glyph::NeedsReply.spec().icon),
+        ]
     }
 
     /// The spam section: one row, which way round depends on the flag. Spam never moves mail.
@@ -229,16 +267,13 @@ impl MailApp {
         })
     }
 
-    /// The Urgency level on `id`: 1 when it carries no urgency tag.
-    fn urgency_of(&self, id: MessageId) -> u8 {
-        self.mailbox
-            .tags(id)
-            .iter()
-            .find_map(|tag| match tag {
-                Tag::Urgent(level) => Some(*level),
-                _ => None,
-            })
-            .unwrap_or(1)
+    /// The Urgency level on `id`, if it carries one: a message with no tag is level 1, which the
+    /// menu shows as "None".
+    fn urgency_of(&self, id: MessageId) -> Option<u8> {
+        self.mailbox.tags(id).iter().find_map(|tag| match tag {
+            Tag::Urgent(level) => Some(*level),
+            _ => None,
+        })
     }
 
     /// A kind's row-menu name, from the one icon table.
@@ -275,6 +310,15 @@ impl MailApp {
                 Box::new(RejectSuggestions)
             }));
         }
+        // The reader footer's Reader mode toggle, moved here so the list menu and the reader's
+        // `⋯` carry it alike. Only HTML messages have two forms to switch between.
+        if msg.html.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::action(
+                if self.reader_plain(id) { "Show original" } else { "Reader mode" },
+                || Box::new(ToggleReaderMode),
+            ));
+        }
         items.push(MenuItem::separator());
         items.push(MenuItem::action("File…", || Box::new(File)));
         items.push(MenuItem::action("Mark spam…", || Box::new(MarkSpam)));
@@ -285,6 +329,7 @@ impl MailApp {
         items.push(MenuItem::action("Summarize thread", || {
             Box::new(SummarizeThread)
         }));
+        items.push(MenuItem::action("Open sender in new tab", || Box::new(OpenSenderTab)));
         items.push(MenuItem::action("Mute thread", || Box::new(MuteThread)));
         items.push(MenuItem::action(
             format!("Unsubscribe {}", sender_domain(msg)),
@@ -344,6 +389,15 @@ impl MailApp {
     }
 }
 
+/// A submenu trigger's label: the section and the value in force, or the section alone when the
+/// message carries no such label.
+fn labeled(section: &str, value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("{section} · {value}"),
+        None => section.to_owned(),
+    }
+}
+
 /// Archive / Delete / Snooze… / Inbox, leaving out a move that would change nothing for
 /// any of the messages in `states`.
 fn triage_items(states: &[TriageState]) -> Vec<MenuItem> {
@@ -360,20 +414,6 @@ fn triage_items(states: &[TriageState]) -> Vec<MenuItem> {
         items.push(MenuItem::action("Move to inbox", || Box::new(MoveToInbox)));
     }
     items
-}
-
-/// The quiet header's overflow: everything that is not about the current message.
-fn global_items() -> Vec<MenuItem> {
-    vec![
-        MenuItem::action("Commands…", || Box::new(ToggleCommandPalette)),
-        MenuItem::separator(),
-        MenuItem::action("Undo", || Box::new(Undo)),
-        MenuItem::action("Classify every message in this list…", || Box::new(ClassifyVisible)),
-        MenuItem::separator(),
-        MenuItem::action("Sender rules…", || Box::new(ToggleRules)),
-        MenuItem::action("Settings…", || Box::new(ToggleSettings)),
-        MenuItem::action("Shortcuts", || Box::new(ToggleHelp)),
-    ]
 }
 
 /// Short sender label for a menu row, e.g. `"acme.com"`.

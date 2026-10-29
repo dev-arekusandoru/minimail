@@ -22,11 +22,15 @@ gpui_kit::assets::icon_assets!(
         BellOff, UserPlus, Hourglass, AlarmClock, Paperclip, CornerUpRight, Clock,
         // Sidebar locations.
         Mails, Inbox, Send, Archive, Trash, Folder, FolderOpen, Folders,
-        // Account icons.
-        Mail, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
+        // Account icons, and the reader's empty state (not in gpui-kit's default bundle).
+        Mail, MailOpen, Briefcase, House, Star, Heart, Building2, GraduationCap, ShoppingBag, Users, Globe,
         Gamepad2, Music, Coffee, Rocket, Wallet, Leaf,
+        // Sidebar rail and panel (not in gpui-kit's default bundle).
+        SquarePen, FolderPlus, ListFilter,
         // Message toolbar and find bar icons (not in gpui-kit's default bundle).
         ReplyAll, Forward, Regex, WholeWord, ScanSearch,
+        // Triage Focus Reader.
+        SkipForward, MessageSquare,
         // Per-message classification state (not classified / in progress / failed).
         CircleDashed, LoaderCircle, CircleAlert,
         // Composer formatting controls.
@@ -430,8 +434,8 @@ pub fn cluster(
 /// The legend: every glyph with icon, label and description, grouped. Used by the `?` help.
 pub fn legend_view(t: &ThemeColor) -> Div {
     let row_states = [
-        ("Selected / open", t.primary, "Blue bar; opening a message uses the same treatment as a one-item selection."),
-        ("Partial thread selection", t.primary.opacity(0.45), "Dimmed blue bar when only some messages are selected."),
+        ("Cursor / open", t.list_hover.blend(t.foreground.opacity(0.06)), "Grey row: the cursor and the open message are the same row."),
+        ("Selected", t.primary, "Checked dot or tile on the left."),
     ];
     let row_state_section = div()
         .flex()
@@ -444,7 +448,7 @@ pub fn legend_view(t: &ThemeColor) -> Div {
                 .items_center()
                 .gap_2()
                 .text_xs()
-                .child(div().w(px(3.)).h(px(12.)).bg(color))
+                .child(div().w(px(12.)).h(px(12.)).rounded_sm().bg(color))
                 .child(div().w(px(112.)).flex_none().text_color(t.foreground).child(label))
                 .child(div().flex_1().text_color(t.muted_foreground).child(description))
         }))
@@ -452,7 +456,7 @@ pub fn legend_view(t: &ThemeColor) -> Div {
             div()
                 .text_xs()
                 .text_color(t.muted_foreground)
-                .child("Cursor: row_cursor background and outline. Click the left edge to select; cmd-click toggles and shift-click range-selects."),
+                .child("Click the left edge to select; cmd-click toggles and shift-click range-selects."),
         );
     let sections = legend().into_iter().map(|(group, glyphs)| {
         div()

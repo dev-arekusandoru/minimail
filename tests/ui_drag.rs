@@ -64,8 +64,10 @@ impl Harness<'_> {
 
     /// Drag tab slot `from` onto slot `to`, the way the kit's own dock test moves a tab.
     fn drag_tab(&mut self, from: usize, to: usize) {
+        let tabs = self.tabs();
+        let (from, to) = (("reader-tab", tabs[from].0 as usize), ("reader-tab", tabs[to].0 as usize));
         self.cx
-            .update_window(self.window, |_, window, cx| window.within("tab-bar").drag_to(from, to, cx))
+            .update_window(self.window, |_, window, cx| window.drag_to(from, to, cx))
             .expect("window alive");
         self.cx.run_until_parked();
     }

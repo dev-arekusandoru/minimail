@@ -1,10 +1,59 @@
 use super::*;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+
+/// A button beside a toast's message, dispatching `action`.
+#[derive(Clone, Copy)]
+pub(super) struct ToastAction {
+    /// The button's element id, which tests click.
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Shortcut hint drawn on the button.
+    pub key: Option<&'static str>,
+    pub action: fn() -> Box<dyn Action>,
+    /// An action slot turns the kit's autohide off; this turns it back on.
+    pub autohide: bool,
+}
+
+const UNDO_ACTION: ToastAction = ToastAction {
+    id: "toast-undo",
+    label: "Undo",
+    key: Some("u"),
+    action: || Box::new(Undo),
+    autohide: true,
+};
 
 impl MailApp {
     /// Show `text` as a kit notification at the bottom of the window. A new toast replaces the
-    /// previous one; one that mentions undo carries an Undo button. `self.toast` mirrors the
-    /// visible text because the kit keeps its notification text private.
+    /// previous one. `self.toast` mirrors the visible message because the kit keeps its
+    /// notification text private.
     pub(super) fn show_toast(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.push_toast(text, None, window, cx);
+    }
+
+    /// Same, with an Undo action: the one undo step `u` performs. While a session runs the
+    /// message goes to the top row instead of a bottom toast, which would cover the toolbar.
+    pub(super) fn show_undo_toast(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.session.is_some() {
+            self.triage_undo = Some(text.into());
+            cx.notify();
+            return;
+        }
+        self.push_toast(text, Some(UNDO_ACTION), window, cx);
+    }
+
+    /// One row: status icon, message, then the action button the kit lays beside it.
+    pub(super) fn push_toast(
+        &mut self,
+        text: String,
+        action: Option<ToastAction>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.toast_gen += 1;
         let generation = self.toast_gen;
         let text: SharedString = text.into();
@@ -22,15 +71,19 @@ impl MailApp {
                 })
                 .ok();
             });
-        if text.contains("undo") {
-            note = note.content(|_, _, cx| {
-                button("toast-undo", "Undo", "Undo", "u", cx)
-                    .on_click(cx.listener(|note, _, window, cx| {
-                        window.dispatch_action(Box::new(Undo), cx);
-                        note.dismiss(window, cx);
-                    }))
-                    .into_any_element()
-            });
+        if let Some(action) = action {
+            note = note
+                .action(move |_, _, cx| {
+                    Button::new(action.id)
+                        .label(action.label)
+                        .ghost()
+                        .when_some(action.key, |b, key| b.child(crate::app::ui::shortcut(key)))
+                        .on_click(cx.listener(move |note, _, window, cx| {
+                            window.dispatch_action((action.action)(), cx);
+                            note.dismiss(window, cx);
+                        }))
+                })
+                .autohide(action.autohide);
         }
         window.push_notification(note, cx);
         cx.notify();
@@ -45,14 +98,16 @@ impl MailApp {
         self.snooze = None;
         self.rules_panel = None;
         self.dialog = None;
+        self.new_folder = None;
         self.folder_picker = None;
         self._modal_sub = None;
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
-    /// After a state change in a session: count it and move to the next message.
-    pub(super) fn session_advance(&mut self) {
+    /// After the current message left the queue: count it as `outcome` and move on. The
+    /// summary takes over when the queue is done.
+    pub(super) fn session_advance(&mut self, outcome: Outcome) {
         // A menu acting on a message other than the session's current one handles nothing
         // of the session.
         if let (Some(ids), Some(current)) = (&self.menu_target, self.session_current())
@@ -60,22 +115,99 @@ impl MailApp {
         {
             return;
         }
-        let Some(s) = self.session.as_mut() else {
-            return;
-        };
-        s.handled += 1;
-        s.index += 1;
-        if s.index >= s.ids.len() {
-            let elapsed = self.clock.now() - s.started;
-            let handled = s.handled;
-            self.session = None;
-            self.session_end = Some((handled, elapsed));
+        let Some(s) = self.session.as_mut() else { return };
+        s.run.handle(outcome, std::mem::take(&mut s.taking));
+        if s.run.is_finished() {
+            self.end_run();
+        } else {
+            self.refresh_suggestion();
+        }
+    }
+
+    /// Recompute the suggestion for the current message.
+    pub(super) fn refresh_suggestion(&mut self) {
+        let suggestion = self.session.as_ref().and_then(|s| {
+            let id = s.run.current().filter(|_| s.run.options.suggestions)?;
+            crate::triage_suggest::suggest(&self.mailbox, id)
+        });
+        if let Some(s) = self.session.as_mut() {
+            s.suggestion = suggestion;
+        }
+    }
+
+    /// Stop the running session: its Summary when anything was handled or skipped, else
+    /// straight back to the user's own views.
+    pub(super) fn end_run(&mut self) {
+        let Some(s) = self.session.take() else { return };
+        self.triage_undo = None;
+        if s.run.handled() == 0 && s.run.skipped() == 0 {
+            return self.end_session();
+        }
+        let remaining = self.mailbox.ids_matching(&self.mailbox.location_query(&s.run.options.location), &self.local_now()).len();
+        self.session_summary = Some((s.run.summary(self.now(), remaining), s.run.options));
+    }
+
+    /// `space`: drop the current message from this session's queue. Not a mailbox change, so
+    /// no undo step; the message stays where it is. The Summary follows when it was the last.
+    pub fn skip_current(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(s) = self.session.as_mut() else { return };
+        s.run.skip();
+        if s.run.is_finished() {
+            self.end_run();
+        } else {
+            self.refresh_suggestion();
+        }
+        self.scroll_to_cursor();
+        cx.notify();
+    }
+
+    /// `enter` while Triage mode is open: start from the Start screen, take the suggestion in a
+    /// running session, keep going from the Summary. `false` when Triage mode is not open.
+    pub(super) fn triage_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.session_setup.is_some() {
+            self.start_session_from_setup(cx);
+        } else if self.session_summary.is_some() {
+            self.keep_going(cx);
+        } else if self.session.is_some() {
+            self.accept_session_suggestion(window, cx);
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// `enter`: take the suggested action on the current message.
+    pub fn accept_session_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(suggestion) = self.session_suggestion().cloned() else { return };
+        let Some(id) = self.session_current() else { return };
+        if let Some(s) = self.session.as_mut() {
+            s.taking = true;
+        }
+        match suggestion.action {
+            SuggestedAction::Archive => self.file_ids(&[id], TriageState::Archived, window, cx),
+            SuggestedAction::File(folder) => self.file_ids(&[id], TriageState::Filed(folder), window, cx),
+            SuggestedAction::Delete => self.mark(TriageState::Deleted, window, cx),
+        }
+        if let Some(s) = self.session.as_mut() {
+            s.taking = false;
         }
     }
 
     pub(super) fn mark(&mut self, state: TriageState, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.target_ids();
+        // Deleting a message that carries the spam flag accepts the suggestion.
+        let spam_sender = (state == TriageState::Deleted)
+            .then(|| ids.iter().filter_map(|id| self.mailbox.get(*id)).find(|m| {
+                !m.outgoing
+                    && m.state == TriageState::Inbox
+                    && self.mailbox.tags(m.id).contains(&Tag::PossibleSpam)
+            }))
+            .flatten()
+            .map(|m| m.from_email.clone());
         self.file_ids(&ids, state, window, cx);
+        if let Some(email) = spam_sender {
+            self.offer_delete_and_always_spam(email, window, cx);
+        }
     }
 
     /// Move `ids` to `state` as one undo step: clear the selection, toast, advance a session.
@@ -93,12 +225,12 @@ impl MailApp {
         self.triage_mut().clear_selection();
         if n > 0 {
             let msg = match state {
-                TriageState::Inbox => format!("Moved {n} to inbox · u to undo"),
-                s => format!("Marked {n} {} · u to undo", s.label().to_lowercase()),
+                TriageState::Inbox => format!("Moved {n} to inbox"),
+                s => format!("Marked {n} {}", s.label().to_lowercase()),
             };
-            self.show_toast(msg, window, cx);
+            self.show_undo_toast(msg, window, cx);
         }
-        self.session_advance();
+        self.session_advance(Outcome::of(state));
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -117,16 +249,13 @@ impl MailApp {
         let n = self.mailbox.set_state_for_sender(&email, from, state);
         self.triage_mut().clear_selection();
         if n > 0 {
-            let msg = format!(
-                "Marked {n} from {name} {} · u to undo",
-                state.label().to_lowercase()
-            );
-            self.show_toast(msg, window, cx);
+            let msg = format!("Marked {n} from {name} {}", state.label().to_lowercase());
+            self.show_undo_toast(msg, window, cx);
         }
         if let Some(rule) = self.rules.record(&email, state) {
             self.pending_rule = Some(rule);
         }
-        self.session_advance();
+        self.session_advance(Outcome::of(state));
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -225,9 +354,21 @@ impl MailApp {
     }
 
     /// `SetSpam`: mark (or unmark) the spam flag by hand. Spam never moves the message.
-    pub(super) fn set_spam_action(&mut self, message: Option<MessageId>, spam: bool, cx: &mut Context<Self>) {
+    /// Clearing the flag offers to never ask about that sender again.
+    pub(super) fn set_spam_action(
+        &mut self,
+        message: Option<MessageId>,
+        spam: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ids = self.label_targets(message);
+        let sender = ids.first().and_then(|id| self.mailbox.get(*id)).map(|m| m.from_email.clone());
+        let before = self.mailbox.undo_depth();
         self.set_label(&ids, QuestionKey::Spam, spam.then_some(Tag::PossibleSpam), cx);
+        if let Some(email) = sender.filter(|_| !spam && self.mailbox.undo_depth() > before) {
+            self.offer_never_spam(email, window, cx);
+        }
     }
 
     /// `SetNeedsReply`: set (or clear) the Needs reply tag by hand. It never moves the message.
@@ -260,29 +401,101 @@ impl MailApp {
         }
     }
 
-    /// Close the Triage tab, whether the session is running or only its summary is up. The
-    /// dock removes the tab's group on its next sync; the user's tabs were never touched.
+    /// Close Triage mode, whichever screen it is on; the user's own views were never touched.
     pub(super) fn end_session(&mut self) {
         self.session = None;
-        self.session_end = None;
+        self.triage_undo = None;
+        self.session_setup = None;
+        self.session_summary = None;
         self.session_view = None;
     }
 
+    /// `t`: open the Start screen with the default options.
     pub(super) fn start_session(&mut self, cx: &mut Context<Self>) {
-        let query = self.mailbox.location_query(&Location::AllInboxes);
-        let ids = self.mailbox.ids_matching(&query, &self.local_now());
+        if self.triage_open() {
+            return;
+        }
+        self.open_setup(SessionOptions::default(), cx);
+    }
+
+    /// The Start screen over `options`. Its list view is the session's own from now on, so the
+    /// user's tabs, cursors and reader stay as they are.
+    fn open_setup(&mut self, options: SessionOptions, cx: &mut Context<Self>) {
+        let query = self.mailbox.location_query(&options.location);
+        self.session_view = Some(ListView::new(query, options.location.clone()));
+        self.session_summary = None;
+        self.session_setup = Some(SetupView::new(&self.mailbox, options, &self.local_now()));
+        cx.notify();
+    }
+
+    fn change_setup(&mut self, edit: impl FnOnce(&mut SessionOptions), cx: &mut Context<Self>) {
+        let Some(mut options) = self.session_setup.as_ref().map(|v| v.options.clone()) else { return };
+        edit(&mut options);
+        self.open_setup(options, cx);
+    }
+
+    pub fn setup_set_location(&mut self, location: Location, cx: &mut Context<Self>) {
+        self.change_setup(|o| o.location = location, cx);
+    }
+
+    pub fn setup_set_filter(&mut self, filter: SessionFilter, cx: &mut Context<Self>) {
+        self.change_setup(|o| o.filter = filter, cx);
+    }
+
+    pub fn setup_set_size(&mut self, size: SessionSize, cx: &mut Context<Self>) {
+        self.change_setup(|o| o.size = size, cx);
+    }
+
+    pub fn setup_set_order(&mut self, order: SessionOrder, cx: &mut Context<Self>) {
+        self.change_setup(|o| o.order = order, cx);
+    }
+
+    pub fn setup_set_suggestions(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.change_setup(|o| o.suggestions = on, cx);
+    }
+
+    /// `enter` on the Start screen: run the queue the options build. An empty queue stays put.
+    pub fn start_session_from_setup(&mut self, cx: &mut Context<Self>) {
+        let Some(options) = self.session_setup.as_ref().map(|v| v.options.clone()) else { return };
+        self.begin_run(options, cx);
+    }
+
+    /// `esc` on the Start screen.
+    pub fn cancel_setup(&mut self, cx: &mut Context<Self>) {
+        self.end_session();
+        cx.notify();
+    }
+
+    /// `esc` in a running session: its Summary when anything was handled, else back out.
+    pub fn end_session_from_ui(&mut self, cx: &mut Context<Self>) {
+        self.end_run();
+        cx.notify();
+    }
+
+    /// `enter` on the Summary: a new session with the same options.
+    pub fn keep_going(&mut self, cx: &mut Context<Self>) {
+        let Some((_, options)) = self.session_summary.clone() else { return };
+        self.begin_run(options, cx);
+    }
+
+    /// `esc` on the Summary.
+    pub fn close_summary(&mut self, cx: &mut Context<Self>) {
+        self.end_session();
+        cx.notify();
+    }
+
+    fn begin_run(&mut self, options: SessionOptions, cx: &mut Context<Self>) {
+        let ids = crate::triage_session::build_queue(&self.mailbox, &options, &self.local_now());
         if ids.is_empty() {
             return;
         }
-        // The session's list is its own: the user's tabs, cursors and reader stay as they are.
-        self.session_view = Some(ListView::new(query, Location::AllInboxes));
-        self.session_end = None;
-        self.session = Some(Session {
-            ids,
-            index: 0,
-            handled: 0,
-            started: self.now(),
-        });
+        let query = self.mailbox.location_query(&options.location);
+        self.session_view = Some(ListView::new(query, options.location.clone()));
+        self.session_setup = None;
+        self.session_summary = None;
+        self.triage_undo = None;
+        self.session = Some(Session { run: Run::new(options, ids, self.now()), suggestion: None, taking: false });
+        self.refresh_suggestion();
         cx.notify();
     }
 
@@ -314,7 +527,7 @@ impl MailApp {
                 auto += a;
                 review += r;
             }
-            if self.auto_classify() && self.needs_questions(id) {
+            if self.auto_wanted(id) && self.needs_questions(id) {
                 self.enqueue_judge(JudgeJob::Message { id, force: false });
             }
         }
@@ -353,12 +566,20 @@ impl MailApp {
     }
 
     pub(super) fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // An undone rename, delete or folder creation changes what tabs point at.
+        let anchors = self.tab_anchors();
         // A held send is the only thing `u` recalls: delivered mail is never un-sent, and
         // the outbox it was queued in is gone with the composer cutover.
         if let Some(id) = self.hold_in_flight() {
             self.undo_send_hold(id, cx);
         } else if self.mailbox.undo() {
-            self.show_toast("Undone".into(), window, cx);
+            self.refresh_suggestion();
+            self.follow_folders(anchors, window, cx);
+            if self.session.is_some() {
+                self.triage_undo = None;
+            } else {
+                self.show_toast("Undone".into(), window, cx);
+            }
         }
         self.scroll_to_cursor();
         cx.notify();

@@ -1,6 +1,6 @@
 use mail_classifier::judge::{
     Answer, AnswerValue, Confidence, Judge, JudgeError, JudgePolicy, Kind, Mode, Question,
-    QuestionKey, Routed, StoredAnswer, StubJudge, classify, expects_reply, incoming_questions,
+    QuestionKey, Routed, StoredAnswer, StubJudge, classify, incoming_questions,
     message_state, questions_to_ask, reply_question, route,
 };
 use mail_classifier::model::{Message, TriageState};
@@ -229,18 +229,20 @@ fn noop_answers_drop_even_in_auto() {
 }
 
 #[test]
-fn expects_reply_heuristic_and_api() {
-    assert!(expects_reply(&StubJudge, "Let me know what you think."));
-    assert!(expects_reply(&StubJudge, "Can you send this today?"));
-    assert!(expects_reply(&StubJudge, "Thoughts"));
-    assert!(!expects_reply(&StubJudge, "Thanks, received."));
-    // The reply question is the only one asked on the reply path.
+fn the_reply_question_is_answered_by_the_stub_heuristic() {
     let (key, q) = reply_question();
     assert_eq!(key, QuestionKey::ExpectsReply);
-    let a = StubJudge
-        .judge(&serde_json::json!({"body": "Could you?"}), &[(key, q)])
-        .unwrap();
-    assert_eq!(a[0].1.value, AnswerValue::Bool(true));
+    for (body, expected) in [
+        ("Let me know what you think.", true),
+        ("Can you send this today?", true),
+        ("Thoughts", true),
+        ("Thanks, received.", false),
+    ] {
+        let a = StubJudge
+            .judge(&serde_json::json!({"body": body}), &[(key, q.clone())])
+            .unwrap();
+        assert_eq!(a[0].1.value, AnswerValue::Bool(expected), "{body}");
+    }
 }
 
 #[test]
@@ -291,23 +293,31 @@ fn spam_kind_urgency_examples() {
 }
 
 #[test]
-fn nearest_preset_for_a_threshold() {
-    assert_eq!(Confidence::from_threshold(0.95), Confidence::High);
-    assert_eq!(Confidence::from_threshold(0.8), Confidence::Medium);
-    assert_eq!(Confidence::from_threshold(0.7), Confidence::Medium);
-    assert_eq!(Confidence::from_threshold(0.5), Confidence::Low);
-    for c in Confidence::ALL {
-        assert_eq!(Confidence::from_threshold(c.threshold()), c);
-    }
-}
-
-#[test]
 fn a_policy_survives_a_json_round_trip() {
     let mut p = JudgePolicy::default();
     p.set_mode(QuestionKey::Spam, Mode::Off);
     p.set_mode(QuestionKey::Kind, Mode::Auto(Confidence::High));
     let back: JudgePolicy = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
     assert_eq!(back, p);
+}
+
+/// Stored values from the old Auto/Off control still decide whether a question is asked:
+/// Auto (any preset) and a missing value ask it; Off does not.
+#[test]
+fn stored_question_modes_decide_whether_it_is_asked() {
+    use mail_classifier::app_settings::MODE_SPAM;
+    use mail_classifier::prefs::{MemoryPrefs, Scope};
+    let asked = |prefs: &MemoryPrefs| {
+        let mut p = JudgePolicy::default();
+        p.set_mode(QuestionKey::Spam, MODE_SPAM.get(prefs, &Scope::Global));
+        incoming_questions(&p, false, &[]).iter().any(|q| q.key == QuestionKey::Spam)
+    };
+    let prefs = MemoryPrefs::default();
+    assert!(asked(&prefs), "missing means asked");
+    MODE_SPAM.set(&prefs, &Scope::Global, Mode::Auto(Confidence::Low));
+    assert!(asked(&prefs), "Auto means asked");
+    MODE_SPAM.set(&prefs, &Scope::Global, Mode::Off);
+    assert!(!asked(&prefs), "Off means not asked");
 }
 
 fn thread(bodies: &[&str]) -> Vec<Message> {

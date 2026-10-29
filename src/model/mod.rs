@@ -12,8 +12,10 @@ use crate::clock::{DAY, HOUR, MINUTE, Timestamp};
 use crate::contacts::{ContactSource, ContactStore};
 use crate::judge::{AnswerValue, Kind, QuestionKey, Suggestion};
 use crate::search::{Field, Query};
+use crate::spam_senders::{SpamSenders, SpamVerdict};
 use crate::tz::Now;
 
+mod folders;
 mod remote;
 mod replies;
 mod states;
@@ -23,6 +25,7 @@ mod triage;
 mod undo;
 mod visibility;
 
+pub use folders::FolderNameError;
 pub use triage::Triage;
 pub use visibility::{SidebarCounts, blocked_ago};
 
@@ -151,6 +154,10 @@ pub struct Folder {
 pub enum Location {
     #[default]
     AllInboxes,
+    AllSnoozed,
+    AllSent,
+    AllArchive,
+    AllTrash,
     Inbox(AccountId),
     Snoozed(AccountId),
     /// The account's unfinished drafts. They are not messages, so the list pane renders them
@@ -211,9 +218,15 @@ enum Change {
     Blocked(String, Option<Timestamp>),
     /// Sender was appended to `unsubscribed`; undo removes it.
     Unsubscribed(String),
+    /// Sender's spam verdict before the action.
+    SpamSender(String, Option<SpamVerdict>),
     /// Whole pending-suggestion list before the action.
     Pending(Vec<Suggestion>),
     FolderPush(FolderId),
+    /// A folder was renamed; holds the name it had.
+    FolderRename(FolderId, String),
+    /// Folders a delete removed, with the positions they held; undo puts them back.
+    FolderRestore(Vec<(usize, Folder)>),
 }
 
 #[derive(Clone, Debug)]
@@ -262,11 +275,18 @@ pub struct Mailbox {
     /// Blocked sender addresses (lowercase) and when each was blocked.
     blocked: HashMap<String, Timestamp>,
     unsubscribed: Vec<String>,
+    spam_senders: SpamSenders,
     muted: HashSet<u32>,
     pending: Vec<Suggestion>,
     accounts: Vec<Account>,
     folders: Vec<Folder>,
+    /// Highest folder id ever handed out or deleted, so an id never comes back while the cache
+    /// may still hold a row for it.
+    folder_floor: FolderId,
     follow_up_timeout: Timestamp,
+    /// Days the list shows collapsed: their messages stay out of the list, the cursor and
+    /// every selection (see [`Mailbox::ids_shown`]).
+    collapsed_days: HashSet<crate::day_groups::DayKey>,
 }
 
 impl Mailbox {
@@ -350,11 +370,14 @@ impl Mailbox {
             blocked: HashMap::new(),
             contacts: None,
             unsubscribed: Vec::new(),
+            spam_senders: SpamSenders::default(),
             muted: HashSet::new(),
             pending: Vec::new(),
             accounts,
             folders,
+            folder_floor: 0,
             follow_up_timeout: DEFAULT_FOLLOW_UP_TIMEOUT,
+            collapsed_days: HashSet::new(),
         }
     }
 

@@ -84,10 +84,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DMG: ${{ steps.package.outputs.dmg }}
+          MANIFEST: ${{ steps.package.outputs.manifest }}
           VERSION: ${{ steps.package.outputs.version }}
         run: |
           gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
-          gh release create nightly "$DMG" \
+          gh release create nightly "$DMG" "$MANIFEST" \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Nightly $VERSION" \

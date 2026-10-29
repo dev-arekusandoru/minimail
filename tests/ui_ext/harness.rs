@@ -106,6 +106,19 @@ fn harness_inner(
                         // headless tests exercise the automatic path, so opt in here.
                         mail_classifier::app_settings::AUTO_CLASSIFY
                             .set(store.as_ref(), &mail_classifier::prefs::Scope::Global, true);
+                        // Fixtures are old relative to the default cutoff; a test that stored a non-default
+                        // cutoff keeps it (a value equal to the default is not stored).
+                        let scope = mail_classifier::prefs::Scope::Global;
+                        if mail_classifier::prefs::PrefStore::get_raw(
+                            store.as_ref(),
+                            &scope,
+                            "auto_classify_max_age_days",
+                        )
+                        .is_none()
+                        {
+                            mail_classifier::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS
+                                .set(store.as_ref(), &scope, 0);
+                        }
                         app.load_preferences(store, window, cx);
                     }
                     // The real worker, over stores that keep nothing: the composer paths a
@@ -153,6 +166,24 @@ pub fn json(msgs: &[String]) -> String {
     format!("[{}]", msgs.join(","))
 }
 
+/// One JSON message whose body is HTML, so the shared message menu carries the Reader mode row.
+pub fn html_msg() -> String {
+    serde_json::json!({
+        "id": 1,
+        "thread_id": 1,
+        "from_name": "news",
+        "from_email": "news@example.com",
+        "to": "you@example.com",
+        "subject": "Weekly digest",
+        "body": "Digest body",
+        "html": "<h1>Digest</h1><p>Hello</p>",
+        "received": "2026-09-01T09:00:00Z",
+        "state": "Inbox",
+        "snooze": null
+    })
+    .to_string()
+}
+
 pub fn mailbox(msgs: &[String]) -> Mailbox {
     Mailbox::from_json(&json(msgs)).expect("valid mailbox json")
 }
@@ -189,6 +220,17 @@ impl Harness<'_> {
             .update_window(self.window, |_, window, cx| window.click(id, cx))
             .unwrap();
         self.settle_modal(was_open);
+    }
+    /// Right-click an element, as a row's context menu is opened.
+    pub fn right_click(&mut self, id: impl Into<gpui_kit::ElementId>) {
+        let id = id.into();
+        let was_open = self.read(|a| a.modal_open());
+        self.cx.update_window(self.window, |_, window, cx| window.right_click(id, cx)).unwrap();
+        self.settle_modal(was_open);
+    }
+    /// The labels of the rows of every open popup menu, in order.
+    pub fn rows(&mut self) -> Vec<String> {
+        menu::row_labels(self.cx, self.window)
     }
     /// Click the row of the open popup menu labelled `label`.
     pub fn click_row(&mut self, label: &str) {

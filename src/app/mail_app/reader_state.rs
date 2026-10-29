@@ -63,9 +63,16 @@ impl MailApp {
         }
     }
 
-    /// `v`: Reader mode for the opened message.
-    pub(super) fn toggle_opened_reader_mode(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self.opened() {
+    /// `v`, and the menu's Reader mode row: Reader mode for the message the menu named, else the
+    /// opened one.
+    pub(super) fn toggle_reader_mode_action(&mut self, cx: &mut Context<Self>) {
+        let id = self
+            .menu_target
+            .as_ref()
+            .and_then(|ids| ids.first())
+            .copied()
+            .or_else(|| self.opened());
+        if let Some(id) = id {
             self.toggle_reader_mode(id, cx);
         }
     }
@@ -86,7 +93,6 @@ impl MailApp {
         self.thread_of(id)
             .is_some_and(|t| self.reader.recipients_open(t, id))
     }
-
     /// Whether `id`'s quoted history is open.
     pub fn reader_quoted_open(&self, id: MessageId) -> bool {
         self.thread_of(id)

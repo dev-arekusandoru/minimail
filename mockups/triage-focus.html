@@ -1,0 +1,190 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Triage · Focus Reader</title>
+<style>
+/* GPUI mapping: flat boxes, 1px borders, radii, solid fills. The email body is a native webview that paints over GPUI, so nothing floats or fades over it: the dock is a reserved bottom band and the scroll area ends above it. 4px grid, integer sizes. */
+:root{--bg:#282c34;--deep:#21252b;--fg:#abb2bf;--strong:#d7dae0;--muted:#7f848e;--border:#3b4048;--active:#3e4451;--hover:#323842;--surface:#2f343d;--primary:#61afef;--on-primary:#1b2330;--sugg-bg:#2c3643;--sugg-border:#3c5a75;--sugg-tile:#36495f;--warn:#d19a66;--cyan:#56b6c2;--danger:#e06c75}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#16181d;color:var(--fg);font:14px/20px -apple-system,system-ui,sans-serif;padding:20px;display:flex;flex-direction:column;align-items:center;gap:16px}
+.mono{font-family:ui-monospace,SFMono-Regular,monospace}
+.tabs{display:flex;gap:8px}
+.tabs button{all:unset;cursor:pointer;height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--border);color:var(--muted);font-size:13px;line-height:26px}
+.tabs button.on{background:var(--active);color:var(--strong)}
+
+.win{width:1180px;height:740px;background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative;display:none;flex-direction:column;transform-origin:top center}
+.win.on{display:flex}
+.title{height:36px;flex:none;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--border);background:var(--deep);position:relative}
+.lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:6px;background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.title .t{position:absolute;left:0;right:0;text-align:center;font-size:13px;line-height:36px;color:var(--muted);pointer-events:none}
+
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+i[data-i]{display:block;width:16px;height:16px;flex:none}
+.sm .ic,.sm{width:14px;height:14px}
+
+.key{display:grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:4px;border:1px solid var(--border);background:var(--deep);font:600 11px/1 ui-monospace,monospace;color:var(--muted);flex:none}
+.key.p{background:#4d93cc;border-color:#4d93cc;color:var(--on-primary)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;border-radius:4px;background:var(--hover);font-size:11px;line-height:20px;color:var(--primary);white-space:nowrap;flex:none}
+.chip.cyan{color:var(--cyan)}.chip.m{color:var(--muted)}
+.chip i[data-i]{width:12px;height:12px}.chip .ic{width:12px;height:12px}
+.btn{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:6px;color:var(--fg);font-size:13px;line-height:32px;white-space:nowrap}
+.btn:hover{background:var(--active)}
+.btn.ghost{color:var(--muted);padding:0 8px}
+.btn.danger .ic{color:var(--danger)}
+.btn.primary{background:var(--primary);color:var(--on-primary);font-weight:600;padding:0 8px 0 12px}
+.btn.primary:hover{background:#74b9f1}
+
+/* progress: one solid 3px bar under the title bar */
+.prog{height:3px;flex:none;background:var(--active)}.prog i{display:block;height:3px;background:var(--primary)}
+.top{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 12px}
+.top .cnt{font-size:12px;line-height:16px;color:var(--muted)}.top .cnt b{color:var(--strong);font-weight:600}
+.top .side{width:120px;display:flex}.top .side.r{justify-content:flex-end}
+
+.scroll{flex:1;min-height:0;position:relative;display:flex;justify-content:center;overflow:hidden}
+.col{width:680px;padding-top:20px;display:flex;flex-direction:column;gap:20px}
+
+.meta{display:flex;align-items:center;gap:12px;height:36px}
+.avatar{width:36px;height:36px;border-radius:18px;background:#3a6a52;display:grid;place-items:center;color:#d7f0e2;font-weight:600;font-size:13px;flex:none}
+.who{display:flex;flex-direction:column;min-width:0}
+.who .n{color:var(--strong);font-weight:600;font-size:14px;line-height:20px}
+.who .a{color:var(--muted);font-size:12px;line-height:16px}
+.meta .r{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px;line-height:20px}
+h1{font-size:28px;line-height:36px;font-weight:600;color:var(--strong);letter-spacing:-.2px}
+.earlier{display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;background:var(--hover);color:var(--muted);font-size:12px}
+.earlier .key{margin-left:auto}
+.copy{color:var(--fg);font-size:15px;line-height:24px}
+.copy p{margin:0 0 16px}.copy b{color:var(--strong)}.copy a{color:var(--primary)}
+.att{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--border);font-size:12px;color:var(--fg)}
+.att span{color:var(--muted);font-size:11px}
+
+/* dock: suggestion card above the toolbar, same width */
+.dock{flex:none;display:flex;justify-content:center;padding:12px 0 24px;border-top:1px solid var(--border)}
+.dock>div{display:flex;flex-direction:column;gap:8px}
+.sugg{display:flex;align-items:center;gap:12px;height:56px;padding:0 12px 0 10px;border-radius:12px;background:var(--sugg-bg);border:1px solid var(--sugg-border)}
+.sugg .tile{width:32px;height:32px;border-radius:8px;background:var(--sugg-tile);color:var(--primary);display:grid;place-items:center;flex:none}
+.sugg .tx{flex:1;min-width:0;display:flex;flex-direction:column}
+.sugg .tx b{font-size:13px;line-height:18px;color:var(--strong);font-weight:600}
+.sugg .tx span{font-size:12px;line-height:16px;color:var(--muted)}
+.sugg .btn.primary{height:36px;line-height:36px}
+.tool{display:flex;align-items:center;gap:2px;padding:4px;border-radius:12px;background:var(--surface);border:1px solid var(--border)}
+.tool .sep{width:1px;height:20px;background:var(--border);margin:0 6px}
+.tool .btn .key{margin-left:2px}
+
+.toast{position:absolute;right:20px;top:92px;display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;color:var(--strong);box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.toast .u{color:var(--primary)}
+
+/* thread */
+.th{display:flex;flex-direction:column;gap:4px}
+.th .lab{display:flex;align-items:center;gap:8px;height:28px;padding:0 4px;font:600 10px/14px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.th .lab .key{margin-left:auto;text-transform:none;letter-spacing:0}
+.th .row{display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;border-radius:8px;background:var(--hover);font-size:13px;color:var(--fg)}
+.th .row .av{width:24px;height:24px;border-radius:12px;background:#4a5568;display:grid;place-items:center;font:600 10px/1 -apple-system,system-ui,sans-serif;color:#e2e8f0;flex:none}
+.th .row b{font-weight:600;color:var(--strong);width:140px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th .row .sn{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:12px}
+.th .row .d{color:var(--muted);font-size:11px;flex:none}
+.rule{height:1px;background:var(--border);flex:none}
+/* centered screens */
+.center{flex:1;display:flex;align-items:center;justify-content:center;padding-bottom:40px}
+.card{width:520px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;overflow:hidden}
+.card .hd{display:flex;align-items:center;gap:12px;padding:20px 20px 16px}
+.tile{width:40px;height:40px;border-radius:10px;background:var(--sugg-tile);color:var(--primary);display:grid;place-items:center;flex:none}
+.tile.ok{background:#3a4a35;color:var(--ok)}
+.card .hd b{display:block;font-size:16px;line-height:22px;color:var(--strong);font-weight:600}
+.card .hd span{display:block;font-size:12px;line-height:16px;color:var(--muted)}
+.field{display:flex;align-items:center;gap:16px;min-height:56px;padding:12px 20px;border-top:1px solid var(--border)}
+.field>label{width:88px;flex:none;font-size:12px;line-height:16px;color:var(--muted)}
+.field .ctl{flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);font-size:12px;line-height:26px;color:var(--fg);white-space:nowrap}
+.pill span{color:var(--muted);font-size:11px}
+.pill.on{background:var(--active);border-color:var(--active);color:var(--strong)}
+.seg2{display:flex;gap:2px;padding:2px;border-radius:8px;border:1px solid var(--border)}
+.seg2 .pill{border-color:transparent;height:24px;line-height:24px}
+.seg2 .pill.on{background:var(--active)}
+.sel{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:6px;border:1px solid var(--border);font-size:13px;color:var(--strong);flex:1}
+.sel .ic:last-child{margin-left:auto;color:var(--muted)}
+.sw{width:32px;height:20px;border-radius:10px;background:var(--primary);position:relative;flex:none}.sw::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:8px;background:var(--on-primary)}
+.card .ft{display:flex;align-items:center;gap:12px;padding:16px 20px;border-top:1px solid var(--border);background:var(--bg)}
+.card .ft .sp{flex:1;font-size:12px;color:var(--muted)}.card .ft .sp b{color:var(--strong);font-weight:600}
+.btn.solid{border:1px solid var(--border);padding:0 12px}
+.btn.primary .key.p{margin-left:2px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--border)}
+.stat{display:flex;align-items:center;gap:12px;height:68px;padding:0 20px;border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
+.stat:nth-child(3n){border-right:0}.stat:nth-last-child(-n+3){border-bottom:0}
+.stat .ic{color:var(--muted)}
+.stat b{display:block;font-size:20px;line-height:24px;color:var(--strong);font-weight:600}
+.stat span{display:block;font-size:12px;line-height:16px;color:var(--muted)}
+.note{display:flex;align-items:center;gap:8px;height:44px;padding:0 20px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}.note b{color:var(--strong);font-weight:600}.note .ic{color:var(--primary)}
+.prog.done i{background:var(--ok)}
+</style>
+
+<div class="tabs mono" id="tabs"></div>
+<div id="stage"></div>
+<script>
+const P={
+archive:'<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+trash:'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+reply:'<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+bellOff:'<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+skip:'<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>',
+spark:'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+undo:'<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+msg:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+play:'<polygon points="6 3 20 12 6 21 6 3"/>',
+check:'<path d="M20 6 9 17l-5-5"/>',
+inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+chev:'<path d="m6 9 6 6 6-6"/>'};
+const I=n=>`<i data-i="${n}"><svg class="ic" viewBox="0 0 24 24">${P[n]}</svg></i>`;
+const K=(t,c='')=>`<span class="key ${c}">${t}</span>`;
+const title='<div class="title"><div class="lights"><i></i><i></i><i></i></div><div class="t">Triage</div></div>';
+const bar=(pct,cls='')=>`<div class="prog ${cls}"><i style="width:${pct}%"></i></div>`;
+const topbar=(mid,right=true)=>`<div class="top"><div class="side"><button class="btn ghost">${I('x')}End ${K('esc')}</button></div><div class="cnt">${mid}</div><div class="side r">${right?`<button class="btn ghost">${I('undo')}Undo ${K('⌘Z')}</button>`:''}</div></div>`;
+const body=`<div class="copy"><p>Hello Alexandru Muresan,</p><p>A package for AMUR6165, Unit 5022, was delivered by Amazon on October 08, 2026 at 06:16 PM and is ready for immediate pickup.</p><p>Please retrieve the package(s) from the Package Concierge <b>(Package Room)</b>.</p><p>For access, enter your username or scan the barcode below and enter your PIN.</p><p>The Package Concierge Team<br>1.888.989.7225<br><a>www.packageconcierge.com</a></p></div><div><span class="att">${I('clip')}image.jpg <span>10 KB</span></span></div>`;
+const thread=`<div class="th"><div class="lab">${I('msg')}Thread · 3 earlier messages ${K('t')}</div>
+<div class="row"><div class="av">PC</div><b>Package Concierge</b><span class="sn">Hello Alexandru Muresan, A package for AMUR6165, Unit 5022, was delivered by Amazon on October 12…</span><span class="d">Oct 12</span></div>
+<div class="row"><div class="av">You</div><b>You</b><span class="sn">Thanks — I'll pick it up tonight.</span><span class="d">Oct 13</span></div>
+<div class="row"><div class="av">PC</div><b>Package Concierge</b><span class="sn">Your package is still waiting for pick up. Please retrieve it from the Package Room…</span><span class="d">Oct 16</span></div></div>`;
+const dock=(sugg)=>`<div class="dock"><div>${sugg?`<div class="sugg"><div class="tile">${I('spark')}</div><div class="tx"><b>Suggested: Archive</b><span>Delivery notice · you've archived 9 of 9 from this sender</span></div><button class="btn primary">${I('archive')}Archive ${K('⏎','p')}</button></div>`:''}
+<div class="tool"><button class="btn">${I('archive')}Archive ${K('e')}</button><button class="btn">${I('clock')}Snooze ${K('s')}</button><button class="btn">${I('folder')}File ${K('f')}</button><button class="btn">${I('reply')}Reply ${K('r')}</button><div class="sep"></div><button class="btn danger">${I('trash')}Delete ${K('d')}</button><button class="btn">${I('bellOff')}Mute ${K('m')}</button><button class="btn">${I('skip')}Skip ${K('␣')}</button></div></div></div>`;
+const running=({th=false,sugg=true}={})=>`${title}${bar(36)}${topbar('<b>14</b> of 2,292 · All Inboxes')}
+<div class="scroll"><div class="col">
+<div class="meta"><div class="avatar">PC</div><div class="who"><span class="n">Package Concierge</span><span class="a">no-reply@packageconcierge.com · to You</span></div><div class="r"><span class="chip">inbox</span><span class="chip m">Normal</span><span class="chip cyan">${I('bell')}Notification</span><span>Oct 18 · 18:54</span></div></div>
+<h1>REMINDER - Package Ready for Pick Up</h1>${th?thread:''}${body}</div></div>${dock(sugg)}
+<div class="toast">${I('archive')}Archived <span class="u">⌘Z undo</span></div>`;
+const start=`${title}${bar(0)}
+<div class="top"><div class="side"></div><div class="cnt"></div><div class="side r"><button class="btn ghost">${I('x')}Cancel ${K('esc')}</button></div></div>
+<div class="center"><div class="card">
+<div class="hd"><div class="tile">${I('inbox')}</div><div><b>Triage</b><span>Work through your inbox one message at a time.</span></div></div>
+<div class="field"><label>Inbox</label><div class="ctl"><div class="sel">${I('inbox')}All Inboxes<span class="mono" style="color:var(--muted);font-size:11px">2,292</span>${I('chev')}</div></div></div>
+<div class="field"><label>Filter</label><div class="ctl"><span class="pill on">All <span>2,292</span></span><span class="pill">Needs Reply <span>12</span></span><span class="pill">Follow Up <span>3</span></span><span class="pill">Urgent <span>8</span></span><span class="pill">Possible Spam <span>5</span></span></div></div>
+<div class="field"><label>Session</label><div class="ctl"><div class="seg2"><span class="pill">25</span><span class="pill">50</span><span class="pill">100</span><span class="pill on">All</span></div></div></div>
+<div class="field"><label>Order</label><div class="ctl"><div class="seg2"><span class="pill on">Newest first</span><span class="pill">Oldest first</span></div></div></div>
+<div class="field"><label>AI suggestions</label><div class="ctl" style="justify-content:space-between"><span style="font-size:12px;color:var(--muted)">Show a suggested action on each message</span><div class="sw"></div></div></div>
+<div class="ft"><div class="sp"><b>2,292</b> messages · newest first</div><button class="btn primary">${I('play')}Start ${K('⏎','p')}</button></div>
+</div></div>`;
+const summary=`${title}${bar(100,'done')}
+<div class="top"><div class="side"></div><div class="cnt"></div><div class="side r"></div></div>
+<div class="center"><div class="card">
+<div class="hd"><div class="tile ok">${I('check')}</div><div><b>Session complete</b><span>42 messages in 18m 20s · about 26s each</span></div></div>
+<div class="stats">
+<div class="stat">${I('archive')}<div><b>21</b><span>Archived</span></div></div>
+<div class="stat">${I('folder')}<div><b>9</b><span>Filed</span></div></div>
+<div class="stat">${I('clock')}<div><b>5</b><span>Snoozed</span></div></div>
+<div class="stat">${I('trash')}<div><b>4</b><span>Deleted</span></div></div>
+<div class="stat">${I('reply')}<div><b>2</b><span>Replied</span></div></div>
+<div class="stat">${I('skip')}<div><b>1</b><span>Skipped</span></div></div></div>
+<div class="note">${I('spark')}<span>You took the suggestion on <b>31 of 42</b> (74%)</span></div>
+<div class="ft"><div class="sp"><b>2,250</b> left in All Inboxes</div><button class="btn solid">Done ${K('esc')}</button><button class="btn primary">${I('play')}Keep going ${K('⏎','p')}</button></div>
+</div></div>`;
+const states={Start:start,Running:running(),'Running · thread':running({th:true}),'Running · no suggestion':running({sugg:false}),Summary:summary};
+const stage=document.getElementById('stage'),tabs=document.getElementById('tabs');
+Object.entries(states).forEach(([k,h])=>{const w=document.createElement('div');w.className='win';w.id='w-'+k;w.innerHTML=h;stage.append(w);
+ const b=document.createElement('button');b.textContent=k;b.onclick=()=>show(k);b.id='t-'+k;tabs.append(b)});
+function show(k){Object.keys(states).forEach(j=>{document.getElementById('w-'+j).classList.toggle('on',j==k);document.getElementById('t-'+j).classList.toggle('on',j==k)});location.hash=encodeURIComponent(k)}
+show(decodeURIComponent(location.hash.slice(1))||'Running');
+const fit=()=>document.querySelectorAll('.win').forEach(w=>w.style.zoom=Math.min(1,(innerWidth-40)/1182));
+addEventListener('resize',fit);fit();
+</script>

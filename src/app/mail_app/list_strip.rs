@@ -7,6 +7,7 @@
 //! another view's cursor, and a drag in the strip puts both back the same way round.
 
 use super::*;
+use crate::search::Field;
 
 /// Which pane the tab keys act on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -30,9 +31,9 @@ pub(super) enum Slot {
 impl MailApp {
     // ------------------------------------------------------------------ the active view
 
-    /// Whether the Triage tab exists: a session is running or its end card is up.
-    pub(super) fn triage_open(&self) -> bool {
-        self.session.is_some() || self.session_end.is_some()
+    /// Whether Triage mode has the window: its Start screen, a running session or its Summary.
+    pub fn triage_open(&self) -> bool {
+        self.session.is_some() || self.session_setup.is_some() || self.session_summary.is_some()
     }
 
     /// Whose list the app speaks for now. Outside a render that is the Triage tab while it
@@ -117,6 +118,8 @@ impl MailApp {
     ///
     /// This is opening a view, not switching tabs, so the reader keeps what it shows.
     pub(super) fn open_view(&mut self, query: Query, folder: Location, pin: bool, cx: &mut Context<Self>) {
+        // Opening a view is the list's own choice of account again, not the rail's.
+        self.sidebar_pick = None;
         match self.list_tabs.index_of(&query) {
             Some(ix) => {
                 if pin {
@@ -148,6 +151,22 @@ impl MailApp {
         let query = self.mailbox.location_query(&location);
         self.end_session();
         self.open_view(query, location, pin, cx);
+    }
+
+    /// Open (or focus) a pinned tab listing everything from the cursor message's sender:
+    /// `from:<address>` alone, so it spans every account and folder like a global search.
+    /// The tab is a view, not a mail mutation, so there is no undo step.
+    pub(super) fn open_sender_tab(&mut self, cx: &mut Context<Self>) {
+        let Some((_, email)) = self.cursor_sender() else { return };
+        let mut query = Query::default();
+        // `add` rejects an empty address; a bare name would match as a fragment, so require `@`.
+        if !email.contains('@') || !query.add(Field::From, &email) {
+            return;
+        }
+        let folder = self.view().folder.clone();
+        self.end_session();
+        self.open_view(query, folder, true, cx);
+        self.scroll_to_cursor();
     }
 
     // ------------------------------------------------------------------ switching

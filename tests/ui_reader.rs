@@ -482,13 +482,14 @@ fn the_reader_more_menu_sets_a_classifier_label(cx: &mut TestAppContext) {
     h.click(("btn-message-more", 1usize));
     assert!(h.read(|a| a.menu_open()));
     h.hover_row("Classifier labels");
+    h.hover_row("Kind · Person");
     h.click_row("Person");
-    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind section set the label");
+    assert!(h.has_tag(1, Tag::Kind(Kind::Person)), "the … menu's Kind submenu set the label");
 }
 
-/// The Needs reply chip's menu clears the tag as a user override, and one `u` brings it back.
+/// Clicking the Needs reply chip clears the tag as a user override, and one `u` brings it back.
 #[gpui_kit::gpui::test]
-fn needs_reply_chip_clears_the_tag_and_undo_restores_it(cx: &mut TestAppContext) {
+fn needs_reply_chip_click_clears_the_tag_and_undo_restores_it(cx: &mut TestAppContext) {
     use mail_classifier::model::Tag;
     let mut mb = mailbox_of(&[msg(1, 1, "alice@example.com", "Lunch?", 1, "Inbox")]);
     tag_needs_reply(&mut mb, 1);
@@ -496,8 +497,7 @@ fn needs_reply_chip_clears_the_tag_and_undo_restores_it(cx: &mut TestAppContext)
     h.keys("enter");
     assert!(h.has_tag(1, Tag::NeedsReply));
     h.click("chip-menu-reader-chip-needs-reply-1");
-    h.click_row("Doesn't need reply");
-    assert!(!h.has_tag(1, Tag::NeedsReply), "the chip's menu cleared the tag");
+    assert!(!h.has_tag(1, Tag::NeedsReply), "the chip's own click cleared the tag");
     assert!(h.read(|a| a.mailbox.is_overridden(1, QuestionKey::NeedsReply)), "the clear is a user override");
     h.keys("u");
     assert!(h.has_tag(1, Tag::NeedsReply), "one undo step brings the tag back");

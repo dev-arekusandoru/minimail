@@ -100,7 +100,7 @@ fn enter_on_the_previewed_message_pins_it(cx: &mut TestAppContext) {
     // Enter on a message that is not open yet only previews it.
     h.keys("k");
     h.keys("enter");
-    assert_eq!(h.tabs(), vec![(2, true), (3, false)]);
+    assert_eq!(h.tabs(), vec![(2, true), (3, true)], "k already previewed it; enter pins it");
 }
 
 #[gpui_kit::gpui::test]
@@ -184,31 +184,13 @@ fn switching_tabs_moves_the_list_cursor_but_not_the_selection(cx: &mut TestAppCo
 }
 
 #[gpui_kit::gpui::test]
-fn a_preview_closes_when_its_thread_leaves_the_list_but_a_pinned_tab_stays(
-    cx: &mut TestAppContext,
-) {
+fn a_pinned_tab_stays_when_its_thread_leaves_the_list(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox());
-    h.row(3);
-    h.keys("e");
-    assert_eq!(
-        h.tabs(),
-        vec![],
-        "archiving the only message closes the preview"
-    );
-
     h.row(4);
     h.keys("enter e");
-    assert_eq!(h.tabs(), vec![(3, true)], "a pinned tab stays open");
-    assert_eq!(
-        h.opened(),
-        Some(4),
-        "and keeps showing the archived message"
-    );
-
-    // A thread that still has a message in the list keeps its preview.
-    h.row(2);
-    h.keys("e");
-    assert_eq!(h.tabs(), vec![(3, true), (1, false)]);
+    // The cursor moved on to the next message, so the reader previews it beside the pinned tab.
+    assert_eq!(h.tabs(), vec![(3, true), (2, false)], "a pinned tab stays open");
+    assert_eq!(h.read(|a| a.cursor_message()), h.opened());
 }
 
 #[gpui_kit::gpui::test]
@@ -234,6 +216,8 @@ fn a_session_hides_the_tabs_and_they_return_afterwards(cx: &mut TestAppContext) 
     h.keys("enter");
     assert!(h.exists(("reader-tab", 2usize)));
     h.keys("t");
+    assert!(!h.exists(("reader-tab", 2usize)), "the Start screen takes the window too");
+    h.keys("enter");
     assert_eq!(h.opened(), Some(4), "the session shows its own message");
     assert!(
         !h.exists(("reader-tab", 2usize)),
@@ -283,4 +267,72 @@ fn tab_avatar_title_and_close_are_evenly_spaced(cx: &mut TestAppContext) {
     );
     let (a, c) = (avatar.center().y, close.center().y);
     assert!((f32::from(a - c)).abs() <= 1., "not vertically aligned");
+}
+
+#[gpui_kit::gpui::test]
+fn moving_the_cursor_with_a_tab_open_updates_the_preview_in_place(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.row(4);
+    h.keys("j");
+    assert_eq!(h.read(|a| a.cursor_message()), Some(3));
+    assert_eq!(h.opened(), Some(3));
+    assert_eq!(h.tabs(), vec![(2, false)]);
+}
+
+#[gpui_kit::gpui::test]
+fn moving_the_cursor_beside_a_pinned_tab_opens_a_preview(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.row(4);
+    h.double_click(("reader-tab", 3usize));
+    h.keys("j");
+    assert_eq!(h.tabs(), vec![(3, true), (2, false)]);
+    assert_eq!(h.opened(), Some(3));
+}
+
+#[gpui_kit::gpui::test]
+fn moving_the_cursor_with_no_tab_open_opens_nothing(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.keys("j");
+    assert_eq!(h.tabs(), vec![]);
+    assert_eq!(h.opened(), None);
+}
+
+#[gpui_kit::gpui::test]
+fn clicking_a_tab_moves_the_cursor_to_its_message(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox());
+    h.row(4);
+    h.double_click(("reader-tab", 3usize));
+    h.row(3);
+    assert_eq!(h.read(|a| a.cursor_message()), Some(3));
+    h.click(("reader-tab", 3usize));
+    assert_eq!(h.opened(), Some(4));
+    assert_eq!(h.read(|a| a.cursor_message()), Some(4));
+}
+
+/// With no tabs open the reader group must not draw the dock's empty tab strip, and its
+/// empty state must actually have an icon rather than a blank frame.
+#[gpui_kit::gpui::test]
+fn no_tabs_means_no_tab_strip_and_the_empty_state_icon_is_drawn(cx: &mut TestAppContext) {
+    use gpui_kit::AssetSource as _;
+    use gpui_kit::assets::IconName;
+
+    let mut h = harness_with(cx, mailbox());
+    assert_eq!(h.opened(), None, "nothing is open at startup");
+    assert!(
+        mail_classifier::app::icons::AppAssets
+            .load(&IconName::MailOpen.path())
+            .unwrap()
+            .is_some(),
+        "the reader's empty-state icon must be embedded in the app's assets"
+    );
+    h.cx.update_window(h.window, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("reader-tab-strip").is_none(), "no tab strip without tabs");
+        let icon = window.try_find("empty-icon").expect("the reader's empty-state icon");
+        let size = icon.bounds().size;
+        assert!(
+            size.width > gpui_kit::px(0.) && size.height > gpui_kit::px(0.),
+            "empty-state icon has no size: {size:?}"
+        );
+    }).unwrap();
 }

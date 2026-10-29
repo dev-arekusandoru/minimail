@@ -32,6 +32,8 @@ const COST_LIST: u32 = 5;
 const COST_HISTORY: u32 = 2;
 const COST_LABEL_LIST: u32 = 1;
 const COST_LABEL_CREATE: u32 = 5;
+const COST_LABEL_PATCH: u32 = 5;
+const COST_LABEL_DELETE: u32 = 5;
 const COST_PROFILE: u32 = 1;
 const COST_MODIFY: u32 = 5;
 const COST_TRASH: u32 = 5;
@@ -90,40 +92,20 @@ impl GmailProvider {
 
     fn send(&self, method: &str, url: &str, body: &RequestBody<'_>) -> Result<Raw, ProviderError> {
         let auth = format!("Bearer {}", self.auth.access);
-        let mut res = match body {
-            RequestBody::Empty if method == "GET" => {
-                self.http.get(url).header("Authorization", auth).call()
-            }
-            RequestBody::Delete => self.http.delete(url).header("Authorization", auth).call(),
-            RequestBody::Json(v) if method == "PUT" => self
-                .http
-                .put(url)
-                .header("Authorization", auth)
-                .send_json(v.clone()),
-            RequestBody::Raw(ct, text) if method == "PUT" => self
-                .http
-                .put(url)
-                .header("Authorization", auth)
-                .header("Content-Type", (*ct).to_owned())
-                .send(text.as_bytes()),
-            RequestBody::Json(v) => self
-                .http
-                .post(url)
-                .header("Authorization", auth)
-                .send_json(v.clone()),
-            RequestBody::Raw(ct, text) => self
-                .http
-                .post(url)
-                .header("Authorization", auth)
-                .header("Content-Type", (*ct).to_owned())
-                .send(text.as_bytes()),
-            RequestBody::Empty => self
-                .http
-                .post(url)
-                .header("Authorization", auth)
-                .send_empty(),
-        }
-        .map_err(|e| ProviderError::Network(e.to_string()))?;
+        let res = match (method, body) {
+            ("GET", RequestBody::Empty) => self.http.get(url).header("Authorization", auth).call(),
+            ("DELETE", _) => self.http.delete(url).header("Authorization", auth).call(),
+            // A DELETE body with any other method string still means DELETE, and labels delete
+            // with an empty body, so both spellings must hit `delete`.
+            (_, RequestBody::Delete) => self.http.delete(url).header("Authorization", auth).call(),
+            ("PATCH", RequestBody::Json(v)) => self.http.patch(url).header("Authorization", auth).send_json(v.clone()),
+            ("PUT", RequestBody::Json(v)) => self.http.put(url).header("Authorization", auth).send_json(v.clone()),
+            ("PUT", RequestBody::Raw(ct, text)) => self.http.put(url).header("Authorization", auth).header("Content-Type", (*ct).to_owned()).send(text.as_bytes()),
+            (_, RequestBody::Empty) => self.http.post(url).header("Authorization", auth).send_empty(),
+            (_, RequestBody::Json(v)) => self.http.post(url).header("Authorization", auth).send_json(v.clone()),
+            (_, RequestBody::Raw(ct, text)) => self.http.post(url).header("Authorization", auth).header("Content-Type", (*ct).to_owned()).send(text.as_bytes()),
+        };
+        let mut res = res.map_err(|e| ProviderError::Network(e.to_string()))?;
         let status = res.status().as_u16();
         let content_type = res
             .headers()
@@ -488,6 +470,18 @@ impl MailProvider for GmailProvider {
             .unwrap_or(path)
             .to_owned();
         Ok(RemoteFolder { id, path: name })
+    }
+
+    fn rename_folder(&mut self, remote_id: &str, new_path: &str) -> Result<RemoteFolder, ProviderError> {
+        let json = self.call(COST_LABEL_PATCH, "PATCH", &format!("{BASE}/labels/{remote_id}"), Some(json!({"name":new_path})))?;
+        let name = json.get("name").and_then(Value::as_str).unwrap_or(new_path).to_owned();
+        Ok(RemoteFolder { id: remote_id.to_owned(), path: name })
+    }
+
+    fn delete_folder(&mut self, remote_id: &str) -> Result<(), ProviderError> {
+        self.call(COST_LABEL_DELETE, "DELETE", &format!("{BASE}/labels/{remote_id}"), None)?;
+        if let Some(ids) = &mut self.user_folders { ids.remove(remote_id); }
+        Ok(())
     }
 
     fn cursor(&mut self) -> Result<String, ProviderError> {

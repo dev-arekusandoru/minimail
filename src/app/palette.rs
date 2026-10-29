@@ -2,11 +2,13 @@
 //!
 //! Filtering is ours ([`crate::fuzzy`]); `Command` only renders the pre-filtered, sectioned
 //! list (`filterable(false)`) and reports the typed query and the confirmed row.
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::assets::IconName;
 
 use std::rc::Rc;
 
-use crate::app::actions::{self, Category, CommandSpec, PALETTE_CONTEXT, ToggleCommandPalette};
+use crate::app::actions::{Category, CommandSpec, PALETTE_CONTEXT, ToggleCommandPalette};
+#[cfg(test)]
+use crate::app::actions;
 use crate::app::ui::shortcut_chips;
 use crate::fuzzy;
 use crate::search::Query;
@@ -38,16 +40,12 @@ enum Target {
 
 impl CommandPalette {
     /// A palette showing `query` (empty for the full list).
-    pub fn new(query: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(query: &str, commands: Vec<CommandSpec>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| CommandState::new(window, cx));
         if !query.is_empty() {
             state.update(cx, |state, cx| state.set_query(query, window, cx));
         }
-        Self {
-            state,
-            query: query.to_owned(),
-            commands: actions::commands(),
-        }
+        Self { state, query: query.to_owned(), commands }
     }
 
     /// Focus the search field.
@@ -86,12 +84,12 @@ impl Render for CommandPalette {
             .filterable(false)
             .max_h(px(400.))
             .placeholder("Type a command…")
-            .empty(|_, _, cx| {
-                div()
-                    .p_4()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No matching commands")
+            .empty(|_, _, _| {
+                crate::app::ui::empty_small(
+                    IconName::SearchX,
+                    "No matching commands",
+                    "Try another word, or type / to search your mail.",
+                )
             });
 
         if Query::is_search(&self.query) {

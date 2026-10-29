@@ -533,7 +533,10 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()));
 
-    // The account's Drafts row shows the Drafts pane.
+    // The account's Drafts row shows the Drafts pane. The list starts on All, whose panel has
+    // no per-account tiles, so pick the account on the rail first.
+    h.click("sidebar-rail-personal");
+    h.tick();
     assert!(h.has("sidebar-drafts-personal"), "the account has a Drafts row");
     h.click("sidebar-drafts-personal");
     h.tick();
@@ -578,12 +581,15 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
         work_msg(2, 202, "ravi@acme.co", "Work note", 14, "Inbox"),
     ]);
     let mut h = harness_with(cx, mb);
+    // The list starts on All; an account's tiles appear once its rail tile is picked.
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("personal draft");
     h.settle();
     let personal = h.read(|a| a.tabs.active_draft().expect("personal draft tab"));
     h.close_draft_tab(personal);
+    h.click("sidebar-rail-work");
     h.click("sidebar-inbox-work");
     h.new_draft();
     h.type_text("work draft");
@@ -591,6 +597,7 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
     let work = h.read(|a| a.tabs.active_draft().expect("work draft tab"));
     h.close_draft_tab(work);
 
+    h.click("sidebar-rail-personal");
     h.click("sidebar-drafts-personal");
     h.tick();
     assert_eq!(h.location(), Some(Location::Drafts("personal".into())));
@@ -604,6 +611,7 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
         "the badge counts the same set"
     );
 
+    h.click("sidebar-rail-work");
     h.click("sidebar-drafts-work");
     h.tick();
     assert_eq!(h.location(), Some(Location::Drafts("work".into())));
@@ -624,6 +632,7 @@ pub fn the_drafts_pane_lists_only_that_accounts_drafts(cx: &mut TestAppContext) 
 #[gpui_kit::gpui::test]
 pub fn a_search_narrows_the_drafts_pane_and_clearing_restores_it(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("budget notes");
@@ -668,6 +677,7 @@ pub fn a_search_narrows_the_drafts_pane_and_clearing_restores_it(cx: &mut TestAp
 #[gpui_kit::gpui::test]
 pub fn drafts_are_newest_first_and_discard_removes_them(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.click("sidebar-rail-personal");
     h.click("sidebar-inbox-personal");
     h.new_draft();
     h.type_text("older draft");

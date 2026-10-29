@@ -27,6 +27,8 @@ use sha2::{Digest, Sha256};
 
 /// Jev wire format: the `/systemone` request/response mapping.
 pub mod jev;
+mod age;
+pub use age::{AGE_CHOICES, DEFAULT_MAX_AGE_DAYS, too_old_for_auto};
 mod policy;
 mod stub;
 
@@ -224,6 +226,8 @@ pub enum JudgeStatus {
     NoKey,
     /// A key is configured and nothing is queued.
     Idle,
+    /// A key is configured but automatic classification is off (stopped or never started).
+    Paused,
     /// The current batch of classifier work: `done` of `total` requests have finished. The
     /// total grows if more work is queued mid-batch, and the batch resets when the queue drains.
     Working { done: usize, total: usize },
@@ -382,24 +386,6 @@ pub fn questions_to_ask(
         })
         .map(|s| (s.key, s.question.clone()))
         .collect()
-}
-
-/// Determines whether an outgoing reply asks for a response.
-pub fn expects_reply(judge: &dyn Judge, body: &str) -> bool {
-    let state = json!({"sender": "", "subject": "", "body": body.trim()});
-    judge
-        .judge(&state, &[reply_question()])
-        .ok()
-        .and_then(|answers| {
-            answers
-                .into_iter()
-                .find(|(key, _)| *key == QuestionKey::ExpectsReply)
-        })
-        .and_then(|(_, answer)| match answer.value {
-            AnswerValue::Bool(value) => Some(value),
-            _ => None,
-        })
-        .unwrap_or(false)
 }
 
 /// The JSON state a judge sees: sender, recipients and role, subject, received date, bulk flag,

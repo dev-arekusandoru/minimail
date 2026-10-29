@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, Focusable, Point, TestAppContext, WindowBounds,
-    WindowOptions, base::Root, px, size,
+    AnyWindowHandle, AppContext, AsKeystroke, Bounds, Entity, Focusable, Point, TestAppContext,
+    WindowBounds, WindowOptions, base::Root, px, size,
 };
 use mail_classifier::app::MailApp;
 use mail_classifier::app::actions::bind_keys;
@@ -16,6 +16,7 @@ mod menu;
 use mail_classifier::clock::{Clock, FakeClock, Timestamp};
 use mail_classifier::judge::{Answer, AnswerValue, QuestionKey, Suggestion};
 use mail_classifier::model::{FolderId, Mailbox, MessageId, Tag, TriageState};
+use mail_classifier::spam_senders::{SpamSenders, SpamVerdict};
 use mail_classifier::tz::Utc;
 
 const NOON: Timestamp = 1_790_683_200;
@@ -291,7 +292,7 @@ fn post_send_dialog_files_original_and_reply_in_one_undo(cx: &mut TestAppContext
     );
     assert_eq!(h.state_of(1), TriageState::Inbox, "nothing filed yet");
 
-    h.keys("1");
+    h.keys("enter");
     assert!(!h.dialog_open());
     assert_eq!(
         h.state_of(1),
@@ -404,7 +405,7 @@ fn block_dialog_leave_keeps_mail_and_escape_changes_nothing(cx: &mut TestAppCont
     assert!(h.blocked().is_empty(), "escape changes nothing");
 
     h.keys("b");
-    h.keys("4");
+    h.keys("enter");
     assert_eq!(h.blocked(), vec!["spam@example.com"]);
     assert_eq!(h.state_of(1), TriageState::Inbox, "Leave keeps the mail");
 }
@@ -440,7 +441,7 @@ fn spam_dialog_blocks_and_deletes_or_just_deletes(cx: &mut TestAppContext) {
     h.keys("!");
     assert!(h.dialog_open());
     assert_eq!(h.dialog_options(), vec!["Block & Delete", "Delete"]);
-    h.keys("1");
+    h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     assert_eq!(h.blocked(), vec!["spam@example.com"]);
 
@@ -462,18 +463,15 @@ fn sender_wide_confirm_cancel_changes_nothing(cx: &mut TestAppContext) {
     );
     h.keys("shift-e");
     assert!(h.dialog_open());
-    assert_eq!(
-        h.dialog_title(),
-        "Archive all 2 messages from alice in Inbox?"
-    );
-    h.keys("2");
+    assert_eq!(h.dialog_title(), "Archive all 2 messages from alice in Inbox?");
+    h.keys("escape");
     assert!(!h.dialog_open());
     assert_eq!(h.count(TriageState::Archived), 0, "cancel archives nothing");
     assert_eq!(h.count(TriageState::Inbox), 2);
 
-    h.keys("escape");
     h.keys("shift-e");
-    h.keys("1");
+    h.keys("enter");
+    assert!(!h.dialog_open());
     assert_eq!(h.count(TriageState::Archived), 2, "confirm archives both");
 }
 
@@ -487,21 +485,15 @@ fn sender_wide_delete_and_inbox_confirm(cx: &mut TestAppContext) {
         ]),
     );
     h.keys("shift-d");
-    assert_eq!(
-        h.dialog_title(),
-        "Delete all 2 messages from alice in Inbox?"
-    );
-    h.keys("1");
+    assert_eq!(h.dialog_title(), "Delete all 2 messages from alice in Inbox?");
+    h.keys("enter");
     assert_eq!(h.count(TriageState::Deleted), 2);
 
     // From Trash, the sender-wide move brings the sender's trashed mail back.
     h.keys("g d");
     h.keys("shift-i");
-    assert_eq!(
-        h.dialog_title(),
-        "Move to Inbox all 2 messages from alice in Trash?"
-    );
-    h.keys("1");
+    assert_eq!(h.dialog_title(), "Move to Inbox all 2 messages from alice in Trash?");
+    h.keys("enter");
     assert_eq!(h.count(TriageState::Inbox), 2);
     assert_eq!(h.count(TriageState::Deleted), 0);
     h.keys("u");
@@ -517,22 +509,20 @@ fn sender_wide_file_and_snooze_confirm(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-f");
     assert_eq!(h.dialog_title(), "File all 1 message from alice in Inbox?");
-    h.keys("1");
+    h.keys("escape");
+    assert!(!h.dialog_open() && !h.read(|a| a.folder_picker_open()), "escape cancels");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    h.keys("shift-f");
+    h.keys("enter");
     assert!(h.folder_rows().contains(&"Receipts".to_owned()));
     h.keys("enter");
     assert_eq!(h.state_of(1), TriageState::Filed(1));
 
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     h.keys("shift-s");
-    assert_eq!(
-        h.dialog_title(),
-        "Snooze all 1 message from alice in Inbox?"
-    );
-    h.keys("1");
-    assert!(
-        h.read(|a| a.snooze_open()),
-        "confirm opens the snooze picker"
-    );
+    assert_eq!(h.dialog_title(), "Snooze all 1 message from alice in Inbox?");
+    h.keys("enter");
+    assert!(h.read(|a| a.snooze_open()), "confirm opens the snooze picker");
     h.keys("1");
     assert_eq!(h.state_of(1), TriageState::Snoozed);
 }
@@ -619,6 +609,22 @@ fn folder_picker_typing_letters_never_triggers_mail_bindings(cx: &mut TestAppCon
 #[gpui_kit::gpui::test]
 fn hash_deletes_and_the_message_menu_archives_and_files(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
+    let delete_key = h
+        .cx
+        .update_window(h.window, |_, window, _| {
+            window
+                .highest_precedence_binding_for_action_in_context(
+                    &mail_classifier::app::actions::Delete,
+                    gpui_kit::KeyContext::parse("MailApp").unwrap(),
+                )
+                .expect("Delete binding")
+                .keystrokes()[0]
+                .as_keystroke()
+                .key
+                .clone()
+        })
+        .unwrap();
+    assert_eq!(delete_key, "d", "automatic shortcut labels use the canonical Delete key");
     h.keys("#");
     assert_eq!(h.state_of(1), TriageState::Deleted);
     h.keys("u");
@@ -672,9 +678,26 @@ fn spam_banner_not_spam_clears_the_flag_and_undo_brings_it_back(cx: &mut TestApp
     assert!(!h.banner_shown(), "the banner goes with the flag");
     assert_eq!(h.state_of(1), TriageState::Inbox, "Not spam never moves the message");
 
+    h.keys("escape");
     h.keys("u");
     assert!(h.has_tag(1, Tag::PossibleSpam), "one undo step restores the flag");
     assert!(h.banner_shown(), "the banner is back");
+}
+
+#[gpui_kit::gpui::test]
+fn undo_after_the_flush_reverts_the_filed_reply_too(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "Lunch?", 1)]));
+    h.send_reply("Sure, let me know when");
+    h.keys("enter");
+    assert_eq!(h.state_of(1), TriageState::Archived);
+
+    h.advance(11);
+    let reply = h.outgoing_ids()[0];
+    assert_eq!(h.state_of(reply), TriageState::Archived, "the reply materialises filed");
+
+    h.keys("u");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    assert_eq!(h.state_of(reply), TriageState::Inbox, "the later-sent reply reverts too");
 }
 
 #[gpui_kit::gpui::test]
@@ -682,7 +705,7 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     // Sender-wide file into a folder that does not exist yet.
     let mut h = harness_with(cx, mailbox(&[msg(1, 1, "alice@example.com", "One", 1)]));
     let before = h.folder_count();
-    h.keys("shift-f 1");
+    h.keys("shift-f enter");
     h.type_text("Zebra");
     h.keys("enter");
     let TriageState::Filed(folder) = h.state_of(1) else {
@@ -713,4 +736,134 @@ fn folder_creation_in_the_sender_wide_and_block_flows_is_one_undo(cx: &mut TestA
     assert!(h.blocked().is_empty(), "the block reverts too");
     assert!(h.folder(folder).is_none());
     assert_eq!(h.folder_count(), before);
+}
+
+const SPAMMER: &str = "spam@example.com";
+
+fn verdict(h: &mut Harness<'_>, email: &str) -> Option<SpamVerdict> {
+    h.read(|a| a.mailbox.spam_senders().verdict(email))
+}
+
+/// Two messages from the spammer, message 1 flagged, the reader open on it.
+fn flagged_pair<'a>(cx: &'a mut TestAppContext, with: Option<(&str, SpamVerdict)>) -> Harness<'a> {
+    let mut mb = mailbox(&[msg(1, 1, SPAMMER, "Offer", 1), msg(2, 2, SPAMMER, "More", 2)]);
+    tag_possible_spam(&mut mb, 1);
+    if let Some((email, v)) = with {
+        let mut lists = SpamSenders::default();
+        lists.set(email, Some(v));
+        mb.load_spam_senders(lists);
+    }
+    let mut h = harness_with(cx, mb);
+    h.goto(1);
+    h.keys("enter");
+    h
+}
+
+#[gpui_kit::gpui::test]
+fn not_spam_yes_records_never_spam_and_undoes_with_the_flag(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-not");
+    assert!(!h.has_tag(1, Tag::PossibleSpam));
+    assert_eq!(h.dialog_title(), "Never mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, "SPAM@example.com"), Some(SpamVerdict::Never));
+    h.keys("u");
+    assert_eq!(verdict(&mut h, SPAMMER), None, "one undo drops the verdict too");
+    assert!(h.has_tag(1, Tag::PossibleSpam), "and restores the flag");
+}
+
+#[gpui_kit::gpui::test]
+fn never_spam_clears_the_warning_on_the_senders_inbox_mail(cx: &mut TestAppContext) {
+    let mut mb = mailbox(&[
+        msg(1, 1, SPAMMER, "Offer", 1),
+        msg(2, 2, SPAMMER, "More", 2),
+        msg(3, 3, "other@example.com", "Hi", 3),
+    ]);
+    for id in 1..=3 {
+        tag_possible_spam(&mut mb, id);
+    }
+    let mut h = harness_with(cx, mb);
+    h.goto(1);
+    h.keys("enter");
+    h.click("btn-banner-spam-not");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Never));
+    assert!(!h.has_tag(1, Tag::PossibleSpam));
+    assert!(!h.has_tag(2, Tag::PossibleSpam), "every Inbox message from the sender loses the warning");
+    assert!(h.has_tag(3, Tag::PossibleSpam), "another sender keeps it");
+
+    h.keys("u");
+    assert!(h.has_tag(1, Tag::PossibleSpam));
+    assert!(h.has_tag(2, Tag::PossibleSpam), "one undo restores them all");
+    assert!(h.has_tag(3, Tag::PossibleSpam));
+    assert_eq!(verdict(&mut h, SPAMMER), None, "and the verdict");
+}
+
+#[gpui_kit::gpui::test]
+fn not_spam_cancel_only_clears_the_flag(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-not");
+    h.keys("escape");
+    assert!(!h.dialog_open());
+    assert!(!h.has_tag(1, Tag::PossibleSpam), "the flag is cleared regardless");
+    assert_eq!(verdict(&mut h, SPAMMER), None);
+}
+
+#[gpui_kit::gpui::test]
+fn tracked_senders_get_no_prompt(cx: &mut TestAppContext) {
+    for v in [SpamVerdict::Always, SpamVerdict::Never] {
+        let mut h = flagged_pair(cx, Some((SPAMMER, v)));
+        h.click("btn-banner-spam-not");
+        assert!(!h.dialog_open(), "{v:?} sender: no never-spam prompt");
+    }
+    let mut h = flagged_pair(cx, Some((SPAMMER, SpamVerdict::Never)));
+    h.click("btn-banner-spam-delete");
+    assert!(!h.dialog_open(), "a tracked sender is not asked about deleting either");
+    assert_eq!(h.state_of(2), TriageState::Inbox);
+}
+
+#[gpui_kit::gpui::test]
+fn deleting_spam_asks_delete_all_then_always_spam_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-delete");
+    assert_eq!(h.state_of(1), TriageState::Deleted);
+    assert_eq!(h.dialog_title(), "Delete all mail from spam@example.com?");
+    h.keys("enter");
+    assert_eq!(h.state_of(2), TriageState::Deleted);
+    assert_eq!(h.dialog_title(), "Always mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Always));
+
+    h.keys("u");
+    assert_eq!(h.state_of(1), TriageState::Inbox);
+    assert_eq!(h.state_of(2), TriageState::Inbox, "the sweep undoes with the delete");
+    assert_eq!(verdict(&mut h, SPAMMER), None, "so does the verdict");
+}
+
+#[gpui_kit::gpui::test]
+fn escape_at_delete_all_ends_the_sequence(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-delete");
+    h.keys("escape");
+    assert!(!h.dialog_open());
+    assert_eq!(h.state_of(2), TriageState::Inbox);
+    assert_eq!(verdict(&mut h, SPAMMER), None);
+}
+
+#[gpui_kit::gpui::test]
+fn blocking_asks_nothing_more(cx: &mut TestAppContext) {
+    let mut h = flagged_pair(cx, None);
+    h.click("btn-banner-spam-block");
+    assert!(!h.dialog_open());
+    assert_eq!(h.blocked(), vec![SPAMMER]);
+}
+
+#[gpui_kit::gpui::test]
+fn marking_spam_without_other_mail_goes_straight_to_always_spam(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, mailbox(&[msg(1, 1, SPAMMER, "Offer", 1)]));
+    h.keys("!");
+    h.keys("2");
+    assert_eq!(h.dialog_title(), "Always mark mail from spam@example.com as spam?");
+    h.keys("enter");
+    assert_eq!(verdict(&mut h, SPAMMER), Some(SpamVerdict::Always));
 }

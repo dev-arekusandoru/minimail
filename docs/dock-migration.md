@@ -34,28 +34,28 @@ A real app-side usage example ships in the kit: `gpui-kit-0.7.0/tests/dock.rs` (
 
 ```
 ┌ titlebar ─────────────────────────────────────────────┐
-├ sidebar (left dock) │ list (tabs) │ reader (tabs) ─────┤
+├ sidebar (Resizable) │ list (tabs) │ reader (tabs) ─────┤
 ├ hint bar ─────────────────────────────────────────────┤
 ```
 
 - `DockSkin::dock_area("mail", None, window, cx)` for the body region; it stays a child of the
   existing root div, in the same slot `render_panes` occupies today
   (`src/app/mail_app/render.rs:237`), under the titlebar and above the hint bar.
-- Skin config: `set_panel_style(PanelStyle::TabBar, cx)`,
+- Skin config: `set_panel_style(PanelStyle::Auto, cx)`,
   `set_close_button_visible(false, cx)` (we draw our own close button inside `Panel::title`, so
   the existing close behaviour and its test survive), `set_toggle_button_visible(false, cx)`.
-- Left dock = sidebar, one panel. `set_dock_collapsible(Left, true)`,
-  `set_dock_size(Left, px(SIDEBAR_W))`. This region keeps a real size API
-  (`dock_area.rs:344-355`) — narrow it with `toggle_dock`, resize with the divider.
+  `Panel::title_bar()` then decides whether a lone panel draws the skin's plain title; the
+  list and the reader's no-tab stand-in both decline it. The sidebar now lives outside Dock.
+- Sidebar stays in the outer Resizable, outside Dock, so centre-group zoom preserves it.
 - Center = `h_split` (side by side) or `v_split` (stacked) of two tab groups: list, reader.
 
-Panels (all `Entity<T>` implementing `BasePanel` + `Panel` + `EventEmitter<PanelEvent>` +
-`Focusable` + `Render`):
+Dock panels (all `Entity<T>` implementing `BasePanel` + `Panel` + `EventEmitter<PanelEvent>` +
+`Focusable` + `Render`; sidebar is not a panel):
 
 | Panel | Content | Chrome |
 |---|---|---|
-| `SidebarPanel` | today's `render_sidebar` | `title_bar() == false`, not closable, not zoomable |
-| `ListPanel` | today's list (`rows.rs`) | `title_bar() == false`, not closable, not zoomable |
+| Sidebar | `render_sidebar`, outside Dock | resizable beside the centre; no dock tab strip |
+| `ListPanel` | one open list view (`rows.rs`) | tab strip even for one view, not closable through Dock, not zoomable through a toolbar control |
 | `ReaderPanel` | one open message (today's reader) | tab: avatar + italic-when-preview title + our close button |
 
 ## 3. Tab model stays ours

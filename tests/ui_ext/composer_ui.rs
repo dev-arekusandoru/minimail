@@ -148,8 +148,8 @@ pub fn closing_a_draft_tab_asks_send_save_or_discard(cx: &mut TestAppContext) {
         "exactly the three choices"
     );
 
-    // `2` chooses Save & Close.
-    h.keys("2");
+    // Save & Close is the default option, so `enter` takes it (digit keys skip the default).
+    h.keys("enter");
     h.settle();
     assert!(!h.read(|a| a.compose_open()), "the choice closed the tab");
     assert_eq!(

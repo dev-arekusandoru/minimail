@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build a macOS .app and a drag-to-install .dmg of the app.
 #
-# Runs the same locally and in CI. Output: dist/Minimail-<version>-arm64.dmg
+# Runs the same locally and in CI. Output: dist/Minimail-<version>-arm64.dmg and
+# dist/latest.json, the manifest the in-app updater reads (upload both to the release).
 #
 # Required env:
 #   MAIL_CLASSIFIER_GOOGLE_CLIENT_ID / _SECRET   baked into the binary (as
@@ -43,7 +44,8 @@ case "$CHANNEL" in
     *) echo "CHANNEL must be nightly or release" >&2; exit 1 ;;
 esac
 VERSION="${VERSION:-$default_version}"
-# CFBundleVersion must be dotted integers; a date is monotonic for nightlies.
+# CFBundleVersion must be dotted integers. The in-app updater treats a higher build number as
+# newer, so it must increase within a channel (CI passes its run number).
 BUILD_NUMBER="${BUILD_NUMBER:-$stamp}"
 
 dist=dist
@@ -53,6 +55,7 @@ rm -rf "$dist"
 mkdir -p "$app/Contents/MacOS"
 
 echo "==> Building $VERSION"
+MAIL_CLASSIFIER_CHANNEL="$CHANNEL" MAIL_CLASSIFIER_BUILD="$BUILD_NUMBER" MAIL_CLASSIFIER_VERSION="$VERSION" \
 MAIL_CLASSIFIER_BUNDLED_GOOGLE_CLIENT_ID="$MAIL_CLASSIFIER_GOOGLE_CLIENT_ID" \
 MAIL_CLASSIFIER_BUNDLED_GOOGLE_CLIENT_SECRET="$MAIL_CLASSIFIER_GOOGLE_CLIENT_SECRET" \
     cargo build --release --locked
@@ -109,8 +112,14 @@ else
     echo "==> Skipping notarization (needs a Developer ID identity and notary credentials)"
 fi
 
+manifest="$dist/latest.json"
+cat > "$manifest" <<EOF
+{"version": "$VERSION", "build": $BUILD_NUMBER, "dmg": "$(basename "$dmg")", "sha256": "$(shasum -a 256 "$dmg" | cut -d' ' -f1)"}
+EOF
+
 echo "==> $dmg"
 [ -z "${GITHUB_OUTPUT:-}" ] || {
     echo "version=$VERSION" >> "$GITHUB_OUTPUT"
     echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+    echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 }

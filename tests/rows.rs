@@ -9,10 +9,9 @@ use mail_classifier::app::actions::{CyclePreviewLines, bind_keys};
 use mail_classifier::app::icons::{
     Glyph, GlyphInputs, glyphs_for, legend, max_icons, split_overflow,
 };
-use mail_classifier::app::row::{
-    BarState, LINE_H, PREVIEW_LINE_H, RowVisual, message_row_height, sender_label,
-    shows_account_icon, thread_preview_lines, thread_row_height,
-};
+use mail_classifier::app::actions::SetUrgency;
+use mail_classifier::app::row::{RowVisual, sender_label, shows_account_icon};
+use mail_classifier::row_style::Chips;
 use mail_classifier::judge::{Answer, AnswerValue, Kind, QuestionKey, Suggestion};
 use mail_classifier::model::{Location, Mailbox, MessageId, Tag};
 
@@ -89,47 +88,22 @@ fn preview_setting_cycles_from_off_to_five(cx: &mut TestAppContext) {
     assert_eq!(seen, [2, 3, 4, 5, 0, 1], "cycle wraps 5 -> Off -> 1");
 }
 
-#[test]
-fn message_row_height_grows_by_one_preview_line() {
-    let base = message_row_height(0);
-    for n in 1..=5u8 {
-        assert_eq!(message_row_height(n) - base, PREVIEW_LINE_H * f32::from(n));
+#[gpui_kit::gpui::test]
+fn chips_replace_the_urgency_icon_in_the_cluster(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let id = h.ids()[0];
+    h.cx.dispatch_action(h.window, SetUrgency { message: Some(id), level: 5 });
+    h.cx.run_until_parked();
+    let shows_siren = |h: &mut Harness<'_>| {
+        let (shown, hidden) = h.read(|a| a.row_icons(id, 600.));
+        shown.iter().chain(&hidden).any(|g| *g == Glyph::UrgentHigh)
+    };
+    assert!(shows_siren(&mut h), "chips off: urgency is an icon");
+    for chips in [Chips::Above, Chips::Below] {
+        h.cx.update_entity(&h.app, |a, _| a.row_style.chips = chips);
+        assert!(!shows_siren(&mut h), "chips {chips:?}: the urgency chip carries it");
     }
-    assert!(
-        base >= 44.,
-        "room for sender and subject even with previews off"
-    );
-    assert!(base > 2. * LINE_H, "previews never squeeze out a line");
-}
 
-#[test]
-fn thread_header_sizes_to_its_own_content_and_never_matches_a_message_row() {
-    for n in 0..=5u8 {
-        let header = thread_row_height(n);
-        let message = message_row_height(n);
-        assert!(
-            header < message,
-            "a thread header at {n} preview lines ({header}) must be shorter than a message row ({message})"
-        );
-        assert_eq!(
-            header,
-            24. + PREVIEW_LINE_H * f32::from(thread_preview_lines(n))
-        );
-    }
-    assert!(
-        thread_row_height(1) > thread_row_height(0),
-        "it follows the preview setting"
-    );
-    assert_eq!(
-        thread_preview_lines(0),
-        0,
-        "no preview lines, no preview block"
-    );
-    assert_eq!(
-        thread_row_height(5),
-        thread_row_height(2),
-        "a header caps its preview"
-    );
 }
 
 #[test]
@@ -253,33 +227,17 @@ fn row_is_selectable_and_openable(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn open_and_cursor_states_are_independent_and_combine(cx: &mut TestAppContext) {
+fn cursor_and_open_row_are_the_same_row_once_a_tab_is_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     let (first, second) = (ids[0], ids[1]);
     h.keys("enter");
-    assert_eq!(cues(&mut h, first), (true, true, false), "cursor on the open row combines both cues");
-    assert!(h.read(|a| a.row_visual(first).combined()));
+    assert_eq!(cues(&mut h, first), (true, true, false));
 
     h.keys("j");
-    let open_only = h.read(|a| a.row_visual(first));
-    let cursor_only = h.read(|a| a.row_visual(second));
-    assert!(open_only.open && !open_only.cursor && !open_only.selected);
-    assert!(cursor_only.cursor && !cursor_only.open && !cursor_only.selected);
-    assert_ne!(open_only, cursor_only);
-    assert_eq!(
-        h.read(|a| a.opened()),
-        Some(first),
-        "moving the cursor keeps the reader open"
-    );
-
-    h.keys("k");
-    assert!(h.read(|a| a.row_visual(first).combined()));
-    let second_after_return = h.read(|a| a.row_visual(second));
-    assert!(
-        second_after_return.unread,
-        "moving the cursor does not mark other rows read"
-    );
+    assert_eq!(h.read(|a| a.opened()), Some(second), "moving the cursor opens the row");
+    assert_eq!(cues(&mut h, second), (true, true, false));
+    assert!(!h.read(|a| a.row_visual(first)).open);
 }
 
 #[gpui_kit::gpui::test]
@@ -287,7 +245,7 @@ fn selected_state_is_separate_from_cursor_and_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let ids = h.ids();
     h.keys("enter x j");
-    assert_eq!(cues(&mut h, ids[0]), (false, true, true));
+    assert_eq!(cues(&mut h, ids[0]), (false, false, true));
 }
 
 #[gpui_kit::gpui::test]
@@ -300,11 +258,8 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
 
     h.keys("x");
     let selected = h.read(|a| a.row_visual(first));
-    assert!(selected.selected, "selection uses the full accent bar");
-    assert!(
-        selected.unread,
-        "unread remains in the visual state while selected"
-    );
+    assert!(selected.selected);
+    assert!(selected.unread, "unread remains in the visual state while selected");
 
     h.keys("enter");
     let open_selected_cursor = h.read(|a| a.row_visual(first));
@@ -314,20 +269,11 @@ fn unread_selected_open_and_cursor_states_remain_distinct(cx: &mut TestAppContex
     assert_ne!(open_selected_cursor, unread);
     h.keys("x");
     let open_deselected_cursor = h.read(|a| a.row_visual(first));
-    assert!(
-        open_deselected_cursor.open
-            && open_deselected_cursor.cursor
-            && !open_deselected_cursor.selected
-    );
-    assert_eq!(open_deselected_cursor.bar_state(), BarState::Selected);
+    assert!(open_deselected_cursor.open && open_deselected_cursor.cursor && !open_deselected_cursor.selected);
     h.keys("j");
-    let open_deselected = h.read(|a| a.row_visual(first));
-    assert!(open_deselected.open && !open_deselected.selected && !open_deselected.cursor);
-    assert_eq!(open_deselected.bar_state(), BarState::Selected);
-    assert!(
-        !open_deselected.unread,
-        "opening marks the message read without restoring the unread bar"
-    );
+    let left = h.read(|a| a.row_visual(first));
+    assert!(!left.open && !left.selected && !left.cursor);
+    assert!(!left.unread, "opening marks the message read");
 }
 
 #[test]
@@ -375,6 +321,9 @@ fn new_sender_badge_is_derived_from_the_mailbox() {
 #[test]
 fn account_icon_shows_only_in_the_unified_inbox() {
     assert!(shows_account_icon(&Location::AllInboxes));
+    for all in [Location::AllSnoozed, Location::AllSent, Location::AllArchive, Location::AllTrash] {
+        assert!(shows_account_icon(&all));
+    }
     assert!(!shows_account_icon(&Location::Inbox("personal".into())));
     assert!(!shows_account_icon(&Location::Snoozed("personal".into())));
     assert!(!shows_account_icon(&Location::Sent("personal".into())));
@@ -421,34 +370,13 @@ fn outgoing_rows_are_labelled_by_recipient() {
 }
 
 #[test]
-fn row_bar_state_uses_the_required_precedence() {
-    let state = |selected, open| RowVisual { selected, open, ..RowVisual::default() }.bar_state();
-    assert_eq!(state(false, false), BarState::None);
-    assert_eq!(state(true, false), BarState::Selected);
-    assert_eq!(state(false, true), BarState::Selected);
-    assert_eq!(state(true, true), BarState::Selected);
-    assert_eq!(
-        RowVisual {
-            partial: true,
-            ..RowVisual::default()
-        }
-        .bar_state(),
-        BarState::Partial
-    );
-    for bar in [
-        RowVisual::default(),
-        RowVisual { selected: true, ..RowVisual::default() },
+fn selected_open_and_cursor_rows_share_the_active_background() {
+    assert!(!RowVisual::default().active());
+    for v in [
+        RowVisual { cursor: true, ..RowVisual::default() },
         RowVisual { open: true, ..RowVisual::default() },
+        RowVisual { selected: true, ..RowVisual::default() },
     ] {
-        let focused = RowVisual {
-            cursor: true,
-            ..bar
-        };
-        assert_eq!(
-            focused.bar_state(),
-            bar.bar_state(),
-            "cursor does not replace bar state"
-        );
-        assert_ne!(focused, bar, "cursor remains independently represented");
+        assert!(v.active());
     }
 }

@@ -1,0 +1,279 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Triage directions</title>
+<style>
+/* Palette = the One Dark vars used by the other mockups. Only flat rects, 1px borders, radii, solid fills and
+   linear gradients are used, so every piece maps to GPUI div()/bg()/border_1()/rounded_*(). No transforms, blur or shadows
+   beyond a single drop shadow (GPUI box_shadow). Stacked cards are inset+offset boxes, not scaled. */
+:root{--bg:#282c34;--deep:#21252b;--fg:#abb2bf;--strong:#d7dae0;--muted:#7f848e;--border:#3b4048;--active:#3e4451;--hover:#323842;--surface:#2f343d;--primary:#61afef;--on-primary:#1b2330;--danger:#e06c75;--warn:#d19a66;--ok:#98c379;--purple:#c678dd;--cyan:#56b6c2}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#16181d;color:var(--fg);font:14px/20px -apple-system,system-ui,sans-serif;padding:20px;display:flex;flex-direction:column;align-items:center;gap:16px}
+.tabs{display:flex;gap:8px}
+.tabs button{all:unset;cursor:pointer;height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--border);color:var(--muted);font-size:13px}
+.tabs button.on{background:var(--active);color:var(--strong)}
+.mono{font-family:ui-monospace,SFMono-Regular,monospace}
+/* window */
+.win{width:1180px;height:740px;background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative;display:none;flex-direction:column}
+.win.on{display:flex}
+.title{height:36px;flex:none;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);background:var(--deep);position:relative}
+.title .lights{display:flex;gap:8px}.title .lights i{width:12px;height:12px;border-radius:50%;background:#ff5f57}.title .lights i:nth-child(2){background:#febc2e}.title .lights i:nth-child(3){background:#28c840}
+.title .t{position:absolute;left:0;right:0;text-align:center;font-size:13px;color:var(--muted);pointer-events:none}
+.ic{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:inline-block}
+i[data-i]{display:inline-flex}
+/* shared bits */
+.key{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:4px;border:1px solid var(--border);background:var(--deep);font:600 11px/1 ui-monospace,monospace;color:var(--muted)}
+.key.p{background:rgba(27,35,48,.35);border-color:rgba(27,35,48,.35);color:var(--on-primary)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:4px;background:var(--hover);font-size:11px;color:var(--primary);white-space:nowrap}
+.chip.warn{color:var(--warn)}.chip.cyan{color:var(--cyan)}.chip.m{color:var(--muted)}
+.btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:6px;border:1px solid var(--border);color:var(--fg);font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary);font-weight:600}
+.btn.danger:hover{color:var(--danger)}
+.btn.ghost{border-color:transparent;color:var(--muted)}
+.avatar{width:36px;height:36px;border-radius:50%;background:#3a6a52;display:grid;place-items:center;color:#d7f0e2;font-weight:600;font-size:13px;flex:none}
+.meta{display:flex;align-items:center;gap:12px}
+.meta .who{display:flex;flex-direction:column;min-width:0}
+.meta .n{color:var(--strong);font-weight:600;font-size:14px;line-height:18px}
+.meta .a{color:var(--muted);font-size:12px;line-height:16px}
+.meta .r{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}
+h1{font-size:26px;line-height:32px;font-weight:600;color:var(--strong);letter-spacing:-.2px}
+.copy{color:var(--fg);font-size:15px;line-height:24px}
+.copy p{margin:0 0 14px}.copy a{color:var(--primary)}
+.att{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);font-size:12px;color:var(--fg)}
+.att span{color:var(--muted);font-size:11px}
+.earlier{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:6px;border:1px dashed var(--border);color:var(--muted);font-size:12px}
+.seg{display:flex;gap:2px;height:4px;width:100%}.seg i{flex:1;border-radius:2px;background:var(--active)}.seg i.d{background:var(--primary)}.seg i.c{background:var(--strong)}
+.bar{height:3px;background:var(--active);border-radius:2px;overflow:hidden}.bar i{display:block;height:100%;background:var(--primary)}
+.toast{position:absolute;display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;color:var(--strong);box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.toast .u{color:var(--primary)}
+.hint{position:absolute;left:50%;top:10px;transform:translateX(-50%);font-size:11px;color:var(--muted)}
+
+/* ===== A. Focus Reader ===== */
+#A .top{height:48px;flex:none;display:flex;align-items:center;padding:0 16px;gap:16px}
+#A .top .mid{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px}
+#A .top .mid .cnt{font-size:12px;color:var(--muted)}#A .top .mid .cnt b{color:var(--strong)}
+#A .scroll{flex:1;overflow:hidden;display:flex;justify-content:center;padding:16px 0 0;position:relative}
+#A .col{width:680px;display:flex;flex-direction:column;gap:20px}
+#A .fade{position:absolute;left:0;right:0;bottom:0;height:150px;background:linear-gradient(to bottom,rgba(40,44,52,0),var(--bg) 70%);pointer-events:none}
+#A .dock{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px}
+#A .sugg{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+#A .sugg b{color:var(--strong);font-weight:600}
+#A .bar2{display:flex;align-items:center;gap:6px;padding:6px;border-radius:12px;background:var(--surface);border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+#A .bar2 .sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+#A .bar2 .btn{border-color:transparent}
+#A .bar2 .btn:hover{background:var(--active)}
+#A .bar2 .btn.primary{border-color:var(--primary)}
+
+/* ===== B. Card Stack ===== */
+#B{background:var(--deep)}
+#B .stage{flex:1;position:relative;display:flex;flex-direction:column;align-items:center}
+#B .cnt{margin-top:18px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}#B .cnt b{color:var(--strong);font-size:13px}
+#B .pile{position:relative;width:700px;height:430px;margin-top:16px}
+#B .card{position:absolute;border-radius:14px;border:1px solid var(--border);background:var(--bg)}
+#B .c3{left:48px;right:48px;top:30px;bottom:-30px;background:#262a32}
+#B .c2{left:24px;right:24px;top:15px;bottom:-15px;background:#2a2e36}
+#B .c1{left:0;right:0;top:0;bottom:0;padding:28px 32px 0;display:flex;flex-direction:column;gap:16px;overflow:hidden;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+#B .c1 .fade{position:absolute;left:0;right:0;bottom:60px;height:90px;background:linear-gradient(to bottom,rgba(40,44,52,0),var(--bg));pointer-events:none}
+#B .foot{position:absolute;left:0;right:0;bottom:0;height:60px;border-top:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:0 20px}
+#B .foot .s{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}#B .foot .s b{color:var(--strong);font-weight:600}
+#B .round{display:flex;gap:20px;margin-top:54px;align-items:flex-start}
+#B .r{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+#B .r .o{width:48px;height:48px;border-radius:50%;border:1px solid var(--border);background:var(--bg);display:grid;place-items:center;color:var(--fg)}
+#B .r .o .ic{width:18px;height:18px}
+#B .r.big .o{width:64px;height:64px;background:var(--primary);border-color:var(--primary);color:var(--on-primary)}#B .r.big .o .ic{width:24px;height:24px}
+#B .r.del .o{color:var(--danger)}
+#B .r .o:hover{background:var(--active)}
+
+/* ===== C. Decision Rail ===== */
+#C .body{flex:1;display:flex;min-height:0}
+#C .read{flex:1;min-width:0;display:flex;flex-direction:column}
+#C .rtop{height:44px;flex:none;display:flex;align-items:center;padding:0 24px;border-bottom:1px solid var(--border);gap:12px;font-size:12px;color:var(--muted)}
+#C .rtop .bar{flex:1}#C .rtop b{color:var(--strong)}
+#C .rscroll{flex:1;overflow:hidden;padding:28px 40px;display:flex;flex-direction:column;gap:18px;position:relative}
+#C .rail{width:320px;flex:none;border-left:1px solid var(--border);background:var(--deep);padding:16px;display:flex;flex-direction:column;gap:16px}
+#C .lbl{font:600 10px/14px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+#C .rec{border:1px solid var(--primary);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
+#C .rec .h{display:flex;align-items:center;gap:8px;color:var(--primary);font-size:12px;font-weight:600}
+#C .rec .why{font-size:12px;line-height:17px;color:var(--muted)}
+#C .rec .btn{justify-content:space-between;height:36px}
+#C .conf{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}#C .conf .bar{flex:1}
+#C .acts{display:flex;flex-direction:column}
+#C .act{display:flex;align-items:center;gap:10px;height:32px;padding:0 8px;border-radius:6px;color:var(--fg);font-size:13px;cursor:pointer}
+#C .act:hover{background:var(--hover)}#C .act .key{margin-left:auto}#C .act .ic{color:var(--muted)}
+#C .act.danger .ic{color:var(--danger)}
+#C .chips{display:flex;gap:6px;flex-wrap:wrap}
+#C .next{display:flex;flex-direction:column;gap:2px}
+#C .nx{display:flex;flex-direction:column;padding:6px 8px;border-radius:6px;font-size:12px;line-height:16px}
+#C .nx b{color:var(--fg);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#C .nx span{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ===== D. Cockpit ===== */
+#D .col{margin:0 auto;width:620px;flex:1;display:flex;flex-direction:column;gap:22px;padding-top:80px;position:relative;overflow:hidden}
+#D .ghost-s{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}#D .ghost-s b{color:var(--primary);font-weight:500}
+#D .thin{height:2px;background:var(--active)}#D .thin i{display:block;height:100%;background:var(--primary)}
+#D .fade{position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(to bottom,rgba(40,44,52,0),var(--bg))}
+#D .strip{height:40px;flex:none;display:flex;align-items:center;justify-content:center;gap:20px;font-size:12px;color:var(--muted);opacity:.8}
+#D .strip span{display:inline-flex;align-items:center;gap:6px}
+#D .strip .sp{width:1px;height:12px;background:var(--border)}
+#D .left{position:absolute;left:20px;bottom:10px;font-size:11px;color:var(--muted)}
+</style>
+
+<div class="tabs mono" id="tabs"></div>
+
+<!-- shared email content, repeated per design via JS -->
+<template id="email-body">
+  <div class="copy">
+    <p>Hello Alexandru Muresan,</p>
+    <p>A package for AMUR6165, Unit 5022, was delivered by Amazon on October 08, 2026 at 06:16 PM and is ready for immediate pickup.</p>
+    <p>Please retrieve the package(s) from the Package Concierge <b>(Package Room)</b>.</p>
+    <p>For access, enter your username or scan the barcode below and enter your PIN.</p>
+    <p>The Package Concierge Team<br>1.888.989.7225<br><a>www.packageconcierge.com</a></p>
+  </div>
+</template>
+
+<!-- A -->
+<div class="win on" id="A">
+  <div class="title"><div class="lights"><i></i><i></i><i></i></div><div class="t">Triage</div></div>
+  <div class="top">
+    <button class="btn ghost"><i data-i="x"></i>End <span class="key">esc</span></button>
+    <div class="mid"><div class="cnt"><b>14</b> of 2,292 · All Inboxes</div><div class="seg" data-seg="40" data-done="13"></div></div>
+    <button class="btn ghost"><i data-i="undo"></i>Undo <span class="key">⌘Z</span></button>
+  </div>
+  <div class="scroll">
+    <div class="col">
+      <div class="meta"><div class="avatar">PC</div><div class="who"><span class="n">Package Concierge</span><span class="a">no-reply@packageconcierge.com · to You</span></div>
+        <div class="r"><span class="chip">inbox</span><span class="chip m">Normal</span><span class="chip cyan"><i data-i="bell"></i>Notification</span><span>Oct 18 · 18:54</span></div></div>
+      <h1>REMINDER - Package Ready for Pick Up</h1>
+      <div class="earlier"><i data-i="msg"></i>1 earlier message in thread · Oct 12<span style="margin-left:auto" class="key">t</span></div>
+      <div data-body></div>
+      <div><span class="att"><i data-i="clip"></i>image.jpg <span>10 KB</span></span></div>
+    </div>
+    <div class="fade"></div>
+  </div>
+  <div class="dock">
+    <div class="sugg"><i data-i="spark"></i><span><b>Suggested: Archive</b> · you've archived 9 of 9 from this sender</span></div>
+    <div class="bar2">
+      <button class="btn primary"><i data-i="archive"></i>Archive <span class="key p">⏎</span></button>
+      <div class="sep"></div>
+      <button class="btn"><i data-i="archive"></i>Archive <span class="key">e</span></button>
+      <button class="btn"><i data-i="clock"></i>Snooze <span class="key">s</span></button>
+      <button class="btn"><i data-i="folder"></i>File <span class="key">f</span></button>
+      <button class="btn"><i data-i="reply"></i>Reply <span class="key">r</span></button>
+      <div class="sep"></div>
+      <button class="btn danger"><i data-i="trash"></i>Delete <span class="key">d</span></button>
+      <button class="btn"><i data-i="bellOff"></i><span class="key">m</span></button>
+      <button class="btn"><i data-i="skip"></i><span class="key">␣</span></button>
+    </div>
+  </div>
+  <div class="toast" style="right:20px;top:100px"><i data-i="archive"></i>Archived <span class="u">⌘Z undo</span></div>
+</div>
+
+<!-- B -->
+<div class="win" id="B">
+  <div class="title"><div class="lights"><i></i><i></i><i></i></div><div class="t">Triage</div></div>
+  <div class="stage">
+    <div class="cnt"><b>14</b> / 2,292 <span class="chip m">All Inboxes</span><span class="chip m"><i data-i="x"></i>End · esc</span></div>
+    <div class="pile">
+      <div class="card c3"></div><div class="card c2"></div>
+      <div class="card c1">
+        <div class="meta"><div class="avatar">PC</div><div class="who"><span class="n">Package Concierge</span><span class="a">no-reply@packageconcierge.com</span></div><div class="r"><span class="chip cyan"><i data-i="bell"></i>Notification</span><span>18:54</span></div></div>
+        <h1>REMINDER - Package Ready for Pick Up</h1>
+        <div data-body></div>
+        <div class="fade"></div>
+        <div class="foot"><div class="s"><i data-i="spark"></i><span><b>Suggested: Archive</b> · 9 of 9 from this sender</span></div><button class="btn primary"><i data-i="archive"></i>Accept <span class="key p">⏎</span></button></div>
+      </div>
+    </div>
+    <div class="round">
+      <div class="r del"><div class="o"><i data-i="trash"></i></div>Delete <span class="key">d</span></div>
+      <div class="r"><div class="o"><i data-i="clock"></i></div>Snooze <span class="key">s</span></div>
+      <div class="r big"><div class="o"><i data-i="archive"></i></div>Archive <span class="key">e</span></div>
+      <div class="r"><div class="o"><i data-i="folder"></i></div>File <span class="key">f</span></div>
+      <div class="r"><div class="o"><i data-i="reply"></i></div>Reply <span class="key">r</span></div>
+      <div class="r"><div class="o"><i data-i="skip"></i></div>Skip <span class="key">␣</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- C -->
+<div class="win" id="C">
+  <div class="title"><div class="lights"><i></i><i></i><i></i></div><div class="t">Triage</div></div>
+  <div class="body">
+    <div class="read">
+      <div class="rtop"><b>14</b> of 2,292<div class="bar"><i style="width:36%"></i></div>All Inboxes</div>
+      <div class="rscroll">
+        <div class="meta"><div class="avatar">PC</div><div class="who"><span class="n">Package Concierge</span><span class="a">no-reply@packageconcierge.com · to You</span></div><div class="r"><span class="chip cyan"><i data-i="bell"></i>Notification</span><span>Oct 18 · 18:54</span></div></div>
+        <h1>REMINDER - Package Ready for Pick Up</h1>
+        <div class="earlier"><i data-i="msg"></i>1 earlier message in thread · Oct 12</div>
+        <div data-body></div>
+        <div><span class="att"><i data-i="clip"></i>image.jpg <span>10 KB</span></span></div>
+        <div class="fade" style="position:absolute;left:0;right:0;bottom:0;height:100px;background:linear-gradient(to bottom,rgba(40,44,52,0),var(--bg))"></div>
+      </div>
+    </div>
+    <div class="rail">
+      <div class="rec">
+        <div class="h"><i data-i="spark"></i>Suggested</div>
+        <button class="btn primary"><span style="display:flex;gap:8px;align-items:center"><i data-i="archive"></i>Archive</span><span class="key p">⏎</span></button>
+        <div class="why">Delivery notice. You've archived 9 of 9 messages from this sender.</div>
+        <div class="conf"><span>94%</span><div class="bar"><i style="width:94%"></i></div></div>
+      </div>
+      <div class="acts">
+        <div class="lbl" style="margin-bottom:6px">Actions</div>
+        <div class="act"><i data-i="archive"></i>Archive<span class="key">e</span></div>
+        <div class="act"><i data-i="clock"></i>Snooze…<span class="key">s</span></div>
+        <div class="act"><i data-i="folder"></i>File…<span class="key">f</span></div>
+        <div class="act"><i data-i="reply"></i>Reply<span class="key">r</span></div>
+        <div class="act"><i data-i="bellOff"></i>Mute thread<span class="key">m</span></div>
+        <div class="act"><i data-i="skip"></i>Skip<span class="key">␣</span></div>
+        <div class="act danger"><i data-i="trash"></i>Delete<span class="key">d</span></div>
+      </div>
+      <div><div class="lbl" style="margin-bottom:8px">File to</div><div class="chips"><span class="chip">1 Receipts</span><span class="chip">2 Newsletters</span><span class="chip">3 Tech</span><span class="chip">4 Crossway</span></div></div>
+      <div class="next"><div class="lbl" style="margin-bottom:6px">Up next</div>
+        <div class="nx"><b>Fully Baked: Savings Companion</b><span>Half Baked</span></div>
+        <div class="nx"><b>REMINDER - Package Ready for Pick Up</b><span>Package Concierge</span></div>
+        <div class="nx"><b>[Reminder - Action Required] Verify…</b><span>Amazon Appstore Team</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- D -->
+<div class="win" id="D">
+  <div class="title"><div class="lights"><i></i><i></i><i></i></div><div class="t">Triage</div></div>
+  <div class="thin"><i style="width:36%"></i></div>
+  <div class="col">
+    <div class="meta"><div class="avatar">PC</div><div class="who"><span class="n">Package Concierge</span><span class="a">18:54 · Oct 18 · to You</span></div></div>
+    <h1>REMINDER - Package Ready for Pick Up</h1>
+    <div class="ghost-s"><i data-i="spark"></i>Suggest <b>archive</b> <span class="key">⏎</span></div>
+    <div data-body></div>
+    <div class="fade"></div>
+  </div>
+  <div class="left mono">14 / 2,292</div>
+  <div class="strip">
+    <span><span class="key">e</span>archive</span><span><span class="key">s</span>snooze</span><span><span class="key">f</span>file</span><span><span class="key">r</span>reply</span><span><span class="key">d</span>delete</span><span><span class="key">m</span>mute</span><span><span class="key">␣</span>skip</span><div class="sp"></div><span><span class="key">?</span>more</span>
+  </div>
+  <div class="toast" style="right:20px;bottom:44px"><i data-i="archive"></i>Archived <span class="u">⌘Z undo</span></div>
+</div>
+
+<script>
+const P={
+archive:'<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+trash:'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+reply:'<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+bellOff:'<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+skip:'<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>',
+spark:'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+undo:'<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+msg:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'};
+document.querySelectorAll('i[data-i]').forEach(e=>e.innerHTML='<svg class="ic" viewBox="0 0 24 24">'+P[e.dataset.i]+'</svg>');
+document.querySelectorAll('[data-body]').forEach(e=>e.append(document.getElementById('email-body').content.cloneNode(true)));
+document.querySelectorAll('.seg').forEach(s=>{const n=+s.dataset.seg,d=+s.dataset.done;for(let i=0;i<n;i++)s.insertAdjacentHTML('beforeend','<i class="'+(i<d?'d':i==d?'c':'')+'"></i>')});
+const names={A:'A · Focus Reader',B:'B · Card Stack',C:'C · Decision Rail',D:'D · Cockpit'};
+const tabs=document.getElementById('tabs');
+Object.keys(names).forEach(k=>{const b=document.createElement('button');b.textContent=names[k];b.onclick=()=>show(k);b.id='t'+k;tabs.append(b)});
+function show(k){Object.keys(names).forEach(j=>{document.getElementById(j).classList.toggle('on',j==k);document.getElementById('t'+j).classList.toggle('on',j==k)});location.hash=k}
+show((location.hash||'#A').slice(1));
+</script>

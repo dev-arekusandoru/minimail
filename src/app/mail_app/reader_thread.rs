@@ -114,4 +114,5 @@ impl MailApp {
             .child(look.mono(self.clock_label(&m.received, newest, &self.local_now()), t.muted_foreground).flex_none())
             .into_any_element()
     }
+
 }

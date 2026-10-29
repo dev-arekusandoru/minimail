@@ -34,6 +34,7 @@ use crate::app::composer_worker::{
     Accounts, Client as ComposerWorker, Command, ComposeAccount, Event, ImportFailure, ResolveMode,
     Stores,
 };
+use crate::judge::Judge as _;
 use crate::model::{Message, MessageId, ProviderKind, TriageState};
 use crate::outgoing::{AttachmentId, DraftId, DraftKind, DraftRecord, DraftState, PendingHold};
 use crate::provider::RemoteId;
@@ -390,7 +391,7 @@ impl MailApp {
     /// notification to. The next frame shows it, which is how every other background
     /// message in the app reads.
     fn say(&mut self, text: String, _cx: &mut Context<Self>) {
-        self.pending_toast = Some(text);
+        self.pending_toast = Some((text, None));
     }
 
     /// Fold one worker answer into the app's state. `window` is present when the answer
@@ -1625,9 +1626,22 @@ impl MailApp {
                 .map(|(name, size)| Attachment { name, size })
                 .collect(),
         };
+        // A reply that asks for an answer leaves its original awaiting one, but only while
+        // automatic classification is on. The reply question is answered locally, on the
+        // stub, so sending never waits on the network.
         let expects = self.judge.is_some()
             && self.auto_classify
-            && crate::judge::expects_reply(&StubJudge, &message.text);
+            && crate::judge::StubJudge
+                .judge(
+                    &serde_json::json!({"sender": "", "subject": "", "body": message.text.trim()}),
+                    &[crate::judge::reply_question()],
+                )
+                .is_ok_and(|answers| {
+                    answers.iter().any(|(key, answer)| {
+                        *key == crate::judge::QuestionKey::ExpectsReply
+                            && answer.value == crate::judge::AnswerValue::Bool(true)
+                    })
+                });
         let local = self
             .mailbox
             .record_sent(outgoing, triage_original, expects, now);
@@ -1753,6 +1767,9 @@ impl MailApp {
     /// What a confirmed send leaves behind: the post-send filing choice, offered only for a
     /// reply whose original this very draft names.
     fn after_send(&mut self, original: Option<MessageId>, cx: &mut Context<Self>) {
+        if original.is_some() && original == self.session_current() {
+            self.session_advance(super::Outcome::Replied);
+        }
         if let Some(original) = original
             && !self.modal_open()
         {
@@ -1953,15 +1970,18 @@ impl MailApp {
         let draft = self.inline_composer?;
         let source = self.composer.record(draft)?.source_message?;
         let original = self.mailbox.get(source)?.thread_id;
-        let active = self
-            .tabs
-            .active()
-            .and_then(|tab| tab.thread_id())
-            .or_else(|| {
-                self.triage()
-                    .cursor(&self.mailbox, &self.local_now())
-                    .and_then(|id| self.mailbox.get(id).map(|message| message.thread_id))
-            })?;
+        let active = if self.triage_open() {
+            self.session_current().and_then(|id| self.thread_of(id))
+        } else {
+            self.tabs
+                .active()
+                .and_then(|tab| tab.thread_id())
+                .or_else(|| {
+                    self.triage()
+                        .cursor(&self.mailbox, &self.local_now())
+                        .and_then(|id| self.thread_of(id))
+                })
+        }?;
         (active == original).then_some(draft)
     }
 

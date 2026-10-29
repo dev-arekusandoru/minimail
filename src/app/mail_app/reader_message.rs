@@ -20,6 +20,13 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tooltip::Tooltip;
 
+/// What clicking a label chip does: open the override menu of the section it shows (an empty
+/// menu means nothing to choose, so the chip is a plain badge), or clear the flag it names.
+enum Chip {
+    Menu(Vec<MenuItem>),
+    Clear,
+}
+
 impl MailApp {
     /// Reply, Reply all, Forward and the `⋯` menu of one expanded message. All act on that
     /// message, whichever one the reader is opened on. Pressing them never counts as a click on
@@ -80,6 +87,7 @@ impl MailApp {
             )))
     }
 
+    /// One message, as the opened surface or a thread's expanded one.
     pub(super) fn message_surface(
         &self,
         m: &Message,
@@ -95,6 +103,7 @@ impl MailApp {
             .account(&m.account)
             .map_or("", |a| a.email.as_str());
         let (pos, total) = reading::thread_position(self.mailbox.messages(), m);
+        let in_thread = total > 1;
         let recipients_open = self.reader.recipients_open(m.thread_id, m.id);
 
         let head_id: ElementId = if opened {
@@ -132,7 +141,7 @@ impl MailApp {
             .when_some(self.classification_state(m.id), |d, state| {
                 d.child(icons::classification_badge(("reader-classify", id), state, t, 13.))
             })
-            .when(opened && !m.outgoing, |d| {
+            .when(opened && !m.outgoing && self.cached_answers(mid).is_none_or(|answers| answers.is_empty()), |d| {
                 d.child(
                     icon_button(("btn-classify", id), IconName::ScanSearch, "Classify this message", "", cx)
                         .on_click(cx.listener(move |this, _, _, cx| this.classify_message(mid, cx))),
@@ -250,7 +259,8 @@ impl MailApp {
             .child(sender)
             .child(self.labels_row(m, look, cx).ml(px(52.)));
 
-        let strip = if opened { self.folder_strip(m, look, cx) } else { None };
+        let show_reader_banners = self.slot() != Slot::Triage;
+        let strip = if opened && show_reader_banners { self.folder_strip(m, look, cx) } else { None };
         let dev = (opened && cfg!(debug_assertions)).then(|| self.dev_answers(m, look)).flatten();
 
         div()
@@ -259,19 +269,17 @@ impl MailApp {
             .gap_3()
             .min_w_0()
             .p_4()
-            .rounded_md()
-            .border_1()
-            .border_color(t.border)
-            .bg(message_card_bg(t))
+            // Only a real thread gets the card; a lone message sits straight on the pane.
+            .when(in_thread, |d| {
+                d.rounded_md().border_1().border_color(t.border).bg(message_card_bg(t))
+            })
             .child(header)
             .when(recipients_open, |d| d.child(self.recipient_rows(m)))
             .when(opened, |d| d.children(self.banners(m, look, cx)))
             .when_some(strip, |d, s| d.child(s))
             .when_some(dev, |d, el| d.child(el))
-            .child(self.message_body(m, role, look, cx))
-            .when(!m.attachments.is_empty(), |d| {
-                d.child(Self::attachment_chips(m, look))
-            })
+            .child(self.message_body(m, role, in_thread, look, cx))
+            .when(!m.attachments.is_empty(), |d| d.child(Self::attachment_chips(m, look)))
             // A message synced from headers only still holds just its snippet.
             .when(m.partial, |d| {
                 d.child(
@@ -308,41 +316,42 @@ impl MailApp {
             .gap_1()
             .child(look.badge(state_text, theme::state_color(t, m.state), None));
         for tag in self.mailbox.tags(m.id) {
-            let (label, glyph, key, items) = match tag {
+            let (label, glyph, key, action) = match tag {
                 Tag::Urgent(level) => (
                     urgency_word(*level),
                     urgency_glyph(*level),
                     "reader-chip-urgency",
-                    self.urgency_items(m.id),
+                    Chip::Menu(Self::section("Urgency", self.urgency_items(m.id))),
                 ),
                 Tag::Kind(kind) => (
                     Glyph::of_kind(*kind).spec().label,
                     Glyph::of_kind(*kind),
                     "reader-chip-kind",
-                    self.kind_items(m.id),
+                    Chip::Menu(Self::section("Kind", self.kind_items(m.id))),
                 ),
                 Tag::PossibleSpam => (
                     "Possible spam",
                     Glyph::PossibleSpam,
                     "reader-chip-spam",
-                    self.spam_items(m.id),
+                    Chip::Menu(self.spam_items(m.id)),
                 ),
-                Tag::NeedsReply => (
-                    "Needs reply",
-                    Glyph::NeedsReply,
-                    "reader-chip-needs-reply",
-                    self.needs_reply_items(m.id),
-                ),
+                Tag::NeedsReply => {
+                    ("Needs reply", Glyph::NeedsReply, "reader-chip-needs-reply", Chip::Clear)
+                }
                 Tag::AwaitingReply => (
                     "Awaiting reply",
                     Glyph::AwaitingReply,
                     "reader-chip-awaiting-reply",
-                    Vec::new(),
+                    Chip::Menu(Vec::new()),
                 ),
-                Tag::FollowUp => ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Vec::new()),
-                Tag::Reminder => ("Reminder", Glyph::Reminder, "reader-chip-reminder", Vec::new()),
+                Tag::FollowUp => {
+                    ("Follow up", Glyph::FollowUp, "reader-chip-follow-up", Chip::Menu(Vec::new()))
+                }
+                Tag::Reminder => {
+                    ("Reminder", Glyph::Reminder, "reader-chip-reminder", Chip::Menu(Vec::new()))
+                }
             };
-            row = row.child(self.chip(m.id, (key, label, glyph), items, look, cx));
+            row = row.child(self.chip(m.id, (key, label, glyph), action, look, cx));
         }
         if !m.outgoing && self.mailbox.is_new_sender(m.id) {
             let spec = Glyph::NewSender.spec();
@@ -351,35 +360,53 @@ impl MailApp {
         row
     }
 
-    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With `items` it is a ghost
-    /// button that opens that section's override menu under the chip; without them it is a plain
-    /// badge (the reply-status chips).
+    /// One labels-row chip, drawn from its `(id key, word, glyph)`. With a menu it is a ghost
+    /// button that opens that section's override menu under the chip; with `Clear` it clears the
+    /// flag it shows, one click; with an empty menu it is a plain badge (the reply-status chips).
     fn chip(
         &self,
         mid: MessageId,
         (key, label, glyph): (&'static str, &'static str, Glyph),
-        items: Vec<MenuItem>,
+        action: Chip,
         look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let badge = look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
         let wrapper = div().id((key, u64::from(mid))).test_support().aria_label(label);
-        if items.is_empty() {
-            return wrapper.child(badge).into_any_element();
+        let badge = || look.badge(label, glyph.spec().token.color(look.t), Some(glyph));
+        let button = || {
+            Button::new(SharedString::from(format!("chip-menu-{key}-{mid}"))).ghost().h(px(18.)).px_0()
+        };
+        match action {
+            Chip::Clear => wrapper
+                .child(
+                    button()
+                        .tooltip("Clear this flag")
+                        .child(badge())
+                        .on_click(run(SetNeedsReply { message: Some(mid), needs_reply: false })),
+                )
+                .into_any_element(),
+            Chip::Menu(items) if items.is_empty() => wrapper.child(badge()).into_any_element(),
+            Chip::Menu(items) => {
+                let owner = cx.weak_entity();
+                wrapper
+                    .child(
+                        button().child(badge()).dropdown_menu_with_anchor(
+                            Anchor::TopRight,
+                            move |menu, window, cx| {
+                                MailApp::populate_items(
+                                    owner.clone(),
+                                    items.clone(),
+                                    Some(vec![mid]),
+                                    menu,
+                                    window,
+                                    cx,
+                                )
+                            },
+                        ),
+                    )
+                    .into_any_element()
+            }
         }
-        let owner = cx.weak_entity();
-        wrapper
-            .child(
-                Button::new(SharedString::from(format!("chip-menu-{key}-{mid}")))
-                    .ghost()
-                    .h(px(18.))
-                    .px_0()
-                    .child(badge)
-                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
-                        MailApp::populate_items(owner.clone(), items.clone(), Some(vec![mid]), menu, window, cx)
-                    }),
-            )
-            .into_any_element()
     }
 
     /// `To:` / `Cc:` / `Bcc:` rows, empty ones omitted.
@@ -438,7 +465,7 @@ impl MailApp {
                 actions,
             ));
         }
-        if self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
+        if self.slot() != Slot::Triage && self.mailbox.tags(m.id).contains(&Tag::PossibleSpam) {
             out.push(self.spam_banner(m.id, look, cx));
         }
         out
@@ -579,12 +606,13 @@ impl MailApp {
     }
 
     /// The body: HTML (remote images blocked only when asked) unless Reader mode is on, else text
-    /// with the quoted history folded. Messages with an HTML part carry the per-message Reader mode
-    /// toggle.
+    /// with the quoted history folded. The per-message Reader mode toggle lives in the message
+    /// menu, not here.
     fn message_body(
         &self,
         m: &Message,
         role: Role,
+        in_thread: bool,
         look: &Look<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -612,10 +640,8 @@ impl MailApp {
         let mut blocked = 0;
         let content = match html {
             Some(h) if !plain => {
-                // Exactly the card's background, not the window's: the page fills the card, so
-                // the loading skeleton, the no-snapshot fallback and the loaded page must all
-                // resolve to this one color or the reader flashes as they swap.
-                let bg = rgb(message_card_bg(t));
+                // Match the surface under the page — card in a thread, pane alone — or it seams.
+                let bg = rgb(if in_thread { message_card_bg(t) } else { t.background });
                 let style = DocStyle {
                     block: self.block_remote_images,
                     dark: luminance(bg) < 0.5,
@@ -625,52 +651,38 @@ impl MailApp {
                 let key = ViewKey { msg: mid, triage: self.slot() == Slot::Triage };
                 let (view, count) = self.webviews.body(key, h, style);
                 blocked = count;
-                div()
-                    .id(("reader-html", id))
-                    .test_support()
-                    .w_full()
-                    .min_w_0()
-                    .child(view)
-                    .into_any_element()
+                if self.webviews.ready(key) {
+                    div()
+                        .id(("reader-html", id))
+                        .test_support()
+                        .w_full()
+                        .min_w_0()
+                        .child(view)
+                        .into_any_element()
+                } else {
+                    // The view is mounted so it can load, but nothing of it may show yet: the
+                    // skeleton covers it until the document is ready, so the card never flashes
+                    // blank between the two.
+                    div()
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .child(view)
+                        .child(body_skeleton(if in_thread { message_card_bg(t) } else { t.background }, t.foreground))
+                        .into_any_element()
+                }
             }
             _ => self.text_content(m, look, cx),
         };
 
-        if html.is_some() {
+        if blocked > 0 {
             body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(if blocked > 0 {
-                        look.mono(
-                            format!(
-                                "{blocked} REMOTE IMAGE{} BLOCKED",
-                                if blocked == 1 { "" } else { "S" }
-                            ),
-                            t.muted_foreground,
-                        )
-                        .id("reader-images-blocked")
-                        .test_support()
-                        .into_any_element()
-                    } else {
-                        div().into_any_element()
-                    })
-                    .child(
-                        look.link(
-                            ("reader-mode", id),
-                            if plain {
-                                "SHOW ORIGINAL"
-                            } else {
-                                "READER MODE"
-                            },
-                            opened.then_some("v"),
-                        )
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.toggle_reader_mode(mid, cx)),
-                        ),
-                    ),
+                look.mono(
+                    format!("{blocked} REMOTE IMAGE{} BLOCKED", if blocked == 1 { "" } else { "S" }),
+                    t.muted_foreground,
+                )
+                .id("reader-images-blocked")
+                .test_support(),
             );
         }
         body.child(content).into_any_element()
@@ -735,32 +747,29 @@ impl MailApp {
     /// Attachment chips: paperclip, file name, mono size.
     fn attachment_chips(m: &Message, look: &Look<'_>) -> Div {
         let t = &look.t;
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(m.attachments.iter().enumerate().map(|(i, a)| {
-                let att_id = u64::from(m.id) * 1024 + i as u64;
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .h(px(24.))
-                    .px_2()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(t.border)
-                    .child(icons::icon(Glyph::Attachment, t, 12.))
-                    .child(div().text_size(px(12.)).child(SelectableText::new(
-                        ("reader-sel-attachment", att_id),
-                        a.name.clone(),
-                    )))
-                    .child(look.mono_selectable(
-                        ("reader-sel-attachment-size", att_id),
-                        reading::format_size(a.size),
-                        t.muted_foreground,
-                    ))
-            }))
+        div().flex().flex_wrap().gap_2().children(m.attachments.iter().enumerate().map(|(i, a)| {
+            let att_id = u64::from(m.id) * 1024 + i as u64;
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .h(px(24.))
+                .px(px(8.))
+                .rounded(px(2.))
+                .border_1()
+                .border_color(t.border)
+                .child(icons::icon(Glyph::Attachment, t, 12.))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .child(SelectableText::new(("reader-sel-attachment", att_id), a.name.clone())),
+                )
+                .child(look.mono_selectable(
+                    ("reader-sel-attachment-size", att_id),
+                    reading::format_size(a.size),
+                    t.muted_foreground,
+                ))
+        }))
     }
 }
 
@@ -808,6 +817,26 @@ fn suggestion_banner(
 /// them; the token keeps light and dark in step.
 fn message_card_bg(t: &ThemeColor) -> Hsla {
     t.secondary
+}
+
+/// The loading placeholder over an email view that has no document to show yet: the card colour
+/// with a heading and body lines, so the card never seams into the page that replaces it.
+fn body_skeleton(bg: Hsla, fg: Hsla) -> impl IntoElement {
+    div()
+        .id("reader-body-skeleton")
+        .test_support()
+        .absolute()
+        .inset_0()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_4()
+        .bg(bg)
+        .child(div().h(px(20.)).w(relative(0.45)).rounded(px(4.)).bg(fg.opacity(0.09)))
+        .children(
+            [1., 0.96, 0.9, 0.62, 1., 0.93, 0.7]
+                .map(|w| div().h(px(12.)).w(relative(w)).rounded(px(4.)).bg(fg.opacity(0.07))),
+        )
 }
 
 /// The reader chip word for urgency `level`; the raw `n/5` is never shown.

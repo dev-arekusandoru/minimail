@@ -22,32 +22,45 @@ impl MailApp {
                 .on_ok(|_, _, _| false)
                 .p_0()
                 .w(px(width(f32::from(window.viewport_size().width))))
-                .on_close(move |_, _, cx| {
-                    app.update(cx, |this, cx| this.dialog_dismissed(cx)).ok();
+                .on_close(move |_, window, cx| {
+                    app.update(cx, |this, cx| this.dialog_dismissed(window, cx)).ok();
                 })
                 .content(move |content, _, _| content.child(view.clone()))
         });
     }
 
-    /// The hosting dialog closed itself (escape, backdrop): forget its view.
-    fn dialog_dismissed(&mut self, cx: &mut Context<Self>) {
+    /// The hosting dialog closed itself (escape, backdrop): forget its view and take focus
+    /// back, as `close_modals` does, so keys work even when the opener (a menu) is gone.
+    fn dialog_dismissed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = None;
+        self.new_folder = None;
         self.folder_picker = None;
         self.snooze = None;
         self.rules_panel = None;
         self.dialog = None;
         self.help = None;
         self._modal_sub = None;
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
-    pub(super) fn open_palette(
-        &mut self,
-        prefill: Option<&str>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), window, cx));
+    pub(super) fn open_palette(&mut self, prefill: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let targets = self.label_targets(None);
+        // Rename and Delete folder act on the folder the list is showing: only offered then.
+        let in_folder = self.target_folder(None).is_some();
+        let commands = crate::app::actions::commands()
+            .into_iter()
+            .filter(|spec| {
+                let action = (spec.action)();
+                let any = action.as_any();
+                (in_folder || !(any.is::<RenameFolder>() || any.is::<DeleteFolder>()))
+                    && (self.in_session() || !(any.is::<SkipMessage>() || any.is::<AcceptSessionSuggestion>()))
+                    && any.downcast_ref::<ResetLabel>().is_none_or(|reset| {
+                        targets.iter().any(|id| self.mailbox.is_overridden(*id, reset.key))
+                    })
+            })
+            .collect();
+        let palette = cx.new(|cx| CommandPalette::new(prefill.unwrap_or(""), commands, window, cx));
         self._modal_sub = Some(cx.subscribe_in(
             &palette,
             window,
@@ -74,7 +87,6 @@ impl MailApp {
         self.apply_query(query, cx);
     }
 
-
     pub(super) fn open_snooze(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_snooze_for(None, window, cx);
     }
@@ -86,19 +98,8 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let quick = self.in_session() && ids.is_none();
         // Captured now: a message menu's target only lives for its own dispatch.
         let ids = ids.unwrap_or_else(|| self.target_ids());
-        if quick {
-            let now = self.local_now();
-            if let Some((_, until)) = self.mailbox.snooze_presets(&now).into_iter().next() {
-                self.mailbox.snooze(&ids, until, now.at());
-                self.triage_mut().clear_selection();
-                self.session_advance();
-            }
-            cx.notify();
-            return;
-        }
         if ids.is_empty() {
             return;
         }
@@ -122,11 +123,15 @@ impl MailApp {
                 let local = this.local_now();
                 let n = this.mailbox.snooze(ids, until, local.at());
                 this.triage_mut().clear_selection();
-                this.show_toast(
-                    format!("Snoozed {n} until {} · u to undo", format_when(until, &local)),
+                this.show_undo_toast(
+                    format!("Snoozed {n} until {}", format_when(until, &local)),
                     window,
                     cx,
                 );
+                // A snoozed session message is handled; snoozing other mail is not.
+                if this.session_current().is_some_and(|current| ids.contains(&current)) {
+                    this.session_advance(Outcome::Snoozed);
+                }
                 this.scroll_to_cursor();
             },
         ));
@@ -136,7 +141,7 @@ impl MailApp {
         cx.notify();
     }
 
-    fn save_setting<T>(&self, setting: &crate::prefs::Setting<T>, value: T)
+    pub(super) fn save_setting<T>(&self, setting: &crate::prefs::Setting<T>, value: T)
     where
         T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Clone,
     {
@@ -188,16 +193,7 @@ impl MailApp {
             .map(|a| {
                 let gmail = a.provider == crate::model::ProviderKind::Gmail;
                 let (status, (sync, sync_problem)) = if gmail {
-                    let facts = crate::sync_status::SyncFacts {
-                        last_synced: self
-                            .cache
-                            .as_ref()
-                            .and_then(|c| c.synced_at(&a.id).ok().flatten()),
-                        syncing: self.older_in_flight.contains(&a.id),
-                        signed_in: self.providers.contains_key(&a.id),
-                        error: self.account_errors.get(&a.id).map(String::as_str),
-                    };
-                    let status = crate::sync_status::status(&facts);
+                    let status = self.account_sync_status(a);
                     (status.clone(), crate::sync_status::describe(&status, now))
                 } else {
                     (
@@ -221,12 +217,6 @@ impl MailApp {
             .collect()
     }
 
-    /// The Settings window, when it is open. Settings is its own native window, so anything
-    /// driving it (a test, a focus request) needs this handle, not the mail window.
-    pub fn settings_window_handle(&self) -> Option<AnyWindowHandle> {
-        self.settings_window
-    }
-
     /// Open Settings in its own native window on `page`, reusing and activating the existing
     /// window.
     pub(super) fn open_settings(&mut self, page: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -246,6 +236,7 @@ impl MailApp {
         }
         let group = self.group_threads;
         let preview = self.preview_lines;
+        let row_style = self.row_style;
         let rows = self.account_rows();
         let gmail_configured = crate::provider::gmail::ClientConfig::load().is_some();
         let policy = self.policy.clone();
@@ -256,7 +247,10 @@ impl MailApp {
         let dark_theme = self.dark_theme.clone();
         let tab_avatars = self.tab_avatars;
         let block_remote_images = self.block_remote_images;
+        let auto_update_check = self.auto_update_check;
+        let update_status = self.update_status();
         let blocked = self.mailbox.blocked();
+        let spam_senders = self.mailbox.spam_senders().clone();
         let now = self.local_now();
         let follow_up = self.mailbox.follow_up_timeout();
         let (jev_base, jev_model) = self.jev_settings();
@@ -270,6 +264,10 @@ impl MailApp {
                 crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope),
             ),
             None => (false, false),
+        };
+        let auto_max_age = match &self.preferences {
+            Some(store) => crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope),
+            None => self.auto_max_age_days,
         };
         let app = cx.weak_entity();
         let options = WindowOptions {
@@ -294,11 +292,16 @@ impl MailApp {
             let panel = cx.new(|cx| {
                 SettingsPanel::new(policy, summaries, group, preview, orientation, settings_window, cx)
                     .tab_avatars(tab_avatars)
+                    .row_style(row_style)
                     .block_remote_images(block_remote_images)
+                    .auto_update_check(auto_update_check)
+                    .update_status(update_status)
                     .mailbox_state(blocked, now, follow_up)
+                    .spam_senders(spam_senders)
                     .theme_preferences(theme_mode, light_theme, dark_theme)
                     .accounts(rows, gmail_configured)
                     .classifier_switches(auto_classify, spam_cold_outreach)
+                    .auto_max_age(auto_max_age)
                     .on_page(page)
                     .jev_connection(jev_base, jev_model, jev_has_key)
             });
@@ -322,8 +325,14 @@ impl MailApp {
                         crate::app_settings::PANE_LAYOUT.reset(store.as_ref(), &scope);
                         crate::app_settings::TAB_AVATARS.reset(store.as_ref(), &scope);
                         crate::app_settings::BLOCK_REMOTE_IMAGES.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_UPDATE_CHECK.reset(store.as_ref(), &scope);
                         crate::app_settings::GROUP_THREADS.reset(store.as_ref(), &scope);
                         crate::app_settings::PREVIEW_LINES.reset(store.as_ref(), &scope);
+                        crate::app_settings::save_row_style(
+                            store.as_ref(),
+                            &scope,
+                            crate::row_style::RowStyle::default(),
+                        );
                         crate::app_settings::FOLLOW_UP_DAYS.reset(store.as_ref(), &scope);
                         crate::app_settings::SUMMARIES.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_SPAM.reset(store.as_ref(), &scope);
@@ -333,6 +342,7 @@ impl MailApp {
                         crate::app_settings::MODE_KIND.reset(store.as_ref(), &scope);
                         crate::app_settings::MODE_FOLDER.reset(store.as_ref(), &scope);
                         crate::app_settings::AUTO_CLASSIFY.reset(store.as_ref(), &scope);
+                        crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.reset(store.as_ref(), &scope);
                         crate::app_settings::SPAM_COLD_OUTREACH.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_BASE_URL.reset(store.as_ref(), &scope);
                         crate::app_settings::JEV_MODEL.reset(store.as_ref(), &scope);
@@ -349,9 +359,10 @@ impl MailApp {
                     this.group_threads = false;
                     this.tab_avatars = true;
                     this.block_remote_images = false;
+                    this.auto_update_check = true;
                     this.preview_lines = crate::preview::DEFAULT_LINES;
-                    this.mailbox
-                        .set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
+                    this.row_style = crate::row_style::RowStyle::default();
+                    this.mailbox.set_follow_up_timeout(crate::model::DEFAULT_FOLLOW_UP_TIMEOUT);
                     this.panes.set_orientation(PaneLayout::SideBySide);
                     let light = crate::theme::names_for(cx, true)
                         .first()
@@ -374,6 +385,12 @@ impl MailApp {
                     this.configure_jev(cx);
                     this.apply_classifier_settings(cx);
                     panel_weak.update(cx, |panel, cx| panel.reset_fields(cx)).ok();
+                    cx.notify();
+                }
+                SettingsEvent::AutoClassifyAge(days) => {
+                    this.auto_max_age_days = *days;
+                    this.save_setting(&crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS, *days);
+                    this.apply_classifier_settings(cx);
                     cx.notify();
                 }
                 SettingsEvent::Changed { policy, summaries, auto_classify, spam_cold_outreach } => {
@@ -422,6 +439,11 @@ impl MailApp {
                     this.save_setting(&crate::app_settings::BLOCK_REMOTE_IMAGES, *on);
                     cx.notify();
                 }
+                SettingsEvent::AutoUpdateCheck(on) => {
+                    this.auto_update_check = *on;
+                    this.save_setting(&crate::app_settings::AUTO_UPDATE_CHECK, *on);
+                }
+                SettingsEvent::UpdateButton => this.settings_update_button(window, cx),
                 SettingsEvent::Grouping(on) => {
                     this.set_grouping(*on);
                     this.save_setting(&crate::app_settings::GROUP_THREADS, *on);
@@ -430,6 +452,17 @@ impl MailApp {
                 SettingsEvent::PreviewLines(n) => {
                     this.preview_lines = (*n).min(5);
                     this.save_setting(&crate::app_settings::PREVIEW_LINES, this.preview_lines);
+                    cx.notify();
+                }
+                SettingsEvent::RowStyle(style) => {
+                    this.row_style = *style;
+                    if let Some(store) = &this.preferences {
+                        crate::app_settings::save_row_style(
+                            store.as_ref(),
+                            &crate::prefs::Scope::Global,
+                            *style,
+                        );
+                    }
                     cx.notify();
                 }
                 SettingsEvent::PaneLayout(orientation) => {
@@ -456,7 +489,12 @@ impl MailApp {
                 }
                 SettingsEvent::Unblock(email) => {
                     if this.mailbox.unblock_sender(email) {
-                        this.show_toast(format!("Unblocked {email} · u to undo"), window, cx);
+                        this.show_undo_toast(format!("Unblocked {email}"), window, cx);
+                    }
+                }
+                SettingsEvent::ClearSpamSender(email) => {
+                    if this.mailbox.set_spam_sender(email, None) {
+                        this.show_undo_toast(format!("Removed {email}"), window, cx);
                     }
                 }
                 SettingsEvent::AddGmail => this.add_gmail_account(window, cx),
@@ -502,12 +540,23 @@ impl MailApp {
     /// Keep the open Settings window's blocked list in step with the mailbox: undo in the
     /// main window restores a block behind the panel's back.
     pub(super) fn sync_settings_blocked(&mut self, cx: &mut Context<Self>) {
+        // Every change to the spam-sender lists, undo included, is written here.
+        let senders = self.mailbox.spam_senders().clone();
+        if senders != self.saved_spam_senders {
+            self.save_setting(&crate::app_settings::NEVER_SPAM_SENDERS, senders.never());
+            self.save_setting(&crate::app_settings::ALWAYS_SPAM_SENDERS, senders.always());
+            self.saved_spam_senders = senders;
+        }
         let Some(panel) = &self.settings else {
             return;
         };
         let now = self.local_now();
         let blocked = self.mailbox.blocked();
-        panel.update(cx, |panel, cx| panel.set_blocked(blocked, now, cx));
+        let senders = self.mailbox.spam_senders().clone();
+        panel.update(cx, |panel, cx| {
+            panel.set_blocked(blocked, now, cx);
+            panel.set_spam_senders(senders, cx);
+        });
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -560,8 +609,8 @@ impl MailApp {
             return;
         };
         self.mailbox.mute_thread(thread);
-        self.show_toast("Thread muted · u to undo".into(), window, cx);
-        self.session_advance();
+        self.show_undo_toast("Thread muted".into(), window, cx);
+        self.session_advance(Outcome::Other);
         cx.notify();
     }
 
@@ -590,7 +639,7 @@ impl MailApp {
             return;
         }
         if self.mailbox.allow_sender(&email) {
-            self.show_toast(format!("Allowed {email} · u to undo"), window, cx);
+            self.show_undo_toast(format!("Allowed {email}"), window, cx);
         }
         self.move_cursor(0);
         cx.notify();
@@ -603,13 +652,9 @@ impl MailApp {
             self.close_filter_popover();
         } else if self.is_filtered() {
             self.clear_filters(cx);
-        } else if let Some(s) = self.session.take() {
-            if s.handled > 0 {
-                self.session_end = Some((s.handled, self.now() - s.started));
-            } else {
-                self.session_view = None;
-            }
-        } else if self.session_end.is_some() {
+        } else if self.session.is_some() {
+            self.end_run();
+        } else if self.triage_open() {
             self.end_session();
         } else {
             self.triage_mut().clear_selection();
@@ -802,6 +847,75 @@ impl MailApp {
             .map(|m| m.account.clone())
     }
 
+    /// Standalone "New folder": pick the account first when there are several and none was
+    /// given, then name the folder. Creation is one undo step.
+    pub(super) fn new_folder(
+        &mut self,
+        account: Option<AccountId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let accounts = self.mailbox.accounts().to_vec();
+        match (account, accounts.as_slice()) {
+            (_, []) => {}
+            (Some(account), _) => self.open_folder_name(account, window, cx),
+            (None, [only]) => self.open_folder_name(only.id.clone(), window, cx),
+            (None, _) => {
+                let picker = cx.new(|cx| AccountPicker::new(accounts, window, cx));
+                self._modal_sub = Some(cx.subscribe_in(
+                    &picker,
+                    window,
+                    |this, _, event: &NewFolderEvent, window, cx| {
+                        if let NewFolderEvent::Account(id) = event {
+                            this.close_modals(window, cx);
+                            this.open_folder_name(id.clone(), window, cx);
+                        }
+                    },
+                ));
+                self.new_folder = Some(picker.clone().into());
+                self.host_in_dialog(picker.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
+                picker.update(cx, |p, cx| p.focus(window, cx));
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_folder_name(&mut self, account: AccountId, window: &mut Window, cx: &mut Context<Self>) {
+        let label = self.mailbox.account(&account).map_or_else(
+            || account.clone(),
+            |a| crate::account_style::display_name(a).to_owned(),
+        );
+        let prompt = cx.new(|cx| NamePrompt::new(format!("New folder in {label}"), "", window, cx));
+        self._modal_sub = Some(cx.subscribe_in(
+            &prompt,
+            window,
+            move |this, _, event: &NewFolderEvent, window, cx| {
+                let NewFolderEvent::Name(name) = event else { return };
+                let name = name.trim();
+                if name.is_empty() {
+                    return;
+                }
+                this.close_modals(window, cx);
+                let exists = this
+                    .mailbox
+                    .folders(&account)
+                    .iter()
+                    .any(|f| f.parent.is_none() && f.name.eq_ignore_ascii_case(name));
+                if exists {
+                    this.show_toast(format!("Folder “{name}” already exists"), window, cx);
+                } else {
+                    this.mailbox.create_folder(&account, name, None);
+                    this.show_undo_toast(format!("Created folder “{name}”"), window, cx);
+                }
+                cx.notify();
+            },
+        ));
+        self.new_folder = Some(prompt.clone().into());
+        self.host_in_dialog(prompt.clone(), |vw| 420f32.min(vw * 0.9), window, cx);
+        prompt.update(cx, |p, cx| p.focus(window, cx));
+        cx.notify();
+    }
+
     /// Folder picker for the account of the messages `action` files.
     fn open_folder_picker(
         &mut self,
@@ -887,12 +1001,16 @@ impl MailApp {
         let text = match action {
             FileAction::BlockSender {
                 unsubscribe: true, ..
-            } => format!("Unsubscribed and filed {n} · u to undo"),
-            FileAction::BlockSender { .. } => format!("Blocked and filed {n} · u to undo"),
-            _ => format!("Filed {n} · u to undo"),
+            } => format!("Unsubscribed and filed {n}"),
+            FileAction::BlockSender { .. } => format!("Blocked and filed {n}"),
+            _ => format!("Filed {n}"),
         };
-        self.show_toast(text, window, cx);
-        self.session_advance();
+        self.show_undo_toast(text, window, cx);
+        // Sending the reply already handled this session message; the post-send move must not
+        // handle the next one too.
+        if !matches!(action, FileAction::AfterReply(_)) {
+            self.session_advance(Outcome::Filed);
+        }
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -936,7 +1054,7 @@ impl MailApp {
             TriageState::Archived => "Archived",
             _ => "Filed",
         };
-        self.show_toast(format!("{verb} {n} · u to undo"), window, cx);
+        self.show_undo_toast(format!("{verb} {n}"), window, cx);
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1023,11 +1141,11 @@ impl MailApp {
             self.mailbox.block_sender(email, state, self.now())
         };
         let tail = match state {
-            Some(_) => format!(" · moved {n} · u to undo"),
-            None => " · u to undo".to_owned(),
+            Some(_) => format!(" · moved {n}"),
+            None => String::new(),
         };
-        self.show_toast(format!("{verb} {email}{tail}"), window, cx);
-        self.session_advance();
+        self.show_undo_toast(format!("{verb} {email}{tail}"), window, cx);
+        self.session_advance(state.map_or(Outcome::Other, Outcome::of));
         self.scroll_to_cursor();
         cx.notify();
     }
@@ -1067,17 +1185,86 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let sender = ids.first().and_then(|id| self.mailbox.get(*id)).map(|m| m.from_email.clone());
         let n = self.mailbox.mark_spam(ids, block, self.now());
         self.triage_mut().clear_selection();
         let text = if block {
-            format!("Marked {n} as spam and blocked the sender · u to undo")
+            format!("Marked {n} as spam and blocked the sender")
         } else {
-            format!("Marked {n} as spam · u to undo")
+            format!("Marked {n} as spam")
         };
-        self.show_toast(text, window, cx);
-        self.session_advance();
+        self.show_undo_toast(text, window, cx);
+        self.session_advance(Outcome::Deleted);
         self.scroll_to_cursor();
         cx.notify();
+        // Blocking already swept the sender; a plain delete asks what to do about the rest.
+        if let Some(email) = sender.filter(|_| n > 0 && !block) {
+            self.offer_delete_and_always_spam(email, window, cx);
+        }
+    }
+
+    /// After a spam-flagged message was marked not spam: ask to never mark this address as
+    /// spam. Yes records it, as part of the same undo step. Skipped for an address that is
+    /// already tracked or blocked.
+    pub(super) fn offer_never_spam(&mut self, email: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.mailbox.spam_senders().should_prompt(&email, self.mailbox.is_blocked(&email)) {
+            return;
+        }
+        let depth = self.mailbox.undo_depth();
+        self.confirm(
+            format!("Never mark mail from {email} as spam?"),
+            move |this, window, cx| {
+                this.mailbox.amend(depth, |m| m.set_spam_sender(&email, Some(SpamVerdict::Never)));
+                this.show_undo_toast(format!("{email} is never spam"), window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// After spam was accepted by deleting without blocking: ask to delete the sender's other
+    /// mail, then whether to always mark them as spam (Esc at either step ends the sequence).
+    /// Both answers fold into the action's undo step. Skipped for a tracked or blocked address.
+    pub(super) fn offer_delete_and_always_spam(
+        &mut self,
+        email: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.mailbox.spam_senders().should_prompt(&email, self.mailbox.is_blocked(&email)) {
+            return;
+        }
+        let depth = self.mailbox.undo_depth();
+        if self.mailbox.sender_ids_in(&email, TriageState::Inbox).is_empty() {
+            return self.ask_always_spam(email, depth, window, cx);
+        }
+        self.confirm(
+            format!("Delete all mail from {email}?"),
+            move |this, window, cx| {
+                let n = this.mailbox.amend(depth, |m| {
+                    m.set_state_for_sender(&email, TriageState::Inbox, TriageState::Deleted)
+                });
+                this.show_undo_toast(format!("Deleted {n} more from {email}"), window, cx);
+                // The delete that opened this offer already advanced the session; this sweep
+                // touches other messages and must not handle the next one too.
+                this.scroll_to_cursor();
+                this.ask_always_spam(email.clone(), depth, window, cx);
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn ask_always_spam(&mut self, email: String, depth: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm(
+            format!("Always mark mail from {email} as spam?"),
+            move |this, window, cx| {
+                this.mailbox.amend(depth, |m| m.set_spam_sender(&email, Some(SpamVerdict::Always)));
+                this.show_undo_toast(format!("{email} is always spam"), window, cx);
+            },
+            window,
+            cx,
+        );
     }
 
     /// Sender-wide archive/delete/inbox: confirm first.
@@ -1169,7 +1356,7 @@ impl MailApp {
         );
     }
 
-    /// Confirm/Cancel dialog; `on_confirm` runs when Confirm is chosen.
+    /// Confirm dialog: `enter` runs `on_confirm`, `escape` cancels.
     fn confirm(
         &mut self,
         title: String,
@@ -1177,15 +1364,49 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_dialog(
+            DialogSpec::new(title, String::new(), vec![DialogOption::new("", "Confirm", "")], 0),
+            move |this, _, window, cx| on_confirm(this, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// `Delete…` on a folder: ask first. The folder and its subfolders go, but their mail is
+    /// archived, not deleted (as removing a Gmail label leaves the mail in All Mail). `enter`
+    /// cancels, `1` deletes.
+    pub(super) fn confirm_delete_folder(
+        &mut self,
+        folder: Option<FolderId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.modal_open() {
+            return;
+        }
+        let Some(id) = self.target_folder(folder) else { return };
+        let Some(name) = self.mailbox.folder(id).map(|f| f.name.clone()) else { return };
+        let n = self.mailbox.folder_message_count(id);
+        let tree = if self.mailbox.folder_subtree(id).len() > 1 { " and its subfolders" } else { "" };
+        let mail = match n {
+            0 => "It holds no messages.".to_owned(),
+            1 => "Its 1 message is not deleted: it moves to Archive.".to_owned(),
+            n => format!("Its {n} messages are not deleted: they move to Archive."),
+        };
         let options = vec![
-            DialogOption::new("1", "Confirm", ""),
-            DialogOption::new("2", "Cancel", ""),
+            DialogOption::new("1", "Delete folder", "Mail moves to Archive"),
+            DialogOption::new("2", "Cancel", "Keep the folder"),
         ];
         self.open_dialog(
-            DialogSpec::new(title, String::new(), options, 0),
+            DialogSpec::new(
+                format!("Delete “{name}”?"),
+                format!("“{name}”{tree} will be deleted. {mail}"),
+                options,
+                1,
+            ),
             move |this, ix, window, cx| {
                 if ix == 0 {
-                    on_confirm(this, window, cx);
+                    this.delete_folder_now(id, window, cx);
                 }
             },
             window,

@@ -22,9 +22,14 @@ use crate::app::dialog::{ChoiceDialog, DialogEvent, DialogOption};
 use crate::app::email_webview::EmailWebViews;
 use crate::app::folder_picker::{FolderOption, FolderPicker, FolderPickerEvent};
 use crate::app::icons::{self, Glyph, GlyphInputs};
+use crate::app::new_folder::{AccountPicker, NamePrompt, NewFolderEvent};
 use crate::app::palette::{CommandPalette, PaletteEvent};
-use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SessionCard, SummaryCard};
+use crate::app::panels::{RuleBanner, RulesEvent, RulesPanel, SummaryCard};
 use crate::app::row::{self, RowVisual};
+use crate::triage_session::{
+    Outcome, Run, SessionFilter, SessionOptions, SessionOrder, SessionSize, SessionSummary, SetupView,
+};
+use crate::triage_suggest::{ActionSuggestion, SuggestedAction};
 use crate::app::settings::{AccountRow, SettingsEvent, SettingsPanel};
 use crate::app::snooze::{SnoozeEvent, SnoozePicker};
 use crate::app::ui::{button, icon_button, run};
@@ -33,13 +38,13 @@ use crate::hints::{HintContext, HintMode};
 use crate::tz::{MONTHS, WEEKDAYS, Now, SystemZone, Zone};
 use crate::judge::{
     Judge, JudgeFactory, JudgePolicy, JudgeStatus, Kind, QuestionKey, Routed, StoredAnswer,
-    StubJudge,
 };
 use crate::model::{
     AccountId, Folder, FolderId, Location, Mailbox, Message, MessageId, Tag, Triage, TriageState,
 };
 use crate::outgoing::{DraftId, DraftKind, Recovery};
 use crate::reading::ReaderView;
+use crate::spam_senders::{SpamSenders, SpamVerdict};
 use crate::provider::secrets::{MemorySecrets, SecretStore};
 use crate::rules::{Rule, RuleBook};
 use crate::search::Query;
@@ -51,6 +56,7 @@ use crate::list_tabs::ListTabs;
 use self::list_strip::{Pane, Slot};
 use self::list_view::ListView;
 use self::judging::JudgeJob;
+use self::list::ListFrame;
 
 /// How long between composer beats. Short enough that a save or sync the worker finished is
 /// on screen within a frame or two, and it is the clock the hold countdowns and the autosave
@@ -62,6 +68,9 @@ mod composer;
 mod drafts;
 use composer::{PendingOpen, PendingUi};
 mod actions;
+mod day;
+mod folder_edit;
+mod bottombar;
 mod dock;
 mod drag;
 mod filters;
@@ -81,10 +90,17 @@ mod reader_find;
 mod reader_state;
 mod reader_tabs;
 mod render;
-mod rows;
 mod sidebar;
-mod sync;
+mod rail;
 mod titlebar;
+mod triage_screen;
+mod sync;
+mod compact;
+mod rows;
+mod thread_rows;
+mod update;
+use actions::ToastAction;
+use crate::update::UpdateState;
 use menus::MenuKind;
 use panes::{Orientation as PaneLayout, Panes};
 use reader::format_when;
@@ -99,10 +115,12 @@ struct FetchToastId;
 
 /// A triage session: one inbox message at a time.
 struct Session {
-    ids: Vec<MessageId>,
-    index: usize,
-    handled: usize,
-    started: Timestamp,
+    run: Run,
+    /// The suggestion for the current message (see [`crate::triage_suggest`]); `None` when the
+    /// session turned them off or history has nothing to say.
+    suggestion: Option<ActionSuggestion>,
+    /// The action being run is the suggested one (set by accepting it).
+    taking: bool,
 }
 
 pub struct MailApp {
@@ -114,6 +132,16 @@ pub struct MailApp {
     list_views: Vec<ListView>,
     /// Which pane the tab keys act on.
     pane_focus: Pane,
+    /// The cursor message the reader last followed (see `follow_cursor`).
+    followed_cursor: Option<MessageId>,
+    /// The account tile the user clicked in the sidebar rail (`None` = All) and the view it
+    /// was clicked in. The panel shows that account only while that view is still the active
+    /// one; any other view makes the panel follow its own location (see
+    /// [`MailApp::sidebar_account`]).
+    sidebar_pick: Option<(Option<AccountId>, Location)>,
+    /// Folders and account sections the user folded or unfolded in the sidebar, by key, true
+    /// when open. A key that is absent has its view's default.
+    sidebar_folds: HashMap<String, bool>,
     /// Reader tabs, one per thread. The active tab's message is the one shown in the reader
     /// (see [`MailApp::opened`]).
     pub tabs: Tabs,
@@ -167,6 +195,8 @@ pub struct MailApp {
     pub block_remote_images: bool,
     /// Preview snippet lines under each subject (`crate::preview::OPTIONS`); 0 is Off.
     pub preview_lines: u8,
+    /// How list rows look (settings > Appearance): density, leading element, chips, group tiles.
+    pub row_style: crate::row_style::RowStyle,
     /// Width of the message list panel in pixels (drives how many row icons fit):
     /// the pane size side by side, the whole pane region when stacked.
     list_w: f32,
@@ -205,8 +235,12 @@ pub struct MailApp {
     classify_failed: HashSet<MessageId>,
     /// Automatic classification (`AUTO_CLASSIFY`); false means Jev runs only on demand.
     auto_classify: bool,
+    /// Age cutoff for automatic classification in days (`AUTO_CLASSIFY_MAX_AGE_DAYS`); 0 = off.
+    auto_max_age_days: u16,
     /// The cold-outreach checkbox (`SPAM_COLD_OUTREACH`); part of the Spam version.
     spam_cold_outreach: bool,
+    /// The never/always-spam lists as last written to preferences.
+    saved_spam_senders: SpamSenders,
     /// Messages classified before their body downloaded: id → force every enabled question.
     pending_classify: HashMap<MessageId, bool>,
     /// The opened message the frame loop last saw, so the open hook fires once per change.
@@ -224,6 +258,8 @@ pub struct MailApp {
     dialog: Option<Entity<ChoiceDialog>>,
     /// Folder picker (`f` and the dialogs' `File…`).
     folder_picker: Option<Entity<FolderPicker>>,
+    /// "New folder" account picker or name prompt.
+    new_folder: Option<AnyView>,
     settings: Option<Entity<SettingsPanel>>,
     _theme_sub: Option<Subscription>,
     /// Separate native Settings window, if currently open.
@@ -232,10 +268,16 @@ pub struct MailApp {
     rules_panel: Option<Entity<RulesPanel>>,
     pending_rule: Option<Rule>,
     session: Option<Session>,
-    session_end: Option<(usize, i64)>,
+    /// The Start screen, while it is up.
+    session_setup: Option<SetupView>,
+    /// The Summary screen, while it is up, with the options "Keep going" starts over with.
+    session_summary: Option<(SessionSummary, SessionOptions)>,
+    /// The last action's message while a session runs: shown with an Undo in the top row
+    /// instead of a bottom toast.
+    triage_undo: Option<SharedString>,
     /// The list a session works through: its own cursor, selection and scroll over the queue,
-    /// so a session never touches the user's list tabs. Present exactly while `session` or
-    /// `session_end` is (see [`MailApp::triage_open`]).
+    /// so a session never touches the user's list tabs. Present exactly while `session`,
+    /// `session_setup` or `session_summary` is (see [`MailApp::triage_open`]).
     session_view: Option<ListView>,
     /// Which list and reader the render in flight draws, when it is not the default
     /// ([`MailApp::slot`]). Set only while a panel renders, so the user's own tabs and the
@@ -304,8 +346,13 @@ pub struct MailApp {
     bodies_paused: bool,
     /// Wakes the sync loop when work is queued.
     sync_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
-    /// Toast text queued from a background task, shown on the next frame.
-    pending_toast: Option<String>,
+    /// Toast queued from a background task, shown on the next frame.
+    pending_toast: Option<(String, Option<ToastAction>)>,
+    /// Check for updates once a day (`AUTO_UPDATE_CHECK`).
+    auto_update_check: bool,
+    /// When the last update check started (`UPDATE_CHECKED_AT`).
+    update_checked_at: Option<Timestamp>,
+    update_state: UpdateState,
 }
 
 impl MailApp {
@@ -320,7 +367,7 @@ impl MailApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Real-time heartbeat wakes snoozed mail and flushes the outbox.
+        // Real-time heartbeat wakes snoozed mail.
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -338,6 +385,9 @@ impl MailApp {
             list_tabs: ListTabs::new(all_inboxes.clone()),
             list_views: vec![ListView::new(all_inboxes, Location::AllInboxes)],
             pane_focus: Pane::default(),
+            followed_cursor: None,
+            sidebar_pick: None,
+            sidebar_folds: HashMap::new(),
             tabs: Tabs::default(),
             tab_avatars: true,
             theme_mode: crate::theme::ThemeMode::System,
@@ -363,6 +413,7 @@ impl MailApp {
             summaries_enabled: false,
             block_remote_images: false,
             preview_lines: crate::preview::DEFAULT_LINES,
+            row_style: crate::row_style::RowStyle::default(),
             list_w: 0.,
             panes,
             reader: ReaderView::default(),
@@ -384,7 +435,9 @@ impl MailApp {
             // Overridden from `AUTO_CLASSIFY` by `load_preferences` at startup; the constructor
             // default keeps headless tests that never load preferences classifying.
             auto_classify: true,
+            auto_max_age_days: 0,
             spam_cold_outreach: false,
+            saved_spam_senders: SpamSenders::default(),
             pending_classify: HashMap::new(),
             last_opened: None,
             zone,
@@ -395,6 +448,7 @@ impl MailApp {
             _theme_sub: None,
             snooze: None,
             dialog: None,
+            new_folder: None,
             folder_picker: None,
             settings: None,
             settings_window: None,
@@ -402,7 +456,9 @@ impl MailApp {
             rules_panel: None,
             pending_rule: None,
             session: None,
-            session_end: None,
+            session_setup: None,
+            session_summary: None,
+            triage_undo: None,
             session_view: None,
             drawing: std::cell::Cell::new(None),
             summary: None,
@@ -439,6 +495,9 @@ impl MailApp {
             bodies_paused: false,
             sync_wake: None,
             pending_toast: None,
+            auto_update_check: true,
+            update_checked_at: None,
+            update_state: UpdateState::Idle,
         };
         app.classify_visible(cx);
         app
@@ -454,9 +513,8 @@ impl MailApp {
         self.tab_avatars = crate::app_settings::TAB_AVATARS.get(store.as_ref(), &scope);
         self.block_remote_images = crate::app_settings::BLOCK_REMOTE_IMAGES.get(store.as_ref(), &scope);
         self.group_threads = crate::app_settings::GROUP_THREADS.get(store.as_ref(), &scope);
-        self.preview_lines = crate::app_settings::PREVIEW_LINES
-            .get(store.as_ref(), &scope)
-            .min(5);
+        self.preview_lines = crate::app_settings::PREVIEW_LINES.get(store.as_ref(), &scope).min(5);
+        self.row_style = crate::app_settings::load_row_style(store.as_ref(), &scope);
         self.summaries_enabled = crate::app_settings::SUMMARIES.get(store.as_ref(), &scope);
         let days = crate::app_settings::FOLLOW_UP_DAYS
             .get(store.as_ref(), &scope)
@@ -504,9 +562,19 @@ impl MailApp {
             QuestionKey::Folder,
             crate::app_settings::MODE_FOLDER.get(store.as_ref(), &scope),
         );
+        self.auto_update_check = crate::app_settings::AUTO_UPDATE_CHECK.get(store.as_ref(), &scope);
+        self.update_checked_at = crate::app_settings::UPDATE_CHECKED_AT.get(store.as_ref(), &scope);
         self.auto_classify = crate::app_settings::AUTO_CLASSIFY.get(store.as_ref(), &scope);
+        self.auto_max_age_days =
+            crate::app_settings::AUTO_CLASSIFY_MAX_AGE_DAYS.get(store.as_ref(), &scope);
         self.spam_cold_outreach =
             crate::app_settings::SPAM_COLD_OUTREACH.get(store.as_ref(), &scope);
+        let senders = SpamSenders::from_lists(
+            crate::app_settings::NEVER_SPAM_SENDERS.get(store.as_ref(), &scope),
+            crate::app_settings::ALWAYS_SPAM_SENDERS.get(store.as_ref(), &scope),
+        );
+        self.mailbox.load_spam_senders(senders.clone());
+        self.saved_spam_senders = senders;
         self.preferences = Some(store);
         cx.set_window_appearance(match self.theme_mode {
             crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),
@@ -546,6 +614,8 @@ impl MailApp {
     pub fn tick(&mut self, cx: &mut Context<Self>) {
         let now = self.now();
         self.mailbox.tick(now);
+        self.auto_check_update(now, cx);
+        self.sync_settings_update(cx); // keeps "checked 2 h ago" current
         cx.notify();
     }
 

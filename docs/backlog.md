@@ -17,7 +17,7 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 
 ## Composer (on `email-composer`)
 
-- **Answer the five Drafts-pane decisions** (not started). Search filtering vs hiding pills; ordering and excluding sent drafts; `cmd-shift-d` renamed "Go to drafts" under Navigate; Drafts above Sent in the sidebar; discard only via `d`/`#` with confirm.
+- **Answer the five Drafts-pane decisions** (not started). Search filtering vs hiding pills; ordering and excluding sent drafts; `cmd-shift-d` renamed "Go to drafts" under Navigate; Drafts above Sent in the sidebar; discard only via `d` with confirm.
 - **Fix body typing lag** (partial). Every keystroke re-renders the whole window and copies the body about four times. The notify guard landed; the missing `.cached()` boundary at Root → MailApp → Composer did not.
 - **Finish the second feedback batch** (partial). The worker died mid-batch. Confirm on the branch: toolbar styled like the kit example, footer Close removed, light-mode To/Cc/Bcc/Subject backgrounds, draft tab icon, discard shortcut and hint, kit-style attachment cards.
 - **Hard flush of drafts on quit** (partial). `flush_dirty_drafts` starts writes but never joins the lane, so the last keystrokes can be lost on quit. You chose best effort for now.
@@ -52,6 +52,8 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 - **Inline search input in the title bar** (not started). Search phase 3: autocomplete dropdown and live token highlighting. The title-bar search is still a button that opens the palette.
 - **Move the result count to the title bar** (not started). Show it after the folder name and drop "All Inboxes · 100" from the list header (`filters.rs`).
 - **Redesign mute** (not started). Mute still hides threads through a separate set, outside the triage-state model (`triage-spec.md`).
+- **Attention fade** (not started). Optional row setting, off by default: unread rows stay bright, read rows dim with age, and a thin left bar shows classifier confidence. Mocked in `mockups/rows.html` (concept 1); deferred from the row redesign. Needs a design pass for the rail and tiles layouts (it only changes opacity, so compact can honour it).
+- **Chips with tiles, thread chips** (not started). Chips Above/Below are mocked on the rail layout only; thread headers show no chips, and the tiles-plus-chips combination was never mocked.
 
 ## Contacts and senders
 
@@ -92,7 +94,9 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 ## Release, build and crashes
 
 - **Run the first nightly** (not started). Land `nightly-build`, then confirm certificate import, notarization and Gatekeeper on a real run.
-- **In-app updates** (not started). The plan is in `docs/in-app-update.md` on `nightly-build`: stage 1 checks every 24 h and shows a toast plus a "Check for updates" command; stage 2 auto-updates via `latest.json`.
+- **In-app updates: download automatically** (not started). Fetch and verify the update in the background and swap it in on the next quit, instead of waiting for the Update button. A setting on the Updates page.
+- **In-app updates: what's new** (not started). Link to (or show) the release notes for the running and the available build from Settings → Updates.
+- **In-app updates: channel picker** (not started). Stable / Nightly on the Updates page once stable releases exist; needs a rule for moving from nightly to an older stable build.
 - **App icon** (not started). Add `AppIcon.icns` and `CFBundleIconFile`; about 5 lines in `package.sh`.
 - **Proper `.app` bundle for local builds** (not started). Covered by `package.sh` if `nightly-build` lands.
 - **SIGILL hardening** (not started). Make `scripts/sign-and-run.sh` abort when `codesign --verify --strict` fails instead of warning and running anyway; give concurrent agents separate `CARGO_TARGET_DIR`s; read the `.ips` report. The email-HTML stack overflows are fixed by the WebKit reader.

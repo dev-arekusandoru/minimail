@@ -62,6 +62,16 @@ impl ListTabs {
         self.active
     }
 
+    /// Point tab `ix` at `query` in place. False for an unknown index, and when another tab
+    /// already shows `query` (the caller then closes this one: a view is open once).
+    pub fn retarget(&mut self, ix: usize, query: Query) -> bool {
+        if ix >= self.tabs.len() || self.tabs.iter().enumerate().any(|(i, t)| i != ix && t.query == query) {
+            return false;
+        }
+        self.tabs[ix].query = query;
+        true
+    }
+
     /// Pin tab `ix`, so the next preview replaces something else.
     pub fn pin(&mut self, ix: usize) -> bool {
         match self.tabs.get_mut(ix) {

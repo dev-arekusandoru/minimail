@@ -28,11 +28,17 @@ pub const STEP: f32 = 40.;
 /// Width of the double-click target centred on the sidebar's edge.
 pub const DIVIDER_HIT: f32 = 7.;
 
-/// The sidebar's default width.
-pub const SIDEBAR_W: f32 = 190.;
+/// Width of the sidebar's fixed account rail; the folder panel takes the rest.
+pub const RAIL_W: f32 = 56.;
+/// The folder panel's default width, and the narrowest it may be dragged to: tiles, titles
+/// and the unread pills stop fitting under that.
+pub const PANEL_W: f32 = 232.;
+pub const MIN_PANEL_W: f32 = 176.;
+/// The sidebar's default width: the rail and its panel.
+pub const SIDEBAR_W: f32 = RAIL_W + PANEL_W;
 /// Sidebar drag limits.
-pub const MIN_SIDEBAR_W: f32 = 120.;
-pub const MAX_SIDEBAR_W: f32 = 320.;
+pub const MIN_SIDEBAR_W: f32 = RAIL_W + MIN_PANEL_W;
+pub const MAX_SIDEBAR_W: f32 = 420.;
 /// The titlebar and the hint bar, which the stacked panes do not get. Only used to size the
 /// stacked list before the first layout has measured the real container.
 const CHROME_H: f32 = 78.;
@@ -233,23 +239,21 @@ impl MailApp {
         self.show_toast(format!("Layout: {}", orientation.label()), window, cx);
     }
 
-    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. While the
-    /// Triage tab exists it is the group in focus — a session takes the keyboard — otherwise
-    /// it is the list or the reader, whichever the tab keys are acting on.
+    /// `alt-z`: zoom the focused group over the whole dock, or give the dock back. Triage mode
+    /// has no dock, so it does nothing there.
     pub(super) fn toggle_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.modal_open() {
+        if self.modal_open() || self.triage_open() {
             return;
         }
-        let group = match (self.triage_open(), self.focused_pane()) {
-            (true, _) => Zoom::Triage,
-            (false, Pane::List) => Zoom::List,
-            (false, Pane::Reader) => Zoom::Reader,
+        let group = match self.focused_pane() {
+            Pane::List => Zoom::List,
+            Pane::Reader => Zoom::Reader,
         };
         self.panes.dock_mut().toggle_zoom(group, window, cx);
         cx.notify();
     }
 
-    /// The group filling the dock — `"list"`, `"reader"` or `"triage"` — if one does.
+    /// The group filling the dock — `"list"` or `"reader"` — if one does.
     pub fn zoomed_group(&self, cx: &App) -> Option<&'static str> {
         self.panes.dock_ref().zoomed(cx).map(Zoom::name)
     }
@@ -294,7 +298,6 @@ impl MailApp {
         TabSets {
             readers: self.tabs.tabs().iter().map(|tab| tab.kind.clone()).collect(),
             reader: self.tabs.active().map(|tab| tab.kind.clone()),
-            triage: self.triage_open() && self.session_view.is_some(),
             views: self.list_tabs.tabs().iter().map(|tab| tab.query.clone()).collect(),
             list: self.list_tabs.active_index(),
         }

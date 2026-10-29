@@ -229,6 +229,22 @@ impl Harness<'_> {
 }
 
 #[gpui_kit::gpui::test]
+fn palette_only_offers_reset_for_overridden_fields(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("cmd-k");
+    assert!(!h.palette_rows().iter().any(|row| row.ends_with("to suggestion")));
+    h.keys("escape");
+    h.app.update(h.cx, |a, _| {
+        let id = a.triage().cursor(&a.mailbox, &a.local_now()).unwrap();
+        a.mailbox.set_label(id, mail_classifier::judge::QuestionKey::Urgency, None);
+    });
+    h.keys("cmd-k");
+    let rows = h.palette_rows();
+    assert!(rows.iter().any(|row| row == "Reset Urgency to suggestion"));
+    assert!(!rows.iter().any(|row| row == "Reset Kind to suggestion"));
+}
+
+#[gpui_kit::gpui::test]
 fn palette_matches_by_subsequence_and_by_key_string(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.keys("cmd-k");
@@ -374,7 +390,7 @@ fn shift_e_archives_all_from_sender(cx: &mut TestAppContext) {
     assert!(expected > 1, "fixture should have multiple msgs per sender");
     let start = h.counts();
     h.keys("shift-e");
-    h.keys("1");
+    h.keys("enter");
     let remaining = h.read(|a| {
         a.mailbox
             .messages()

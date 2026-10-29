@@ -3,21 +3,30 @@ use super::*;
 /// The sidebar's visible-location counts, computed in one pass over the mailbox.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarCounts {
-    /// Visible messages in Inbox across every account (the All Inboxes row).
+    /// Visible messages in Inbox across every account (the All Inboxes tile).
     pub all_inboxes: usize,
-    /// Per account: `(inbox, snoozed)`.
-    per: std::collections::HashMap<AccountId, (usize, usize)>,
+    /// Visible snoozed messages across every account (the All Snoozed tile).
+    pub all_snoozed: usize,
+    /// Visible unread Inbox messages across every account (the rail's All dot).
+    pub all_inboxes_unread: usize,
+    /// Per account: `(inbox, snoozed, unread inbox)`.
+    per: std::collections::HashMap<AccountId, (usize, usize, usize)>,
 }
 
 impl SidebarCounts {
     /// The account's visible Inbox count.
     pub fn inbox(&self, account: &str) -> usize {
-        self.per.get(account).map_or(0, |(inbox, _)| *inbox)
+        self.per.get(account).map_or(0, |(inbox, _, _)| *inbox)
     }
 
     /// The account's visible Snoozed count.
     pub fn snoozed(&self, account: &str) -> usize {
-        self.per.get(account).map_or(0, |(_, snoozed)| *snoozed)
+        self.per.get(account).map_or(0, |(_, snoozed, _)| *snoozed)
+    }
+
+    /// The account's visible unread Inbox count.
+    pub fn inbox_unread(&self, account: &str) -> usize {
+        self.per.get(account).map_or(0, |(_, _, unread)| *unread)
     }
 }
 
@@ -66,18 +75,25 @@ impl Mailbox {
             .count()
     }
 
-    /// The counts the sidebar shows, in one pass: All Inboxes plus each account's Inbox and
-    /// Snoozed. Every other location is displayed without a count, so no query is built for
-    /// it and the mailbox is scanned once per frame rather than once per location.
+    /// The counts the sidebar shows, in one pass: All Inboxes, All Snoozed plus each
+    /// account's Inbox and Snoozed, and the unread Inbox counts behind the rail's dots. Every
+    /// other location is displayed without a count, so no query is built for it and the
+    /// mailbox is scanned once per frame rather than once per location.
     pub fn sidebar_counts(&self) -> SidebarCounts {
         let mut counts = SidebarCounts::default();
         for message in self.messages.iter().filter(|m| self.is_visible_msg(m)) {
             match message.state {
                 TriageState::Inbox => {
                     counts.all_inboxes += 1;
-                    counts.per.entry(message.account.clone()).or_default().0 += 1;
+                    let per = counts.per.entry(message.account.clone()).or_default();
+                    per.0 += 1;
+                    if !message.read {
+                        counts.all_inboxes_unread += 1;
+                        per.2 += 1;
+                    }
                 }
                 TriageState::Snoozed => {
+                    counts.all_snoozed += 1;
                     counts.per.entry(message.account.clone()).or_default().1 += 1;
                 }
                 _ => {}
@@ -163,6 +179,51 @@ impl Mailbox {
         };
         self.push_undo(vec![Change::Blocked(e, Some(at))]);
         true
+    }
+    pub fn is_blocked(&self, email: &str) -> bool {
+        self.blocked.contains_key(&email.trim().to_ascii_lowercase())
+    }
+    /// Record the user's spam verdict for `email` (`None` clears it); one undo step. The
+    /// address leaves the other list. Never-spam also clears the spam warning on the
+    /// sender's Inbox mail in every account. False when nothing changed.
+    pub fn set_spam_sender(&mut self, email: &str, verdict: Option<SpamVerdict>) -> bool {
+        let before = self.spam_senders.verdict(email);
+        let e = email.trim().to_ascii_lowercase();
+        if before == verdict || e.is_empty() {
+            return false;
+        }
+        self.spam_senders.set(&e, verdict);
+        let mut changes = vec![Change::SpamSender(e.clone(), before)];
+        if verdict == Some(SpamVerdict::Never) {
+            let flagged: Vec<MessageId> = self
+                .messages
+                .iter()
+                .filter(|m| {
+                    m.state == TriageState::Inbox
+                        && m.from_email.eq_ignore_ascii_case(&e)
+                        && self
+                            .meta
+                            .get(&m.id)
+                            .is_some_and(|meta| meta.tags.contains(&Tag::PossibleSpam))
+                })
+                .map(|m| m.id)
+                .collect();
+            for id in flagged {
+                changes.push(self.snapshot(id));
+                if let Some(meta) = self.meta.get_mut(&id) {
+                    meta.tags.retain(|tag| *tag != Tag::PossibleSpam);
+                }
+            }
+        }
+        self.push_undo(changes);
+        true
+    }
+    pub fn spam_senders(&self) -> &SpamSenders {
+        &self.spam_senders
+    }
+    /// Seed the lists from preferences at startup; not an undo step.
+    pub fn load_spam_senders(&mut self, senders: SpamSenders) {
+        self.spam_senders = senders;
     }
     /// Blocked senders with the time each was blocked, sorted by address.
     pub fn blocked(&self) -> Vec<(String, Timestamp)> {
@@ -261,7 +322,8 @@ impl Mailbox {
         name: &str,
         parent: Option<FolderId>,
     ) -> FolderId {
-        let id = self.folders.iter().map(|f| f.id).max().unwrap_or(0) + 1;
+        let id = self.next_folder_id();
+        self.folder_floor = id;
         self.folders.push(Folder {
             id,
             account: account.to_owned(),
@@ -299,9 +361,58 @@ impl Mailbox {
             })
             .collect()
     }
+    /// [`Mailbox::ids_matching`] minus the messages of collapsed days: exactly what the list,
+    /// the cursor and selections work over.
+    pub fn ids_shown(&self, query: &Query, now: &Now) -> Vec<MessageId> {
+        let mut ids = self.ids_matching(query, now);
+        if !self.collapsed_days.is_empty() {
+            ids.retain(|id| !self.collapsed_days.contains(&self.day_of(*id, now)));
+        }
+        ids
+    }
+    /// Local day a message was received on (the epoch's day when `received` is unreadable).
+    pub fn day_of(&self, id: MessageId, now: &Now) -> crate::day_groups::DayKey {
+        let ts = self.get(id).and_then(Message::received_at).unwrap_or(0);
+        crate::day_groups::day_key(now, ts)
+    }
+    pub fn collapsed_days(&self) -> &HashSet<crate::day_groups::DayKey> {
+        &self.collapsed_days
+    }
+    /// Collapse the day, or expand it when it already is collapsed.
+    pub fn toggle_day(&mut self, day: crate::day_groups::DayKey) {
+        if !self.collapsed_days.remove(&day) {
+            self.collapsed_days.insert(day);
+        }
+    }
     /// How many visible messages `location` holds.
     pub fn count_at(&self, location: &Location, now: &Now) -> usize {
         self.ids_matching(&self.location_query(location), now).len()
+    }
+    /// How many visible, unread messages `location` holds.
+    pub fn unread_count_at(&self, location: &Location, now: &Now) -> usize {
+        let query = self.location_query(location);
+        self.ids_matching(&query, now)
+            .into_iter()
+            .filter(|id| self.get(*id).is_some_and(|m| !m.read))
+            .count()
+    }
+    /// Unread visible messages per folder, each folder counting its whole subtree (itself and
+    /// every subfolder). Folders with none are absent. One pass over the messages, so a
+    /// sidebar of many folders does not scan the mailbox once per row.
+    pub fn folder_unread(&self) -> HashMap<FolderId, usize> {
+        let mut out = HashMap::new();
+        for m in self.messages.iter().filter(|m| !m.read && self.is_visible_msg(m)) {
+            let TriageState::Filed(mut at) = m.state else { continue };
+            // Bounded by the folder count, so a corrupt parent cycle cannot hang the render.
+            for _ in 0..self.folders.len() {
+                *out.entry(at).or_insert(0) += 1;
+                match self.folder(at).and_then(|f| f.parent) {
+                    Some(parent) => at = parent,
+                    None => break,
+                }
+            }
+        }
+        out
     }
     /// A folder's name including its parents, e.g. `"Projects/Northwind"`.
     pub fn folder_path(&self, id: FolderId) -> String {
@@ -322,6 +433,10 @@ impl Mailbox {
     pub fn location_query(&self, location: &Location) -> Query {
         let (place, account) = match location {
             Location::AllInboxes => ("inbox".to_owned(), None),
+            Location::AllSnoozed => ("snoozed".to_owned(), None),
+            Location::AllSent => ("sent".to_owned(), None),
+            Location::AllArchive => ("archived".to_owned(), None),
+            Location::AllTrash => ("deleted".to_owned(), None),
             Location::Inbox(a) => ("inbox".to_owned(), Some(a.as_str())),
             Location::Snoozed(a) => ("snoozed".to_owned(), Some(a.as_str())),
             Location::Drafts(a) => ("drafts".to_owned(), Some(a.as_str())),
@@ -341,7 +456,7 @@ impl Mailbox {
         q
     }
     /// The location `query` names through its `in:` (and `account:`) values: exactly one of
-    /// each at most, the account required for everything but All Inboxes. `None` for a
+    /// each at most, the account required only for folders and the per-account places. `None` for a
     /// query that is not anchored to one place (global search, several `in:` values).
     pub fn query_location(&self, query: &Query) -> Option<Location> {
         let [place] = query.values(Field::In) else {
@@ -364,6 +479,10 @@ impl Mailbox {
         };
         match (place.as_str(), account) {
             ("inbox", None) => Some(Location::AllInboxes),
+            ("snoozed", None) => Some(Location::AllSnoozed),
+            ("sent", None) => Some(Location::AllSent),
+            ("archived", None) => Some(Location::AllArchive),
+            ("deleted", None) => Some(Location::AllTrash),
             ("inbox", Some(a)) => Some(Location::Inbox(a)),
             ("snoozed", Some(a)) => Some(Location::Snoozed(a)),
             ("drafts", Some(a)) => Some(Location::Drafts(a)),

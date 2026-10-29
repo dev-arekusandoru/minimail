@@ -146,14 +146,29 @@ impl MailApp {
         self.pending_rule.clone()
     }
 
-    /// `(current 1-based, total)` while a session is active.
+    /// `(current 1-based, total)` while a session is running (see [`crate::triage_session`]).
     pub fn session_progress(&self) -> Option<(usize, usize)> {
-        self.session.as_ref().map(|s| (s.index + 1, s.ids.len()))
+        self.session.as_ref().map(|s| s.run.progress())
     }
 
-    /// `(handled, elapsed secs)` once the session end card is shown.
-    pub fn session_end(&self) -> Option<(usize, i64)> {
-        self.session_end
+    /// The Start screen's state, while it is up.
+    pub fn session_setup(&self) -> Option<&SetupView> {
+        self.session_setup.as_ref()
+    }
+
+    /// The Summary screen's numbers, while it is up.
+    pub fn session_summary(&self) -> Option<&SessionSummary> {
+        self.session_summary.as_ref().map(|(summary, _)| summary)
+    }
+
+    /// The suggested action for the current message; `None` with suggestions off or no advice.
+    pub fn session_suggestion(&self) -> Option<&ActionSuggestion> {
+        self.session.as_ref().and_then(|s| s.suggestion.as_ref())
+    }
+
+    /// The options of the running session.
+    pub fn session_options(&self) -> Option<&SessionOptions> {
+        self.session.as_ref().map(|s| &s.run.options)
     }
 
     /// Summary displayed for the opened thread, if any.
@@ -183,9 +198,9 @@ impl MailApp {
         commands().iter().map(|c| c.name.to_string()).collect()
     }
 
-    /// Exactly the message ids the list shows, top to bottom.
+    /// Exactly the message ids the list shows, top to bottom: collapsed days hold none.
     pub fn visible_ids(&self) -> Vec<MessageId> {
-        self.mailbox.ids_matching(&self.triage().query, &self.local_now())
+        self.mailbox.ids_shown(&self.triage().query, &self.local_now())
     }
 
     /// [`Self::visible_ids`] memoized for the current render pass. [`Self::render`] clears the
@@ -227,9 +242,7 @@ impl MailApp {
     }
 
     pub(super) fn session_current(&self) -> Option<MessageId> {
-        self.session
-            .as_ref()
-            .and_then(|s| s.ids.get(s.index).copied())
+        self.session.as_ref().and_then(|s| s.run.current())
     }
 
     /// Message the actions target: the menu's message, else the one under the cursor (or the
@@ -238,10 +251,8 @@ impl MailApp {
         if let Some(id) = self.menu_target.as_ref().and_then(|ids| ids.first()) {
             return Some(*id);
         }
-        if self.slot() == Slot::Triage
-            && let Some(id) = self.session_current()
-        {
-            return Some(id);
+        if self.triage_open() && self.slot() == Slot::Triage {
+            return self.session_current();
         }
         if self.grouped() {
             return self.cursor_row().map(|r| r.primary());
@@ -291,6 +302,10 @@ impl MailApp {
 
     /// Ids an action applies to: the menu's target, session message, selection/cursor, or cursor.
     pub(super) fn target_ids(&self) -> Vec<MessageId> {
+        // The Start and Summary screens act on nothing.
+        if self.triage_open() && self.session.is_none() {
+            return Vec::new();
+        }
         if let Some(ids) = &self.menu_target {
             return ids.clone();
         }
@@ -327,6 +342,7 @@ impl MailApp {
             || self.rules_panel.is_some()
             || self.dialog.is_some()
             || self.folder_picker.is_some()
+            || self.new_folder.is_some()
     }
 
     /// The documents the email views loaded without a native window (the headless platform).
@@ -341,9 +357,11 @@ impl MailApp {
     }
 
     /// Scroll the cursor row fully into view; rows have their own heights, so the list state
-    /// works it out.
-    pub(super) fn scroll_to_cursor(&self) {
-        self.view().list_state.scroll_to_reveal_item(self.cursor_ix());
+    /// works it out. Re-clamps first: mailbox changes shrink the list without touching the cursor.
+    pub(super) fn scroll_to_cursor(&mut self) {
+        self.move_cursor(0);
+        let item = self.list_model().item_of_row(self.cursor_ix());
+        self.view().list_state.scroll_to_reveal_item(item);
     }
 
     /// The reader's scroll state for `thread`, as `(offset_y, max_offset_y)` in pixels, so a

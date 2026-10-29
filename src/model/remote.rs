@@ -12,7 +12,7 @@ impl Mailbox {
     }
 
     pub fn next_folder_id(&self) -> FolderId {
-        self.folders.iter().map(|f| f.id).max().map_or(1, |m| m + 1)
+        self.folders.iter().map(|f| f.id).max().unwrap_or(0).max(self.folder_floor) + 1
     }
 
     pub fn next_thread_id(&self) -> u32 {
@@ -59,9 +59,18 @@ impl Mailbox {
                 self.insert_sorted(id, new_stamp);
             }
         } else {
+            // New mail from an always-spam sender arrives flagged, and the flag is a hand
+            // override so the classifier never changes it.
+            let always = !message.outgoing
+                && self.spam_senders.verdict(&message.from_email) == Some(SpamVerdict::Always);
             self.messages.push(message);
             self.index.insert(id, self.messages.len() - 1);
             self.insert_sorted(id, new_stamp);
+            if always {
+                let meta = self.meta.entry(id).or_default();
+                meta.tags.push(Tag::PossibleSpam);
+                meta.overrides.push(QuestionKey::Spam);
+            }
         }
         let meta = self.meta.entry(id).or_default();
         if state == TriageState::Snoozed {

@@ -79,21 +79,26 @@ pub enum SettingsEvent {
         auto_classify: bool,
         spam_cold_outreach: bool,
     },
+    AutoClassifyAge(u16),
     Grouping(bool),
     TabAvatars(bool),
     /// Whether the reader blocks remote images (keeps the sender from learning it was opened).
     BlockRemoteImages(bool),
+    /// Whether to check for updates once a day.
+    AutoUpdateCheck(bool),
+    /// The Updates row's button: check, or move a found update forward.
+    UpdateButton,
     PreviewLines(u8),
-    Theme {
-        mode: theme::ThemeMode,
-        light: String,
-        dark: String,
-    },
+    /// The row style changed (density, leading element, group tile, chips, subject first).
+    RowStyle(crate::row_style::RowStyle),
+    Theme { mode: theme::ThemeMode, light: String, dark: String },
     PaneLayout(Orientation),
     /// New global follow-up timeout, in seconds (`mailbox.set_follow_up_timeout`).
     FollowUp(Timestamp),
     /// Unblock the sender (`mailbox.unblock_sender`); one undo step.
     Unblock(String),
+    /// Remove the sender from the never-spam / always-spam list; one undo step.
+    ClearSpamSender(String),
     /// Start the Gmail sign-in flow.
     AddGmail,
     /// Remove a linked account (confirmed in the panel).
@@ -151,9 +156,6 @@ pub const ACCOUNTS_PAGE: usize = 0;
 /// Index of the AI (classifier) page, where the Jev connection lives.
 pub const AI_PAGE: usize = 4;
 
-/// The mode segments of a non-folder question: its label is applied as soon as it arrives, or
-/// the question is off. A folder suggestion is the only one queued for review.
-const CLASSIFIER_MODES: [(&str, &str); 2] = [("auto", "Auto"), ("off", "Off")];
 const MAX_PREVIEW_LINES: u8 = 5;
 const FOLLOW_UP_DAYS: std::ops::RangeInclusive<u8> = 1..=14;
 
@@ -260,13 +262,20 @@ pub struct SettingsPanel {
     summaries: bool,
     /// Classify new mail automatically as it arrives (opt in; off by default).
     auto_classify: bool,
+    /// Age cutoff for automatic classification in days; 0 = never skip.
+    auto_max_age_days: u16,
     /// Count recruiters' and sales cold outreach as spam (`SPAM_COLD_OUTREACH`).
     spam_cold_outreach: bool,
     group: bool,
     tab_avatars: bool,
     /// Block remote images in the reader (opt in; images load by default).
     block_remote_images: bool,
+    /// Check for updates once a day (on by default).
+    auto_update_check: bool,
+    /// The Updates status row, pushed by the app.
+    update_status: crate::update::Status,
     preview_lines: u8,
+    row_style: crate::row_style::RowStyle,
     orientation: Orientation,
     theme_mode: theme::ThemeMode,
     light_theme: String,
@@ -274,6 +283,8 @@ pub struct SettingsPanel {
     /// Blocked sender addresses with the time each was blocked, sorted;
     /// `Unblock` removes one and emits [`SettingsEvent::Unblock`].
     blocked: Vec<(String, Timestamp)>,
+    /// Never-spam and always-spam senders; `ClearSpamSender` removes one.
+    spam_senders: crate::spam_senders::SpamSenders,
     /// Address filter for the Senders page.
     filter: String,
     /// The filter's input (with its subscription).
@@ -378,16 +389,21 @@ impl SettingsPanel {
             policy,
             summaries,
             auto_classify: false,
+            auto_max_age_days: crate::judge::DEFAULT_MAX_AGE_DAYS,
             spam_cold_outreach: false,
             group,
             tab_avatars: true,
             block_remote_images: false,
+            auto_update_check: true,
+            update_status: crate::update::status(None, &crate::update::UpdateState::Idle, None, 0),
             preview_lines: preview_lines.min(MAX_PREVIEW_LINES),
+            row_style: crate::row_style::RowStyle::default(),
             orientation,
             theme_mode: theme::ThemeMode::System,
             light_theme: String::new(),
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             blocked: Vec::new(),
+            spam_senders: Default::default(),
             filter: String::new(),
             filter_input,
             _filter_sub: filter_sub,
@@ -412,6 +428,12 @@ impl SettingsPanel {
         }
     }
 
+    /// The row style's initial value.
+    pub fn row_style(mut self, style: crate::row_style::RowStyle) -> Self {
+        self.row_style = style;
+        self
+    }
+
     /// Whether tabs show the sender's avatar (the row's initial value).
     pub fn tab_avatars(mut self, on: bool) -> Self {
         self.tab_avatars = on;
@@ -424,10 +446,28 @@ impl SettingsPanel {
         self
     }
 
+    /// Whether updates are checked daily (the switch's initial value).
+    pub fn auto_update_check(mut self, on: bool) -> Self {
+        self.auto_update_check = on;
+        self
+    }
+
+    /// The Updates status row (version, status, button).
+    pub fn update_status(mut self, status: crate::update::Status) -> Self {
+        self.update_status = status;
+        self
+    }
+
     /// The classifier switches' initial values (both off by default).
     pub fn classifier_switches(mut self, auto_classify: bool, spam_cold_outreach: bool) -> Self {
         self.auto_classify = auto_classify;
         self.spam_cold_outreach = spam_cold_outreach;
+        self
+    }
+
+    /// The auto-classify age cutoff's initial value, in days (0 = never skip).
+    pub fn auto_max_age(mut self, days: u16) -> Self {
+        self.auto_max_age_days = days;
         self
     }
     pub fn theme_preferences(mut self, mode: theme::ThemeMode, light: String, dark: String) -> Self {
@@ -563,6 +603,20 @@ impl SettingsPanel {
         self
     }
 
+    /// Seed the never/always-spam lists.
+    pub fn spam_senders(mut self, senders: crate::spam_senders::SpamSenders) -> Self {
+        self.spam_senders = senders;
+        self
+    }
+
+    /// Re-read the never/always-spam lists (undo restores an entry).
+    pub fn set_spam_senders(&mut self, senders: crate::spam_senders::SpamSenders, cx: &mut Context<Self>) {
+        if self.spam_senders != senders {
+            self.spam_senders = senders;
+            cx.notify();
+        }
+    }
+
     /// Re-read the blocked senders and the clock (undo restores a block).
     pub fn set_blocked(&mut self, blocked: Vec<(String, Timestamp)>, now: Now, cx: &mut Context<Self>) {
         if self.blocked != blocked || self.now.at() != now.at() {
@@ -623,11 +677,14 @@ impl SettingsPanel {
         self.policy = JudgePolicy::default();
         self.summaries = false;
         self.auto_classify = false;
+        self.auto_max_age_days = crate::judge::DEFAULT_MAX_AGE_DAYS;
         self.spam_cold_outreach = false;
         self.group = false;
         self.tab_avatars = true;
         self.block_remote_images = false;
+        self.auto_update_check = true;
         self.preview_lines = preview::DEFAULT_LINES;
+        self.row_style = crate::row_style::RowStyle::default();
         self.orientation = Orientation::SideBySide;
         self.theme_mode = theme::ThemeMode::System;
         self.light_theme = crate::app_settings::DEFAULT_LIGHT_THEME.to_owned();
@@ -643,13 +700,13 @@ impl SettingsPanel {
         cx.notify();
     }
 
-
-    fn set_classifier_mode(&mut self, question: QuestionKey, value: &str, cx: &mut Context<Self>) {
-        let mode = match (value, self.policy.mode(question)) {
-            ("auto", mode @ Mode::Auto(_)) => mode,
-            // Back to Auto puts the question's shipped preset back.
-            ("auto", _) => JudgePolicy::default().mode(question),
-            _ => Mode::Off,
+    /// Ask `question` of the classifier (on) or not at all (off). On keeps a stored preset and
+    /// otherwise restores the question's shipped one.
+    fn set_question_asked(&mut self, question: QuestionKey, on: bool, cx: &mut Context<Self>) {
+        let mode = match (on, self.policy.mode(question)) {
+            (false, _) => Mode::Off,
+            (true, Mode::Off) => JudgePolicy::default().mode(question),
+            (true, mode) => mode,
         };
         self.set_mode(question, mode, cx);
     }
@@ -692,6 +749,21 @@ impl SettingsPanel {
         self.set_grouping(false, cx);
     }
 
+    /// Apply `edit` to the row style and tell the app when it changed.
+    fn edit_row_style(
+        &mut self,
+        edit: impl FnOnce(&mut crate::row_style::RowStyle),
+        cx: &mut Context<Self>,
+    ) {
+        let mut style = self.row_style;
+        edit(&mut style);
+        if style != self.row_style {
+            self.row_style = style;
+            cx.emit(SettingsEvent::RowStyle(style));
+            cx.notify();
+        }
+    }
+
     fn set_tab_avatars(&mut self, on: bool, cx: &mut Context<Self>) {
         if on != self.tab_avatars {
             self.tab_avatars = on;
@@ -713,6 +785,18 @@ impl SettingsPanel {
         self.set_block_remote_images(false, cx);
     }
 
+    fn set_auto_update_check(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_update_check {
+            self.auto_update_check = on;
+            cx.emit(SettingsEvent::AutoUpdateCheck(on));
+            cx.notify();
+        }
+    }
+
+    fn reset_auto_update_check(&mut self, cx: &mut Context<Self>) {
+        self.set_auto_update_check(true, cx);
+    }
+
     fn set_summaries(&mut self, on: bool, cx: &mut Context<Self>) {
         if on != self.summaries {
             self.summaries = on;
@@ -724,6 +808,30 @@ impl SettingsPanel {
         if on != self.auto_classify {
             self.auto_classify = on;
             self.changed(cx);
+        }
+    }
+
+    fn set_auto_max_age(&mut self, days: u16, cx: &mut Context<Self>) {
+        if days != self.auto_max_age_days {
+            self.auto_max_age_days = days;
+            cx.emit(SettingsEvent::AutoClassifyAge(days));
+            cx.notify();
+        }
+    }
+
+    /// Show a change made outside the panel (Stop / Start classifying) on its switch.
+    pub fn show_auto_classify(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on != self.auto_classify {
+            self.auto_classify = on;
+            cx.notify();
+        }
+    }
+
+    /// Show the app's current update status.
+    pub fn show_update_status(&mut self, status: crate::update::Status, cx: &mut Context<Self>) {
+        if status != self.update_status {
+            self.update_status = status;
+            cx.notify();
         }
     }
 
@@ -818,6 +926,12 @@ impl SettingsPanel {
             .iter()
             .filter(|(email, _)| needle.is_empty() || email.to_lowercase().contains(&needle))
             .collect()
+    }
+
+    fn clear_spam_sender(&mut self, email: &str, cx: &mut Context<Self>) {
+        self.spam_senders.set(email, None);
+        cx.emit(SettingsEvent::ClearSpamSender(email.to_owned()));
+        cx.notify();
     }
 
     /// Drop `email` from the local list and ask the app to unblock it.
@@ -946,6 +1060,7 @@ impl SettingsPanel {
             self.reader_page(weak),
             self.classifier_page(weak),
             self.blocked_page(weak),
+            self.updates_page(weak),
         ]
     }
 }
@@ -1110,13 +1225,14 @@ fn row(
 /// A switch control: the panel bool and the setter a click uses.
 fn switch(
     weak: &Weak,
-    get: fn(&SettingsPanel) -> bool,
-    set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
+    get: impl Fn(&SettingsPanel) -> bool + 'static,
+    set: impl Fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>) + 'static,
 ) -> Control {
     let (read, write) = (weak.clone(), weak.clone());
+    let set = Rc::new(set);
     Rc::new(move |_, _, cx| {
         let on = read.read_with(cx, |this, _| get(this)).unwrap_or_default();
-        let write = write.clone();
+        let (write, set) = (write.clone(), set.clone());
         Switch::new("check")
             .checked(on)
             .small()
@@ -1130,9 +1246,9 @@ fn switch(
 /// The undo of a switch row, which a reset turns back to `default`.
 fn switch_undo(
     weak: &Weak,
-    get: fn(&SettingsPanel) -> bool,
+    get: impl Fn(&SettingsPanel) -> bool + 'static,
     default: bool,
-    set: fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>),
+    set: impl Fn(&mut SettingsPanel, bool, &mut Context<SettingsPanel>) + 'static,
 ) -> Undo {
     Undo::of_panel(
         weak,
@@ -1271,17 +1387,6 @@ fn select(entries: Vec<(SharedString, SharedString)>, read: Read, write: Write) 
     })
 }
 
-
-/// A muted one-line placeholder row.
-fn note(id: &'static str, text: &'static str) -> SettingItem {
-    SettingItem::render(move |_, _, cx| {
-        div()
-            .id(id)
-            .text_sm()
-            .text_color(cx.theme().muted_foreground)
-            .child(text)
-    })
-}
 
 impl Focusable for SettingsPanel {
     fn focus_handle(&self, _: &App) -> FocusHandle {

@@ -18,7 +18,7 @@ impl Triage {
         }
     }
     fn ids(&self, mb: &Mailbox, now: &Now) -> Vec<MessageId> {
-        mb.ids_matching(&self.query, now)
+        mb.ids_shown(&self.query, now)
     }
     pub fn cursor_index(&self) -> usize {
         self.cursor
