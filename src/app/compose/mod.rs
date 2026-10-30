@@ -1678,10 +1678,14 @@ impl Render for Composer {
                 // ⇧⌘↵ edits the sentence without sending: the token's click, on the keys.
                 this.open_menu(false, None, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &DismissComposeOverlay, _, cx| {
-                // Escape dismisses the slash menu or the hint and stops there; it never
-                // closes the composer, whatever field has focus.
+            .on_action(cx.listener(|this, _: &DismissComposeOverlay, window, cx| {
+                // Escape dismisses the slash menu or the hint; from a header field it also
+                // hands the keyboard to the body. It never closes the composer.
                 this.dismiss_footer_overlays(cx);
+                let body = this.body_focus(cx);
+                if !body.is_focused(window) && !this.frozen() {
+                    window.focus(&body, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &ToggleFormattingBar, _, cx| this.toggle_toolbar(cx)))
             // The slash menu owns these keys before the textarea sees them.

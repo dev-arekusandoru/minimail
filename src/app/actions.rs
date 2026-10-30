@@ -216,7 +216,8 @@ pub fn bind_keys(cx: &mut App) {
     let p = Some(PALETTE_CONTEXT);
     // Match the focused input depth as well as the compose surface. Otherwise the kit's
     // Enter/Escape bindings win and can edit the selection before sending or closing.
-    let c = Some("Compose > Input || Compose");
+    // `>` binds loosest, so the parentheses are what lets the bare surface match too.
+    let c = Some("(Compose > Input) || Compose");
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("j", SelectNext, m),

@@ -857,8 +857,8 @@ fn the_new_folder_tile_names_the_panels_account_or_asks_in_the_all_view(cx: &mut
     assert!(h.read(|a| a.mailbox.folders("personal").iter().all(|f| f.name != "Receipts 2027")));
 }
 
-/// Escape dismisses what floats over the composer and stops there: with the caret in a
-/// recipient field it must leave the composer, and its tab, exactly as they were.
+/// Escape in a recipient field never closes the composer or its tab: it hands the
+/// keyboard to the body.
 #[gpui_kit::gpui::test]
 fn escape_in_a_composer_recipient_input_leaves_the_composer_open(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -875,13 +875,13 @@ fn escape_in_a_composer_recipient_input_leaves_the_composer_open(cx: &mut TestAp
     assert!(h.read(|a| a.compose_open()), "escape left the composer open");
     assert_eq!(h.read(|a| a.open_drafts().len()), 1, "and its tab with it");
 
-    // And the caret never left the field: what is typed there is what the draft receives.
-    h.type_text("newcc@example.com");
-    h.keys("enter");
-    assert_eq!(
-        h.read(|a| a.composer.drafts[0].record.cc.clone()),
-        "newcc@example.com",
-        "the recipient field still had the keyboard"
+    // The keyboard moved to the body: what is typed next is the message, not a recipient.
+    h.type_text("hello");
+    h.settle();
+    assert_eq!(h.read(|a| a.composer.drafts[0].record.cc.clone()), "", "no recipient was typed");
+    assert!(
+        h.read(|a| a.composer.drafts[0].record.body.source.contains("hello")),
+        "the body had the keyboard"
     );
 
     // Closing is still on the keys: the palette's command closes the composer and keeps

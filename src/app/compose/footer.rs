@@ -83,6 +83,8 @@ pub struct FooterState {
     slash: Option<(Range<usize>, Vec<&'static toolbar::Tool>)>,
     /// The highlighted slash row.
     slash_sel: usize,
+    /// Where the menu opened: the `/`'s line box, kept so a frame without layout can't move it.
+    slash_at: Option<Point<Pixels>>,
     /// The first-run hint is on screen.
     hint: bool,
 }
@@ -92,6 +94,7 @@ impl FooterState {
         Self {
             slash: None,
             slash_sel: 0,
+            slash_at: None,
             hint: !FooterPrefs::toolbar(cx) && !FooterPrefs::hint_seen(cx),
         }
     }
@@ -158,6 +161,7 @@ impl Composer {
             open.as_ref().map(|(range, _)| range) != self.footer.slash.as_ref().map(|(range, _)| range);
         if self.footer.slash.is_none() {
             self.footer.slash_sel = 0;
+            self.footer.slash_at = None;
         }
         if let Some((_, rows)) = &open {
             self.footer.slash_sel = self.footer.slash_sel.min(rows.len() - 1);
@@ -361,10 +365,17 @@ impl Composer {
             })
     }
 
-    /// The body caret's line box on screen, when it has been laid out.
-    fn caret_bounds(&self, cx: &App) -> Option<Bounds<Pixels>> {
-        let at = self.footer.slash.as_ref()?.0.end;
-        self.body.read(cx).range_to_bounds(&(at..at))
+    /// Under the `/` that opened the menu: fixed while the query grows, and kept once laid out.
+    fn slash_anchor(&mut self, cx: &App) -> Option<Point<Pixels>> {
+        let at = self.footer.slash.as_ref()?.0.start;
+        if self.footer.slash_at.is_none() {
+            self.footer.slash_at = self
+                .body
+                .read(cx)
+                .range_to_bounds(&(at..at))
+                .map(|caret| point(caret.origin.x, caret.bottom() + px(4.)));
+        }
+        self.footer.slash_at
     }
 
     /// Overlays that float over the body: the slash menu and the first-run hint.
@@ -435,12 +446,12 @@ impl Composer {
                 );
             }
             menu = menu.max_h(px(320.)).overflow_y_scroll();
-            // Just under the caret; anchored flips it above when the body ends too near the
+            // Just under the `/`; anchored flips it above when the body ends too near the
             // window edge. Before the first layout there is no caret to anchor to.
-            out.push(match self.caret_bounds(cx) {
-                Some(caret) => anchored()
+            out.push(match self.slash_anchor(cx) {
+                Some(at) => anchored()
                     .anchor(Anchor::TopLeft)
-                    .position(point(caret.origin.x, caret.bottom() + px(4.)))
+                    .position(at)
                     .snap_to_window_with_margin(px(8.))
                     .child(menu)
                     .into_any_element(),
@@ -470,7 +481,7 @@ impl Composer {
                     .text_size(px(12.))
                     .line_height(px(17.))
                     .shadow_lg()
-                    .child("Formatting is hidden. Click the sliders (or ⌘⌥T) to show it. Type / in the body to run any formatting command, attach a file, or send later.")
+                    .child("Formatting is hidden. Click the sliders (or ⌘⌥T) to show it. Type / in the body to run any formatting command or attach a file.")
                     .into_any_element(),
             );
         }

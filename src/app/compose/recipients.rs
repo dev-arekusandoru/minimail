@@ -332,7 +332,12 @@ impl Recipients {
                 let step = if k.key == "down" { 1 } else { rows - 1 };
                 self.active = (self.active + step) % rows;
             }
-            "escape" if open => self.popup_open = false,
+            // The popup closes here; the composer's Escape then hands the keyboard to the body.
+            "escape" => {
+                self.popup_open = false;
+                cx.notify();
+                return;
+            }
             "tab" if !k.modifiers.shift && !self.typed(cx).is_empty() => {
                 if !self.commit(window, cx) {
                     return;

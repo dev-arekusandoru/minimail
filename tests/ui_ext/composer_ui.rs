@@ -135,6 +135,35 @@ pub fn the_formatting_bar_toggles_and_is_remembered(cx: &mut TestAppContext) {
     assert!(!h.has("compose-bold"), "cmd-alt-t hides it again");
 }
 
+/// ⌘⇧V shows the preview and the same key brings the editor back.
+#[gpui_kit::gpui::test]
+pub fn the_preview_key_toggles_both_ways(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("hello");
+    h.keys("cmd-shift-v");
+    assert!(h.has("compose-preview"), "cmd-shift-v shows the preview");
+    h.keys("cmd-shift-v");
+    assert!(!h.has("compose-preview"), "cmd-shift-v again returns to the editor");
+    h.type_text(" again");
+    h.settle();
+    assert_eq!(h.draft_fields().3, "hello again", "and the body takes typing again");
+}
+
+/// Escape in a recipient field closes its suggestions and moves typing to the body.
+#[gpui_kit::gpui::test]
+pub fn escape_in_a_recipient_field_moves_to_the_body(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.click("compose-to");
+    h.type_text("someone");
+    h.keys("escape");
+    assert!(h.read(|a| a.compose_open()), "the composer stays open");
+    h.type_text("body text");
+    h.settle();
+    assert_eq!(h.draft_fields().3, "body text", "typing lands in the body");
+}
+
 /// A `/` opens the menu at the start of a word — the body's start or after whitespace —
 /// and the text after it filters the rows. Escape or whitespace dismisses it.
 #[gpui_kit::gpui::test]
