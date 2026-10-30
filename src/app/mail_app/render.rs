@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::compose::ComposeEvent;
 use gpui_kit::component::ActiveTheme as _;
 
 impl Focusable for MailApp {
@@ -104,6 +105,15 @@ impl Render for MailApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ClearSelection, window, cx| this.escape(window, cx)))
+            // The palette hands focus back to the app before running a command, so the
+            // composer never sees the shell moves it lists. Hand them to the draft on
+            // screen: it is where the user would have used the old ⋯ menu.
+            .on_action(cx.listener(|this, _: &ExpandComposer, _, cx| {
+                this.emit_to_composer(ComposeEvent::Expand, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CollapseComposer, _, cx| {
+                this.emit_to_composer(ComposeEvent::Collapse, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenMessage, window, cx| {
                 if !this.triage_enter(window, cx) {
                     this.open_cursor(window, cx);

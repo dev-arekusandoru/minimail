@@ -32,11 +32,13 @@ impl MailApp {
         self.in_drafts()
     }
 
-    /// The draft rows the Drafts pane shows, newest edit first: the current account's
-    /// unfinished drafts. Empty while another location is the list.
+    /// The draft rows the Drafts pane shows, newest edit first: every account's unfinished
+    /// drafts in the All view, else the current account's. Empty while another location is
+    /// the list.
     pub fn draft_rows(&self) -> Vec<crate::app::compose::drafts::DraftRow> {
         match self.location() {
-            Some(Location::Drafts(account)) => self.account_drafts(&account),
+            Some(Location::Drafts(account)) => self.account_drafts(Some(&account)),
+            Some(Location::AllDrafts) => self.account_drafts(None),
             _ => Vec::new(),
         }
     }
@@ -273,14 +275,15 @@ impl MailApp {
     /// Whether the Drafts pane is the list the app is showing. Drafts are not messages, so
     /// the list, the cursor and the open key all take their drafts-pane path.
     pub(super) fn in_drafts(&self) -> bool {
-        matches!(self.location(), Some(Location::Drafts(_)))
+        matches!(self.location(), Some(Location::Drafts(_) | Location::AllDrafts))
     }
 
-    /// The drafts `account` still has to finish that the active query matches, newest edit
-    /// first. Filtering is the pane's; the sidebar badge counts the unfiltered set.
+    /// The drafts `account` (`None` for every account) still has to finish that the active
+    /// query matches, newest edit first. Filtering is the pane's; the sidebar badge counts the
+    /// unfiltered set.
     pub(super) fn account_drafts(
         &self,
-        account: &str,
+        account: Option<&str>,
     ) -> Vec<crate::app::compose::drafts::DraftRow> {
         crate::app::compose::drafts::rows(
             self.composer.drafts.iter().map(|d| &d.record),

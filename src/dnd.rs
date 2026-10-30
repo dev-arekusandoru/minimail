@@ -74,6 +74,7 @@ pub fn drop_action(location: &Location) -> DropAction {
         Location::AllInboxes
         | Location::Sent(_)
         | Location::Drafts(_)
+        | Location::AllDrafts
         | Location::AllSent
         | Location::AllSnoozed => DropAction::Nothing,
     }

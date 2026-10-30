@@ -1,9 +1,9 @@
 //! The sidebar's folder panel: the part of the sidebar beside the account rail (see
 //! [`super::rail`]), showing one account's locations at a time.
 //!
-//! Top to bottom it is a title (the account, or *All Inboxes*), a grid of tiles for the five
-//! places mail lives (Inbox, Snoozed, Sent, Archive, Trash) plus a *new folder* tile, and the
-//! folders. An account's view carries its whole folder tree; the All view carries the
+//! Top to bottom it is a title (the account, or *All Inboxes*), a grid of tiles for the six
+//! places mail lives (Inbox, Snoozed, Drafts, Sent, Archive, Trash) plus a *new folder* tile,
+//! and the folders. An account's view carries its whole folder tree; the All view carries the
 //! cross-account tiles and then one section per account with its top-level folders.
 //!
 //! Which account the panel shows is [`MailApp::sidebar_account`]: it follows the list's
@@ -35,6 +35,7 @@ pub(super) fn location_label(loc: &Location, mailbox: &Mailbox) -> String {
     match loc {
         Location::AllInboxes
         | Location::AllSnoozed
+        | Location::AllDrafts
         | Location::AllSent
         | Location::AllArchive
         | Location::AllTrash => location_name(loc).to_owned(),
@@ -64,6 +65,7 @@ fn location_name(loc: &Location) -> &'static str {
     match loc {
         Location::AllInboxes => "All Inboxes",
         Location::AllSnoozed => "All Snoozed",
+        Location::AllDrafts => "All Drafts",
         Location::AllSent => "All Sent",
         Location::AllArchive => "All Archive",
         Location::AllTrash => "All Trash",
@@ -88,6 +90,7 @@ fn location_account(loc: &Location) -> AccountId {
         | Location::Trash(a) => a.clone(),
         Location::AllInboxes
         | Location::AllSnoozed
+        | Location::AllDrafts
         | Location::AllSent
         | Location::AllArchive
         | Location::AllTrash
@@ -108,7 +111,7 @@ fn location_icon(loc: &Location, t: &ThemeColor) -> (IconName, Hsla) {
         Location::AllInboxes => (IconName::Mails, t.primary),
         Location::Inbox(_) => (IconName::Inbox, theme::inbox(t)),
         Location::Snoozed(_) | Location::AllSnoozed => (IconName::AlarmClock, theme::snoozed(t)),
-        Location::Drafts(_) => (IconName::FileText, t.info),
+        Location::Drafts(_) | Location::AllDrafts => (IconName::FileText, t.info),
         Location::Sent(_) | Location::AllSent => (IconName::Send, t.info),
         Location::Archive(_) | Location::AllArchive => (IconName::Archive, theme::archived(t)),
         Location::Trash(_) | Location::AllTrash => (IconName::Trash, theme::deleted(t)),
@@ -183,6 +186,7 @@ fn row_id(loc: &Location) -> ElementId {
     match loc {
         Location::AllInboxes => "sidebar-all-inboxes".into(),
         Location::AllSnoozed => "sidebar-all-snoozed".into(),
+        Location::AllDrafts => "sidebar-all-drafts".into(),
         Location::AllSent => "sidebar-all-sent".into(),
         Location::AllArchive => "sidebar-all-archive".into(),
         Location::AllTrash => "sidebar-all-trash".into(),
@@ -294,6 +298,7 @@ impl MailApp {
             None => vec![
                 (Location::AllInboxes, ""),
                 (Location::AllSnoozed, ""),
+                (Location::AllDrafts, ""),
                 (Location::AllSent, ""),
                 (Location::AllArchive, ""),
                 (Location::AllTrash, ""),
@@ -370,6 +375,7 @@ impl MailApp {
             loc,
             Location::AllInboxes
                 | Location::AllSnoozed
+                | Location::AllDrafts
                 | Location::Inbox(_)
                 | Location::Snoozed(_)
                 | Location::Drafts(_)
@@ -379,6 +385,7 @@ impl MailApp {
         let count = if counted {
             match &loc {
                 Location::Drafts(account) => self.account_draft_count(account),
+                Location::AllDrafts => self.all_draft_count(),
                 Location::AllInboxes => self.sidebar_counts().all_inboxes,
                 Location::AllSnoozed => self.sidebar_counts().all_snoozed,
                 Location::Inbox(account) => self.sidebar_counts().inbox(account),
@@ -571,6 +578,15 @@ impl MailApp {
             .drafts
             .iter()
             .filter(|d| d.record.account == account)
+            .filter(|d| crate::app::compose::drafts::listed(&d.record))
+            .count()
+    }
+
+    /// How many drafts every account still has to finish, for the All view's Drafts tile.
+    pub fn all_draft_count(&self) -> usize {
+        self.composer
+            .drafts
+            .iter()
             .filter(|d| crate::app::compose::drafts::listed(&d.record))
             .count()
     }

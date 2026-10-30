@@ -35,6 +35,8 @@ gpui_kit::assets::icon_assets!(
         CircleDashed, LoaderCircle, CircleAlert,
         // Composer formatting controls.
         Bold, Italic, Link, List, ListOrdered, Heading, Quote, Code, Strikethrough, Table,
+        // The formatting-bar toggle in the composer's status line.
+        SlidersHorizontal,
         // Draft tabs: a document-with-pen glyph, not in gpui-kit's default bundle.
         FilePen
     ]

@@ -67,16 +67,21 @@ pub fn listed(record: &DraftRecord) -> bool {
     !matches!(record.state, DraftState::Sent { .. })
 }
 
-/// The drafts of `account` as the pane lists them: unfinished, matching `filter`, newest
-/// edit first (ties by id, so the order is stable). One row per draft.
+/// The drafts of `account` (`None` for every account) as the pane lists them: unfinished,
+/// matching `filter`, newest edit first (ties by id, so the order is stable). One row per
+/// draft.
 pub fn rows<'a>(
     records: impl IntoIterator<Item = &'a DraftRecord>,
-    account: &str,
+    account: Option<&str>,
     filter: &Query,
 ) -> Vec<DraftRow> {
     let mut out: Vec<DraftRow> = records
         .into_iter()
-        .filter(|record| record.account == account && listed(record) && matches(record, filter))
+        .filter(|record| {
+            account.is_none_or(|account| record.account == account)
+                && listed(record)
+                && matches(record, filter)
+        })
         .map(row)
         .collect();
     // Newest first; the id keeps drafts edited in the same second in a stable order.
@@ -182,7 +187,7 @@ mod tests {
             remote_id: "mid".into(),
         };
         assert!(
-            rows([&sent], "personal", &Query::default()).is_empty(),
+            rows([&sent], Some("personal"), &Query::default()).is_empty(),
             "Sent lives in the Sent folder, not in Drafts"
         );
     }
@@ -191,13 +196,19 @@ mod tests {
     fn only_the_named_accounts_drafts_are_listed() {
         let mut other = draft(2, "Work note", "boss@corp.io");
         other.account = "work".into();
-        let rows = rows(
+        let only = rows(
             [&draft(1, "Personal note", "cal@example.com"), &other],
-            "personal",
+            Some("personal"),
             &Query::default(),
         );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].subject, "Personal note");
+        assert_eq!(only.len(), 1);
+        assert_eq!(only[0].subject, "Personal note");
+        let all = rows(
+            [&draft(1, "Personal note", "cal@example.com"), &other],
+            None,
+            &Query::default(),
+        );
+        assert_eq!(all.len(), 2, "no account filter lists every account's drafts");
     }
 
     #[test]
@@ -208,7 +219,7 @@ mod tests {
                 &draft(3, "Newest", "b@x.com"),
                 &draft(2, "Middle", "c@x.com"),
             ],
-            "personal",
+            Some("personal"),
             &Query::default(),
         );
         let subjects: Vec<&str> = rows.iter().map(|r| r.subject.as_str()).collect();
@@ -217,7 +228,7 @@ mod tests {
 
     #[test]
     fn subject_and_recipient_fall_back_to_placeholders() {
-        let rows = rows([&draft(1, "", "")], "personal", &Query::default());
+        let rows = rows([&draft(1, "", "")], Some("personal"), &Query::default());
         assert_eq!(rows[0].subject_label(), "(no subject)");
         assert_eq!(rows[0].recipient_label(), "(no recipient)");
     }
@@ -226,7 +237,7 @@ mod tests {
     fn the_snippet_drops_quoted_lines_and_signatures() {
         let mut quoted = draft(1, "Re: Budget", "cal@example.com");
         quoted.body.source = "Here is the answer.\n\n> quoted text\n-- \nsig".into();
-        let rows = rows([&quoted], "personal", &Query::default());
+        let rows = rows([&quoted], Some("personal"), &Query::default());
         assert_eq!(rows[0].snippet, "Here is the answer.");
     }
 
@@ -239,7 +250,7 @@ mod tests {
         a.body.source = "the Quarterly numbers".into();
         let mut b = draft(2, "Lunch", "dee@example.com");
         b.cc = "chef@example.com".into();
-        let listed = |q: &str| rows([&a, &b], "personal", &Query::parse(q)).len();
+        let listed = |q: &str| rows([&a, &b], Some("personal"), &Query::parse(q)).len();
 
         assert_eq!(listed(""), 2, "no query lists every draft");
         assert_eq!(listed("budget"), 1, "subject, case-insensitively");

@@ -4,23 +4,18 @@
 use crate::harness::{harness, harness_with, mailbox, msg};
 use gpui_kit::TestAppContext;
 
-/// Collapse is only offered for a draft that came out of a thread. A fresh message has no
-/// thread to go back to, so it never shows the control; an expanded reply does.
+/// Expand and Collapse lost their ⋯ menu; the palette is their home now, and both move the
+/// same draft between the tab strip and the thread it answers.
 #[gpui_kit::gpui::test]
-pub fn collapse_is_offered_only_for_a_draft_that_came_from_a_thread(cx: &mut TestAppContext) {
+pub fn expand_and_collapse_run_from_the_palette(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.compose_reply("from a thread");
     h.expand_active_draft();
     assert!(h.read(|a| a.compose_in_tab()), "the reply is in a tab");
+    h.collapse_active_draft();
     assert!(
-        h.composer_menu_rows().iter().any(|r| r == "Collapse"),
-        "an expanded reply can collapse back to its thread"
-    );
-
-    h.new_draft();
-    assert!(
-        !h.composer_menu_rows().iter().any(|r| r == "Collapse"),
-        "a fresh message has no thread, so it offers no Collapse"
+        h.read(|a| a.inline_compose_open()),
+        "an expanded reply collapses back under its thread"
     );
 }
 
@@ -156,16 +151,21 @@ pub fn a_slash_opens_the_menu_and_typing_or_escape_dismisses_it(cx: &mut TestApp
     assert!(h.read(|a| a.compose_open()), "and does not close the composer");
 }
 
-/// Down and Enter drive the slash menu instead of moving the caret: Enter on Attach file
-/// removes the `/` and closes the menu; Down then Enter on Send later opens the intent menu.
+/// Down and Enter drive the slash menu instead of moving the caret. The menu mirrors the
+/// bar (every command plus Send later): Up from the first row wraps to Send later, which
+/// opens the intent menu, and picking Bold by click makes the same edit its chord does.
 #[gpui_kit::gpui::test]
 pub fn the_slash_menu_is_driven_from_the_keyboard(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.new_draft();
     h.type_text("hi\n");
     h.type_text("/");
-    h.keys("down");
-    h.keys("enter");
+    // Every bar command, then the menu-only Send later.
+    for ix in 0usize..=11 {
+        assert!(h.has(("compose-slash", ix)), "slash row {ix} is missing");
+    }
+    assert!(h.has("compose-slash-later"), "slash row 12 is missing");
+    h.keys("up enter");
     assert!(!h.has("compose-slash-menu"), "picking closes the menu");
     assert!(h.has("compose-intent-menu"), "Send later opens the intent menu");
     h.keys("escape");
@@ -178,8 +178,13 @@ pub fn the_slash_menu_is_driven_from_the_keyboard(cx: &mut TestAppContext) {
 
     h.type_text("/");
     h.keys("enter");
-    assert!(!h.has("compose-slash-menu"), "Enter on Attach file closes the menu");
+    assert!(!h.has("compose-slash-menu"), "Enter on Bold closes the menu");
     assert!(!h.has("compose-intent-menu"));
+    let body = h.read(|a| {
+        let id = a.tabs.active_draft().expect("a draft tab");
+        a.composer.record(id).expect("record").body.source.clone()
+    });
+    assert_eq!(body, "hi\n****", "Bold wraps the empty caret like its chord does");
 }
 
 /// Mentioning an attachment with none attached warns in the status line, and Send says so.

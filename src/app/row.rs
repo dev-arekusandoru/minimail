@@ -48,7 +48,7 @@ pub fn sender_label(msg: &crate::model::Message) -> String {
 /// `All Archive`, ...), where the account is otherwise ambiguous.
 pub fn shows_account_icon(location: &crate::model::Location) -> bool {
     use crate::model::Location::*;
-    matches!(location, AllInboxes | AllSnoozed | AllSent | AllArchive | AllTrash)
+    matches!(location, AllInboxes | AllSnoozed | AllDrafts | AllSent | AllArchive | AllTrash)
 }
 
 /// Background of a row in its resting state (`--rowbg` of the mockups): the active step for the

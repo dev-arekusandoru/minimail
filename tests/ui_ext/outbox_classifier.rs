@@ -52,7 +52,7 @@ pub fn composer_clicks_keep_typing_and_formatting_in_the_editor(cx: &mut TestApp
 pub fn selected_body_text_survives_submit_and_recall(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("before selected after");
-    h.keys("cmd-a cmd-enter");
+    h.keys("cmd-a cmd-enter enter");
     h.await_holds(1);
     h.keys("u");
     h.settle();
@@ -76,7 +76,7 @@ pub fn sending_holds_first_and_nothing_leaves_before_the_countdown(cx: &mut Test
         1,
         "the reply is a durable draft, not a modal"
     );
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     assert!(h.hold_pending(), "the send waits out its hold");
 
@@ -101,7 +101,7 @@ pub fn undo_during_the_hold_restores_the_draft(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("still here");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     assert!(h.hold_pending());
     h.advance(mail_classifier::outgoing::HOLD_SECONDS - 1);
@@ -134,7 +134,7 @@ pub fn a_second_submit_does_not_bypass_the_hold(cx: &mut TestAppContext) {
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("once only");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     assert!(h.hold_pending());
     h.keys("cmd-enter");
@@ -176,7 +176,7 @@ pub fn every_edit_after_the_first_is_written_in_turn(cx: &mut TestAppContext) {
         "and the third took the third"
     );
 
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     h.deliver_held();
     let bodies = h.sent_bodies();
@@ -197,7 +197,7 @@ pub fn sending_while_the_last_save_is_still_running_sends_the_newest_text(cx: &m
     h.settle();
     // Submit in the same breath as the last edit: the save of "second pass" is still out.
     h.type_text(" second pass");
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.settle();
     h.await_holds(1);
     h.deliver_held();
@@ -312,7 +312,7 @@ pub fn sending_while_a_file_is_still_being_attached_sends_the_newest_draft(
     let path = temp_file("send-race.txt", b"receipt bytes");
     h.attach(vec![path.clone()]);
     h.type_text(" second pass");
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.settle();
     h.await_holds(1);
     h.deliver_held();
@@ -347,7 +347,7 @@ pub fn a_held_reply_changes_nothing_until_a_provider_confirms_it(cx: &mut TestAp
     h.settle();
     assert_eq!(h.counts(), start, "typing a reply triages nothing");
 
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     assert!(h.sent_bodies().is_empty(), "a hold is not a delivery");
     assert_eq!(h.state_of(id), Inbox, "the original has not moved");
@@ -570,23 +570,48 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
     );
 }
 
-/// The rail's pinned Drafts icon shows the draft count and opens the list with the draft in it.
+/// The All view's Drafts tile counts every account's drafts and opens the list holding them.
 #[gpui_kit::gpui::test]
-pub fn the_rail_drafts_pin_shows_the_count_and_lists_the_draft(cx: &mut TestAppContext) {
-    let mut h = harness_with(cx, snooze_box());
-    assert!(h.has("sidebar-drafts"), "the Drafts pin is on the rail");
-    assert!(!h.has("sidebar-drafts-count"), "no badge without drafts");
-    h.compose_reply("pinned");
+pub fn the_all_drafts_tile_shows_the_count_and_lists_every_draft(cx: &mut TestAppContext) {
+    let mb = mailbox(&[
+        msg(1, 101, "dana@whitfield.dev", "Personal note", 14, "Inbox"),
+        work_msg(2, 202, "ravi@acme.co", "Work note", 14, "Inbox"),
+    ]);
+    let mut h = harness_with(cx, mb);
+    assert!(!h.has("sidebar-drafts"), "the rail has no Drafts button");
+    assert!(h.has("sidebar-all-drafts"), "the All grid has a Drafts tile");
+    assert_eq!(h.read(|a| a.all_draft_count()), 0, "no drafts to count yet");
+
+    // One draft per account, closed so only the pane can reach them.
+    h.click("sidebar-rail-personal");
+    h.click("sidebar-inbox-personal");
+    h.new_draft();
+    h.type_text("personal draft");
     h.settle();
-    h.keys("escape");
+    let personal = h.read(|a| a.tabs.active_draft().expect("personal draft tab"));
+    h.close_draft_tab(personal);
+    h.click("sidebar-rail-work");
+    h.click("sidebar-inbox-work");
+    h.new_draft();
+    h.type_text("work draft");
+    h.settle();
+    let work = h.read(|a| a.tabs.active_draft().expect("work draft tab"));
+    h.close_draft_tab(work);
+
+    h.click("sidebar-rail-all");
     h.tick();
-    assert!(h.has("sidebar-drafts-count"), "the pin carries the count");
-    h.click("sidebar-drafts");
+    assert_eq!(h.read(|a| a.all_draft_count()), 2, "the tile counts both accounts");
+    h.click("sidebar-all-drafts");
     h.tick();
+    assert_eq!(h.location(), Some(Location::AllDrafts));
     assert!(h.drafts_pane_open());
     let rows = h.draft_rows();
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].3.contains("pinned"), "{rows:?}");
+    assert_eq!(rows.len(), 2, "every account's draft is listed");
+    let mut accounts: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    accounts.sort_unstable();
+    assert_eq!(accounts, ["personal", "work"]);
+    assert!(rows.iter().any(|r| r.3.contains("work draft")), "{rows:?}");
+    assert!(rows.iter().any(|r| r.3.contains("personal draft")), "{rows:?}");
 }
 
 /// The Drafts pane is per account: each account's row lists only its own drafts, and the

@@ -339,20 +339,25 @@ impl Cache {
     /// Drop a folder the provider never saw. One with a remote label stays: only the provider
     /// can remove it.
     pub fn delete_local_folder(&self, id: FolderId) -> rusqlite::Result<()> {
-        self.conn.execute("DELETE FROM folders WHERE id=?1 AND remote_id IS NULL", [id as i64])?;
+        self.conn.execute(
+            "DELETE FROM folders WHERE id=?1 AND remote_id IS NULL",
+            [id as i64],
+        )?;
         Ok(())
     }
 
     /// Tombstone a folder the mailbox no longer has but whose label the provider still does:
     /// the label is deleted remotely next round.
     pub fn tombstone_folder(&self, id: FolderId) -> rusqlite::Result<()> {
-        self.conn.execute("UPDATE folders SET deleted=1 WHERE id=?1", [id as i64])?;
+        self.conn
+            .execute("UPDATE folders SET deleted=1 WHERE id=?1", [id as i64])?;
         Ok(())
     }
 
     /// Bring a tombstoned folder back (its deletion was undone before the label went).
     pub fn restore_folder(&self, id: FolderId) -> rusqlite::Result<()> {
-        self.conn.execute("UPDATE folders SET deleted=0 WHERE id=?1", [id as i64])?;
+        self.conn
+            .execute("UPDATE folders SET deleted=0 WHERE id=?1", [id as i64])?;
         Ok(())
     }
 
@@ -368,7 +373,8 @@ impl Cache {
     /// The provider deleted a folder's label. A tombstone row goes; a live row (the deletion was
     /// undone while the round ran) forgets the label, so filing into it creates a new one.
     pub fn finish_folder_delete(&self, id: FolderId) -> rusqlite::Result<()> {
-        self.conn.execute("DELETE FROM folders WHERE id=?1 AND deleted=1", [id as i64])?;
+        self.conn
+            .execute("DELETE FROM folders WHERE id=?1 AND deleted=1", [id as i64])?;
         self.conn.execute(
             "UPDATE folders SET remote_id=NULL, synced_path=NULL WHERE id=?1",
             [id as i64],
@@ -394,7 +400,8 @@ impl Cache {
              WHERE parent=?1",
             params![dup, into.map(|i| i as i64)],
         )?;
-        self.conn.execute("DELETE FROM folders WHERE id=?1", [dup])?;
+        self.conn
+            .execute("DELETE FROM folders WHERE id=?1", [dup])?;
         Ok(())
     }
 
@@ -797,7 +804,9 @@ fn cached_path(rows: &[CachedFolder], id: FolderId) -> String {
     let mut at = Some(id);
     // Bounded by the row count, so a parent cycle cannot hang the migration.
     while let Some(next) = at.filter(|_| names.len() <= rows.len()) {
-        let Some((_, name, parent, _)) = rows.iter().find(|r| r.0 == next) else { break };
+        let Some((_, name, parent, _)) = rows.iter().find(|r| r.0 == next) else {
+            break;
+        };
         names.push(name.as_str());
         at = *parent;
     }

@@ -1,7 +1,7 @@
-use crate::harness::{Harness, harness_with};
+use crate::harness::{Harness, NOON, harness_with};
 use crate::snooze::snooze_box;
 use gpui_kit::TestAppContext;
-use mail_classifier::clock::DAY;
+use mail_classifier::clock::{DAY, HOUR, MINUTE};
 use mail_classifier::model::Tag;
 use mail_classifier::model::TriageState::*;
 use mail_classifier::outgoing::{DraftState, HOLD_SECONDS, SendIntent};
@@ -12,6 +12,13 @@ fn intent(h: &mut Harness<'_>) -> SendIntent {
         let id = a.inline_composer.expect("an inline composer");
         a.composer.record(id).expect("the draft").intent
     })
+}
+
+/// Send the sentence as it already reads: ⌘↵ opens the menu, Enter takes the lit row.
+fn send(h: &mut Harness<'_>) {
+    h.keys("cmd-enter");
+    assert!(h.has("compose-intent-menu"), "⌘↵ asks what happens after");
+    h.keys("enter");
 }
 
 /// Reply to the first message, open the intent menu from its chord and press `pick`.
@@ -30,7 +37,7 @@ pub fn archive_intent_files_the_thread_after_the_send_is_confirmed(cx: &mut Test
     reply_with_intent(&mut h, "1");
     assert_eq!(intent(&mut h), SendIntent::Archive);
     assert!(!h.has("compose-intent-menu"), "picking closes the menu");
-    h.keys("cmd-enter");
+    send(&mut h);
     h.await_holds(1);
     assert_eq!(h.state_of(original), Inbox, "nothing is filed inside the hold");
     h.deliver_held();
@@ -45,7 +52,7 @@ pub fn remind_intent_flags_the_thread_and_resurfaces_it_without_a_reply(cx: &mut
     let original = h.cursor().expect("message");
     reply_with_intent(&mut h, "2");
     assert_eq!(intent(&mut h), SendIntent::RemindIfNoReply { days: 3 });
-    h.keys("cmd-enter");
+    send(&mut h);
     h.await_holds(1);
     h.deliver_held();
     assert!(h.has_tag(original, Tag::AwaitingReply));
@@ -66,7 +73,7 @@ pub fn send_later_holds_until_its_time_and_then_sends(cx: &mut TestAppContext) {
     let SendIntent::SendLater { at } = intent(&mut h) else {
         panic!("send later is chosen");
     };
-    h.keys("cmd-enter");
+    send(&mut h);
     h.await_holds(1);
     assert_eq!(
         h.read(|a| a.composer.holds.values().next().map(|hold| hold.hold_until)),
@@ -88,7 +95,7 @@ pub fn undo_during_the_hold_restores_the_draft_in_place_with_a_notice(cx: &mut T
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("still mine");
     h.settle();
-    h.keys("cmd-enter");
+    send(&mut h);
     h.await_holds(1);
     assert!(h.has("compose-send-pill"), "the pill sits inside the frozen composer");
     assert!(h.has("compose-hold-undo"));
@@ -118,4 +125,97 @@ pub fn the_send_button_asks_what_happens_after_and_picking_also_sends(cx: &mut T
     assert_eq!(intent(&mut h), SendIntent::Archive);
     h.deliver_held();
     assert_eq!(h.state_of(original), Archived);
+}
+
+#[gpui_kit::gpui::test]
+pub fn cmd_enter_opens_the_send_menu_instead_of_sending(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("ask first");
+    h.settle();
+    h.keys("cmd-enter");
+    assert!(h.has("compose-intent-menu"), "⌘↵ opens the same menu as Send");
+    assert_eq!(h.hold_count(), 0, "nothing goes out before a row is picked");
+    h.keys("escape");
+    assert!(!h.has("compose-intent-menu"), "escape leaves the message alone");
+    assert_eq!(h.hold_count(), 0);
+}
+
+#[gpui_kit::gpui::test]
+pub fn a_typed_send_later_time_lands_on_the_draft(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("typed time");
+    h.settle();
+    // Send later asks when: `3`, then `4` for a typed date and time.
+    h.keys("cmd-shift-enter");
+    h.keys("3");
+    h.keys("4");
+    h.type_text("14:30");
+    h.keys("enter");
+    assert_eq!(
+        intent(&mut h),
+        SendIntent::SendLater {
+            at: NOON + 2 * HOUR + 30 * MINUTE
+        },
+        "14:30 today is the intent the draft carries"
+    );
+    assert!(!h.has("compose-intent-menu"), "the choice closes the menu");
+}
+
+#[gpui_kit::gpui::test]
+pub fn a_typed_time_in_the_past_is_refused(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("too late");
+    h.settle();
+    h.keys("cmd-shift-enter");
+    h.keys("3");
+    h.keys("4");
+    h.type_text("09:00");
+    h.keys("enter");
+    assert!(h.has("compose-intent-menu"), "the menu stays open on a bad time");
+    assert_eq!(intent(&mut h), SendIntent::JustSend, "the sentence is unchanged");
+}
+
+#[gpui_kit::gpui::test]
+pub fn the_menu_hangs_directly_under_the_then_token(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("where does it go");
+    h.settle();
+    h.keys("cmd-shift-enter");
+    assert!(h.has("compose-intent-menu"), "the menu opens");
+    let (token, menu) = {
+        let mut view = gpui_kit::VisualTestContext::from_window(h.window, h.cx);
+        (
+            view.debug_bounds("compose-intent").expect("the token is laid out"),
+            view.debug_bounds("compose-intent-menu").expect("the menu is laid out"),
+        )
+    };
+    let below = f32::from(menu.top() - token.bottom());
+    assert!((0. ..=16.).contains(&below), "the menu starts under the token, {below}px away");
+    assert!(
+        menu.left() <= token.right() && menu.right() >= token.left(),
+        "and hangs from the token's column (token {token:?}, menu {menu:?})"
+    );
+}
+
+#[gpui_kit::gpui::test]
+pub fn the_send_menu_hangs_off_the_send_control(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.compose_reply("anchored to Send");
+    h.settle();
+    h.click("compose-send");
+    assert!(h.has("compose-intent-menu"), "Send opens the menu");
+    let (send, menu) = {
+        let mut view = gpui_kit::VisualTestContext::from_window(h.window, h.cx);
+        (
+            view.debug_bounds("compose-send").expect("Send is laid out"),
+            view.debug_bounds("compose-intent-menu").expect("the menu is laid out"),
+        )
+    };
+    // The footer is at the bottom edge, so the menu turns up: its bottom meets Send's top.
+    let gap = f32::from(menu.bottom() - send.top()).abs();
+    assert!(gap <= 16., "the menu meets Send's edge, {gap}px apart");
+    assert!(
+        menu.left() <= send.right() && menu.right() >= send.left(),
+        "and hangs from its column (send {send:?}, menu {menu:?})"
+    );
 }

@@ -121,7 +121,7 @@ fn filing_the_original_after_a_reply_does_not_handle_the_next_message(cx: &mut T
     assert_eq!(h.read(|a| a.opened()), Some(4));
     h.compose_reply("thanks");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     h.deliver_held();
     assert_eq!(h.read(|a| a.opened()), Some(3), "the reply handled message 4");
@@ -251,7 +251,7 @@ fn keep_going_restarts_with_the_same_options_and_a_sent_reply_counts(cx: &mut Te
     h.keys("enter");
     h.compose_reply("thanks");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     h.deliver_held();
     assert_eq!(h.read(|a| a.session_progress()), Some((2, 3)), "the reply handled message 2");

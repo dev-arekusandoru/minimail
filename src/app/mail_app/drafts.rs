@@ -3,8 +3,8 @@
 //! Drafts are not messages, so they get their own row rendering rather than going through the
 //! message list. The geometry mirrors a message row (recipient and time, subject, snippet),
 //! the same cursor/selection frame is used, and Enter or a click reopens the draft in a
-//! composer tab. One account's drafts are shown at a time; the sidebar's count is the same
-//! set.
+//! composer tab. The list shows one account's drafts, or every account's from the All view;
+//! the sidebar's count is the same set.
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 

@@ -259,7 +259,7 @@ fn a_reply_expecting_an_answer_is_tagged_awaiting(cx: &mut TestAppContext) {
     let id = h.cursor().unwrap();
     h.compose_reply("thanks je ?");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     h.deliver_held();
     assert!(h.has_tag(id, Tag::AwaitingReply), "the worker tagged the thread");
@@ -271,7 +271,7 @@ fn without_a_judge_a_reply_is_not_tagged(cx: &mut TestAppContext) {
     let id = h.cursor().unwrap();
     h.compose_reply("thanks je ?");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_holds(1);
     h.deliver_held();
     assert!(!h.has_tag(id, Tag::AwaitingReply), "no key means no tag");

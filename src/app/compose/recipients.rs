@@ -458,7 +458,7 @@ impl Recipients {
             .iter()
             .map(|c| suggest::chip_width(&suggest::label_of(c), self.directory.is_new(c)))
             .collect();
-        suggest::visible_count(&widths, avail, 4., 36., 24.)
+        suggest::visible_count(&widths, avail, 4., 36., 20.)
     }
 
     /// The floating autocomplete: contacts and history, then the typed text as a new address.
@@ -498,8 +498,9 @@ impl Recipients {
             .top_full()
             .left_0()
             .mt(px(4.))
+            // A fixed width: clamped to the field, a Cc popup squeezed into its narrow clause
+            // and wrapped its header over three lines.
             .w(px(300.))
-            .max_w_full()
             .p(px(4.))
             .rounded(px(8.))
             .border_1()
@@ -682,24 +683,23 @@ impl Render for Recipients {
                         )
                     })
                     .when(!focused, |d| {
+                        // A quiet glyph at text height: a boxed button beside words reads as a
+                        // control, not as part of the sentence.
                         d.child(
                             div()
                                 .id(("compose-add", field))
                                 .test_support()
                                 .flex_none()
-                                .size(px(24.))
+                                .size(px(20.))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(px(6.))
-                                .border_1()
-                                .border_dashed()
-                                .border_color(border)
+                                .rounded(px(5.))
                                 .text_color(muted)
                                 .cursor_pointer()
-                                .hover(move |s| s.text_color(fg))
+                                .hover(move |s| s.text_color(fg).bg(field_bg))
                                 .tooltip(|window, cx| Tooltip::new("Add recipient").build(window, cx))
-                                .child(Icon::new(gpui_kit::assets::IconName::Plus).with_size(px(13.))),
+                                .child(Icon::new(gpui_kit::assets::IconName::Plus).with_size(px(14.))),
                         )
                     })
                     // Always mounted so it can take focus; collapsed out of sight while blurred.
@@ -708,9 +708,12 @@ impl Render for Recipients {
                             .when(focused, |d| d.flex_1().min_w(px(80.)).h(px(24.)))
                             .when(!focused, |d| d.absolute().size(px(1.)).opacity(0.))
                             .child(
+                                // `small` draws the field at chip height (24px) with the
+                                // text on the chips' baseline.
                                 Input::new(&self.input)
-                                    .h(px(24.))
+                                    .small()
                                     .bordered(false)
+                                    .text_size(px(13.))
                                     .disabled(self.disabled),
                             ),
                     ),

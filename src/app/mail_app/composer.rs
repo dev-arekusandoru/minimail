@@ -25,7 +25,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::app::compose::{ComposeEvent, Composer, Focus, Placement};
+use crate::app::compose::{AccountChoice, ComposeEvent, Composer, Focus, Placement};
 use crate::app::composer_state::{DraftOperation, SaveStatus};
 use crate::app::composer_worker::{
     Accounts, Client as ComposerWorker, Command, ComposeAccount, Event, ImportFailure, ResolveMode,
@@ -1119,16 +1119,16 @@ impl MailApp {
         cx.notify();
     }
 
-    /// The accounts the composer's account selector offers, as `(id, label)`.
-    fn compose_accounts(&self) -> Vec<(String, String)> {
+    /// The accounts the composer's account selector offers, each with the rail's icon and tint.
+    fn compose_accounts(&self) -> Vec<AccountChoice> {
         self.mailbox
             .accounts()
             .iter()
-            .map(|a| {
-                (
-                    a.id.clone(),
-                    crate::account_style::nickname_or(a, &a.email).to_owned(),
-                )
+            .map(|a| AccountChoice {
+                id: a.id.clone(),
+                label: crate::account_style::nickname_or(a, &a.email).to_owned(),
+                icon: crate::account_style::icon_key(a),
+                color: a.color.clone(),
             })
             .collect()
     }
@@ -1971,6 +1971,18 @@ impl MailApp {
     }
 
     // --------------------------------------------------------------- surfaces
+
+    /// Emit a composer event to the draft the user is working in, for a command that
+    /// arrives while focus is outside the composer (the palette hands focus back to the
+    /// app before running one).
+    pub(super) fn emit_to_composer(&self, event: ComposeEvent, cx: &mut Context<Self>) {
+        let Some(id) = self.tabs.active_draft().or(self.inline_composer) else {
+            return;
+        };
+        if let Some(entity) = self.composers.get(&id).cloned() {
+            entity.update(cx, |_, cx| cx.emit(event));
+        }
+    }
 
     fn expand_composer(&mut self, id: DraftId, cx: &mut Context<Self>) {
         // The same draft moves; nothing is re-created, so nothing typed is lost.

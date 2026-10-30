@@ -1,11 +1,11 @@
-//! The header as one line of prose: `To [people] cc bcc  about [subject]  from [account]
+//! The header as one line of prose: `To [people] Cc Bcc  about [subject]  from [account]
 //! then [what happens after send]`. Each clause is a verb plus a token; unset optional
 //! clauses are ghost words, and clauses wrap whole when the line runs out.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
@@ -13,9 +13,10 @@ use std::rc::Rc;
 use super::Composer;
 use super::recipients::Field;
 use crate::app::actions::ComposeAccount;
+use crate::app::icons;
 use crate::outgoing::DraftKind;
 
-/// Per-clause verb: 13px muted prose.
+/// Per-clause verb: 13px prose, readable but not as strong as the tokens.
 fn verb(text: &'static str, color: Hsla) -> Div {
     div()
         .text_size(px(13.))
@@ -46,7 +47,8 @@ impl Composer {
         let to_focused = self.to.read(cx).focus_handle(cx).contains_focused(window, cx);
         let subject_focused = self.subject.read(cx).focus_handle(cx).is_focused(window);
         let t = cx.theme();
-        let (muted, border, field, strong) = (t.muted_foreground, t.border, t.secondary, t.foreground);
+        let (muted, prose, border, field, strong) =
+            (t.muted_foreground, t.secondary_foreground, t.border, t.secondary, t.foreground);
         let primary = t.primary;
         // While the To field is being edited, everything else steps back.
         let dim = |el: Div| if to_focused { el.opacity(0.55) } else { el };
@@ -57,10 +59,10 @@ impl Composer {
                 .cursor_pointer()
                 .text_size(px(13.))
                 .line_height(px(20.))
-                .text_color(muted.opacity(0.7))
+                .text_color(muted)
                 .border_b_1()
                 .border_dashed()
-                .border_color(muted.opacity(0.35))
+                .border_color(muted.opacity(0.45))
                 .px(px(2.))
                 .hover(move |s| s.text_color(strong))
                 .child(label)
@@ -73,7 +75,6 @@ impl Composer {
 
         let reply = !matches!(self.draft.kind, DraftKind::New | DraftKind::Forward);
         let to = clause()
-            .flex_grow_1()
             .id("compose-to")
             .test_support()
             .child(
@@ -89,14 +90,14 @@ impl Composer {
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| this.focus_recipients(window, cx)),
                     )
-                    .child(verb(if reply { "Reply to" } else { "To" }, muted))
+                    .child(verb(if reply { "Reply to" } else { "To" }, prose))
                     .child(div().flex_grow_1().min_w_0().child(self.to.clone())),
             )
             .when(!self.cc_shown, |d| {
-                d.child(ghost("compose-show-cc", "cc", Field::Cc, cx))
+                d.child(ghost("compose-show-cc", "Cc", Field::Cc, cx))
             })
             .when(!self.bcc_shown, |d| {
-                d.child(ghost("compose-show-bcc", "bcc", Field::Bcc, cx))
+                d.child(ghost("compose-show-bcc", "Bcc", Field::Bcc, cx))
             });
 
         // The token is as wide as its text (or the placeholder), measured, not estimated.
@@ -110,7 +111,7 @@ impl Composer {
             .text_system()
             .layout_line(text, px(13.), &[run], None)
             .width;
-        let subject = dim(clause().child(verb("about", muted)).child(
+        let subject = dim(clause().child(verb("about", prose)).child(
             div()
                 .id("compose-subject")
                 .test_support()
@@ -126,11 +127,12 @@ impl Composer {
                 .border_color(if subject_focused { primary } else { border })
                 .bg(field)
                 .child(
+                    // `xsmall` keeps the field at text height with 4px side padding, so the
+                    // measured width plus that padding shows the whole subject.
                     Input::new(&self.subject)
                         .appearance(false)
-                        .h(px(20.))
-                        .px_0()
-                        .w(text_w + px(6.))
+                        .xsmall()
+                        .w(text_w + px(10.))
                         .max_w_full()
                         .text_size(px(13.))
                         .text_color(strong)
@@ -140,7 +142,7 @@ impl Composer {
         ));
 
         let from = self.account_token(frozen, cx).map(|token| {
-            dim(clause().child(verb("from", muted)).child(token))
+            dim(clause().child(verb("from", prose)).child(token))
         });
 
         let mut sentence = div()
@@ -151,16 +153,15 @@ impl Composer {
             .gap_y(px(7.))
             .child(to);
         for (id, label, entity, shown) in [
-            ("compose-cc", "cc", &self.cc, self.cc_shown),
-            ("compose-bcc", "bcc", &self.bcc, self.bcc_shown),
+            ("compose-cc", "Cc", &self.cc, self.cc_shown),
+            ("compose-bcc", "Bcc", &self.bcc, self.bcc_shown),
         ] {
             if shown {
-                sentence = sentence.child(dim_on(to_focused, 
+                sentence = sentence.child(dim_on(to_focused,
                     clause()
-                        .flex_grow_1()
                         .id(id)
                         .test_support()
-                        .child(verb(label, muted))
+                        .child(verb(label, prose))
                         .child(div().flex_grow_1().min_w_0().child(entity.clone())),
                 ));
             }
@@ -192,18 +193,19 @@ impl Composer {
         if self.accounts.len() < 2 {
             return None;
         }
-        let current = self
-            .accounts
-            .iter()
-            .find(|(id, _)| *id == self.draft.account)
-            .map(|(_, label)| label.clone())
-            .unwrap_or_else(|| self.draft.account.clone());
+        let current = self.accounts.iter().find(|a| a.id == self.draft.account);
+        let label = current.map_or_else(|| self.draft.account.clone(), |a| a.label.clone());
         let t = cx.theme();
+        let icon = current.map_or_else(
+            || Icon::new(gpui_kit::assets::IconName::Mail).with_size(px(13.)).text_color(t.muted_foreground),
+            |a| icons::account_icon(a.icon, &a.color, t, 13.),
+        );
         let app = cx.weak_entity();
         Some(
             Button::new("compose-account")
                 .ghost()
-                .label(current)
+                .icon(icon)
+                .label(label)
                 .child(Icon::new(gpui_kit::assets::IconName::ChevronDown).size_3())
                 .h(px(24.))
                 .px(px(7.))
@@ -219,22 +221,25 @@ impl Composer {
                     let Some(this) = app.upgrade() else {
                         return menu;
                     };
-                    let rows = this.read(cx).account_rows();
-                    let owner = app.clone();
+                    let accounts = this.read(cx).accounts.clone();
+                    let t = cx.theme();
                     // A chosen row dispatches what the action would, so the composer hears
                     // it through the same handler as any other key or click.
+                    let owner = app.clone();
                     let run: crate::app::menu::MenuRun = Rc::new(move |action, window, cx| {
                         owner
                             .update(cx, |_, cx| window.dispatch_action(action, cx))
                             .ok();
                     });
-                    let items: Vec<crate::app::menu::MenuItem> = rows
+                    let items: Vec<crate::app::menu::MenuItem> = accounts
                         .into_iter()
-                        .map(|(label, id)| {
-                            crate::app::menu::MenuItem::action_fn(label, move || {
+                        .map(|a| {
+                            let id = a.id;
+                            crate::app::menu::MenuItem::action_fn(a.label, move || {
                                 Box::new(ComposeAccount { account: id.clone() })
                                     as Box<dyn Action>
                             })
+                            .icon(icons::account_icon(a.icon, &a.color, t, 14.))
                         })
                         .collect();
                     crate::app::menu::populate(menu, &items, &run, window, cx)
@@ -243,11 +248,5 @@ impl Composer {
         )
     }
 
-    /// The account menu's rows: `(label, id)`.
-    fn account_rows(&self) -> Vec<(String, String)> {
-        self.accounts
-            .iter()
-            .map(|(id, label)| (label.clone(), id.clone()))
-            .collect()
-    }
+
 }

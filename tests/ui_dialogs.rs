@@ -266,7 +266,7 @@ impl Harness<'_> {
         self.keys("r");
         self.await_state("the reply opens", |a| a.compose_open());
         self.type_text(body);
-        self.keys("cmd-enter");
+        self.keys("cmd-enter enter");
         self.await_state("the send holds before it leaves", |a| {
             a.hold_in_flight().is_some()
         });
@@ -322,7 +322,7 @@ fn no_filing_choice_before_the_provider_confirms(cx: &mut TestAppContext) {
     h.keys("r");
     h.await_state("the reply opens", |a| a.compose_open());
     h.type_text("Sure, let me know when");
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_state("the send holds before it leaves", |a| {
         a.hold_in_flight().is_some()
     });

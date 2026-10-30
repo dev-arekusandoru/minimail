@@ -13,6 +13,7 @@ pub mod hold;
 pub mod html;
 pub mod markdown;
 pub mod mime;
+pub mod schedule;
 pub mod store;
 
 pub use attachment::{
@@ -32,4 +33,5 @@ pub use html::{html_text, html_to_markdown};
 pub use mime::{
     OutgoingMessage, build_mime, encode_header_value, format_address_list, rfc2822_date,
 };
+pub use schedule::{BadTime, parse_send_later};
 pub use store::{DraftError, DraftStore, Recovery};

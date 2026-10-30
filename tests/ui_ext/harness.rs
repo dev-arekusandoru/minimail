@@ -554,26 +554,14 @@ impl Harness<'_> {
         self.read(|a| a.cursor_draft().map(|r| r.id))
     }
 
-    /// The rows of the composer's ⋯ menu; the menu is closed again afterwards.
-    pub fn composer_menu_rows(&mut self) -> Vec<String> {
-        self.click("compose-more");
-        let rows = self.rows();
-        self.keys("escape");
-        rows
-    }
-
-    /// Move the draft the composer is showing into the tab strip, through the ⋯ menu.
+    /// Move the draft the composer is showing into the tab strip, from the palette.
     pub fn expand_active_draft(&mut self) {
-        self.click("compose-more");
-        self.click_row("Expand");
-        self.tick();
+        self.run_palette("Expand composer to a tab");
     }
 
-    /// Move the draft the composer is showing back under its thread.
+    /// Move the draft the composer is showing back under its thread, from the palette.
     pub fn collapse_active_draft(&mut self) {
-        self.click("compose-more");
-        self.click_row("Collapse");
-        self.tick();
+        self.run_palette("Collapse composer into the thread");
     }
 
     /// Discard the draft the composer is showing, answering the confirmation.
@@ -588,6 +576,15 @@ impl Harness<'_> {
 impl Harness<'_> {
     pub fn palette_rows(&mut self) -> Vec<String> {
         self.app.read_with(self.cx, |a, cx| a.palette_rows(cx))
+    }
+    /// Run a command from the palette by name: open it, type enough to pick the row, Enter.
+    /// ⌘⇧P, because the composer claims ⌘K for links.
+    pub fn run_palette(&mut self, name: &str) {
+        self.keys("cmd-shift-p");
+        assert!(self.read(|a| a.palette_open()), "the palette opens");
+        self.type_text(name);
+        self.keys("enter");
+        self.tick();
     }
     /// Rows of the open filter picker, top to bottom.
     pub fn picker_rows(&mut self) -> Vec<String> {

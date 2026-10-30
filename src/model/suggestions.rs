@@ -119,7 +119,9 @@ impl Mailbox {
     /// Whether the user set `key`'s label by hand: reclassification leaves it alone until
     /// [`Self::reset_label`].
     pub fn is_overridden(&self, id: MessageId, key: QuestionKey) -> bool {
-        self.meta.get(&id).is_some_and(|m| m.overrides.contains(&key))
+        self.meta
+            .get(&id)
+            .is_some_and(|m| m.overrides.contains(&key))
     }
 
     /// Set `key`'s label from the user: the tag becomes `tag` (or is cleared) and sticks, so a
@@ -155,20 +157,26 @@ impl Mailbox {
         if before == self.meta.get(&id).cloned().unwrap_or_default() {
             return false;
         }
-        self.push_undo(vec![Change::Msg(id, self.state_of(id).unwrap_or_default(), before)]);
+        self.push_undo(vec![Change::Msg(
+            id,
+            self.state_of(id).unwrap_or_default(),
+            before,
+        )]);
         true
     }
 }
 
 /// Replace `key`'s tag with `tag` (`None` clears it); every other tag is left alone.
 fn replace_tag(tags: &mut Vec<Tag>, key: QuestionKey, tag: Option<Tag>) {
-    tags.retain(|t| !matches!(
-        (key, t),
-        (QuestionKey::Spam, Tag::PossibleSpam)
-            | (QuestionKey::NeedsReply, Tag::NeedsReply)
-            | (QuestionKey::Urgency, Tag::Urgent(_))
-            | (QuestionKey::Kind, Tag::Kind(_))
-    ));
+    tags.retain(|t| {
+        !matches!(
+            (key, t),
+            (QuestionKey::Spam, Tag::PossibleSpam)
+                | (QuestionKey::NeedsReply, Tag::NeedsReply)
+                | (QuestionKey::Urgency, Tag::Urgent(_))
+                | (QuestionKey::Kind, Tag::Kind(_))
+        )
+    });
     if let Some(tag) = tag {
         tags.push(tag);
     }

@@ -6,8 +6,8 @@ use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
 use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
 use crate::app::compose::intent::{
-    INTENT_CONTEXT, IntentCancel, IntentConfirm, IntentFewerDays, IntentJustSend, IntentMoreDays,
-    IntentNext, IntentPick1, IntentPick2, IntentPick3, IntentPrev,
+    INTENT_CONTEXT, INTENT_KEYS, IntentCancel, IntentConfirm, IntentCustom, IntentFewerDays,
+    IntentJustSend, IntentMoreDays, IntentNext, IntentPick1, IntentPick2, IntentPick3, IntentPrev,
 };
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::judge::{Kind, QuestionKey};
@@ -318,19 +318,21 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
         KeyBinding::new("3", SnoozePreset3, Some("SnoozePicker && !Input")),
         KeyBinding::new("4", SnoozeCustom, Some("SnoozePicker && !Input")),
-        // Intent menu ("After sending"): a digit per row, enter takes the lit one.
-        KeyBinding::new("1", IntentPick1, Some(INTENT_CONTEXT)),
-        KeyBinding::new("2", IntentPick2, Some(INTENT_CONTEXT)),
-        KeyBinding::new("3", IntentPick3, Some(INTENT_CONTEXT)),
-        KeyBinding::new("cmd-enter", IntentJustSend, Some(INTENT_CONTEXT)),
-        KeyBinding::new("enter", IntentConfirm, Some(INTENT_CONTEXT)),
+        // Intent menu ("After sending"): a digit per row, enter takes the lit one. Typing in
+        // the custom time field owns its own digits and Enter, so these step aside there.
+        KeyBinding::new("1", IntentPick1, Some(INTENT_KEYS)),
+        KeyBinding::new("2", IntentPick2, Some(INTENT_KEYS)),
+        KeyBinding::new("3", IntentPick3, Some(INTENT_KEYS)),
+        KeyBinding::new("4", IntentCustom, Some(INTENT_KEYS)),
+        KeyBinding::new("cmd-enter", IntentJustSend, Some(INTENT_KEYS)),
+        KeyBinding::new("enter", IntentConfirm, Some(INTENT_KEYS)),
         KeyBinding::new("escape", IntentCancel, Some(INTENT_CONTEXT)),
-        KeyBinding::new("down", IntentNext, Some(INTENT_CONTEXT)),
-        KeyBinding::new("j", IntentNext, Some(INTENT_CONTEXT)),
-        KeyBinding::new("up", IntentPrev, Some(INTENT_CONTEXT)),
-        KeyBinding::new("k", IntentPrev, Some(INTENT_CONTEXT)),
-        KeyBinding::new("left", IntentFewerDays, Some(INTENT_CONTEXT)),
-        KeyBinding::new("right", IntentMoreDays, Some(INTENT_CONTEXT)),
+        KeyBinding::new("down", IntentNext, Some(INTENT_KEYS)),
+        KeyBinding::new("j", IntentNext, Some(INTENT_KEYS)),
+        KeyBinding::new("up", IntentPrev, Some(INTENT_KEYS)),
+        KeyBinding::new("k", IntentPrev, Some(INTENT_KEYS)),
+        KeyBinding::new("left", IntentFewerDays, Some(INTENT_KEYS)),
+        KeyBinding::new("right", IntentMoreDays, Some(INTENT_KEYS)),
         // Choice dialog: one key per option, enter = default; escape is the dialog's.
         KeyBinding::new("1", Choice1, Some("ChoiceDialog && !Input")),
         KeyBinding::new("2", Choice2, Some("ChoiceDialog && !Input")),

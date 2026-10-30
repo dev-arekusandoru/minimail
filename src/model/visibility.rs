@@ -434,6 +434,7 @@ impl Mailbox {
         let (place, account) = match location {
             Location::AllInboxes => ("inbox".to_owned(), None),
             Location::AllSnoozed => ("snoozed".to_owned(), None),
+            Location::AllDrafts => ("drafts".to_owned(), None),
             Location::AllSent => ("sent".to_owned(), None),
             Location::AllArchive => ("archived".to_owned(), None),
             Location::AllTrash => ("deleted".to_owned(), None),
@@ -480,6 +481,7 @@ impl Mailbox {
         match (place.as_str(), account) {
             ("inbox", None) => Some(Location::AllInboxes),
             ("snoozed", None) => Some(Location::AllSnoozed),
+            ("drafts", None) => Some(Location::AllDrafts),
             ("sent", None) => Some(Location::AllSent),
             ("archived", None) => Some(Location::AllArchive),
             ("deleted", None) => Some(Location::AllTrash),

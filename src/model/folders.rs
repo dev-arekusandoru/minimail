@@ -97,7 +97,9 @@ impl Mailbox {
                 .map(|(i, f)| (i, f.clone()))
                 .collect();
             mb.folders.retain(|f| !doomed.contains(&f.id));
-            mb.folder_floor = mb.folder_floor.max(doomed.iter().copied().max().unwrap_or(0));
+            mb.folder_floor = mb
+                .folder_floor
+                .max(doomed.iter().copied().max().unwrap_or(0));
             mb.push_undo(vec![Change::FolderRestore(removed)]);
             archived
         })

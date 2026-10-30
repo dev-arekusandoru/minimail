@@ -429,6 +429,18 @@ impl Render for ConversionPreview {
     }
 }
 
+/// An account the composer can send from: its label plus the icon and tint the sidebar draws
+/// for it, so the selector looks like the rail.
+#[derive(Clone)]
+pub struct AccountChoice {
+    pub id: String,
+    pub label: String,
+    /// Lucide icon key ([`crate::account_style::icon_key`]).
+    pub icon: &'static str,
+    /// `#rrggbb` account color.
+    pub color: String,
+}
+
 /// The composer.
 pub struct Composer {
     draft: DraftRecord,
@@ -462,8 +474,8 @@ pub struct Composer {
     preview_html: SharedString,
     /// Set by every path that changes the body, cleared when the preview is rebuilt.
     preview_dirty: bool,
-    /// The accounts the selector offers, as `(id, label)`.
-    accounts: Vec<(String, String)>,
+    /// The accounts the selector offers, with the look the rail gives each.
+    accounts: Vec<AccountChoice>,
     /// An acknowledged record, applied after the current entity borrow is released.
     pending_record: Option<DraftRecord>,
     /// A hold or a send is in flight; the controls stop offering another one rather than
@@ -484,7 +496,7 @@ impl Composer {
         draft: DraftRecord,
         placement: Placement,
         focus: Focus,
-        accounts: Vec<(String, String)>,
+        accounts: Vec<AccountChoice>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -699,7 +711,7 @@ impl Composer {
     }
 
     /// The accounts the selector offers, refreshed by the owner as accounts come and go.
-    pub fn set_accounts(&mut self, accounts: Vec<(String, String)>, cx: &mut Context<Self>) {
+    pub fn set_accounts(&mut self, accounts: Vec<AccountChoice>, cx: &mut Context<Self>) {
         self.accounts = accounts;
         cx.notify();
     }
@@ -1223,29 +1235,31 @@ impl Composer {
                 .into_any_element()
         });
         // Preview and Attach move into the toolbar, at its right end. They are the same
-        // 36px rounded controls the format buttons are.
+        // 26px rounded controls the format buttons are, and the same rows the `/` menu
+        // offers, so their id, icon, label and chord come from the shared list.
+        let [attach, preview_tool] = toolbar::FILE_TOOLS;
         let trailing = vec![
             crate::app::ui::key_tooltip(
-                Button::new("compose-attach")
-                    .icon(gpui_kit::assets::IconName::Paperclip)
+                Button::new(attach.id)
+                    .icon(attach.icon)
                     .ghost()
                     .h(px(26.))
                     .w(px(26.))
                     .px_0()
                     .rounded(px(5.))
                     .text_color(cx.theme().foreground),
-                "Attach files",
-                "cmd-shift-a",
+                attach.label,
+                attach.key,
             )
             .disabled(self.frozen() || self.attachments_busy)
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Attach)))
             .into_any_element(),
             crate::app::ui::key_tooltip(
-                Button::new("compose-preview")
+                Button::new(preview_tool.id)
                     .icon(if previewing {
                         gpui_kit::assets::IconName::FileText
                     } else {
-                        gpui_kit::assets::IconName::Eye
+                        preview_tool.icon
                     })
                     .ghost()
                     .h(px(26.))
@@ -1258,9 +1272,9 @@ impl Composer {
                 if previewing {
                     "Edit the Markdown source"
                 } else {
-                    "Preview the outgoing message"
+                    preview_tool.tip
                 },
-                "cmd-shift-v",
+                preview_tool.key,
             )
             .on_click(cx.listener(|this, _, window, cx| this.toggle_preview(window, cx)))
             .into_any_element(),
@@ -1557,6 +1571,9 @@ pub(crate) fn tool_action(id: &str) -> Option<fn() -> Box<dyn Action>> {
         "compose-code" => || Box::new(ComposeCodeBlock),
         "compose-strike" => || Box::new(ComposeStrike),
         "compose-table" => || Box::new(ComposeTable),
+        // The bar's trailing controls, so the `/` menu reaches them through the same map.
+        "compose-attach" => || Box::new(AddAttachment),
+        "compose-preview" => || Box::new(ToggleComposePreview),
         _ => return None,
     })
 }
@@ -1663,12 +1680,13 @@ impl Render for Composer {
             // While a message is held or in flight only what is still true of it is offered:
             // closing keeps it, undo recalls it, and nothing pretends it can be edited or
             // sent again.
-            .on_action(cx.listener(|this, _: &SendDraft, _, cx| {
-                if this.can_send() {
-                    cx.emit(ComposeEvent::Send)
-                }
+            .on_action(cx.listener(|this, _: &SendDraft, window, cx| {
+                // ⌘↵ asks what happens after the send, exactly as the Send control does;
+                // the row picked is what sends.
+                this.open_intent_menu(window, cx)
             }))
             .on_action(cx.listener(|this, _: &ChooseSendIntent, window, cx| {
+                // ⇧⌘↵ edits the sentence without sending: the token's click, on the keys.
                 this.open_menu(false, None, window, cx)
             }))
             .on_action(cx.listener(|this, _: &CloseComposer, _, cx| {

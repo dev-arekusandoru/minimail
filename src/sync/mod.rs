@@ -1298,7 +1298,7 @@ pub fn scopes_for(mb: &Mailbox, cache: &Cache, location: &Location) -> Vec<(Stri
             scoped(&f.account, Scope::Folder(remote))
         }
         Location::Snoozed(_) | Location::Sent(_) | Location::Drafts(_) => Vec::new(),
-        Location::AllSnoozed | Location::AllSent => Vec::new(),
+        Location::AllSnoozed | Location::AllDrafts | Location::AllSent => Vec::new(),
     }
 }
 

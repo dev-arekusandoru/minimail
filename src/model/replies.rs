@@ -1,5 +1,5 @@
-use crate::outgoing::SendIntent;
 use super::*;
+use crate::outgoing::SendIntent;
 
 impl Mailbox {
     /// Record provider-confirmed delivery. Unlike filing, delivery cannot be undone.

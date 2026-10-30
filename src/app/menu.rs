@@ -25,7 +25,7 @@ pub enum MenuItem {
         label: SharedString,
         /// Shown with a check mark: the active filter choice.
         checked: bool,
-        icon: Option<gpui_kit::assets::IconName>,
+        icon: Option<Box<gpui_kit::component::Icon>>,
         action: ActionFn,
     },
     /// A non-interactive section header.
@@ -62,9 +62,9 @@ impl MenuItem {
         self
     }
     /// Show an icon alongside an action row.
-    pub fn icon(mut self, icon: gpui_kit::assets::IconName) -> Self {
+    pub fn icon(mut self, icon: impl Into<gpui_kit::component::Icon>) -> Self {
         if let MenuItem::Action { icon: item_icon, .. } = &mut self {
-            *item_icon = Some(icon);
+            *item_icon = Some(Box::new(icon.into()));
         }
         self
     }
@@ -114,7 +114,7 @@ pub fn populate(
                 .action(action())
                 .checked(*checked)
                 .on_click(move |_, window, cx| run(build(), window, cx));
-            menu.item(if let Some(icon) = icon { item.icon(*icon) } else { item })
+            menu.item(if let Some(icon) = icon { item.icon((**icon).clone()) } else { item })
         }
         MenuItem::Submenu { label, items } => {
             let (items, run) = (items.clone(), run.clone());

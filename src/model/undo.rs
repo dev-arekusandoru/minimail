@@ -47,7 +47,8 @@ impl Mailbox {
         if mark == depth && mark > 0 {
             let pushed: Vec<UndoStep> = self.undo.split_off(mark);
             let top = self.undo.last_mut().expect("depth > 0");
-            top.changes.extend(pushed.into_iter().flat_map(|step| step.changes));
+            top.changes
+                .extend(pushed.into_iter().flat_map(|step| step.changes));
         }
         out
     }

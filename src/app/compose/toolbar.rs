@@ -113,6 +113,33 @@ pub const TOOLS: [Tool; 10] = [
     },
 ];
 
+/// The two controls at the bar's right end. The `/` menu offers them too, so their id,
+/// icon, label and chord are written once.
+pub const FILE_TOOLS: [Tool; 2] = [
+    Tool {
+        id: "compose-attach",
+        icon: IconName::Paperclip,
+        label: "Attach files",
+        tip: "Attach files",
+        key: "cmd-shift-a",
+        group: 4,
+    },
+    Tool {
+        id: "compose-preview",
+        icon: IconName::Eye,
+        label: "Preview",
+        tip: "Preview the outgoing message",
+        key: "cmd-shift-v",
+        group: 4,
+    },
+];
+
+/// Every command the `/` menu mirrors from the bar, in bar order: the formats, then the
+/// trailing controls. Send later is the menu's own last row.
+pub fn commands() -> impl Iterator<Item = &'static Tool> {
+    TOOLS.iter().chain(FILE_TOOLS.iter())
+}
+
 /// A tool button is 26 wide with a 4px gap after it.
 const TOOL_SLOT: f32 = 30.;
 /// The strip's padding and the separators between groups.

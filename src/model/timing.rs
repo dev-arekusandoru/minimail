@@ -52,7 +52,12 @@ impl Mailbox {
             if let Some(since) = meta.and_then(|x| x.awaiting_since) {
                 if self.has_newer_reply(m, since) {
                     answered.push(m.id);
-                } else if now >= since + meta.and_then(|x| x.follow_up_after).unwrap_or(self.follow_up_timeout) {
+                } else if now
+                    >= since
+                        + meta
+                            .and_then(|x| x.follow_up_after)
+                            .unwrap_or(self.follow_up_timeout)
+                {
                     follow.push(m.id);
                 }
             }
@@ -116,7 +121,12 @@ impl Mailbox {
         });
         let tomorrow = now.instant(midnight + DAY + 8 * HOUR);
         // Monday is weekday 1 (0 is Sunday).
-        let monday = now.instant(midnight + now.days_until_weekday(now.at(), 1, 8 * HOUR) + 8 * HOUR);
-        [("Tonight", tonight), ("Tomorrow", tomorrow), ("Monday", monday)]
+        let monday =
+            now.instant(midnight + now.days_until_weekday(now.at(), 1, 8 * HOUR) + 8 * HOUR);
+        [
+            ("Tonight", tonight),
+            ("Tomorrow", tomorrow),
+            ("Monday", monday),
+        ]
     }
 }

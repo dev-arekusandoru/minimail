@@ -155,6 +155,8 @@ pub enum Location {
     #[default]
     AllInboxes,
     AllSnoozed,
+    /// Every account's unfinished drafts, listed from the composer's durable state.
+    AllDrafts,
     AllSent,
     AllArchive,
     AllTrash,

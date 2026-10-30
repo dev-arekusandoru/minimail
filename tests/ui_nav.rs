@@ -547,7 +547,7 @@ fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
     h.await_state("the reply opens", |a| a.compose_open());
     h.type_text("Sure, let me know.");
     h.settle();
-    h.keys("cmd-enter");
+    h.keys("cmd-enter enter");
     h.await_state("the hold comes before anything leaves", |a| {
         a.hold_in_flight().is_some()
     });

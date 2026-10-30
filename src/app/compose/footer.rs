@@ -1,5 +1,5 @@
 //! The composer's bottom edge: the status line (draft state, content warning, toolbar
-//! toggle, ⋯ menu, Send), the `/` menu in the body and the one-time formatting hint.
+//! toggle, Send), the `/` menu under the body's caret and the one-time formatting hint.
 //!
 //! The formatting bar is a user preference, shared by every composer and kept across
 //! restarts; it lives in [`FooterPrefs`], a global the owner fills from the settings store.
@@ -8,14 +8,15 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use super::{ComposeEvent, Composer, Placement};
-use crate::app::actions::*;
+use super::toolbar;
+use super::{ComposeEvent, Composer};
 use crate::outgoing::markdown;
 use crate::outgoing::DraftState;
 
@@ -86,7 +87,8 @@ pub struct FooterState {
     hint: bool,
 }
 
-const SLASH_ROWS: usize = 2;
+/// Every `/` row: the bar's commands, then Send later.
+const SLASH_ROWS: usize = toolbar::TOOLS.len() + toolbar::FILE_TOOLS.len() + 1;
 
 impl FooterState {
     pub fn new(cx: &mut App) -> Self {
@@ -171,7 +173,9 @@ impl Composer {
         self.pick_slash(self.footer.slash_sel, window, cx);
     }
 
-    /// Choosing a slash row removes the `/` it was opened with, then runs the row.
+    /// Choosing a slash row removes the `/` it was opened with, then runs the row: a bar
+    /// command dispatches the same action its button does, and the last row (Send later)
+    /// opens the intent menu.
     pub(super) fn pick_slash(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(range) = self.footer.slash.take() else {
             return;
@@ -185,89 +189,30 @@ impl Composer {
                 cx,
             );
         }
-        match row {
-            0 => cx.emit(ComposeEvent::Attach),
-            // Choosing the Send-later row only sets the intent; Send still sends.
-            _ => self.open_menu(false, Some(2), window, cx),
+        match toolbar::commands().nth(row) {
+            Some(tool) => {
+                if let Some(action) = super::tool_action(tool.id) {
+                    window.dispatch_action(action(), cx);
+                }
+            }
+            None => self.open_menu(false, Some(2), window, cx),
         }
         cx.notify();
-    }
-
-    fn render_more_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let app = cx.weak_entity();
-        let inline = self.placement == Placement::Inline;
-        let collapsible = !inline && self.draft.source_message.is_some();
-        let bar_on = FooterPrefs::toolbar(cx);
-        let frozen = self.frozen();
-        let danger = cx.theme().danger;
-        crate::app::ui::key_tooltip(
-            Button::new("compose-more")
-                .icon(IconName::Ellipsis)
-                .ghost()
-                .h(px(26.))
-                .w(px(26.))
-                .px_0()
-                .rounded(px(5.))
-                .text_color(cx.theme().muted_foreground),
-            "More",
-            "",
-        )
-        .dropdown_menu_with_anchor(Anchor::BottomRight, move |menu, window, cx| {
-            use crate::app::menu::MenuItem;
-            let owner = app.clone();
-            let run: crate::app::menu::MenuRun = Rc::new(move |action, window, cx| {
-                owner.update(cx, |_, cx| window.dispatch_action(action, cx)).ok();
-            });
-            let mut rows = vec![MenuItem::header("Composer")];
-            if inline {
-                rows.push(
-                    MenuItem::action_fn("Expand", || Box::new(ExpandComposer))
-                        .icon(IconName::Maximize2),
-                );
-            }
-            if collapsible {
-                rows.push(
-                    MenuItem::action_fn("Collapse", || Box::new(CollapseComposer))
-                        .icon(IconName::Minimize2),
-                );
-            }
-            rows.extend([
-                MenuItem::action_fn("Preview as sent", || Box::new(ToggleComposePreview))
-                    .icon(IconName::Eye),
-                MenuItem::action_fn("Attach file", || Box::new(AddAttachment))
-                    .icon(IconName::Paperclip),
-                MenuItem::action_fn(
-                    if bar_on { "Hide formatting bar" } else { "Show formatting bar" },
-                    || Box::new(ToggleFormattingBar),
-                )
-                .icon(IconName::SlidersHorizontal),
-                MenuItem::separator(),
-            ]);
-            let owner = app.clone();
-            let menu = crate::app::menu::populate(menu, &rows, &run, window, cx);
-            menu.item(
-                PopupMenuItem::element(move |_, _| {
-                    div().text_color(danger).child("Discard draft")
-                })
-                .icon(Icon::new(IconName::Trash).text_color(danger))
-                .action(Box::new(DiscardDraft))
-                .disabled(frozen)
-                .on_click(move |_, window, cx| {
-                    owner
-                        .update(cx, |_, cx| window.dispatch_action(Box::new(DiscardDraft), cx))
-                        .ok();
-                }),
-            )
-        })
-        .into_any_element()
     }
 
     /// The status line: draft state, then the controls.
     pub(super) fn render_footer(&mut self, cx: &mut Context<Self>) -> Div {
         // Colours are copied out: every button below needs the context mutably.
-        let (border, warning, muted, success, primary) = {
+        let (border, warning, muted, success, primary, on_primary) = {
             let t = cx.theme();
-            (t.border, t.warning, t.muted_foreground, t.success, t.primary)
+            (
+                t.border,
+                t.warning,
+                t.muted_foreground,
+                t.success,
+                t.primary,
+                t.primary_foreground,
+            )
         };
         let status = self.status();
         let frozen = self.frozen();
@@ -361,12 +306,14 @@ impl Composer {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_toolbar(cx))),
             )
-            .child(self.render_more_button(cx))
             // The hold is a fixed ten seconds with an Undo: while a message is held the
             // control offers nothing, so pressing Send again cannot send it early.
-            .child(
+            .child({
+                // Where the intent menu opened from Send hangs from.
+                let anchor = self.send_anchor();
                 crate::app::ui::key_tooltip(
                     Button::new("compose-send")
+                        .debug_selector(|| "compose-send".into())
                         .primary()
                         .h(px(28.))
                         .px(px(11.))
@@ -389,32 +336,50 @@ impl Composer {
                                         .child(send_label),
                                 )
                                 .when(send_label == "Send", |d| {
-                                    d.child(crate::app::ui::shortcut("cmd-enter"))
+                                    // On the primary fill the keycap is plain text at reduced
+                                    // contrast: a bordered box of muted grey muddies the blue.
+                                    d.child(
+                                        crate::app::ui::shortcut("cmd-enter")
+                                            .text_color(on_primary.opacity(0.7))
+                                            .bg(gpui_kit::transparent_black()),
+                                    )
                                 }),
                         ),
                     "Send; the message is held for ten seconds so it can be recalled",
                     "",
                 )
                 .disabled(!self.can_send() || frozen)
-                .on_click(cx.listener(|this, _, window, cx| this.open_intent_menu(window, cx))),
-            )
+                .on_prepaint(move |bounds, _, _| anchor.set(Some(bounds)))
+                .on_click(cx.listener(|this, _, window, cx| this.open_intent_menu(window, cx)))
+            })
     }
 
-    /// Overlays that float over the body: the slash menu and the first-run hint. Absolute,
-    /// so nothing under them moves.
+    /// The body caret's line box on screen, when it has been laid out.
+    fn caret_bounds(&self, cx: &App) -> Option<Bounds<Pixels>> {
+        let at = self.footer.slash.as_ref()?.start;
+        self.body.read(cx).range_to_bounds(&(at..at))
+    }
+
+    /// Overlays that float over the body: the slash menu and the first-run hint.
     pub(super) fn render_footer_overlays(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out = Vec::new();
         let (border, popover, fg, muted, hover, primary) = {
             let t = cx.theme();
             (t.border, t.popover, t.popover_foreground, t.muted_foreground, t.secondary_hover, t.primary)
         };
-        // Everything below the body: the status line and, when shown, the toolbar strip.
+        // Everything below the body: the status line and, when shown, the toolbar strip. Only
+        // the fallback placement needs it, for a body whose caret is not laid out yet.
         let below = STATUS_H + if FooterPrefs::toolbar(cx) { 37. } else { 0. };
         if self.footer.slash.is_some() && !self.body_locked() {
             let sel = self.footer.slash_sel;
-            let row = |id: &'static str, icon: IconName, label: &'static str, key: &'static str, on: bool| {
+            let row = |id: ElementId,
+                       icon: IconName,
+                       label: &'static str,
+                       key: &'static str,
+                       on: bool| {
                 div()
                     .id(id)
+                    .test_support()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -435,39 +400,63 @@ impl Composer {
                         )
                     })
             };
-            out.push(
-                div()
-                    .id("compose-slash-menu")
-                    .test_support()
+            // The bar's own commands, so the menu never drifts from what the toolbar offers.
+            let mut menu = div()
+                .id("compose-slash-menu")
+                .test_support()
+                .w(px(250.))
+                .p_1()
+                .rounded(px(8.))
+                .border_1()
+                .border_color(border)
+                .bg(popover)
+                .text_color(fg)
+                .shadow_lg();
+            let mut group = None;
+            for (ix, tool) in toolbar::commands().enumerate() {
+                if group.is_some_and(|group| group != tool.group) {
+                    menu = menu.child(Separator::horizontal().my(px(4.)));
+                }
+                group = Some(tool.group);
+                menu = menu.child(
+                    row(("compose-slash", ix).into(), tool.icon, tool.label, tool.key, sel == ix)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.pick_slash(ix, window, cx)
+                        })),
+                );
+            }
+            // Send later only sets the intent; Send still sends.
+            menu = menu
+                .child(Separator::horizontal().my(px(4.)))
+                .child(
+                    row(
+                        "compose-slash-later".into(),
+                        IconName::Clock,
+                        "Send later",
+                        "",
+                        sel == SLASH_ROWS - 1,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.pick_slash(SLASH_ROWS - 1, window, cx)
+                    })),
+                )
+                .max_h(px(320.))
+                .overflow_y_scroll();
+            // Just under the caret; anchored flips it above when the body ends too near the
+            // window edge. Before the first layout there is no caret to anchor to.
+            out.push(match self.caret_bounds(cx) {
+                Some(caret) => anchored()
+                    .anchor(Anchor::TopLeft)
+                    .position(point(caret.origin.x, caret.bottom() + px(4.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(menu)
+                    .into_any_element(),
+                None => menu
                     .absolute()
                     .left(px(14.))
                     .bottom(px(below + 6.))
-                    .w(px(250.))
-                    .p_1()
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(border)
-                    .bg(popover)
-                    .text_color(fg)
-                    .shadow_lg()
-                    .child(
-                        div()
-                            .px_2()
-                            .pt_1()
-                            .text_size(px(9.))
-                            .text_color(muted)
-                            .child("INSERT"),
-                    )
-                    .child(
-                        row("compose-slash-attach", IconName::Paperclip, "Attach file", "cmd-shift-a", sel == 0)
-                            .on_click(cx.listener(|this, _, window, cx| this.pick_slash(0, window, cx))),
-                    )
-                    .child(
-                        row("compose-slash-later", IconName::Clock, "Send later", "", sel == 1)
-                            .on_click(cx.listener(|this, _, window, cx| this.pick_slash(1, window, cx))),
-                    )
                     .into_any_element(),
-            );
+            });
         }
         if self.footer.hint && !FooterPrefs::toolbar(cx) {
             out.push(
@@ -488,7 +477,7 @@ impl Composer {
                     .text_size(px(12.))
                     .line_height(px(17.))
                     .shadow_lg()
-                    .child("Formatting is hidden. Click the sliders (or ⌘⌥T) to show it. Type / in the body for attach and send later.")
+                    .child("Formatting is hidden. Click the sliders (or ⌘⌥T) to show it. Type / in the body to run any formatting command, attach a file, or send later.")
                     .into_any_element(),
             );
         }

@@ -4,9 +4,12 @@
 //! The view only chooses and shows. The chosen [`SendIntent`] lives on the draft record
 //! (saved with it), and the owner carries it out once the provider confirms the send.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
+use gpui_kit::base::{Align, ElementExt as _, Placement, Positioner};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -17,7 +20,10 @@ use crate::app::chrome::format_time;
 use crate::app::ui::shortcut;
 use crate::clock::{Clock, Timestamp};
 use crate::model::Mailbox;
-use crate::outgoing::{DEFAULT_REMIND_DAYS, DraftState, PendingHold, SendIntent, hold_progress};
+use crate::outgoing::{
+    BadTime, DEFAULT_REMIND_DAYS, DraftState, PendingHold, SendIntent, hold_progress,
+    parse_send_later,
+};
 use crate::tz::{Now, Zone};
 
 gpui_kit::actions!(
@@ -26,6 +32,7 @@ gpui_kit::actions!(
         IntentPick1,
         IntentPick2,
         IntentPick3,
+        IntentCustom,
         IntentJustSend,
         IntentConfirm,
         IntentNext,
@@ -39,27 +46,44 @@ gpui_kit::actions!(
 /// Key context of the open intent menu (digits, enter, escape and arrows bind under it).
 pub const INTENT_CONTEXT: &str = "ComposeIntent";
 
+/// The same, minus keys typed into the custom time field, which owns its digits and Enter.
+pub const INTENT_KEYS: &str = "ComposeIntent && !Input";
+
 /// The day counts the Remind row steps through with ← →.
 const REMIND_DAYS: [u32; 6] = [1, 2, 3, 5, 7, 14];
 
 const DIM: f32 = 0.38;
 
-/// The menu's own state: which page, which row is lit, and whether picking also sends.
+/// Which page the menu is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Main,
+    Later,
+    Custom,
+}
+
+/// The menu's own state: which page, which row is lit, whether picking also sends, the
+/// Remind day count, and what the custom entry last complained about.
 struct Menu {
-    later: bool,
+    page: Page,
     selected: usize,
     and_send: bool,
     days: u32,
+    error: Option<&'static str>,
 }
 
 /// Everything intent-related the composer keeps: the open menu, the hold it is frozen
-/// under, the one-line "restored" notice and the clock presets are read from.
+/// under, the one-line "restored" notice, the clock presets are read from, the custom
+/// time field, and where the token and Send were last painted.
 pub struct IntentState {
     focus: FocusHandle,
     menu: Option<Menu>,
     hold: Option<PendingHold>,
     restored: bool,
     time: Option<(Rc<dyn Clock>, Rc<dyn Zone>)>,
+    custom_input: Option<Entity<InputState>>,
+    token_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    send_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
 impl IntentState {
@@ -70,6 +94,9 @@ impl IntentState {
             hold: None,
             restored: false,
             time: None,
+            custom_input: None,
+            token_bounds: Rc::new(Cell::new(None)),
+            send_bounds: Rc::new(Cell::new(None)),
         }
     }
 }
@@ -176,8 +203,11 @@ impl Composer {
             (t.muted_foreground, t.border, t.secondary, t.foreground, t.primary)
         };
         let (icon, words) = self.intent_words(intent);
+        // Measured each frame so the menu this opens hangs under it, wherever it wraps to.
+        let anchor = self.intent.token_bounds.clone();
         let token = div()
             .id("compose-intent")
+            .debug_selector(|| "compose-intent".into())
             .test_support()
             .flex()
             .items_center()
@@ -191,6 +221,7 @@ impl Composer {
             .text_size(px(13.))
             .line_height(px(20.))
             .text_color(strong)
+            .on_prepaint(move |bounds, _, _| anchor.set(Some(bounds)))
             .child(Icon::new(icon).with_size(px(13.)).text_color(muted))
             .child(words)
             .when(!frozen, |d| {
@@ -199,29 +230,6 @@ impl Composer {
                 }))
             });
 
-        let ghost = |id: &'static str, text: String, row: usize, cx: &mut Context<Self>| {
-            div()
-                .id(id)
-                .test_support()
-                .text_size(px(13.))
-                .line_height(px(20.))
-                .text_color(muted.opacity(0.7))
-                .border_b_1()
-                .border_dashed()
-                .border_color(muted.opacity(0.35))
-                .px(px(2.))
-                .when(!frozen, |d| {
-                    d.cursor_pointer()
-                        .hover(move |s| s.text_color(strong))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_menu(false, Some(row), window, cx)
-                        }))
-                })
-                .child(text)
-        };
-        let dot = || div().text_size(px(13.)).text_color(muted.opacity(0.5)).child("·");
-        let remind = !matches!(intent, SendIntent::RemindIfNoReply { .. });
-        let later = !matches!(intent, SendIntent::SendLater { .. }) && self.now().is_some();
         div()
             .flex()
             .flex_wrap()
@@ -229,28 +237,25 @@ impl Composer {
             .gap(px(6.))
             .child(div().text_size(px(13.)).line_height(px(20.)).text_color(muted).child("then"))
             .child(token)
-            .when(remind, |d| {
-                d.child(dot()).child(ghost(
-                    "compose-intent-remind",
-                    format!("if no reply in {}d remind me", DEFAULT_REMIND_DAYS),
-                    1,
-                    cx,
-                ))
-            })
-            .when(later, |d| {
-                d.child(dot())
-                    .child(ghost("compose-intent-later", "send later".into(), 2, cx))
-            })
             .into_any_element()
     }
 
     // ------------------------------------------------------------------- the menu
 
-    /// Open the menu from Send: picking a row also sends.
+    /// Open the menu from Send: picking a row also sends, and the menu hangs under the
+    /// Send control.
     pub fn open_intent_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_menu(true, None, window, cx);
     }
 
+    /// Where the Send control was last painted. The Send menu is anchored to it, so it
+    /// follows the footer instead of a fixed corner.
+    pub(super) fn send_anchor(&self) -> Rc<Cell<Option<Bounds<Pixels>>>> {
+        self.intent.send_bounds.clone()
+    }
+
+    /// Open the menu, anchored under the token — or under Send, when picking from it also
+    /// sends.
     pub(super) fn open_menu(
         &mut self,
         and_send: bool,
@@ -266,10 +271,11 @@ impl Composer {
             _ => DEFAULT_REMIND_DAYS,
         };
         self.intent.menu = Some(Menu {
-            later: false,
+            page: Page::Main,
             selected: row.unwrap_or_else(|| row_of(self.draft.intent)),
             and_send,
             days,
+            error: None,
         });
         window.focus(&self.intent.focus, cx);
         cx.notify();
@@ -304,20 +310,31 @@ impl Composer {
         let Some(menu) = self.intent.menu.as_ref() else {
             return;
         };
-        if menu.later {
-            if let Some((_, at)) = self.later_presets().get(ix) {
-                self.choose(SendIntent::SendLater { at: *at }, window, cx);
+        if menu.page == Page::Custom {
+            return;
+        }
+        if menu.page == Page::Later {
+            let presets = self.later_presets();
+            match presets.get(ix) {
+                Some((_, at)) => self.choose(SendIntent::SendLater { at: *at }, window, cx),
+                None if ix == presets.len() => self.open_custom(window, cx),
+                None => {}
             }
             return;
         }
         let days = menu.days;
+        let and_send = menu.and_send;
+        let intent = self.draft.intent;
         match ix {
             0 => self.choose(SendIntent::Archive, window, cx),
             1 => self.choose(SendIntent::RemindIfNoReply { days }, window, cx),
-            // Send later asks when.
+            // Send later: Send confirms a time already chosen; the token's menu asks when.
+            2 if and_send && matches!(intent, SendIntent::SendLater { .. }) => {
+                self.choose(intent, window, cx)
+            }
             2 if self.now().is_some() => {
                 if let Some(menu) = self.intent.menu.as_mut() {
-                    menu.later = true;
+                    menu.page = Page::Later;
                     menu.selected = 1;
                 }
                 cx.notify();
@@ -327,11 +344,60 @@ impl Composer {
         }
     }
 
+    /// The custom send-later page: a field for a date and time, focused so it can be typed
+    /// straight away.
+    fn open_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = match self.intent.custom_input.clone() {
+            Some(input) => input,
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("tomorrow 09:00"));
+                cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        this.submit_custom(window, cx);
+                    }
+                })
+                .detach();
+                self.intent.custom_input = Some(input.clone());
+                input
+            }
+        };
+        if let Some(menu) = self.intent.menu.as_mut() {
+            menu.page = Page::Custom;
+            menu.error = None;
+        }
+        window.focus(&input.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    /// Enter in the custom field: take the typed time, or say why it will not do.
+    fn submit_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(input), Some(now)) = (self.intent.custom_input.clone(), self.now()) else {
+            return;
+        };
+        let text = input.read(cx).value().to_string();
+        let error = match parse_send_later(text.trim(), &now) {
+            Ok(at) => return self.choose(SendIntent::SendLater { at }, window, cx),
+            Err(BadTime::Past) => "That time has passed",
+            Err(BadTime::Unreadable) => "Try 14:30, tomorrow 9:00 or 2026-11-03 08:15",
+        };
+        if let Some(menu) = self.intent.menu.as_mut() {
+            menu.error = Some(error);
+        }
+        cx.notify();
+    }
+
+    /// `4` on the send-later page: type the time instead of taking a preset.
+    fn custom_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.intent.menu.as_ref().is_some_and(|m| m.page == Page::Later) {
+            self.open_custom(window, cx);
+        }
+    }
+
     fn move_selection(&mut self, direction: i32, cx: &mut Context<Self>) {
         let rows = match self.intent.menu.as_ref() {
-            Some(menu) if menu.later => self.later_presets().len(),
-            Some(_) => 4,
-            None => return,
+            Some(menu) if menu.page == Page::Later => self.later_presets().len() + 1,
+            Some(menu) if menu.page == Page::Main => 4,
+            _ => return,
         };
         if let Some(menu) = self.intent.menu.as_mut() {
             menu.selected = (menu.selected as i32 + direction).rem_euclid(rows as i32) as usize;
@@ -341,7 +407,7 @@ impl Composer {
 
     fn step_remind_days(&mut self, direction: i32, cx: &mut Context<Self>) {
         if let Some(menu) = self.intent.menu.as_mut()
-            && !menu.later
+            && menu.page == Page::Main
         {
             menu.days = step_days(menu.days, direction);
             cx.notify();
@@ -390,7 +456,8 @@ impl Composer {
         let Some(now) = self.now() else {
             return Vec::new();
         };
-        self.later_presets()
+        let mut rows: Vec<Row> = self
+            .later_presets()
             .into_iter()
             .zip(["1", "2", "3"])
             .map(|((label, at), key)| Row {
@@ -399,23 +466,29 @@ impl Composer {
                 detail: format_time(at, &now),
                 key,
             })
-            .collect()
+            .collect();
+        rows.push(Row {
+            icon: IconName::Calendar,
+            label: "Custom…".into(),
+            detail: "a date and time".into(),
+            key: "4",
+        });
+        rows
     }
 
-    /// The floating menu, anchored above the footer. `None` while it is closed.
+    /// The floating menu, anchored under whatever opened it: the `then` token, or Send.
+    /// `None` while it is closed.
     pub(super) fn render_intent_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.intent.menu.as_ref()?;
-        let (later, selected, days) = (menu.later, menu.selected, menu.days);
-        let rows = if later {
-            self.later_rows()
+        let (page, selected, days, error) = (menu.page, menu.selected, menu.days, menu.error);
+        let anchor = if menu.and_send {
+            self.intent.send_bounds.get()
         } else {
-            self.main_rows(days)
+            self.intent.token_bounds.get()
         };
-        // Above the status line, and above the formatting bar when it is showing.
-        let bottom = if self.toolbar_visible(cx) { 79. } else { 45. };
         let mono = crate::app::ui::mono_font(cx);
         let t = cx.theme();
-        let (bg, border, fg, strong, muted, hover, primary) = (
+        let (bg, border, fg, strong, muted, hover, primary, danger) = (
             t.popover,
             t.border,
             t.popover_foreground,
@@ -423,15 +496,14 @@ impl Composer {
             t.muted_foreground,
             t.secondary_hover,
             t.primary,
+            t.danger,
         );
         let mut list = div()
             .id("compose-intent-menu")
+            .debug_selector(|| "compose-intent-menu".into())
             .test_support()
             .key_context(INTENT_CONTEXT)
             .track_focus(&self.intent.focus)
-            .absolute()
-            .right(px(8.))
-            .bottom(px(bottom))
             .w(px(340.))
             .p(px(4.))
             .flex()
@@ -446,8 +518,9 @@ impl Composer {
             .on_action(cx.listener(|this, _: &IntentPick1, w, cx| this.pick(0, w, cx)))
             .on_action(cx.listener(|this, _: &IntentPick2, w, cx| this.pick(1, w, cx)))
             .on_action(cx.listener(|this, _: &IntentPick3, w, cx| this.pick(2, w, cx)))
+            .on_action(cx.listener(|this, _: &IntentCustom, w, cx| this.custom_key(w, cx)))
             .on_action(cx.listener(|this, _: &IntentJustSend, w, cx| {
-                if this.intent.menu.as_ref().is_some_and(|m| !m.later) {
+                if this.intent.menu.as_ref().is_some_and(|m| m.page == Page::Main) {
                     this.pick(3, w, cx)
                 }
             }))
@@ -471,47 +544,89 @@ impl Composer {
                     .text_size(px(9.))
                     .line_height(px(16.))
                     .text_color(muted)
-                    .child(if later { "SEND LATER" } else { "AFTER SENDING" }),
+                    .child(match page {
+                        Page::Main => "AFTER SENDING",
+                        Page::Later => "SEND LATER",
+                        Page::Custom => "SEND LATER · CUSTOM",
+                    }),
             );
-        let last = rows.len().saturating_sub(1);
-        for (ix, row) in rows.into_iter().enumerate() {
-            let lit = ix == selected;
-            // Just send sits apart, under a rule.
-            if !later && ix == last {
-                list = list.child(div().h(px(1.)).mx(px(6.)).my(px(4.)).bg(border));
-            }
-            let quiet = !later && ix == last;
+        if page == Page::Custom {
             list = list.child(
                 div()
-                    .id(("compose-intent-row", ix))
-                    .test_support()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .h(px(28.))
                     .px(px(8.))
-                    .rounded(px(5.))
-                    .text_size(px(12.))
-                    .cursor_pointer()
-                    .text_color(if quiet { muted } else { fg })
-                    .when(lit, |d| d.bg(hover).text_color(strong))
-                    .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, w, cx| this.pick(ix, w, cx)))
-                    .child(
-                        Icon::new(row.icon)
-                            .with_size(px(15.))
-                            .text_color(if lit { primary } else { muted }),
-                    )
+                    .pb(px(6.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .when_some(self.intent.custom_input.clone(), |d, input| {
+                        d.child(Input::new(&input))
+                    })
                     .child(
                         div()
-                            .when(!quiet, |d| d.font_weight(FontWeight::MEDIUM).text_color(strong))
-                            .child(row.label),
+                            .text_size(px(11.))
+                            .text_color(muted)
+                            .child("14:30 · tomorrow 9:00 · 2026-11-03 08:15"),
                     )
-                    .child(div().text_size(px(11.)).text_color(muted).child(row.detail))
-                    .child(div().ml_auto().child(shortcut(row.key))),
+                    .when_some(error, |d, why| {
+                        d.child(div().text_size(px(11.)).text_color(danger).child(why))
+                    }),
             );
+        } else {
+            let rows = if page == Page::Later {
+                self.later_rows()
+            } else {
+                self.main_rows(days)
+            };
+            let last = rows.len().saturating_sub(1);
+            for (ix, row) in rows.into_iter().enumerate() {
+                let lit = ix == selected;
+                // Just send sits apart, under a rule.
+                if page == Page::Main && ix == last {
+                    list = list.child(div().h(px(1.)).mx(px(6.)).my(px(4.)).bg(border));
+                }
+                let quiet = page == Page::Main && ix == last;
+                list = list.child(
+                    div()
+                        .id(("compose-intent-row", ix))
+                        .test_support()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .h(px(28.))
+                        .px(px(8.))
+                        .rounded(px(5.))
+                        .text_size(px(12.))
+                        .cursor_pointer()
+                        .text_color(if quiet { muted } else { fg })
+                        .when(lit, |d| d.bg(hover).text_color(strong))
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(move |this, _, w, cx| this.pick(ix, w, cx)))
+                        .child(
+                            Icon::new(row.icon)
+                                .with_size(px(15.))
+                                .text_color(if lit { primary } else { muted }),
+                        )
+                        .child(
+                            div()
+                                .when(!quiet, |d| {
+                                    d.font_weight(FontWeight::MEDIUM).text_color(strong)
+                                })
+                                .child(row.label),
+                        )
+                        .child(div().text_size(px(11.)).text_color(muted).child(row.detail))
+                        .child(div().ml_auto().child(shortcut(row.key))),
+                );
+            }
         }
-        Some(list.into_any_element())
+        Some(
+            Positioner::side(anchor?)
+                .placement(Placement::Bottom)
+                .align(Align::Start)
+                .offset(px(6.))
+                .occlude()
+                .child(list)
+                .into_any_element(),
+        )
     }
 
     // ------------------------------------------------------------- the frozen state
