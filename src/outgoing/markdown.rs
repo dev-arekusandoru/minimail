@@ -198,7 +198,11 @@ impl Renderer {
                 } else if self.text {
                     self.write(" ");
                 } else {
-                    self.out.push('\n');
+                    // A soft break is the space HTML would receive anyway. Writing a
+                    // literal newline inside the paragraph makes the preview split the
+                    // line and lose an inline code span that sits at the break, so the
+                    // line's text stays one run.
+                    self.out.push(' ');
                 }
             }
             Event::HardBreak => {
@@ -1090,6 +1094,25 @@ mod tests {
         assert!(!block_active("- one\ntwo", sel(0, 10), BlockFormat::BulletList));
         assert!(block_active("> quoted", sel(3, 3), BlockFormat::Quote));
         assert!(block_active("```\nx\n```", sel(0, 9), BlockFormat::CodeBlock));
+    }
+
+    /// Inline code stays inside its paragraph: no line break splits the paragraph, so an
+    /// inline span at the end of a source line cannot be handed to the preview as a
+    /// separate line (where it rendered as a full-width code block with no text).
+    #[test]
+    fn inline_code_keeps_its_line_text_inline() {
+        assert_eq!(
+            render_markdown("foo `bar`"),
+            "<p>foo <code>bar</code></p>\n"
+        );
+        let html = render_markdown("### Highlights\nfoo\nfoo `bar`");
+        assert!(
+            html.contains("<p>foo foo <code>bar</code></p>"),
+            "the soft breaks stay inside one paragraph: {html}"
+        );
+        assert!(!html.contains("<pre"), "inline code is not a code block: {html}");
+        assert_eq!(html.matches("<code>").count(), 1, "{html}");
+        assert!(!html.contains("`"), "the backticks do not leak into the text: {html}");
     }
 
     #[test]
