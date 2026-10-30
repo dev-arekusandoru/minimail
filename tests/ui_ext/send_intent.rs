@@ -9,8 +9,11 @@ use mail_classifier::outgoing::{DraftState, HOLD_SECONDS, SendIntent};
 /// The intent the open draft carries.
 fn intent(h: &mut Harness<'_>) -> SendIntent {
     h.read(|a| {
-        let id = a.inline_composer.expect("an inline composer");
-        a.composer.record(id).expect("the draft").intent
+        let id = a
+            .inline_composer
+            .or_else(|| a.tabs.active_draft())
+            .expect("an open composer");
+        a.composer.record(id).expect("the draft").intent()
     })
 }
 
@@ -172,7 +175,7 @@ pub fn a_typed_time_in_the_past_is_refused(cx: &mut TestAppContext) {
     h.type_text("09:00");
     h.keys("enter");
     assert!(h.has("compose-intent-menu"), "the menu stays open on a bad time");
-    assert_eq!(intent(&mut h), SendIntent::JustSend, "the sentence is unchanged");
+    assert_eq!(intent(&mut h), SendIntent::Archive, "the sentence is unchanged");
 }
 
 #[gpui_kit::gpui::test]
@@ -217,5 +220,34 @@ pub fn the_send_menu_hangs_off_the_send_control(cx: &mut TestAppContext) {
     assert!(
         menu.left() <= send.right() && menu.right() >= send.left(),
         "and hangs from its column (send {send:?}, menu {menu:?})"
+    );
+}
+
+#[gpui_kit::gpui::test]
+pub fn a_reply_already_reads_archive_and_sending_takes_it(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    let original = h.cursor().expect("message");
+    h.compose_reply("see you then");
+    h.settle();
+    assert_eq!(intent(&mut h), SendIntent::Archive, "a reply leaves the inbox once it is sent");
+    send(&mut h);
+    h.await_holds(1);
+    h.deliver_held();
+    assert_eq!(h.state_of(original), Archived);
+}
+
+#[gpui_kit::gpui::test]
+pub fn a_new_message_has_no_archive_to_pick_and_never_starts_on_one(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    h.new_draft();
+    assert_eq!(intent(&mut h), SendIntent::JustSend, "a new conversation just leaves");
+    h.keys("cmd-enter");
+    assert!(h.has("compose-intent-menu"), "the menu opens");
+    // Archive used to be row `1`: without a thread, that key is the reminder instead.
+    h.keys("1");
+    assert_eq!(
+        intent(&mut h),
+        SendIntent::RemindIfNoReply { days: 3 },
+        "there is no archive row to take"
     );
 }

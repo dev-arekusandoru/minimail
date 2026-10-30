@@ -99,7 +99,8 @@ pub fn a_reply_with_cc_shows_the_field_automatically(cx: &mut TestAppContext) {
     );
 }
 
-/// Escape closes the composer and keeps the draft (a close never deletes).
+/// Closing keeps the draft (a close never deletes): escape no longer closes, so the
+/// palette's Close composer is the keys' way out.
 #[gpui_kit::gpui::test]
 pub fn closing_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -108,7 +109,7 @@ pub fn closing_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
     h.settle();
     assert!(!h.has("compose-save-close"), "the footer no longer has Save & Close");
 
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.settle();
     assert!(!h.read(|a| a.compose_open()), "the composer closed");
     assert_eq!(
@@ -126,7 +127,7 @@ pub fn the_formatting_bar_toggles_and_is_remembered(cx: &mut TestAppContext) {
     assert!(!h.has("compose-bold"), "the bar starts hidden");
     h.keys("cmd-alt-t");
     assert!(h.has("compose-bold"), "cmd-alt-t shows it");
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.settle();
     h.new_draft();
     assert!(h.has("compose-bold"), "a new composer remembers the choice");
@@ -134,57 +135,76 @@ pub fn the_formatting_bar_toggles_and_is_remembered(cx: &mut TestAppContext) {
     assert!(!h.has("compose-bold"), "cmd-alt-t hides it again");
 }
 
-/// A lone `/` on a line opens the slash menu; more typing or Escape dismisses it.
+/// A `/` opens the menu at the start of a word — the body's start or after whitespace —
+/// and the text after it filters the rows. Escape or whitespace dismisses it.
 #[gpui_kit::gpui::test]
-pub fn a_slash_opens_the_menu_and_typing_or_escape_dismisses_it(cx: &mut TestAppContext) {
+pub fn a_slash_opens_the_menu_at_a_word_start(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.new_draft();
     h.type_text("/");
     assert!(h.has("compose-slash-menu"), "a lone slash opens the menu");
-    h.type_text("x");
-    assert!(!h.has("compose-slash-menu"), "continued typing dismisses it");
-    h.keys("backspace backspace");
-    h.type_text("/");
-    assert!(h.has("compose-slash-menu"));
     h.keys("escape");
     assert!(!h.has("compose-slash-menu"), "escape dismisses it");
     assert!(h.read(|a| a.compose_open()), "and does not close the composer");
+
+    h.new_draft();
+    h.type_text("hello /bo");
+    assert!(h.has("compose-slash-menu"), "a slash after a space opens mid-line");
+    h.type_text(" ");
+    assert!(!h.has("compose-slash-menu"), "a space ends the query");
 }
 
-/// Down and Enter drive the slash menu instead of moving the caret. The menu mirrors the
-/// bar (every command plus Send later): Up from the first row wraps to Send later, which
-/// opens the intent menu, and picking Bold by click makes the same edit its chord does.
+/// A slash inside a word (`and/or`, a URL) is left as text.
+#[gpui_kit::gpui::test]
+pub fn a_slash_inside_a_word_does_not_open_the_menu(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("and/or");
+    assert!(!h.has("compose-slash-menu"), "`and/or` is not a slash command");
+    h.type_text(" https://example.com");
+    assert!(!h.has("compose-slash-menu"), "nor is a URL's slash");
+}
+
+/// The query after the `/` filters the bar's commands, and Enter runs the match.
+#[gpui_kit::gpui::test]
+pub fn a_slash_query_filters_and_enter_applies_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("hello /bo");
+    assert!(h.has("compose-slash-menu"), "the menu stays up while the query is typed");
+    assert!(h.has(("compose-slash", 0usize)), "Bold ranks first for `bo`");
+    assert!(
+        !h.has(("compose-slash", 2usize)),
+        "only the fuzzy matches are offered"
+    );
+    assert!(!h.has("compose-slash-later"), "Send later is not a row");
+
+    h.keys("enter");
+    assert!(!h.has("compose-slash-menu"), "picking closes the menu");
+    let body = h.read(|a| {
+        let id = a.tabs.active_draft().expect("a draft tab");
+        a.composer.record(id).expect("record").body.source.clone()
+    });
+    assert_eq!(body, "hello ****", "Bold applies and the `/bo` span is gone");
+}
+
+/// Down and Enter drive the slash menu instead of moving the caret. The menu is exactly
+/// the bar's commands, so Down from Bold lands on Italic.
 #[gpui_kit::gpui::test]
 pub fn the_slash_menu_is_driven_from_the_keyboard(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.new_draft();
-    h.type_text("hi\n");
-    h.type_text("/");
-    // Every bar command, then the menu-only Send later.
+    h.type_text("hi\n/");
     for ix in 0usize..=11 {
         assert!(h.has(("compose-slash", ix)), "slash row {ix} is missing");
     }
-    assert!(h.has("compose-slash-later"), "slash row 12 is missing");
-    h.keys("up enter");
+    h.keys("down enter");
     assert!(!h.has("compose-slash-menu"), "picking closes the menu");
-    assert!(h.has("compose-intent-menu"), "Send later opens the intent menu");
-    h.keys("escape");
-    h.settle();
     let body = h.read(|a| {
         let id = a.tabs.active_draft().expect("a draft tab");
         a.composer.record(id).expect("record").body.source.clone()
     });
-    assert_eq!(body, "hi\n", "the slash was removed and nothing else typed");
-
-    h.type_text("/");
-    h.keys("enter");
-    assert!(!h.has("compose-slash-menu"), "Enter on Bold closes the menu");
-    assert!(!h.has("compose-intent-menu"));
-    let body = h.read(|a| {
-        let id = a.tabs.active_draft().expect("a draft tab");
-        a.composer.record(id).expect("record").body.source.clone()
-    });
-    assert_eq!(body, "hi\n****", "Bold wraps the empty caret like its chord does");
+    assert_eq!(body, "hi\n**", "Italic wraps the empty caret like its chord does");
 }
 
 /// Mentioning an attachment with none attached warns in the status line, and Send says so.

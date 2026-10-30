@@ -454,10 +454,6 @@ pub struct Composer {
     /// The reply-all recipients the thread started with, so a removed one can be noted and
     /// restored; empty for everything but a reply-all.
     recipient_baseline: Vec<(Field, String)>,
-    /// Whether the Cc field is on screen. It starts shown only when the draft already has a
-    /// Cc, so an empty `Cc` row does not take a line of its own.
-    cc_shown: bool,
-    bcc_shown: bool,
     subject: Entity<InputState>,
     body: Entity<TextareaState>,
     preview_focus: FocusHandle,
@@ -515,8 +511,6 @@ impl Composer {
             b.set_value(draft.body.source.as_str(), window, cx)
         });
         let mode = draft.body.mode;
-        let cc_shown = !draft.cc.trim().is_empty();
-        let bcc_shown = !draft.bcc.trim().is_empty();
         let mut subs = Vec::new();
         for entity in [&to, &cc, &bcc] {
             subs.push(
@@ -567,8 +561,6 @@ impl Composer {
             cc,
             bcc,
             recipient_baseline: Vec::new(),
-            cc_shown,
-            bcc_shown,
             subject,
             body,
             preview_focus: cx.focus_handle(),
@@ -682,8 +674,6 @@ impl Composer {
             self.pending_paste = None;
         }
         self.mode = self.draft.body.mode;
-        self.cc_shown = self.cc_shown || !self.draft.cc.trim().is_empty();
-        self.bcc_shown = self.bcc_shown || !self.draft.bcc.trim().is_empty();
         if body_changed {
             self.invalidate_preview();
         }
@@ -747,6 +737,12 @@ impl Composer {
 
     pub fn focus_recipients(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.to.update(cx, |r, cx| r.focus(window, cx));
+    }
+
+    /// How far the subject field has scrolled sideways: zero while the whole subject fits,
+    /// so a keystroke test can prove the text never slides under its own padding.
+    pub fn subject_scroll(&self, cx: &App) -> Pixels {
+        self.subject.read(cx).scroll_offset().x
     }
 
     /// The owner marks a send request in flight, so the controls stop offering one.
@@ -1109,21 +1105,14 @@ impl Composer {
     }
 
     /// Reveal a hidden recipient field and put the caret in it, so the link that asked for it
-    /// leads straight to typing. The link hides itself once the field is on screen.
+    /// leads straight to typing. The link gives way to the field while it has the caret.
     fn reveal_field(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) {
         let entity = match field {
-            Field::To => {
-                self.to.clone()
-            }
-            Field::Cc => {
-                self.cc_shown = true;
-                self.cc.clone()
-            }
-            Field::Bcc => {
-                self.bcc_shown = true;
-                self.bcc.clone()
-            }
-        };
+            Field::To => &self.to,
+            Field::Cc => &self.cc,
+            Field::Bcc => &self.bcc,
+        }
+        .clone();
         entity.update(cx, |recipients, cx| recipients.focus(window, cx));
         cx.notify();
     }
@@ -1134,7 +1123,7 @@ impl Composer {
             DraftState::Editing | DraftState::Failed { .. } | DraftState::Conflict => {
                 self.save_status.clone()
             }
-            DraftState::Held if matches!(self.draft.intent, crate::outgoing::SendIntent::SendLater { .. }) => {
+            DraftState::Held if matches!(self.draft.intent(), crate::outgoing::SendIntent::SendLater { .. }) => {
                 "Scheduled".into()
             }
             DraftState::Held => "Sending…".into(),
@@ -1689,11 +1678,10 @@ impl Render for Composer {
                 // ⇧⌘↵ edits the sentence without sending: the token's click, on the keys.
                 this.open_menu(false, None, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &CloseComposer, _, cx| {
-                // Escape dismisses the slash menu or hint first; only a bare one closes.
-                if !this.dismiss_footer_overlays(cx) {
-                    cx.emit(ComposeEvent::Close)
-                }
+            .on_action(cx.listener(|this, _: &DismissComposeOverlay, _, cx| {
+                // Escape dismisses the slash menu or the hint and stops there; it never
+                // closes the composer, whatever field has focus.
+                this.dismiss_footer_overlays(cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleFormattingBar, _, cx| this.toggle_toolbar(cx)))
             // The slash menu owns these keys before the textarea sees them.

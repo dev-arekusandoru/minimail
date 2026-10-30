@@ -79,16 +79,13 @@ impl FooterPrefs {
 
 /// Per-composer footer state.
 pub struct FooterState {
-    /// The `/` that opened the slash menu, while it is still the whole line.
-    slash: Option<Range<usize>>,
+    /// The `/query` that opened the slash menu, and the bar commands it still matches.
+    slash: Option<(Range<usize>, Vec<&'static toolbar::Tool>)>,
     /// The highlighted slash row.
     slash_sel: usize,
     /// The first-run hint is on screen.
     hint: bool,
 }
-
-/// Every `/` row: the bar's commands, then Send later.
-const SLASH_ROWS: usize = toolbar::TOOLS.len() + toolbar::FILE_TOOLS.len() + 1;
 
 impl FooterState {
     pub fn new(cx: &mut App) -> Self {
@@ -122,15 +119,12 @@ impl Composer {
         cx.notify();
     }
 
-    /// Escape and Close dismiss the slash menu and the hint before they close anything.
-    /// Returns whether the slash menu was dismissed.
-    pub(super) fn dismiss_footer_overlays(&mut self, cx: &mut Context<Self>) -> bool {
-        let was = self.footer.slash.take().is_some();
-        self.retire_hint(cx);
-        if was {
+    /// Escape dismisses the slash menu and the hint; it never closes the composer.
+    pub(super) fn dismiss_footer_overlays(&mut self, cx: &mut Context<Self>) {
+        if self.footer.slash.take().is_some() {
             cx.notify();
         }
-        was
+        self.retire_hint(cx);
     }
 
     /// The hint goes away for good once dismissed.
@@ -140,20 +134,36 @@ impl Composer {
         }
     }
 
-    /// Re-evaluate the slash menu after the body changed.
+    /// Re-evaluate the slash menu after the body changed: the `/query` under the caret
+    /// decides both whether it opens and which rows it keeps.
     pub(super) fn update_slash(&mut self, cx: &mut Context<Self>) {
         let body = self.body.read(cx);
         let sel = body.selected_range();
         let open = if sel.is_empty() {
-            crate::send_checks::slash_trigger(body.value().as_str(), sel.start)
+            crate::send_checks::slash_trigger(body.value().as_str(), sel.start).and_then(|range| {
+                let query = &body.value()[range.start + 1..range.end];
+                let mut ranked = toolbar::commands()
+                    .filter_map(|tool| {
+                        crate::fuzzy::rank(tool.label, tool.key, query).map(|rank| (rank, tool))
+                    })
+                    .collect::<Vec<_>>();
+                ranked.sort_by_key(|(rank, _)| *rank);
+                let rows = ranked.into_iter().map(|(_, tool)| tool).collect::<Vec<_>>();
+                (!rows.is_empty()).then_some((range, rows))
+            })
         } else {
             None
         };
-        if open != self.footer.slash {
-            if self.footer.slash.is_none() {
-                self.footer.slash_sel = 0;
-            }
-            self.footer.slash = open;
+        let changed =
+            open.as_ref().map(|(range, _)| range) != self.footer.slash.as_ref().map(|(range, _)| range);
+        if self.footer.slash.is_none() {
+            self.footer.slash_sel = 0;
+        }
+        if let Some((_, rows)) = &open {
+            self.footer.slash_sel = self.footer.slash_sel.min(rows.len() - 1);
+        }
+        self.footer.slash = open;
+        if changed {
             cx.notify();
         }
     }
@@ -164,7 +174,10 @@ impl Composer {
     }
 
     pub(super) fn slash_move(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let n = SLASH_ROWS as isize;
+        let Some((_, rows)) = &self.footer.slash else {
+            return;
+        };
+        let n = rows.len() as isize;
         self.footer.slash_sel = (self.footer.slash_sel as isize + delta).rem_euclid(n) as usize;
         cx.notify();
     }
@@ -173,15 +186,14 @@ impl Composer {
         self.pick_slash(self.footer.slash_sel, window, cx);
     }
 
-    /// Choosing a slash row removes the `/` it was opened with, then runs the row: a bar
-    /// command dispatches the same action its button does, and the last row (Send later)
-    /// opens the intent menu.
+    /// Choosing a slash row removes the `/query` it was opened with, then runs that row's
+    /// bar command, so the menu does exactly what its button does.
     pub(super) fn pick_slash(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(range) = self.footer.slash.take() else {
+        let Some((range, rows)) = self.footer.slash.take() else {
             return;
         };
         let mut text = self.body.read(cx).value().to_string();
-        if text.get(range.clone()) == Some("/") {
+        if text.get(range.clone()).is_some_and(|span| span.starts_with('/')) {
             text.replace_range(range.clone(), "");
             self.apply(
                 markdown::Edit { text, selection: range.start..range.start },
@@ -189,13 +201,8 @@ impl Composer {
                 cx,
             );
         }
-        match toolbar::commands().nth(row) {
-            Some(tool) => {
-                if let Some(action) = super::tool_action(tool.id) {
-                    window.dispatch_action(action(), cx);
-                }
-            }
-            None => self.open_menu(false, Some(2), window, cx),
+        if let Some(action) = rows.get(row).and_then(|tool| super::tool_action(tool.id)) {
+            window.dispatch_action(action(), cx);
         }
         cx.notify();
     }
@@ -356,7 +363,7 @@ impl Composer {
 
     /// The body caret's line box on screen, when it has been laid out.
     fn caret_bounds(&self, cx: &App) -> Option<Bounds<Pixels>> {
-        let at = self.footer.slash.as_ref()?.start;
+        let at = self.footer.slash.as_ref()?.0.end;
         self.body.read(cx).range_to_bounds(&(at..at))
     }
 
@@ -413,7 +420,9 @@ impl Composer {
                 .text_color(fg)
                 .shadow_lg();
             let mut group = None;
-            for (ix, tool) in toolbar::commands().enumerate() {
+            let rows: &[&'static toolbar::Tool] =
+                self.footer.slash.as_ref().map_or(&[], |(_, rows)| rows);
+            for (ix, tool) in rows.iter().enumerate() {
                 if group.is_some_and(|group| group != tool.group) {
                     menu = menu.child(Separator::horizontal().my(px(4.)));
                 }
@@ -425,23 +434,7 @@ impl Composer {
                         })),
                 );
             }
-            // Send later only sets the intent; Send still sends.
-            menu = menu
-                .child(Separator::horizontal().my(px(4.)))
-                .child(
-                    row(
-                        "compose-slash-later".into(),
-                        IconName::Clock,
-                        "Send later",
-                        "",
-                        sel == SLASH_ROWS - 1,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.pick_slash(SLASH_ROWS - 1, window, cx)
-                    })),
-                )
-                .max_h(px(320.))
-                .overflow_y_scroll();
+            menu = menu.max_h(px(320.)).overflow_y_scroll();
             // Just under the caret; anchored flips it above when the body ends too near the
             // window edge. Before the first layout there is no caret to anchor to.
             out.push(match self.caret_bounds(cx) {

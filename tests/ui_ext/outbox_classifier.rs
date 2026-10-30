@@ -219,7 +219,7 @@ pub fn two_holds_count_down_at_once_and_are_recalled_one_at_a_time(cx: &mut Test
     h.settle();
     let first = h.read(|a| a.inline_composer.expect("the inline reply"));
     // Close the first so the list is driving again, then start a second reply beside it.
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.tick();
     h.compose_reply("second message");
     h.settle();
@@ -435,7 +435,7 @@ pub fn closing_keeps_the_draft_and_discard_removes_it(cx: &mut TestAppContext) {
     h.settle();
     let (_, _, subject, body) = h.draft_fields();
     assert!(!body.is_empty());
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()), "the surface closed");
     assert_eq!(
@@ -508,7 +508,7 @@ pub fn closing_flushes_the_pending_write_immediately(cx: &mut TestAppContext) {
     h.compose_reply("typed then closed");
     assert_eq!(h.pending_saves(), 1, "the edit is queued, not yet written");
 
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()), "the surface closed");
     h.await_composer("the close wrote the draft", |a| a.composer_idle());
@@ -529,7 +529,7 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
     h.settle();
     let id = h.read(|a| a.composer.drafts[0].record.id);
     // Close it so the draft is only reachable through the list.
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.tick();
     assert!(!h.read(|a| a.inline_compose_open()));
 
@@ -850,11 +850,11 @@ pub fn a_closed_draft_reopens_from_the_drafts_pane(cx: &mut TestAppContext) {
     h.compose_reply("kept for later");
     h.settle();
     let id = h.read(|a| a.composer.drafts[0].record.id);
-    h.keys("escape");
+    h.run_palette("Close composer");
     h.tick();
     assert!(
         !h.read(|a| a.compose_in_tab()) && !h.read(|a| a.inline_compose_open()),
-        "escape closes the surface; the draft is kept, not shown"
+        "the close keeps the draft off screen"
     );
 
     h.keys("cmd-shift-d");

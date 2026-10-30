@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod harness;
 
+mod compose_clauses;
 mod composer_ui;
 mod draft_tabs;
 mod classifier;

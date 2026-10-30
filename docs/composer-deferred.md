@@ -27,3 +27,11 @@ up without re-deriving the decision.
       guarantee needs the close path to join/flush the local lane before the
       window goes away (or a synchronous local write there); the seam is
       `MailApp::watch_window_close` / `flush_dirty_drafts`.
+- [ ] **File to…** — a `then file to <folder>` intent that moves the thread
+      into a chosen folder or label after sending. Only `archive thread`,
+      `remind if no reply`, `send later` and plain send exist today, all
+      limited to what an in-thread reply can do. Still to decide: whether the
+      picker reuses the folder picker's fuzzy matching (it does for moving a
+      message), how a provider without folder writes reports a failure after
+      the send has already gone, and whether the choice is remembered per
+      recipient or per account.

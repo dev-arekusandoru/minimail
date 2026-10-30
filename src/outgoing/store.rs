@@ -255,7 +255,7 @@ impl DraftStore {
         next.cc = draft.cc.clone();
         next.bcc = draft.bcc.clone();
         next.body = draft.body.clone();
-        next.intent = draft.intent;
+        next.set_intent(draft.intent());
 
         let account_moved = draft.account != current.account;
         let subject_changed = draft.subject.trim() != current.subject.trim();

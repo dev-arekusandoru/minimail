@@ -1188,7 +1188,7 @@ impl MailApp {
                 }
                 open.edit_form(to, cc, bcc, subject, body, now);
                 entity.update(cx, |composer, cx| {
-                    open.record.intent = composer.intent();
+                    open.record.set_intent(composer.intent());
                     composer.dismiss_restored_notice(cx);
                 });
                 // The write itself is not started here: the beat writes the queued snapshot
@@ -1203,8 +1203,8 @@ impl MailApp {
             ComposeEvent::Close => {
                 self.close_composer(id);
                 // The surface that owned the keyboard is gone, so the app takes focus back:
-                // list keys work straight after `esc` instead of being swallowed by an input
-                // that no longer exists.
+                // list keys work straight after closing the composer instead of being
+                // swallowed by an input that no longer exists.
                 window.focus(&self.focus_handle, cx);
             }
             ComposeEvent::Discard => self.pending_ui.push_back(PendingUi::ConfirmDiscard(id)),
@@ -1439,7 +1439,7 @@ impl MailApp {
             }
             open.operation = Some(DraftOperation::Hold);
             // Send later holds until its time; anything else waits out the undo window.
-            let at = open.record.intent.send_at();
+            let at = open.record.intent().send_at();
             worker.send(Command::BeginHold { draft: id, now, at });
         }
         cx.notify();
@@ -1562,7 +1562,7 @@ impl MailApp {
         if let Some(local) = self.message_by_remote(&account, &sent.id) {
             self.last_sent_remote = Some(sent.id.clone());
             let original = self.triage_original(&record, &sent);
-            self.after_send(original, original.unwrap_or(local), record.intent, cx);
+            self.after_send(original, original.unwrap_or(local), record.intent(), cx);
             return;
         }
         // The provider says which thread the message landed in, and that is where the copy
@@ -1653,7 +1653,7 @@ impl MailApp {
             .record_sent(outgoing, triage_original, expects, now);
         self.cache_outgoing(local, &sent);
         self.last_sent_remote = Some(sent.id.clone());
-        self.after_send(triage_original, triage_original.unwrap_or(local), record.intent, cx);
+        self.after_send(triage_original, triage_original.unwrap_or(local), record.intent(), cx);
         self.pending_ui.push_back(PendingUi::FocusBody(draft));
     }
 
@@ -2262,6 +2262,9 @@ impl MailApp {
             return;
         };
         self.tabs.open_draft_pinned(id);
+        // Reopening a draft puts the caret in it, so the reader is the pane the user is now
+        // in: the tab keys (`cmd-w`, `ctrl-tab`) follow them there, as with any opened mail.
+        self.focus_pane(Pane::Reader);
         if self.composers.contains_key(&id) {
             if self.inline_composer == Some(id) {
                 self.inline_composer = None;

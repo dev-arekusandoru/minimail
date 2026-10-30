@@ -29,13 +29,17 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
 .cl{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-width:0}
 .cl.to{cursor:text}
 .verb{font-size:13px;line-height:20px;color:var(--fg)}
-.tk{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 7px;border-radius:6px;background:var(--field);border:1px solid var(--border);font-size:13px;line-height:20px;color:var(--strong);white-space:nowrap}
+.tk{position:relative;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 7px;border-radius:6px;background:var(--field);border:1px solid var(--border);font-size:13px;line-height:20px;color:var(--strong);white-space:nowrap}
 .tk .av{width:16px;height:16px;border-radius:8px;font:700 9px/16px -apple-system,system-ui,sans-serif;text-align:center;color:#151517;flex:none}
 .tk.pad{padding-left:4px}
 .tk.subj{color:var(--strong)}
 .tk.intent{gap:6px}
 .tk.intent svg{width:13px;height:13px;color:var(--muted)}
-.tk.edit{border-color:var(--primary);background:#2b2c38}
+.tk.subj{padding:0 12px 0 7px}
+.tk .rm{display:none;width:16px;height:16px;align-items:center;justify-content:center;border-radius:4px;color:var(--fg);flex:none;margin-left:auto;position:absolute;right:3px;top:4px;background:var(--field)}
+.tk:hover .rm,.tk.hov .rm{display:flex}
+.tk.hov .rm:hover{background:var(--hover)}
+.typing{font-size:13px;line-height:20px;color:var(--strong)}
 .caret{display:inline-block;width:1px;height:14px;background:var(--primary);margin-left:1px}
 .to-caret{display:none}
 .cl.to.armed .to-caret{display:inline-block}
@@ -163,7 +167,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
 <section>
 <h2>A · New message, blurred (default)</h2>
 <div class="col">
-  <div class="cap">The header starts at <em>To</em>. The quiet <em>+</em> at text height adds a recipient; clicking anywhere in the To clause focuses it, and Tab or typing an address starts the same thing.</div>
+  <div class="cap">The header starts at <em>To</em>. The quiet <em>+</em> at text height adds a recipient; clicking anywhere in the To clause focuses it, and Tab or typing an address starts the same thing. A new message starts its own conversation, so its sentence already reads <em>just send</em>: there is no thread to archive, and the menu leaves that row out. A reply or forward — a draft that continues a thread — reads <em>archive thread</em>.</div>
   <div class="win">
     <div class="hd">
       <div class="sent">
@@ -178,7 +182,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
         </div>
         <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
         <div class="cl"><span class="verb">from</span><span class="tk"><svg class="ic" style="width:13px;height:13px;color:#61afef"><use href="#i-briefcase"/></svg>work<svg class="ic" style="width:12px;height:12px;color:var(--muted)"><use href="#i-chevron-down"/></svg></span></div>
-        <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
       </div>
     </div>
     <div class="body">
@@ -216,7 +220,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
 <section>
 <h2>B · Reply-all, address invented in place</h2>
 <div class="col">
-  <div class="cap">The autocomplete floats under the focused clause; the dropped-recipient note rides the header's bottom-right, so neither moves the sentence or body. Added people only carry NEW on their chip.</div>
+  <div class="cap">The autocomplete floats under the focused clause; the dropped-recipient note rides the header's bottom-right, so neither moves the sentence or body. Added people only carry NEW on their chip. A chip is a token, never a field: hovering one shows the <em>x</em> that removes it, and typing after the chips starts the next recipient.</div>
   <div class="win">
     <div class="hd focus">
       <div class="sent">
@@ -224,9 +228,9 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
           <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
           <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
           <span class="tk pad"><span class="av" style="background:#b6a4d6">A</span>Ana Ruiz</span>
-          <span class="tk pad"><span class="av" style="background:#9fc79a">S</span>sam@stripe.com<span class="tag new">NEW</span></span>
+          <span class="tk pad hov"><span class="av" style="background:#9fc79a">S</span>sam@stripe.com<span class="tag new">NEW</span><span class="rm"><svg class="ic" style="width:12px;height:12px"><use href="#i-x"/></svg></span></span>
           <span class="more">+1</span>
-          <span class="tk edit">jo<span class="caret"></span></span>
+          <span class="typing">jo<span class="caret"></span></span>
           <span class="caret to-caret"></span>
         </div>
         <div class="cl"><span class="verb">cc</span>
@@ -273,7 +277,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
 <h2>C · Send — confirm the clause, freeze the container, undo in place</h2>
 <div class="grid" style="gap:20px">
   <div class="col">
-    <div class="cap">C1 · Send — or ⌘↵ — opens the intent menu hanging right under the <em>then</em> token, turned the other way when there is no room below. The lit row is what the sentence already says; Enter takes it, and that sends.</div>
+    <div class="cap">C1 · Send — or ⌘↵ — opens the intent menu hanging right under the <em>then</em> token, turned the other way when there is no room below. The lit row is what the sentence already says; Enter takes it, and that sends. The archive row only exists because this draft answers a thread: a brand-new message's menu starts at Remind (<em>1</em>), then Send later (<em>2</em>), then Just send (<em>⌘↵</em>).</div>
     <div class="win">
       <div class="hd">
         <div class="sent">
@@ -456,7 +460,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
           </div>
           <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
           <div class="cl"><span class="verb">from</span><span class="tk"><svg class="ic" style="width:13px;height:13px;color:#61afef"><use href="#i-briefcase"/></svg>work<svg class="ic" style="width:12px;height:12px;color:var(--muted)"><use href="#i-chevron-down"/></svg></span></div>
-          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
         </div>
       </div>
       <div class="body" style="min-height:84px"><p>Hi all — holding the 14th.</p><p>Sam, confirm the build slot?</p></div>
@@ -475,7 +479,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
             <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya</span>
             <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon</span>
             <span class="more">+2</span>
-            <span class="tk edit">jo<span class="caret"></span></span>
+            <span class="typing">jo<span class="caret"></span></span>
           </div>
           <div class="cl"><span class="verb">cc</span><span class="tk">Dana</span><span class="verb">bcc</span><span class="ghost">add</span></div>
           <div class="cl"><span class="verb">about</span><span class="tk subj">re: Q4 launch</span></div>
@@ -515,7 +519,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
           </div>
           <div class="cl"><span class="verb">about</span><span class="tk subj">Re: build slot</span></div>
           <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
-          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
         </div>
       </div>
       <div class="body" style="min-height:96px"><p>Confirmed — build lands Friday<span class="caret" style="vertical-align:-3px"></span></p></div>
@@ -523,12 +527,12 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
         <button class="tgl" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
         <button class="send">Send <span class="kbd">⌘↵</span></button>
       </div>
-      <div class="hint"><b>Formatting is hidden.</b> Click the sliders (or <b>⌘⌥T</b>) to show it. Type <b>/</b> in the body for any formatting command, attach, preview or send later.</div>
+      <div class="hint"><b>Formatting is hidden.</b> Click the sliders (or <b>⌘⌥T</b>) to show it. Type <b>/</b> at the start of a word for any formatting command, attach or preview.</div>
     </div>
   </div>
 
   <div class="col">
-    <div class="cap">E2 · Same click, bar restored and remembered; the hint retires. The <b>/</b> menu is the toolbar under the caret: every command the bar offers, then Send later.</div>
+    <div class="cap">E2 · Same click, bar restored and remembered; the hint retires. The <b>/</b> menu is the toolbar under the caret: every command the bar offers, and typing after the slash filters the rows.</div>
     <div class="win">
       <div class="hd">
         <div class="sent">
@@ -539,7 +543,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
           </div>
           <div class="cl"><span class="verb">about</span><span class="tk subj">Re: build slot</span></div>
           <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
-          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
         </div>
       </div>
       <div class="body" style="min-height:300px"><p>Confirmed — build lands Friday.</p><p>I'll bring the deck.</p><p class="m">/<span class="caret" style="vertical-align:-3px"></span></p></div>
@@ -559,8 +563,6 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
         <div class="msep"></div>
         <div class="mi"><svg class="ic"><use href="#i-paperclip"/></svg><span>Attach files</span><span class="rt">⌘⇧A</span></div>
         <div class="mi"><svg class="ic"><use href="#i-eye"/></svg><span>Preview</span><span class="rt">⌘⇧V</span></div>
-        <div class="msep"></div>
-        <div class="mi"><svg class="ic"><use href="#i-clock"/></svg><span>Send later</span></div>
       </div>
       <div class="tb">
         <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
@@ -606,7 +608,7 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
           </div>
           <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
           <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
-          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
         </div>
       </div>
       <div class="body" style="min-height:150px">

@@ -260,14 +260,28 @@ impl MailApp {
         self.pane_focus
     }
 
-    /// `cmd-w`: close the active tab of the focused pane.
+    /// The pane whose strip the tab keys act on: the one holding the keyboard while
+    /// something in it is focused (a composer field, the find bar), else the one last
+    /// touched. A draft opened in the reader takes the caret but not a click, so the
+    /// remembered pane alone would still say the list.
+    fn pane_for_tab_keys(&self, window: &Window, cx: &App) -> Pane {
+        self.panes
+            .dock_ref()
+            .focused_pane(window, cx)
+            .unwrap_or(self.pane_focus)
+    }
+
+    /// `cmd-w`: close the innermost surface first — the reader's active tab while it has one,
+    /// else the list's. Closing the reader's last tab leaves the list as the next one to go.
     pub(super) fn close_focused_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs_locked() {
             return;
         }
-        match self.focused_pane() {
-            Pane::List => self.close_active_list_tab(window, cx),
-            Pane::Reader => self.close_active_reader_tab(window, cx),
+        match self.pane_for_tab_keys(window, cx) {
+            Pane::Reader if self.tabs.active_index().is_some() => {
+                self.close_active_reader_tab(window, cx)
+            }
+            _ => self.close_active_list_tab(window, cx),
         }
     }
 
@@ -277,7 +291,7 @@ impl MailApp {
 
     /// `ctrl-tab` / `ctrl-shift-tab`: cycle the focused pane's strip.
     pub(super) fn cycle_focused_tab(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
-        match self.focused_pane() {
+        match self.pane_for_tab_keys(window, cx) {
             Pane::List => self.cycle_list_tabs(delta, window, cx),
             Pane::Reader => self.cycle_reader_tabs(delta, window, cx),
         }

@@ -377,4 +377,12 @@ impl MailApp {
             f32::from(pane.scroll.max_offset().y),
         ))
     }
+
+    /// The open composer's subject scroll, in pixels, so a test can tell whether the field
+    /// slid the text under its own left edge.
+    pub fn subject_scroll(&self, cx: &App) -> Option<f32> {
+        let id = self.tabs.active_draft().or(self.inline_composer)?;
+        let composer = self.composers.get(&id)?;
+        Some(f32::from(composer.read(cx).subject_scroll(cx)))
+    }
 }

@@ -87,14 +87,8 @@ impl Composer {
         for (field, chip) in self.dropped_recipients() {
             let entity = match field {
                 Field::To => &self.to,
-                Field::Cc => {
-                    self.cc_shown = true;
-                    &self.cc
-                }
-                Field::Bcc => {
-                    self.bcc_shown = true;
-                    &self.bcc
-                }
+                Field::Cc => &self.cc,
+                Field::Bcc => &self.bcc,
             };
             entity.update(cx, |r, cx| r.add(&chip, cx));
         }

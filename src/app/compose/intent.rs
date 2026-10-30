@@ -106,21 +106,34 @@ struct Row {
     icon: IconName,
     label: String,
     detail: String,
-    key: &'static str,
+    key: String,
+}
+
+/// What a main-page row picks. A message that starts its own conversation has no thread
+/// to archive, so archive is simply not one of its rows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Choice {
+    Archive,
+    Remind,
+    Later,
+    JustSend,
+}
+
+impl Choice {
+    /// Whether this row is the one an already-chosen intent lights up.
+    fn shows(self, intent: SendIntent) -> bool {
+        matches!(
+            (self, intent),
+            (Choice::Archive, SendIntent::Archive)
+                | (Choice::Remind, SendIntent::RemindIfNoReply { .. })
+                | (Choice::Later, SendIntent::SendLater { .. })
+                | (Choice::JustSend, SendIntent::JustSend)
+        )
+    }
 }
 
 fn plural_days(days: u32) -> String {
     format!("{days} day{}", if days == 1 { "" } else { "s" })
-}
-
-/// The row an intent lights on the main page.
-fn row_of(intent: SendIntent) -> usize {
-    match intent {
-        SendIntent::Archive => 0,
-        SendIntent::RemindIfNoReply { .. } => 1,
-        SendIntent::SendLater { .. } => 2,
-        SendIntent::JustSend => 3,
-    }
 }
 
 /// The next day count after `days` in `direction` (`+1` / `-1`), staying inside the list.
@@ -157,15 +170,15 @@ impl Composer {
     }
 
     pub fn intent(&self) -> SendIntent {
-        self.draft.intent
+        self.draft.intent()
     }
 
     /// Change what sending does to the thread. An edit like any other: the draft saves it.
     pub fn set_intent(&mut self, intent: SendIntent, cx: &mut Context<Self>) {
-        if self.frozen() || self.draft.intent == intent {
+        if self.frozen() || self.draft.intent() == intent {
             return;
         }
-        self.draft.intent = intent;
+        self.draft.set_intent(intent);
         cx.emit(ComposeEvent::Edited);
         cx.notify();
     }
@@ -197,7 +210,7 @@ impl Composer {
     pub fn render_intent_clause(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let frozen = self.frozen();
         let open = self.intent.menu.is_some();
-        let intent = self.draft.intent;
+        let intent = self.draft.intent();
         let (muted, border, field, strong, primary) = {
             let t = cx.theme();
             (t.muted_foreground, t.border, t.secondary, t.foreground, t.primary)
@@ -266,13 +279,13 @@ impl Composer {
         if self.frozen() || (and_send && !self.can_send()) {
             return;
         }
-        let days = match self.draft.intent {
+        let days = match self.draft.intent() {
             SendIntent::RemindIfNoReply { days } => days,
             _ => DEFAULT_REMIND_DAYS,
         };
         self.intent.menu = Some(Menu {
             page: Page::Main,
-            selected: row.unwrap_or_else(|| row_of(self.draft.intent)),
+            selected: row.unwrap_or_else(|| self.row_of(self.draft.intent())),
             and_send,
             days,
             error: None,
@@ -324,23 +337,26 @@ impl Composer {
         }
         let days = menu.days;
         let and_send = menu.and_send;
-        let intent = self.draft.intent;
-        match ix {
-            0 => self.choose(SendIntent::Archive, window, cx),
-            1 => self.choose(SendIntent::RemindIfNoReply { days }, window, cx),
+        let intent = self.draft.intent();
+        let Some(choice) = self.main_choices().get(ix).copied() else {
+            return;
+        };
+        match choice {
+            Choice::Archive => self.choose(SendIntent::Archive, window, cx),
+            Choice::Remind => self.choose(SendIntent::RemindIfNoReply { days }, window, cx),
             // Send later: Send confirms a time already chosen; the token's menu asks when.
-            2 if and_send && matches!(intent, SendIntent::SendLater { .. }) => {
+            Choice::Later if and_send && matches!(intent, SendIntent::SendLater { .. }) => {
                 self.choose(intent, window, cx)
             }
-            2 if self.now().is_some() => {
+            Choice::Later if self.now().is_some() => {
                 if let Some(menu) = self.intent.menu.as_mut() {
                     menu.page = Page::Later;
                     menu.selected = 1;
                 }
                 cx.notify();
             }
-            3 => self.choose(SendIntent::JustSend, window, cx),
-            _ => {}
+            Choice::JustSend => self.choose(SendIntent::JustSend, window, cx),
+            Choice::Later => {}
         }
     }
 
@@ -396,7 +412,7 @@ impl Composer {
     fn move_selection(&mut self, direction: i32, cx: &mut Context<Self>) {
         let rows = match self.intent.menu.as_ref() {
             Some(menu) if menu.page == Page::Later => self.later_presets().len() + 1,
-            Some(menu) if menu.page == Page::Main => 4,
+            Some(menu) if menu.page == Page::Main => self.main_choices().len(),
             _ => return,
         };
         if let Some(menu) = self.intent.menu.as_mut() {
@@ -414,21 +430,29 @@ impl Composer {
         }
     }
 
+    /// The choices the main page offers, in key order. A draft that starts a brand new
+    /// conversation has no thread, so archive is neither offered nor reachable there.
+    fn main_choices(&self) -> &'static [Choice] {
+        const IN_THREAD: [Choice; 4] =
+            [Choice::Archive, Choice::Remind, Choice::Later, Choice::JustSend];
+        const NEW: [Choice; 3] = [Choice::Remind, Choice::Later, Choice::JustSend];
+        if self.draft.in_thread() {
+            &IN_THREAD
+        } else {
+            &NEW
+        }
+    }
+
+    /// The row an intent lights on the main page.
+    fn row_of(&self, intent: SendIntent) -> usize {
+        self.main_choices()
+            .iter()
+            .position(|choice| choice.shows(intent))
+            .unwrap_or(0)
+    }
+
+    /// The main page's rows, one per choice, keys counted down the list.
     fn main_rows(&self, days: u32) -> Vec<Row> {
-        let mut rows = vec![
-            Row {
-                icon: IconName::Archive,
-                label: "Archive thread".into(),
-                detail: "leaves the inbox".into(),
-                key: "1",
-            },
-            Row {
-                icon: IconName::Bell,
-                label: "Remind if no reply".into(),
-                detail: plural_days(days),
-                key: "2",
-            },
-        ];
         let tomorrow = self
             .now()
             .map(|now| {
@@ -437,19 +461,33 @@ impl Composer {
                 format!("{} {}", label.to_lowercase(), now.hhmm(at))
             })
             .unwrap_or_default();
-        rows.push(Row {
-            icon: IconName::Clock,
-            label: "Send later".into(),
-            detail: tomorrow,
-            key: "3",
-        });
-        rows.push(Row {
-            icon: IconName::Send,
-            label: "Just send".into(),
-            detail: String::new(),
-            key: "cmd-enter",
-        });
-        rows
+        let choices = self.main_choices();
+        let last = choices.len() - 1;
+        choices
+            .iter()
+            .enumerate()
+            .map(|(ix, choice)| {
+                let key = if ix == last {
+                    "cmd-enter".to_owned()
+                } else {
+                    (ix + 1).to_string()
+                };
+                let (icon, label, detail) = match choice {
+                    Choice::Archive => {
+                        (IconName::Archive, "Archive thread", "leaves the inbox".to_owned())
+                    }
+                    Choice::Remind => (IconName::Bell, "Remind if no reply", plural_days(days)),
+                    Choice::Later => (IconName::Clock, "Send later", tomorrow.clone()),
+                    Choice::JustSend => (IconName::Send, "Just send", String::new()),
+                };
+                Row {
+                    icon,
+                    label: label.into(),
+                    detail,
+                    key,
+                }
+            })
+            .collect()
     }
 
     fn later_rows(&self) -> Vec<Row> {
@@ -464,14 +502,14 @@ impl Composer {
                 icon: IconName::Clock,
                 label: label.into(),
                 detail: format_time(at, &now),
-                key,
+                key: key.to_owned(),
             })
             .collect();
         rows.push(Row {
             icon: IconName::Calendar,
             label: "Custom…".into(),
             detail: "a date and time".into(),
-            key: "4",
+            key: "4".to_owned(),
         });
         rows
     }
@@ -521,7 +559,7 @@ impl Composer {
             .on_action(cx.listener(|this, _: &IntentCustom, w, cx| this.custom_key(w, cx)))
             .on_action(cx.listener(|this, _: &IntentJustSend, w, cx| {
                 if this.intent.menu.as_ref().is_some_and(|m| m.page == Page::Main) {
-                    this.pick(3, w, cx)
+                    this.pick(this.main_choices().len() - 1, w, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &IntentConfirm, w, cx| {
@@ -614,7 +652,7 @@ impl Composer {
                                 .child(row.label),
                         )
                         .child(div().text_size(px(11.)).text_color(muted).child(row.detail))
-                        .child(div().ml_auto().child(shortcut(row.key))),
+                        .child(div().ml_auto().child(shortcut(&row.key))),
                 );
             }
         }

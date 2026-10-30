@@ -10,7 +10,6 @@
 //! The pure parts (matching, splitting, fitting) live in [`crate::recipient_suggest`].
 
 use crate::recipient_suggest::{self as suggest, Directory, Suggestion};
-use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
@@ -27,7 +26,7 @@ const SUGGESTION_ROWS: usize = 5;
 /// What an edit of a recipient field tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecipientEvent {
-    /// The field's committed addresses changed (a chip added, removed or replaced).
+    /// The field's committed addresses changed (a chip added or removed).
     Changed { field: Field, value: String },
     /// The user typed `cc:` or `bcc:`: the owner shows that field, focuses it and hands it
     /// `rest`, whatever was typed after the prefix.
@@ -315,17 +314,6 @@ impl Recipients {
         self.changed(cx);
     }
 
-    /// Put chip `ix`'s address back in the input so it can be corrected.
-    fn edit(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.disabled || ix >= self.chips.len() {
-            return;
-        }
-        let chip = self.chips.remove(ix);
-        self.changed(cx);
-        self.set_typed(&suggest::parts_of(&chip).1, window, cx);
-        self.focus(window, cx);
-    }
-
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.input.read(cx).focus_handle(cx), cx);
     }
@@ -390,9 +378,13 @@ impl Recipients {
                     Some(n) => format!("{n} <{address}>"),
                     None => address.clone(),
                 });
+                // A chip is a token, never a field: hovering shows the `x` that removes it,
+                // and a click only puts the caret back in the input beside it.
+                let group = SharedString::from(format!("compose-chip-{key}"));
                 div()
                     .flex()
                     .flex_none()
+                    .relative()
                     .max_w(px(220.))
                     .h(px(24.))
                     .pl(px(4.))
@@ -407,6 +399,7 @@ impl Recipients {
                     .text_color(fg)
                     .id(("compose-chip", key))
                     .test_support()
+                    .group(group.clone())
                     .child(avatar(&label, &address, dark))
                     .child(div().min_w_0().truncate().child(label.clone()))
                     .when(self.directory.is_new(chip), |d| {
@@ -423,26 +416,39 @@ impl Recipients {
                                 .child("NEW"),
                         )
                     })
-                    .when(focused, |d| {
-                        d.child(
-                            Button::new(("compose-chip-remove", key))
-                                .icon(gpui_kit::assets::IconName::Close)
-                                .ghost()
-                                .xsmall()
-                                .w(px(14.))
-                                .h(px(14.))
-                                .px_0()
-                                .on_click(cx.listener(move |this, _, _, cx| this.remove(ix, cx))),
-                        )
-                    })
-                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.edit(ix, window, cx)
-                        }),
+                    .child(
+                        // Overlaid on the chip's tail so revealing it never changes the
+                        // chip's width; hidden until the chip is hovered.
+                        div()
+                            .id(("compose-chip-remove", key))
+                            .test_support()
+                            .absolute()
+                            .top(px(4.))
+                            .right(px(3.))
+                            .size(px(16.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
+                            .bg(field_bg)
+                            .opacity(0.)
+                            .group_hover(group, |s| s.opacity(1.))
+                            .hover(|s| s.bg(theme.secondary_hover))
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.remove(ix, cx)
+                                }),
+                            )
+                            .child(
+                                Icon::new(gpui_kit::assets::IconName::X)
+                                    .with_size(px(12.))
+                                    .text_color(fg),
+                            ),
                     )
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     .into_any_element()
             })
             .collect()
@@ -705,7 +711,9 @@ impl Render for Recipients {
                     // Always mounted so it can take focus; collapsed out of sight while blurred.
                     .child(
                         div()
-                            .when(focused, |d| d.flex_1().min_w(px(80.)).h(px(24.)))
+                            // Wide enough for most addresses; it grows into whatever the
+                            // chips leave on its line.
+                            .when(focused, |d| d.flex_1().min_w(px(200.)).h(px(24.)))
                             .when(!focused, |d| d.absolute().size(px(1.)).opacity(0.))
                             .child(
                                 // `small` draws the field at chip height (24px) with the

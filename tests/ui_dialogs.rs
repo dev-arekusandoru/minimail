@@ -261,12 +261,14 @@ impl Harness<'_> {
     }
 
     /// Reply, submit it and wait out the send hold, so the provider has confirmed the send
-    /// and the app has offered what to do with the original.
+    /// and the app has offered what to do with the original. A reply defaults to archiving
+    /// its thread, which settles the filing in the sentence; pick "just send" so the filing
+    /// dialog is still the thing offered.
     fn send_reply(&mut self, body: &str) {
         self.keys("r");
         self.await_state("the reply opens", |a| a.compose_open());
         self.type_text(body);
-        self.keys("cmd-enter enter");
+        self.keys("cmd-enter cmd-enter");
         self.await_state("the send holds before it leaves", |a| {
             a.hold_in_flight().is_some()
         });

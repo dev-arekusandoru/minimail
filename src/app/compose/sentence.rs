@@ -92,18 +92,12 @@ impl Composer {
                     )
                     .child(verb(if reply { "Reply to" } else { "To" }, prose))
                     .child(div().flex_grow_1().min_w_0().child(self.to.clone())),
-            )
-            .when(!self.cc_shown, |d| {
-                d.child(ghost("compose-show-cc", "Cc", Field::Cc, cx))
-            })
-            .when(!self.bcc_shown, |d| {
-                d.child(ghost("compose-show-bcc", "Bcc", Field::Bcc, cx))
-            });
+            );
 
         // The token is as wide as its text (or the placeholder), measured, not estimated.
         let text = self.subject.read(cx).value();
         let text: &str = if text.is_empty() { "Subject" } else { text.as_ref() };
-        let mut run = window.text_style().to_run(text.len());
+        let mut run = window.text_style().to_run(text.chars().count());
         if reply {
             run.font.weight = FontWeight::MEDIUM;
         }
@@ -116,7 +110,7 @@ impl Composer {
                 .id("compose-subject")
                 .test_support()
                 .h(px(24.))
-                .px(px(7.))
+                .pl(px(7.))
                 .min_w_0()
                 .max_w_full()
                 .flex()
@@ -127,12 +121,16 @@ impl Composer {
                 .border_color(if subject_focused { primary } else { border })
                 .bg(field)
                 .child(
-                    // `xsmall` keeps the field at text height with 4px side padding, so the
-                    // measured width plus that padding shows the whole subject.
+                    // A single-line kit input keeps 10px clear on the right so the caret at
+                    // the end never touches the edge, and scrolls the text left once its own
+                    // padding eats that reserve. So the field takes no padding of its own and
+                    // the box carries the inset; the measured width plus the reserve never
+                    // scrolls.
                     Input::new(&self.subject)
                         .appearance(false)
                         .xsmall()
-                        .w(text_w + px(10.))
+                        .px(px(0.))
+                        .w(text_w + px(12.))
                         .max_w_full()
                         .text_size(px(13.))
                         .text_color(strong)
@@ -152,18 +150,25 @@ impl Composer {
             .gap_x(px(12.))
             .gap_y(px(7.))
             .child(to);
-        for (id, label, entity, shown) in [
-            ("compose-cc", "Cc", &self.cc, self.cc_shown),
-            ("compose-bcc", "Bcc", &self.bcc, self.bcc_shown),
+        // One clause per field, always in To, Cc, Bcc order: a field is its clause while it
+        // holds someone or the caret is in it, and the ghost word that reveals it otherwise.
+        // A revealed field that was left empty falls back to its ghost the moment it blurs.
+        for (ghost_id, id, label, entity, field) in [
+            ("compose-show-cc", "compose-cc", "Cc", &self.cc, Field::Cc),
+            ("compose-show-bcc", "compose-bcc", "Bcc", &self.bcc, Field::Bcc),
         ] {
-            if shown {
-                sentence = sentence.child(dim_on(to_focused,
+            let focused = entity.read(cx).focus_handle(cx).contains_focused(window, cx);
+            if focused || !entity.read(cx).chips().is_empty() {
+                sentence = sentence.child(dim_on(
+                    to_focused,
                     clause()
                         .id(id)
                         .test_support()
                         .child(verb(label, prose))
                         .child(div().flex_grow_1().min_w_0().child(entity.clone())),
                 ));
+            } else {
+                sentence = sentence.child(ghost(ghost_id, label, field, cx));
             }
         }
         sentence = sentence.child(subject).children(from);

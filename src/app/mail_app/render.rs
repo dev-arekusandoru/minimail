@@ -114,6 +114,11 @@ impl Render for MailApp {
             .on_action(cx.listener(|this, _: &CollapseComposer, _, cx| {
                 this.emit_to_composer(ComposeEvent::Collapse, cx);
             }))
+            // The palette's Close composer: escape no longer closes the composer, so this is
+            // the keys' way out. Closing keeps the draft, as the tab's own close does.
+            .on_action(cx.listener(|this, _: &CloseComposer, _, cx| {
+                this.emit_to_composer(ComposeEvent::Close, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenMessage, window, cx| {
                 if !this.triage_enter(window, cx) {
                     this.open_cursor(window, cx);

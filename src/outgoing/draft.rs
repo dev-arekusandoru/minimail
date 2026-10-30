@@ -192,9 +192,11 @@ pub struct DraftRecord {
     /// finished record actually has.
     #[serde(default, skip)]
     pub(crate) mirrored_now: bool,
-    /// The `then …` clause: what sending does to the thread.
+    /// The `then …` clause: what sending does to the thread. Read and write it through
+    /// [`DraftRecord::intent`] / [`DraftRecord::set_intent`], which know when an archive
+    /// is impossible.
     #[serde(default)]
-    pub intent: SendIntent,
+    intent: SendIntent,
     pub updated_at: Timestamp,
     pub state: DraftState,
 }
@@ -254,6 +256,9 @@ impl DraftRecord {
         record.body = DraftBody::markdown(prefilled.body);
         record.prefilled_subject = Some(record.subject.clone());
         record.source_message = Some(msg.id);
+        // A reply or forward lands in a thread that already exists: leaving the inbox once
+        // it is sent is what the sentence should already say.
+        record.intent = SendIntent::Archive;
         record
     }
 
@@ -301,6 +306,28 @@ impl DraftRecord {
         self.references.clear();
         self.thread_remote_id = None;
         self
+    }
+
+    /// Whether sending this draft continues a conversation that already exists — a reply,
+    /// a reply-all or a forward. Only such a draft has a thread to archive afterwards.
+    pub fn in_thread(&self) -> bool {
+        self.kind != DraftKind::New
+    }
+
+    /// The `then …` clause. A message that starts its own conversation has nothing to
+    /// archive, so it never shows one — not even a stored archive it was reopened with.
+    pub fn intent(&self) -> SendIntent {
+        match self.intent {
+            SendIntent::Archive if !self.in_thread() => SendIntent::JustSend,
+            intent => intent,
+        }
+    }
+
+    /// Choose what sending does to the thread. Persisting an archive on a thread-less
+    /// draft is a no-op the accessor already covers; the next save writes the sanitized
+    /// intent back.
+    pub fn set_intent(&mut self, intent: SendIntent) {
+        self.intent = intent;
     }
 
     /// Every recipient of this draft, in To, Cc, Bcc order.
@@ -540,6 +567,20 @@ mod tests {
             same.message_id, draft.message_id,
             "saving must not regenerate it"
         );
+    }
+
+    #[test]
+    fn only_a_draft_that_answers_a_thread_can_archive_it() {
+        let reply = DraftRecord::prefilled(DraftKind::Reply, &message(), "me@x.test", 10);
+        assert_eq!(reply.intent(), SendIntent::Archive, "a reply leaves the inbox");
+        let forward = DraftRecord::prefilled(DraftKind::Forward, &message(), "me@x.test", 10);
+        assert_eq!(forward.intent(), SendIntent::Archive);
+
+        let mut fresh = DraftRecord::new_email("me@x.test", 10);
+        assert_eq!(fresh.intent(), SendIntent::JustSend, "a new message just leaves");
+        // A stored draft reopened with an archive it cannot carry out reads as plain.
+        fresh.set_intent(SendIntent::Archive);
+        assert_eq!(fresh.intent(), SendIntent::JustSend);
     }
 
     #[test]

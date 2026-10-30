@@ -547,7 +547,9 @@ fn a_confirmed_send_puts_exactly_one_message_in_sent(cx: &mut TestAppContext) {
     h.await_state("the reply opens", |a| a.compose_open());
     h.type_text("Sure, let me know.");
     h.settle();
-    h.keys("cmd-enter enter");
+    // A reply defaults to archiving its thread; "just send" leaves the filing dialog as the
+    // thing the send offers.
+    h.keys("cmd-enter cmd-enter");
     h.await_state("the hold comes before anything leaves", |a| {
         a.hold_in_flight().is_some()
     });
@@ -854,3 +856,81 @@ fn the_new_folder_tile_names_the_panels_account_or_asks_in_the_all_view(cx: &mut
     assert_eq!(h.read(|a| a.mailbox.folders("work").len()), before + 1, "created in the panel's account");
     assert!(h.read(|a| a.mailbox.folders("personal").iter().all(|f| f.name != "Receipts 2027")));
 }
+
+/// Escape dismisses what floats over the composer and stops there: with the caret in a
+/// recipient field it must leave the composer, and its tab, exactly as they were.
+#[gpui_kit::gpui::test]
+fn escape_in_a_composer_recipient_input_leaves_the_composer_open(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("sidebar-rail-personal");
+    h.click("sidebar-inbox-personal");
+    h.keys("cmd-n");
+    h.await_state("the composer opens", |a| a.compose_open());
+    assert_eq!(h.read(|a| a.open_drafts().len()), 1, "a draft tab is open");
+
+    // The caret in a recipient input is where escape must stay harmless.
+    h.click("compose-show-cc");
+    h.keys("escape");
+    h.tick();
+    assert!(h.read(|a| a.compose_open()), "escape left the composer open");
+    assert_eq!(h.read(|a| a.open_drafts().len()), 1, "and its tab with it");
+
+    // And the caret never left the field: what is typed there is what the draft receives.
+    h.type_text("newcc@example.com");
+    h.keys("enter");
+    assert_eq!(
+        h.read(|a| a.composer.drafts[0].record.cc.clone()),
+        "newcc@example.com",
+        "the recipient field still had the keyboard"
+    );
+
+    // Closing is still on the keys: the palette's command closes the composer and keeps
+    // the draft, exactly as the tab's own close does.
+    h.keys("cmd-shift-p");
+    h.type_text("close composer");
+    h.keys("enter");
+    assert!(!h.read(|a| a.compose_open()), "the palette's Close composer closed it");
+    assert_eq!(h.read(|a| a.composer.drafts.len()), 1, "and kept the draft");
+}
+
+/// `cmd-w` closes the innermost surface first: a draft reopened from the Drafts list goes
+/// before the list itself, which only a second `cmd-w` closes.
+#[gpui_kit::gpui::test]
+fn cmd_w_closes_the_draft_open_in_the_reader_before_the_drafts_list(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.click("sidebar-rail-personal");
+    h.click("sidebar-inbox-personal");
+
+    // A new message, closed as a saved draft.
+    h.keys("cmd-n");
+    h.await_state("the composer opens", |a| a.compose_open());
+    h.keys("cmd-w");
+    assert!(h.read(|a| a.modal_open()), "cmd-w asks what to do with the draft");
+    assert_eq!(h.read(|a| a.list_tabs.len()), 2, "the list tab was left alone");
+    h.keys("enter"); // Save & Close (the dialog's default)
+    assert!(h.read(|a| a.open_drafts().is_empty()), "the draft tab closed");
+
+    // The Drafts list, and the draft reopened from it.
+    h.keys("cmd-shift-d");
+    h.tick();
+    assert!(matches!(h.location(), Some(Location::Drafts(_))));
+    assert_eq!(h.read(|a| a.draft_rows().len()), 1, "the saved draft is listed");
+    h.click(("draft-row", 0usize));
+    h.await_state("the draft reopens", |a| a.compose_open());
+
+    h.keys("cmd-w");
+    assert!(h.read(|a| a.modal_open()), "cmd-w asks about the draft, not the list");
+    assert!(matches!(h.location(), Some(Location::Drafts(_))), "the Drafts list is still the list");
+    assert_eq!(h.read(|a| a.list_tabs.len()), 2, "and its tab is still there");
+    assert_eq!(h.read(|a| a.open_drafts().len()), 1, "the draft is still open");
+
+    h.keys("enter"); // Save & Close (the dialog's default)
+    assert!(h.read(|a| a.open_drafts().is_empty()), "the draft closed");
+    assert!(matches!(h.location(), Some(Location::Drafts(_))), "the list stayed");
+
+    // Only now is the list the innermost thing left to close.
+    h.keys("cmd-w");
+    assert_eq!(h.read(|a| a.list_tabs.len()), 1, "the second cmd-w closed the Drafts list");
+    assert!(!matches!(h.location(), Some(Location::Drafts(_))));
+}
+

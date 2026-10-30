@@ -135,7 +135,7 @@ pub const FILE_TOOLS: [Tool; 2] = [
 ];
 
 /// Every command the `/` menu mirrors from the bar, in bar order: the formats, then the
-/// trailing controls. Send later is the menu's own last row.
+/// trailing controls. The `/` menu offers exactly these.
 pub fn commands() -> impl Iterator<Item = &'static Tool> {
     TOOLS.iter().chain(FILE_TOOLS.iter())
 }

@@ -44,6 +44,7 @@ gpui_kit::actions!(
         NewMail,
         SendDraft,
         ChooseSendIntent,
+        DismissComposeOverlay,
         CloseComposer,
         DiscardDraft,
         ExpandComposer,
@@ -369,7 +370,9 @@ pub fn bind_keys(cx: &mut App) {
         // inline or in a tab.
         KeyBinding::new("cmd-enter", SendDraft, c),
         KeyBinding::new("cmd-shift-enter", ChooseSendIntent, c),
-        KeyBinding::new("escape", CloseComposer, c),
+        // Escape dismisses what floats over the composer (the `/` menu, the intent menu, an
+        // autocomplete) and stops there: it never closes or discards the draft.
+        KeyBinding::new("escape", DismissComposeOverlay, c),
         // Discard deletes the draft, so it is a modifier chord and asks first (the dialog).
         KeyBinding::new("cmd-shift-backspace", DiscardDraft, c),
         KeyBinding::new("cmd-b", ComposeBold, c),
@@ -503,7 +506,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "cmd-shift-enter",
             ChooseSendIntent
         ),
-        cmd!(Triage, "Close composer", "escape", CloseComposer),
+        cmd!(Triage, "Close composer", "", CloseComposer),
         cmd!(Triage, "Discard draft", "cmd-shift-backspace", DiscardDraft),
         cmd!(View, "Expand composer to a tab", "", ExpandComposer),
         cmd!(
