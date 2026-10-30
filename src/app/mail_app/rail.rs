@@ -237,11 +237,46 @@ impl MailApp {
                     .child(Icon::new(IconName::ListFilter).with_size(px(18.)))
                     .on_click(run(ToggleRules)),
             )
+            .child(self.drafts_tool(cx))
             .child(
                 tool_button("sidebar-settings", "Settings", "cmd-,", self.settings_open(), t)
                     .child(Icon::new(IconName::Settings).with_size(px(18.)))
                     .on_click(run(ToggleSettings)),
             )
+    }
+
+    /// Drafts: opens the Drafts pane of the account the panel shows (`ShowDrafts`), with that
+    /// account's unfinished-draft count on a corner badge while there are any.
+    fn drafts_tool(&self, cx: &Context<Self>) -> AnyElement {
+        let t = cx.theme();
+        let count = self.nav_account().map_or(0, |a| self.account_draft_count(&a));
+        tool_button("sidebar-drafts", "Drafts", "cmd-shift-d", self.drafts_pane_open(), t)
+            .child(Icon::new(IconName::FileText).with_size(px(18.)))
+            .when(count > 0, |d| {
+                d.child(
+                    div()
+                        .id("sidebar-drafts-count")
+                        .test_support()
+                        .absolute()
+                        .top(px(2.))
+                        .right(px(2.))
+                        .min_w(px(16.))
+                        .h(px(16.))
+                        .px(px(4.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(t.primary)
+                        .text_color(t.primary_foreground)
+                        .text_size(px(10.))
+                        .border_2()
+                        .border_color(rail_bg(t))
+                        .child(count.to_string()),
+                )
+            })
+            .on_click(run(ShowDrafts))
+            .into_any_element()
     }
 
     /// Fetch mail. Idle shows nothing, since a dot would read as something to do; a running

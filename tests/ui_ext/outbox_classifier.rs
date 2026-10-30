@@ -570,6 +570,25 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
     );
 }
 
+/// The rail's pinned Drafts icon shows the draft count and opens the list with the draft in it.
+#[gpui_kit::gpui::test]
+pub fn the_rail_drafts_pin_shows_the_count_and_lists_the_draft(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, snooze_box());
+    assert!(h.has("sidebar-drafts"), "the Drafts pin is on the rail");
+    assert!(!h.has("sidebar-drafts-count"), "no badge without drafts");
+    h.compose_reply("pinned");
+    h.settle();
+    h.keys("escape");
+    h.tick();
+    assert!(h.has("sidebar-drafts-count"), "the pin carries the count");
+    h.click("sidebar-drafts");
+    h.tick();
+    assert!(h.drafts_pane_open());
+    let rows = h.draft_rows();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].3.contains("pinned"), "{rows:?}");
+}
+
 /// The Drafts pane is per account: each account's row lists only its own drafts, and the
 /// count the sidebar badge uses is that same set.
 #[gpui_kit::gpui::test]
