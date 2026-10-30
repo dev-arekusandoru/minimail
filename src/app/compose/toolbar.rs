@@ -113,12 +113,12 @@ pub const TOOLS: [Tool; 10] = [
     },
 ];
 
-/// A tool button is 36 wide with an 8px gap after it.
-const TOOL_SLOT: f32 = 44.;
-/// The container's padding and the separators between groups.
-const BAR_PADDING: f32 = 48.;
+/// A tool button is 26 wide with a 4px gap after it.
+const TOOL_SLOT: f32 = 30.;
+/// The strip's padding and the separators between groups.
+const BAR_PADDING: f32 = 56.;
 /// What the right-hand controls (Preview and Attach) take, plus the spacer and gaps.
-const TRAILING_WIDTH: f32 = 128.;
+const TRAILING_WIDTH: f32 = 64.;
 
 /// How many tools fit in `width` pixels before the overflow trigger is needed.
 ///
@@ -151,10 +151,10 @@ impl Tool {
             Button::new(self.id)
                 .icon(self.icon)
                 .ghost()
-                .h(px(36.))
-                .w(px(36.))
+                .h(px(26.))
+                .w(px(26.))
                 .px_0()
-                .rounded_md()
+                .rounded(px(5.))
                 .text_color(t.foreground)
                 .selected(active)
                 .toggled(active),
@@ -175,7 +175,7 @@ impl Tool {
 
 /// A thin divider between toolbar groups.
 fn separator() -> AnyElement {
-    Separator::vertical().h(px(20.)).into_any_element()
+    Separator::vertical().h(px(14.)).into_any_element()
 }
 
 /// The toolbar row: the format tools that fit, an overflow trigger when some do not, a
@@ -194,12 +194,8 @@ pub fn bar(
     let t = cx.theme();
     let mut toolbar = Toolbar::new("compose-toolbar")
         .w_full()
-        .h(px(44.))
-        .p_1()
+        .h(px(26.))
         .gap_1()
-        .rounded_lg()
-        .border_1()
-        .border_color(t.border)
         .bg(t.background);
     let mut last_group: Option<u8> = None;
     for tool in TOOLS.iter().take(visible.min(TOOLS.len())) {
@@ -241,9 +237,9 @@ mod tests {
         // A wide-enough row keeps all ten; narrower starts spilling into the menu, and does
         // not suddenly drop more than the room lost.
         assert_eq!(visible_tools(800., total), total, "all ten still fit");
-        let narrower = visible_tools(560., total);
+        let narrower = visible_tools(360., total);
         assert!(narrower < total, "a narrower row hides some");
-        assert!(narrower >= visible_tools(500., total));
+        assert!(narrower >= visible_tools(300., total));
         assert!(narrower < total - 1, "the overflow keeps its own room");
         // The count never exceeds the tools that exist.
         assert_eq!(visible_tools(10_000., total), total);

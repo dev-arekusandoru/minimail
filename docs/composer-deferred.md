@@ -17,9 +17,6 @@ up without re-deriving the decision.
       express (bold, italic, links, lists, headings, quotes, code, tables,
       strikethrough) survive. Preserving the rest needs a body format richer
       than Markdown, or an HTML part carried alongside it.
-- [ ] **Send later** — schedule a send for a chosen time. Only the 10-second
-      undo hold exists; a hold is never requeued for later, and an interrupted
-      hold comes back as an editable draft rather than a scheduled send.
 - [ ] **Templates and snippets** — reusable bodies and reusable text inserted
       from the palette. Nothing is stored or inserted yet.
 - [ ] **Hard flush on quit** — when the main window closes, dirty drafts are

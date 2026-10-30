@@ -8,6 +8,10 @@
 
 pub mod drafts;
 pub mod recipients;
+pub mod recipients_note;
+pub mod sentence;
+pub mod footer;
+pub mod intent;
 pub mod toolbar;
 
 use gpui_kit::component::Disableable as _;
@@ -15,7 +19,7 @@ use gpui_kit::component::attachment::{
     Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentMedia,
     AttachmentTitle,
 };
-use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{
@@ -435,6 +439,9 @@ pub struct Composer {
     to: Entity<Recipients>,
     cc: Entity<Recipients>,
     bcc: Entity<Recipients>,
+    /// The reply-all recipients the thread started with, so a removed one can be noted and
+    /// restored; empty for everything but a reply-all.
+    recipient_baseline: Vec<(Field, String)>,
     /// Whether the Cc field is on screen. It starts shown only when the draft already has a
     /// Cc, so an empty `Cc` row does not take a line of its own.
     cc_shown: bool,
@@ -466,6 +473,8 @@ pub struct Composer {
     /// fit move behind the overflow instead of being clipped. `None` until the first
     /// layout: the default is to show every tool.
     toolbar_width: Option<f32>,
+    footer: footer::FooterState,
+    intent: intent::IntentState,
     _subs: Vec<Subscription>,
 }
 
@@ -499,20 +508,8 @@ impl Composer {
         let mut subs = Vec::new();
         for entity in [&to, &cc, &bcc] {
             subs.push(
-                cx.subscribe_in(entity, window, |this, _, event: &RecipientEvent, _, cx| {
-                    if this.frozen() {
-                        return;
-                    }
-                    let RecipientEvent::Changed { field, value } = event;
-                    let current = match field {
-                        Field::To => &mut this.draft.to,
-                        Field::Cc => &mut this.draft.cc,
-                        Field::Bcc => &mut this.draft.bcc,
-                    };
-                    if current != value {
-                        current.clone_from(value);
-                        cx.emit(ComposeEvent::Edited);
-                    }
+                cx.subscribe_in(entity, window, |this, _, event: &RecipientEvent, window, cx| {
+                    this.recipient_event(event, window, cx)
                 }),
             );
         }
@@ -535,6 +532,7 @@ impl Composer {
                 if !matches!(event, InputEvent::Change) || this.body_locked() {
                     return;
                 }
+                this.update_slash(cx);
                 let text = body.read(cx).value();
                 if text.as_str() == this.draft.body.source.as_str() {
                     return;
@@ -556,6 +554,7 @@ impl Composer {
             to,
             cc,
             bcc,
+            recipient_baseline: Vec::new(),
             cc_shown,
             bcc_shown,
             subject,
@@ -574,6 +573,8 @@ impl Composer {
             pending_record: None,
             sending: false,
             toolbar_width: None,
+            footer: footer::FooterState::new(cx),
+            intent: intent::IntentState::new(cx),
             _subs: subs,
         };
         this.sync_frozen_fields(cx);
@@ -732,7 +733,7 @@ impl Composer {
         window.focus(&self.body_focus(cx), cx);
     }
 
-    fn focus_recipients(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus_recipients(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.to.update(cx, |r, cx| r.focus(window, cx));
     }
 
@@ -1121,7 +1122,10 @@ impl Composer {
             DraftState::Editing | DraftState::Failed { .. } | DraftState::Conflict => {
                 self.save_status.clone()
             }
-            DraftState::Held => "Held — undo restores it".into(),
+            DraftState::Held if matches!(self.draft.intent, crate::outgoing::SendIntent::SendLater { .. }) => {
+                "Scheduled".into()
+            }
+            DraftState::Held => "Sending…".into(),
             DraftState::Sending => "Sending…".into(),
             DraftState::Sent { .. } => "Sent".into(),
             DraftState::Uncertain => self.save_status.clone(),
@@ -1151,11 +1155,6 @@ impl Composer {
                 DraftState::Editing | DraftState::Failed { .. }
             )
     }
-
-    /// Closing is always allowed: a closed draft is kept, never deleted.
-    fn can_close(&self) -> bool {
-        true
-    }
 }
 
 impl Focusable for Composer {
@@ -1167,216 +1166,6 @@ impl Focusable for Composer {
 impl EventEmitter<ComposeEvent> for Composer {}
 
 impl Composer {
-    fn header_row(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        field: Entity<Recipients>,
-        trailing: Option<AnyElement>,
-        cx: &App,
-    ) -> AnyElement {
-        let t = cx.theme();
-        div()
-            .id(id)
-            .test_support()
-            .flex()
-            .flex_none()
-            .items_start()
-            .gap_2()
-            .py_1()
-            .child(
-                div()
-                    .w(px(44.))
-                    .flex_none()
-                    .pt_1()
-                    .text_sm()
-                    .text_color(t.muted_foreground)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .rounded_md()
-                    .bg(t.muted)
-                    .px_2()
-                    .py(px(3.))
-                    .child(field),
-            )
-            .when_some(trailing, |d, el| d.child(el))
-            .into_any_element()
-    }
-
-    /// The small `Cc` / `Bcc` link that reveals a hidden field and puts the caret in it.
-    fn reveal_link(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        field: Field,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        Button::new(id)
-            .label(label)
-            .ghost()
-            .xsmall()
-            .h(px(18.))
-            .px_1()
-            .text_size(px(11.))
-            .text_color(muted)
-            .tooltip(format!("Show the {label} field"))
-            .disabled(disabled)
-            .on_click(
-                cx.listener(move |this, _, window, cx| this.reveal_field(field, window, cx)),
-            )
-            .into_any_element()
-    }
-
-    fn subject_row(&self, cx: &App) -> Div {
-        let t = cx.theme();
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .py_1()
-            .border_b(px(1.))
-            .border_color(t.border)
-            .child(
-                div()
-                    .w(px(56.))
-                    .flex_none()
-                    .text_sm()
-                    .text_color(t.muted_foreground)
-                    .child("Subject"),
-            )
-            .child(
-                div()
-                    .id("compose-subject")
-                    .test_support()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        Input::new(&self.subject)
-                            .h(px(22.))
-                            .bordered(false)
-                            .rounded_md()
-                            .bg(t.muted)
-                            .px_2()
-                            .disabled(self.frozen()),
-                    ),
-            )
-    }
-
-    /// The sending account, as a menu of the accounts this mailbox holds. Choosing one is
-    /// an edit like any other, so the record and the send follow it.
-    ///
-    /// With one account there is nothing to choose, so the control is not even shown: a
-    /// selector that cannot change anything only takes room. While the message is held or
-    /// on its way the account it goes from is still shown, but it cannot be changed: the
-    /// message is that account's now.
-    fn account_selector(&self, cx: &App) -> Option<DropdownButton> {
-        if self.accounts.len() < 2 {
-            return None;
-        }
-        let current = self
-            .accounts
-            .iter()
-            .find(|(id, _)| *id == self.draft.account)
-            .map(|(_, label)| label.clone())
-            .unwrap_or_else(|| self.draft.account.clone());
-        let button = crate::app::ui::button(
-            "compose-account-label",
-            current,
-            "Send this message from a different account",
-            "",
-            cx,
-        )
-        .disabled(self.frozen());
-        Some(
-            DropdownButton::new("compose-account")
-                .disabled(self.frozen())
-                .button(button),
-        )
-    }
-
-    /// The account menu's rows, so a click runs exactly what choosing the account does.
-    fn account_rows(&self) -> Vec<(String, String)> {
-        self.accounts
-            .iter()
-            .map(|(id, label)| (label.clone(), id.clone()))
-            .collect()
-    }
-
-    fn render_headers(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let frozen = self.frozen();
-        let app = cx.weak_entity();
-        let account = self.account_selector(cx).map(|selector| {
-            // The rows are read when the menu opens, so the closure owns nothing that would
-            // have to outlive the frame.
-            selector.dropdown_menu_with_anchor(Anchor::BottomRight, move |menu, window, cx| {
-                let Some(this) = app.upgrade() else {
-                    return menu;
-                };
-                let rows: Vec<(String, String)> = this.read(cx).account_rows();
-                let owner = app.clone();
-                // A chosen row dispatches exactly what the action would, so the composer
-                // hears it through the same handler as any other key or click.
-                let run: crate::app::menu::MenuRun = Rc::new(move |action, window, cx| {
-                    owner
-                        .update(cx, |_, cx| window.dispatch_action(action, cx))
-                        .ok();
-                });
-                let items: Vec<crate::app::menu::MenuItem> = rows
-                    .into_iter()
-                    .map(|(label, id)| {
-                        crate::app::menu::MenuItem::action_fn(label, move || {
-                            Box::new(ComposeAccount {
-                                account: id.clone(),
-                            }) as Box<dyn Action>
-                        })
-                    })
-                    .collect();
-                crate::app::menu::populate(menu, &items, &run, window, cx)
-            })
-        });
-        // The Cc/Bcc reveal links share the right end of the To row with the account: one
-        // row for the addresses, nothing on its own line.
-        let mut to_trailing = div().flex().flex_none().items_center().gap_1();
-        if !self.cc_shown {
-            to_trailing =
-                to_trailing.child(self.reveal_link("compose-show-cc", "Cc", Field::Cc, frozen, cx));
-        }
-        if !self.bcc_shown {
-            to_trailing = to_trailing
-                .child(self.reveal_link("compose-show-bcc", "Bcc", Field::Bcc, frozen, cx));
-        }
-        if let Some(account) = account {
-            to_trailing = to_trailing.child(account);
-        }
-        div()
-            .flex()
-            .flex_none()
-            .flex_col()
-            .px_3()
-            .pt_2()
-            .child(self.header_row(
-                "compose-to",
-                "To",
-                self.to.clone(),
-                Some(to_trailing.into_any_element()),
-                cx,
-            ))
-            .when(self.cc_shown, |d| {
-                d.child(self.header_row("compose-cc", "Cc", self.cc.clone(), None, cx))
-            })
-            .when(self.bcc_shown, |d| {
-                d.child(self.header_row("compose-bcc", "Bcc", self.bcc.clone(), None, cx))
-            })
-            .child(self.subject_row(cx))
-    }
-
     /// The formatting toolbar: every format inline while the row has room, the rest behind
     /// an overflow menu, with Preview and Attach at its right end.
     fn render_toolbar(&mut self, cx: &mut Context<Self>) -> Div {
@@ -1400,10 +1189,10 @@ impl Composer {
             Button::new("compose-more-format")
                 .icon(gpui_kit::assets::IconName::Ellipsis)
                 .ghost()
-                .h(px(36.))
-                .w(px(36.))
+                .h(px(26.))
+                .w(px(26.))
                 .px_0()
-                .rounded_md()
+                .rounded(px(5.))
                 .text_color(cx.theme().foreground)
                 .tooltip("More formatting")
                 .disabled(locked)
@@ -1440,10 +1229,10 @@ impl Composer {
                 Button::new("compose-attach")
                     .icon(gpui_kit::assets::IconName::Paperclip)
                     .ghost()
-                    .h(px(36.))
-                    .w(px(36.))
+                    .h(px(26.))
+                    .w(px(26.))
                     .px_0()
-                    .rounded_md()
+                    .rounded(px(5.))
                     .text_color(cx.theme().foreground),
                 "Attach files",
                 "cmd-shift-a",
@@ -1459,10 +1248,10 @@ impl Composer {
                         gpui_kit::assets::IconName::Eye
                     })
                     .ghost()
-                    .h(px(36.))
-                    .w(px(36.))
+                    .h(px(26.))
+                    .w(px(26.))
                     .px_0()
-                    .rounded_md()
+                    .rounded(px(5.))
                     .text_color(cx.theme().foreground)
                     .selected(previewing)
                     .toggled(previewing),
@@ -1484,8 +1273,10 @@ impl Composer {
             .flex()
             .flex_none()
             .w_full()
-            .px_3()
-            .py_2()
+            .px_2()
+            .py_1()
+            .border_t(px(1.))
+            .border_color(cx.theme().border)
             .on_children_prepainted(move |bounds, _, cx| {
                 let Some(width) = bounds.first().map(|b| f32::from(b.size.width)) else {
                     return;
@@ -1691,132 +1482,6 @@ impl Composer {
         Some(bar)
     }
 
-    fn render_footer(&mut self, cx: &mut Context<Self>) -> Div {
-        // The colours are copied out rather than the theme borrowed: every button below
-        // needs the context mutably, which a live theme borrow would forbid.
-        let border = cx.theme().border;
-        let warning = cx.theme().warning;
-        let muted = cx.theme().muted_foreground;
-        let status = self.status();
-        let frozen = self.frozen();
-        let conflicted = matches!(self.draft.state, DraftState::Conflict);
-        let inline = self.placement == Placement::Inline;
-        // Collapse only makes sense for a draft that came out of a thread: a fresh message
-        // never had one, so the control is not offered at all.
-        let collapsible = !inline && self.draft.source_message.is_some();
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .border_t(px(1.))
-            .border_color(border)
-            .child(
-                div()
-                    .id("compose-status")
-                    .test_support()
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(px(11.))
-                    .text_color(match self.draft.state {
-                        DraftState::Failed { .. }
-                        | DraftState::Uncertain
-                        | DraftState::Conflict => warning,
-                        _ => muted,
-                    })
-                    .child(status),
-            )
-            .when(inline, |d| {
-                d.child(
-                    crate::app::ui::button(
-                        "compose-expand",
-                        "Expand",
-                        "Move this draft into its own tab",
-                        "",
-                        cx,
-                    )
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Expand))),
-                )
-            })
-            .when(collapsible, |d| {
-                d.child(
-                    crate::app::ui::button(
-                        "compose-collapse",
-                        "Collapse",
-                        "Move this draft back under its thread",
-                        "",
-                        cx,
-                    )
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Collapse))),
-                )
-            })
-            // A conflicted draft is not left in a dead end: the choice is right here, and
-            // the local snapshot is kept until it is made.
-            .when(conflicted, |d| {
-                d.child(
-                    crate::app::ui::button(
-                        "compose-resolve-conflict",
-                        "Resolve…",
-                        "Choose between your copy, the server's, or keeping both",
-                        "",
-                        cx,
-                    )
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::ResolveConflict))),
-                )
-            })
-            .when(matches!(self.draft.state, DraftState::Uncertain), |d| {
-                d.child(
-                    crate::app::ui::button(
-                        "compose-check-delivery",
-                        "Check delivery",
-                        "Look in Sent without sending again",
-                        "",
-                        cx,
-                    )
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::CheckDelivery))),
-                )
-            })
-            .child(
-                crate::app::ui::button(
-                    "compose-discard",
-                    "Discard",
-                    "Delete this draft; it asks first",
-                    "",
-                    cx,
-                )
-                .disabled(frozen)
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Discard))),
-            )
-            .child(
-                crate::app::ui::button(
-                    "compose-save-close",
-                    "Save & Close",
-                    "Save the draft now and close the composer",
-                    "escape",
-                    cx,
-                )
-                .disabled(!self.can_close())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Close))),
-            )
-            // The hold is a fixed ten seconds with an Undo, not a delay to skip: while a
-            // message is held the control offers nothing, so pressing Send again cannot
-            // send it early. Undo is on the countdown toast, per draft.
-            .child(
-                crate::app::ui::primary_button(
-                    "compose-send",
-                    gpui_kit::assets::IconName::Send,
-                    "Send",
-                    "Send; the message is held for ten seconds so it can be recalled",
-                    "cmd-enter",
-                    cx,
-                )
-                .disabled(!self.can_send())
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Send))),
-            )
-    }
-
     /// The body surface: the editor, or the rendered preview of what will be sent.
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self.mode == BodyMode::Preview {
@@ -2003,7 +1668,35 @@ impl Render for Composer {
                     cx.emit(ComposeEvent::Send)
                 }
             }))
-            .on_action(cx.listener(|_, _: &CloseComposer, _, cx| cx.emit(ComposeEvent::Close)))
+            .on_action(cx.listener(|this, _: &ChooseSendIntent, window, cx| {
+                this.open_menu(false, None, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CloseComposer, _, cx| {
+                // Escape dismisses the slash menu or hint first; only a bare one closes.
+                if !this.dismiss_footer_overlays(cx) {
+                    cx.emit(ComposeEvent::Close)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFormattingBar, _, cx| this.toggle_toolbar(cx)))
+            // The slash menu owns these keys before the textarea sees them.
+            .capture_action(cx.listener(|this, _: &gpui_kit::component::input::MoveUp, _, cx| {
+                if this.slash_open() {
+                    this.slash_move(-1, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &gpui_kit::component::input::MoveDown, _, cx| {
+                if this.slash_open() {
+                    this.slash_move(1, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &gpui_kit::component::input::Enter, window, cx| {
+                if this.slash_open() {
+                    this.pick_selected_slash(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(|this, _: &DiscardDraft, _, cx| {
                 if !this.frozen() {
                     cx.emit(ComposeEvent::Discard)
@@ -2068,14 +1761,18 @@ impl Render for Composer {
             .on_action(
                 cx.listener(|this, _: &ComposeTable, window, cx| this.apply_table(window, cx)),
             )
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .min_w_0()
             .min_h_0()
             .bg(background)
-            .child(self.render_headers(window, cx))
-            .child(self.render_toolbar(cx))
+            .children(self.render_restored_notice(cx))
+            .child({
+                let headers = self.render_headers(window, cx);
+                self.dimmed(headers, false)
+            })
             .when_some(self.render_conversion(cx), |d, el| d.child(el))
             .when_some(self.render_pending_paste(cx), |d, el| d.child(el))
             .child(
@@ -2086,10 +1783,20 @@ impl Render for Composer {
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .child(body),
+                    .child(self.dimmed(body, true))
+                    .when_some(self.render_send_pill(cx), |d, el| d.child(el)),
             )
             .when_some(self.render_attachments(cx), |d, el| d.child(el))
-            .child(self.render_footer(cx))
+            .when(self.toolbar_visible(cx), |d| {
+                let toolbar = self.render_toolbar(cx);
+                d.child(self.dimmed(toolbar, false))
+            })
+            .child({
+                let footer = self.render_footer(cx);
+                self.dimmed(footer, false)
+            })
+            .children(self.render_footer_overlays(cx))
+            .children(self.render_intent_menu(cx))
     }
 }
 

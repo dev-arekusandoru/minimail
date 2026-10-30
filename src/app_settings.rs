@@ -33,6 +33,11 @@ pub const DARK_THEME: Setting<String> =
     Setting::with_default_fn("dark_theme", String::new(), default_dark_theme);
 pub const PANE_LAYOUT: Setting<String> =
     Setting::with_default_fn("pane_layout", String::new(), default_pane_layout);
+/// Whether the composer shows its formatting toolbar. Hidden until the user asks.
+pub const COMPOSE_FORMATTING_BAR: Setting<bool> = Setting::new("compose_formatting_bar", false);
+/// Set once the "formatting is hidden" hint has been shown, so it never returns.
+pub const COMPOSE_FORMATTING_HINT_SEEN: Setting<bool> =
+    Setting::new("compose_formatting_hint_seen", false);
 pub const TAB_AVATARS: Setting<bool> = Setting::new("tab_avatars", true);
 pub const GROUP_THREADS: Setting<bool> = Setting::new("group_threads", false);
 pub const BLOCK_REMOTE_IMAGES: Setting<bool> = Setting::new("block_remote_images", false);

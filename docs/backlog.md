@@ -24,7 +24,6 @@ Finished or half-finished work that only exists outside `main`. Land or discard 
 - **Signatures** (not started). Open: storage, per-account or not, placement relative to the quote, interaction with Markdown.
 - **Live formatted (WYSIWYG) editor as a setting** (not started).
 - **Keep pasted rich-text styling** (not started). Fonts, colours and sizes are lost because paste converts to Markdown; this needs a richer body format or an HTML part carried alongside.
-- **Send later** (not started). Only the 10 s undo hold exists.
 - **Templates and snippets** (not started).
 - **Attach files dropped from Finder** (not started; dock slice S5).
 

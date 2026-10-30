@@ -59,3 +59,33 @@ fn confirmed_reply_inherits_current_filing_and_snooze_wake_time() {
     assert!(mb.tick(T0 + 100).woken.contains(&snoozed));
     assert_eq!(mb.state_of(snoozed), Some(State::Inbox));
 }
+
+#[test]
+fn archive_intent_files_the_thread_in_one_undo_step() {
+    use mail_classifier::outgoing::SendIntent;
+    let mut mb = sample();
+    let id = delivered(&mut mb, 1, false);
+    mb.apply_send_intent(1, SendIntent::Archive, T0);
+    assert_eq!(mb.state_of(1), Some(State::Archived));
+    assert_eq!(mb.state_of(id), Some(State::Archived));
+    assert!(mb.undo());
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(!mb.undo());
+}
+
+#[test]
+fn remind_intent_resurfaces_after_its_days_unless_a_reply_arrives() {
+    use mail_classifier::outgoing::SendIntent;
+    let day = 86_400;
+    let mut mb = sample();
+    mb.set_state(&[1], State::Archived);
+    delivered(&mut mb, 1, false);
+    mb.apply_send_intent(1, SendIntent::RemindIfNoReply { days: 3 }, T0);
+    assert!(mb.tags(1).contains(&Tag::AwaitingReply));
+    let depth = mb.undo_depth();
+    assert!(mb.tick(T0 + 2 * day).followed_up.is_empty(), "not due yet");
+    assert_eq!(mb.tick(T0 + 3 * day).followed_up, vec![1]);
+    assert_eq!(mb.state_of(1), Some(State::Inbox));
+    assert!(mb.tags(1).contains(&Tag::FollowUp));
+    assert_eq!(mb.undo_depth(), depth, "tick pushes no undo step");
+}

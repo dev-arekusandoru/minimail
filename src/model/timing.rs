@@ -52,7 +52,7 @@ impl Mailbox {
             if let Some(since) = meta.and_then(|x| x.awaiting_since) {
                 if self.has_newer_reply(m, since) {
                     answered.push(m.id);
-                } else if now >= since + self.follow_up_timeout {
+                } else if now >= since + meta.and_then(|x| x.follow_up_after).unwrap_or(self.follow_up_timeout) {
                     follow.push(m.id);
                 }
             }
@@ -60,6 +60,7 @@ impl Mailbox {
         for id in answered {
             let meta = self.meta.entry(id).or_default();
             meta.awaiting_since = None;
+            meta.follow_up_after = None;
             meta.tags.retain(|t| *t != Tag::AwaitingReply);
         }
         for id in wake {
@@ -97,12 +98,13 @@ impl Mailbox {
         }
         let meta = self.meta.entry(id).or_default();
         meta.awaiting_since = None;
+        meta.follow_up_after = None;
         meta.snoozed_until = None;
     }
 
     /// Tonight 18:00, Tomorrow 08:00, next Monday 08:00, each at that time on the user's
     /// own clock. Tonight rolls to tomorrow 18:00 once 18:00 has passed.
-    pub fn snooze_presets(&self, now: &Now) -> [(&'static str, Timestamp); 3] {
+    pub fn snooze_presets(now: &Now) -> [(&'static str, Timestamp); 3] {
         // Today's local midnight as wall-clock seconds: everything below is written on the
         // user's clock and converted back to an instant at the end.
         let midnight = now.parts(now.at()).0 * DAY;

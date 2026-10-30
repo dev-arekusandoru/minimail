@@ -17,6 +17,8 @@ pub const HOLD_SECONDS: Timestamp = 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HoldReason {
     UserSend,
+    /// Send later: held until the chosen time, and kept across a restart.
+    Scheduled,
 }
 
 /// A scheduled send waiting out its hold. Persisted, so a restart can see it.
@@ -38,6 +40,19 @@ impl PendingHold {
             hold_until: now + HOLD_SECONDS,
             reason: HoldReason::UserSend,
         }
+    }
+
+    /// A send held until `at` (never sooner than the undo window).
+    pub fn scheduled(draft: DraftId, account: AccountId, now: Timestamp, at: Timestamp) -> Self {
+        Self {
+            hold_until: at.max(now + HOLD_SECONDS),
+            reason: HoldReason::Scheduled,
+            ..Self::start(draft, account, now)
+        }
+    }
+
+    pub fn is_scheduled(&self) -> bool {
+        self.reason == HoldReason::Scheduled
     }
 
     pub fn is_due(&self, now: Timestamp) -> bool {
@@ -242,6 +257,17 @@ mod tests {
         draft.to = "sam@x.test".to_owned();
         draft.subject = "Re: Lunch".to_owned();
         draft
+    }
+
+    #[test]
+    fn a_scheduled_hold_waits_for_its_time_but_never_less_than_the_undo_window() {
+        let later = PendingHold::scheduled(DraftId(1), "me@x.test".to_owned(), 100, 5_000);
+        assert!(later.is_scheduled());
+        assert_eq!(later.hold_until, 5_000);
+        assert!(!later.is_due(4_999));
+        assert!(later.is_due(5_000));
+        let past = PendingHold::scheduled(DraftId(1), "me@x.test".to_owned(), 100, 50);
+        assert_eq!(past.hold_until, 100 + HOLD_SECONDS, "a past time still gets the undo window");
     }
 
     #[test]

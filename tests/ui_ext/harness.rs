@@ -389,11 +389,13 @@ impl Harness<'_> {
         });
     }
 
-    /// Press the composer's Send control for the draft it is showing. That control is the
-    /// user-facing path into the hold, and it works whichever surface currently has the
-    /// draft, focused or not.
+    /// Press the composer's Send control for the draft it is showing and confirm the
+    /// intent menu it opens with Enter (the row already lit is what the sentence says).
+    /// That control is the user-facing path into the hold, and it works whichever surface
+    /// currently has the draft, focused or not.
     pub fn send_draft(&mut self) {
         self.click("compose-send");
+        self.keys("enter");
         self.tick();
     }
 
@@ -552,21 +554,31 @@ impl Harness<'_> {
         self.read(|a| a.cursor_draft().map(|r| r.id))
     }
 
-    /// Move the draft the composer is showing into the tab strip, through the real control.
+    /// The rows of the composer's ⋯ menu; the menu is closed again afterwards.
+    pub fn composer_menu_rows(&mut self) -> Vec<String> {
+        self.click("compose-more");
+        let rows = self.rows();
+        self.keys("escape");
+        rows
+    }
+
+    /// Move the draft the composer is showing into the tab strip, through the ⋯ menu.
     pub fn expand_active_draft(&mut self) {
-        self.click("compose-expand");
+        self.click("compose-more");
+        self.click_row("Expand");
         self.tick();
     }
 
     /// Move the draft the composer is showing back under its thread.
     pub fn collapse_active_draft(&mut self) {
-        self.click("compose-collapse");
+        self.click("compose-more");
+        self.click_row("Collapse");
         self.tick();
     }
 
     /// Discard the draft the composer is showing, answering the confirmation.
     pub fn discard_active_draft(&mut self) {
-        self.click("compose-discard");
+        self.keys("cmd-shift-backspace");
         self.tick();
         self.keys("1");
         self.settle();

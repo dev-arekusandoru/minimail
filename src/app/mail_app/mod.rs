@@ -66,6 +66,7 @@ const BEAT_INTERVAL: Duration = Duration::from_millis(50);
 mod accessors;
 mod composer;
 mod drafts;
+mod recipient_context;
 use composer::{PendingOpen, PendingUi};
 mod actions;
 mod day;
@@ -575,6 +576,7 @@ impl MailApp {
         );
         self.mailbox.load_spam_senders(senders.clone());
         self.saved_spam_senders = senders;
+        crate::app::compose::footer::FooterPrefs::install(store.clone(), cx);
         self.preferences = Some(store);
         cx.set_window_appearance(match self.theme_mode {
             crate::theme::ThemeMode::Light => Some(WindowAppearance::Light),

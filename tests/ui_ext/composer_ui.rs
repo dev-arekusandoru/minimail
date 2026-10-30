@@ -13,13 +13,13 @@ pub fn collapse_is_offered_only_for_a_draft_that_came_from_a_thread(cx: &mut Tes
     h.expand_active_draft();
     assert!(h.read(|a| a.compose_in_tab()), "the reply is in a tab");
     assert!(
-        h.has("compose-collapse"),
+        h.composer_menu_rows().iter().any(|r| r == "Collapse"),
         "an expanded reply can collapse back to its thread"
     );
 
     h.new_draft();
     assert!(
-        !h.has("compose-collapse"),
+        !h.composer_menu_rows().iter().any(|r| r == "Collapse"),
         "a fresh message has no thread, so it offers no Collapse"
     );
 }
@@ -58,14 +58,14 @@ pub fn cc_and_bcc_reveal_inline_and_only_when_asked(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.new_draft();
 
-    assert!(h.has("compose-show-cc"), "the Cc link is on the To row");
-    assert!(h.has("compose-show-bcc"), "the Bcc link is on the To row");
+    assert!(h.has("compose-show-cc"), "a ghost `cc` word is offered");
+    assert!(h.has("compose-show-bcc"), "a ghost `bcc` word is offered");
     assert!(!h.has("compose-cc"), "an empty Cc row is hidden");
     assert!(!h.has("compose-bcc"), "an empty Bcc row is hidden");
 
     h.click("compose-show-cc");
     assert!(h.has("compose-cc"), "clicking Cc reveals its row");
-    assert!(!h.has("compose-show-cc"), "the Cc link hides once shown");
+    assert!(!h.has("compose-show-cc"), "the ghost word gives way to its clause");
     assert!(!h.has("compose-bcc"), "revealing Cc leaves Bcc alone");
 
     // The reveal focused the field: typing lands in Cc.
@@ -80,7 +80,7 @@ pub fn cc_and_bcc_reveal_inline_and_only_when_asked(cx: &mut TestAppContext) {
 
     h.click("compose-show-bcc");
     assert!(h.has("compose-bcc"), "clicking Bcc reveals its row");
-    assert!(!h.has("compose-show-bcc"), "the Bcc link hides once shown");
+    assert!(!h.has("compose-show-bcc"), "the ghost word gives way to its clause");
 }
 
 /// A reply-all that carries a Cc opens with the Cc row already shown.
@@ -104,18 +104,16 @@ pub fn a_reply_with_cc_shows_the_field_automatically(cx: &mut TestAppContext) {
     );
 }
 
-/// The footer offers Save & Close instead of Close; it flushes the draft and closes, keeping
-/// the draft (a close never deletes).
+/// Escape closes the composer and keeps the draft (a close never deletes).
 #[gpui_kit::gpui::test]
-pub fn save_and_close_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
+pub fn closing_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.new_draft();
     h.type_text("keep me");
     h.settle();
-    assert!(h.has("compose-save-close"), "the footer offers Save & Close");
-    assert!(!h.has("compose-close"), "the old Close button is gone");
+    assert!(!h.has("compose-save-close"), "the footer no longer has Save & Close");
 
-    h.click("compose-save-close");
+    h.keys("escape");
     h.settle();
     assert!(!h.read(|a| a.compose_open()), "the composer closed");
     assert_eq!(
@@ -123,6 +121,79 @@ pub fn save_and_close_flushes_and_keeps_the_draft(cx: &mut TestAppContext) {
         1,
         "the draft was kept, not deleted"
     );
+}
+
+/// The formatting bar starts hidden, ⌘⌥T shows it, and the choice outlives the composer.
+#[gpui_kit::gpui::test]
+pub fn the_formatting_bar_toggles_and_is_remembered(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    assert!(!h.has("compose-bold"), "the bar starts hidden");
+    h.keys("cmd-alt-t");
+    assert!(h.has("compose-bold"), "cmd-alt-t shows it");
+    h.keys("escape");
+    h.settle();
+    h.new_draft();
+    assert!(h.has("compose-bold"), "a new composer remembers the choice");
+    h.keys("cmd-alt-t");
+    assert!(!h.has("compose-bold"), "cmd-alt-t hides it again");
+}
+
+/// A lone `/` on a line opens the slash menu; more typing or Escape dismisses it.
+#[gpui_kit::gpui::test]
+pub fn a_slash_opens_the_menu_and_typing_or_escape_dismisses_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("/");
+    assert!(h.has("compose-slash-menu"), "a lone slash opens the menu");
+    h.type_text("x");
+    assert!(!h.has("compose-slash-menu"), "continued typing dismisses it");
+    h.keys("backspace backspace");
+    h.type_text("/");
+    assert!(h.has("compose-slash-menu"));
+    h.keys("escape");
+    assert!(!h.has("compose-slash-menu"), "escape dismisses it");
+    assert!(h.read(|a| a.compose_open()), "and does not close the composer");
+}
+
+/// Down and Enter drive the slash menu instead of moving the caret: Enter on Attach file
+/// removes the `/` and closes the menu; Down then Enter on Send later opens the intent menu.
+#[gpui_kit::gpui::test]
+pub fn the_slash_menu_is_driven_from_the_keyboard(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.new_draft();
+    h.type_text("hi\n");
+    h.type_text("/");
+    h.keys("down");
+    h.keys("enter");
+    assert!(!h.has("compose-slash-menu"), "picking closes the menu");
+    assert!(h.has("compose-intent-menu"), "Send later opens the intent menu");
+    h.keys("escape");
+    h.settle();
+    let body = h.read(|a| {
+        let id = a.tabs.active_draft().expect("a draft tab");
+        a.composer.record(id).expect("record").body.source.clone()
+    });
+    assert_eq!(body, "hi\n", "the slash was removed and nothing else typed");
+
+    h.type_text("/");
+    h.keys("enter");
+    assert!(!h.has("compose-slash-menu"), "Enter on Attach file closes the menu");
+    assert!(!h.has("compose-intent-menu"));
+}
+
+/// Mentioning an attachment with none attached warns in the status line, and Send says so.
+#[gpui_kit::gpui::test]
+pub fn an_unattached_attachment_mention_warns_and_changes_the_send_label(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.new_draft();
+    assert!(h.has("compose-send-label") && !h.has("compose-warning"));
+    h.type_text("I've attached the deck.");
+    assert!(h.has("compose-warning"), "the warning shows");
+    assert!(h.has("compose-send-anyway"), "Send reads Send anyway");
+    assert!(!h.has("compose-send-label"));
 }
 
 /// Closing a draft tab with its x asks Send / Save & Close / Discard, and the choice acts.

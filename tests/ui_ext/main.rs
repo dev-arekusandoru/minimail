@@ -9,5 +9,7 @@ mod outbox_classifier;
 mod reader_mode_menu;
 mod row_menu;
 mod rules_new_senders;
+mod send_intent;
 mod session_search;
 mod snooze;
+mod recipients_ui;

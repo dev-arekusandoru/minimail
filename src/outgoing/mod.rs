@@ -23,7 +23,7 @@ pub use body::{
     BodyFormat, BodyMode, Clipboard, ConversionApproval, ConversionWarning, DraftBody,
     HtmlConversion, ImportedOriginal, PasteResult, RenderedBody,
 };
-pub use draft::{DraftId, DraftKind, DraftRecord, DraftState, ReplyContext, SendIntent, split_addresses};
+pub use draft::{DEFAULT_REMIND_DAYS, DraftId, DraftKind, DraftRecord, DraftState, ReplyContext, SendIntent, split_addresses};
 pub use hold::{
     HOLD_SECONDS, HoldAction, HoldProgress, HoldRegistry, HoldTransition, PendingHold,
     Reconciliation, SendOutcome, SentLookup, hold_progress, hold_remaining, reconcile_uncertain,

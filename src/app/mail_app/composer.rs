@@ -20,11 +20,8 @@
 //! applies queued window work. Rendering only constructs elements; it never starts IO.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -36,7 +33,7 @@ use crate::app::composer_worker::{
 };
 use crate::judge::Judge as _;
 use crate::model::{Message, MessageId, ProviderKind, TriageState};
-use crate::outgoing::{AttachmentId, DraftId, DraftKind, DraftRecord, DraftState, PendingHold};
+use crate::outgoing::{AttachmentId, DraftId, DraftKind, DraftRecord, DraftState, SendIntent};
 use crate::provider::RemoteId;
 use crate::provider::compose::{RemoteDraft, SentMail, Threading};
 use crate::tabs;
@@ -45,17 +42,8 @@ use super::modals::DialogSpec;
 use super::*;
 use crate::model::Attachment;
 
-/// Identity of the hold toast type, paired with the draft's own id: two drafts counting down
-/// at once each keep their own toast, bar and Undo instead of replacing one another.
-struct HoldToastId;
 /// Identity of the "restored a draft" toast.
 struct RecoveryToastId;
-
-/// The element id one draft's countdown toast is filed under. `DraftId` is not an
-/// `ElementId`, so the toast is keyed by its rendered form: two drafts never share a toast.
-fn toast_key(id: DraftId) -> SharedString {
-    SharedString::from(format!("draft-{id}"))
-}
 
 /// How many provider drafts one import round asks for.
 const IMPORT_LIMIT: usize = 25;
@@ -95,11 +83,6 @@ pub(super) enum PendingUi {
     RestoreDraft(DraftId),
     /// Ask before deleting a draft: the one action that cannot be undone.
     ConfirmDiscard(DraftId),
-    /// Show the countdown, the shrinking bar and the Undo.
-    HoldToast(PendingHold),
-    /// Take one draft's countdown down: it was sent, recalled or refused. Only that draft's
-    /// toast goes; another hold counting down keeps its own.
-    ClearHoldToast(DraftId),
     /// Say what a startup recovery brought back.
     Recovered(DraftId),
     /// Offer the filing choice for a confirmed reply's original.
@@ -287,11 +270,20 @@ impl MailApp {
                 self.hold_painted_at = None;
             } else if self.hold_painted_at != Some(now) {
                 self.hold_painted_at = Some(now);
-                let holds: Vec<_> = self.composer.holds.values().cloned().collect();
-                for hold in holds {
-                    self.show_hold_toast(hold, window, cx);
+                // The pill counts down in whole seconds, so it repaints once per second.
+                let counting: Vec<DraftId> = self
+                    .composer
+                    .holds
+                    .values()
+                    .filter(|hold| !hold.is_scheduled())
+                    .map(|hold| hold.draft)
+                    .collect();
+                for id in counting {
+                    if let Some(entity) = self.composers.get(&id) {
+                        entity.update(cx, |_, cx| cx.notify());
+                    }
+                    did = true;
                 }
-                did = true;
             }
             // A local write follows a pause in typing, so a burst of keystrokes is one save
             // rather than one transaction per character.
@@ -370,10 +362,6 @@ impl MailApp {
                     self.focus_draft_body(id, window, cx);
                 }
                 PendingUi::ConfirmDiscard(id) => self.confirm_discard(id, window, cx),
-                PendingUi::HoldToast(hold) => self.show_hold_toast(hold, window, cx),
-                PendingUi::ClearHoldToast(id) => {
-                    window.remove_notification1::<HoldToastId>(toast_key(id), cx)
-                }
                 PendingUi::Recovered(id) => self.show_recovered(id, window, cx),
                 PendingUi::PostSend(original) => self.open_post_send_dialog(original, window, cx),
                 // The filing dialog a reply leaves behind owns the keyboard; the handback
@@ -461,6 +449,10 @@ impl MailApp {
                     self.composer.put(draft);
                 }
                 self.recovered = *recovery;
+                // A send-later hold survived the restart: it counts again and goes out when due.
+                for hold in self.recovered.scheduled.clone() {
+                    self.composer.begin_hold(hold);
+                }
                 // The lists are taken rather than read so the recovery stays on the record
                 // for the rest of the session.
                 let restored = self.recovered.restored.clone();
@@ -485,7 +477,6 @@ impl MailApp {
                 self.composer.begin_hold(hold.clone());
                 self.hold_after_save.remove(&id);
                 self.set_composer_sending(id, true, cx);
-                self.pending_ui.push_back(PendingUi::HoldToast(hold));
                 if let Some(window) = window.as_deref_mut() {
                     window.focus(&self.focus_handle, cx);
                 }
@@ -498,7 +489,9 @@ impl MailApp {
                     open.operation = None;
                 }
                 self.set_composer_sending(id, false, cx);
-                self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
+                if let Some(entity) = self.composers.get(&id).cloned() {
+                    entity.update(cx, |composer, cx| composer.show_restored_notice(cx));
+                }
                 self.pending_ui.push_back(PendingUi::RestoreDraft(id));
             }
             Event::Attached { draft, failed } => {
@@ -574,7 +567,6 @@ impl MailApp {
                 // Delivery settles the draft's uncertainty, whether this send was watched
                 // through or confirmed later by a reconciliation.
                 self.composer.reconciling.retain(|pending| *pending != id);
-                self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
                 self.say("Sent".into(), cx);
                 // The outgoing message needs the draft's own account, body and attachments, so
                 // it is recorded *before* the draft is forgotten. Forgetting first is what
@@ -589,7 +581,6 @@ impl MailApp {
                     open.operation = None;
                 }
                 self.composer.reconciling.push(id);
-                self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
                 self.say(
                     format!("The server may or may not have sent it — checking before sending again ({detail})"),
                     cx,
@@ -604,7 +595,6 @@ impl MailApp {
                 }
                 self.composer.holds.remove(&id);
                 self.set_composer_sending(id, false, cx);
-                self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
                 self.say(
                     "You appear to be offline — the draft was kept and nothing was sent".into(),
                     cx,
@@ -620,7 +610,6 @@ impl MailApp {
                 // instead of running to the end for a send that is not going to happen.
                 self.composer.holds.remove(&id);
                 self.set_composer_sending(id, false, cx);
-                self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
                 self.say(format!("Not sent: {error}"), cx);
             }
             Event::AutosaveFailed(id, detail) => {
@@ -847,7 +836,11 @@ impl MailApp {
         let Some(entity) = self.composers.get(&id).cloned() else {
             return;
         };
-        entity.update(cx, |composer, cx| composer.set_sending(sending, cx));
+        let hold = self.composer.holds.get(&id).cloned();
+        entity.update(cx, |composer, cx| {
+            composer.set_hold(hold, cx);
+            composer.set_sending(sending, cx)
+        });
     }
 
     fn account_label(&self, account: &str) -> String {
@@ -911,6 +904,7 @@ impl MailApp {
             .composer
             .holds
             .values()
+            .filter(|h| !h.is_scheduled())
             .map(|h| (h.created_at, h.draft))
             .collect();
         holds.sort();
@@ -1088,6 +1082,7 @@ impl MailApp {
                 cx,
             )
         });
+        self.give_recipient_context(&record, &entity, cx);
         let sub = cx.subscribe_in(
             &entity,
             window,
@@ -1096,6 +1091,8 @@ impl MailApp {
             },
         );
         self._composer_subs.push(sub);
+        let (clock, zone) = (self.clock.clone(), self.zone.clone());
+        entity.update(cx, |composer, _| composer.set_clock(clock, zone));
         self.composers.insert(id, entity.clone());
         self.composer.put(record);
         if let Some(state) = self.composer.get_mut(id) {
@@ -1113,6 +1110,10 @@ impl MailApp {
             }
         } else {
             self.tabs.open_draft_pinned(id);
+        }
+        // A draft reopened while its send-later hold is waiting shows the frozen state.
+        if self.composer.holds.contains_key(&id) {
+            self.set_composer_sending(id, true, cx);
         }
         self.sync_composer_status(id, cx);
         cx.notify();
@@ -1186,6 +1187,10 @@ impl MailApp {
                     return;
                 }
                 open.edit_form(to, cc, bcc, subject, body, now);
+                entity.update(cx, |composer, cx| {
+                    open.record.intent = composer.intent();
+                    composer.dismiss_restored_notice(cx);
+                });
                 // The write itself is not started here: the beat writes the queued snapshot
                 // once typing pauses, so a keystroke never waits on a database transaction.
                 self.sync_composer_status(id, cx);
@@ -1433,7 +1438,9 @@ impl MailApp {
                 return;
             }
             open.operation = Some(DraftOperation::Hold);
-            worker.send(Command::BeginHold { draft: id, now });
+            // Send later holds until its time; anything else waits out the undo window.
+            let at = open.record.intent.send_at();
+            worker.send(Command::BeginHold { draft: id, now, at });
         }
         cx.notify();
     }
@@ -1483,7 +1490,6 @@ impl MailApp {
         if self.composer.holds.remove(&id).is_none() {
             return;
         }
-        self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
         let Some(record) = self.composer.record(id).cloned() else {
             return;
         };
@@ -1506,7 +1512,6 @@ impl MailApp {
         if self.composer.holds.remove(&id).is_none() {
             return;
         }
-        self.pending_ui.push_back(PendingUi::ClearHoldToast(id));
         if let Some(open) = self.composer.get_mut(id) {
             open.operation = Some(DraftOperation::Hold);
         }
@@ -1554,9 +1559,10 @@ impl MailApp {
         };
         let account = record.account.clone();
         // A message the sync loop has already seen is adopted, not duplicated.
-        if self.message_by_remote(&account, &sent.id).is_some() {
+        if let Some(local) = self.message_by_remote(&account, &sent.id) {
             self.last_sent_remote = Some(sent.id.clone());
-            self.after_send(self.triage_original(&record, &sent), cx);
+            let original = self.triage_original(&record, &sent);
+            self.after_send(original, original.unwrap_or(local), record.intent, cx);
             return;
         }
         // The provider says which thread the message landed in, and that is where the copy
@@ -1647,7 +1653,7 @@ impl MailApp {
             .record_sent(outgoing, triage_original, expects, now);
         self.cache_outgoing(local, &sent);
         self.last_sent_remote = Some(sent.id.clone());
-        self.after_send(triage_original, cx);
+        self.after_send(triage_original, triage_original.unwrap_or(local), record.intent, cx);
         self.pending_ui.push_back(PendingUi::FocusBody(draft));
     }
 
@@ -1764,13 +1770,35 @@ impl MailApp {
         );
     }
 
-    /// What a confirmed send leaves behind: the post-send filing choice, offered only for a
-    /// reply whose original this very draft names.
-    fn after_send(&mut self, original: Option<MessageId>, cx: &mut Context<Self>) {
+    /// What a confirmed send leaves behind: the thread's fate as the sentence said (`target`
+    /// is the original it answered, or the sent message for a new thread), else the
+    /// post-send filing choice, offered only for a reply whose original this very draft names.
+    fn after_send(
+        &mut self,
+        original: Option<MessageId>,
+        target: MessageId,
+        intent: SendIntent,
+        cx: &mut Context<Self>,
+    ) {
         if original.is_some() && original == self.session_current() {
             self.session_advance(super::Outcome::Replied);
         }
+        let now = self.now();
+        self.mailbox.apply_send_intent(target, intent, now);
+        let said = match intent {
+            SendIntent::Archive => Some("Sent · thread archived".to_owned()),
+            SendIntent::RemindIfNoReply { days } => {
+                Some(format!("Sent · reminding you in {days}d if no reply"))
+            }
+            SendIntent::JustSend | SendIntent::SendLater { .. } => None,
+        };
+        // The sentence already answered what to do with the thread: no filing dialog on top.
+        let asked = said.is_some();
+        if let Some(said) = said {
+            self.say(said, cx);
+        }
         if let Some(original) = original
+            && !asked
             && !self.modal_open()
         {
             self.pending_ui.push_back(PendingUi::PostSend(original));
@@ -2457,89 +2485,6 @@ impl MailApp {
     }
 
     // --------------------------------------------------------------------- toasts
-
-    /// The hold toast: what it counts down to, a progress bar that shrinks with it, and
-    /// the Undo that brings the whole draft back.
-    fn show_hold_toast(&mut self, hold: PendingHold, window: &mut Window, cx: &mut Context<Self>) {
-        let draft = hold.draft;
-        let text = SharedString::from("Sending…");
-        // The countdown, the shrinking bar and the Undo *are* the toast's content: a title
-        // cannot offer a button, and building the bar only to discard it left the hold with
-        // no way back at all.
-        let content = cx.weak_entity();
-        let closer = cx.weak_entity();
-        window.push_notification(
-            Notification::info(text)
-                .id::<HoldToastId>()
-                .id1::<HoldToastId>(toast_key(draft))
-                .placement(Anchor::BottomCenter)
-                .autohide(false)
-                .content(move |_, _, cx| {
-                    content
-                        .upgrade()
-                        .map(|owner| owner.read(cx).render_hold_bar(draft, cx))
-                        // The app is gone; an empty toast beats a leaked one.
-                        .unwrap_or_else(|| div().into_any_element())
-                })
-                .on_close(move |_, cx| {
-                    closer.update(cx, |_, cx| cx.notify()).ok();
-                }),
-            cx,
-        );
-        cx.notify();
-    }
-
-    /// The countdown itself, redrawn when its remaining seconds change.
-    fn render_hold_bar(&self, draft: DraftId, cx: &App) -> AnyElement {
-        let t = cx.theme();
-        let progress =
-            self.composer
-                .progress(draft, self.now())
-                .unwrap_or(crate::outgoing::HoldProgress {
-                    remaining: Duration::ZERO,
-                    fraction: 0.,
-                    due: true,
-                });
-        let seconds = progress.remaining.as_secs();
-        div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .id("compose-hold-countdown")
-                            .test_support()
-                            .child(format!("Sending in {seconds}s")),
-                    )
-                    .child(Progress::new("compose-hold-progress").value(progress.fraction * 100.)),
-            )
-            .child(
-                crate::app::ui::button(
-                    format!("compose-hold-undo-{draft:?}"),
-                    "Undo",
-                    "Bring this draft back",
-                    "u",
-                    cx,
-                )
-                // Each toast undoes its own draft, so two holds counting down at once are
-                // recalled independently.
-                .on_click(move |_, window, cx| {
-                    window.dispatch_action(Box::new(UndoSendHold { draft }), cx)
-                }),
-            )
-            .child(
-                div()
-                    .text_color(t.muted_foreground)
-                    .text_size(px(11.))
-                    .child(""),
-            )
-            .into_any_element()
-    }
 
     /// The toast shown after a startup recovery, naming what came back.
     fn show_recovered(&mut self, draft: DraftId, window: &mut Window, cx: &mut Context<Self>) {

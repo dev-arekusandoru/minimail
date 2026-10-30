@@ -138,7 +138,7 @@ impl LocalLane {
             Command::Save { draft, expected } => vec![self.save(*draft, expected)],
             Command::List => vec![Event::Listed(self.list())],
             Command::Recover { now } => vec![self.recover(now)],
-            Command::BeginHold { draft, now } => vec![self.begin_hold(draft, now)],
+            Command::BeginHold { draft, now, at } => vec![self.begin_hold(draft, now, at)],
             Command::CancelHold(id) => vec![self.cancel_hold(id)],
             _ => vec![Event::JobFailed(
                 "that command is not local persistence".into(),
@@ -200,7 +200,7 @@ impl LocalLane {
     /// draft that both waits out a hold and looks editable. Both writes are applied to the
     /// row as it is *now*: a file copy that finished while the user pressed send adds its
     /// attachment without making the hold fail.
-    fn begin_hold(&mut self, id: DraftId, now: Timestamp) -> Event {
+    fn begin_hold(&mut self, id: DraftId, now: Timestamp, at: Option<Timestamp>) -> Event {
         let draft = match self.drafts.get(id) {
             Ok(Some(draft)) => draft,
             Ok(None) => return Event::Missing(id),
@@ -213,7 +213,10 @@ impl LocalLane {
             return Event::StoreFailed(Some(id), reason);
         }
         let account = draft.account;
-        let hold = PendingHold::start(id, account, now);
+        let hold = match at {
+            Some(at) => PendingHold::scheduled(id, account, now, at),
+            None => PendingHold::start(id, account, now),
+        };
         if let Err(e) = self.hold_state(id, DraftState::Held, now) {
             return self.store_failed(Some(id), e);
         }

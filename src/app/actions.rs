@@ -5,6 +5,10 @@ use crate::app::dialog::{Choice1, Choice2, Choice3, Choice4, Choice5, DialogConf
 use crate::app::filter_popover::FILTER_PICKER_CONTEXT;
 use crate::app::panels::{RULES_CONTEXT, RulesNext, RulesPrev, RulesRevoke};
 use crate::app::settings::{SETTINGS_NAV, SETTINGS_SCOPE};
+use crate::app::compose::intent::{
+    INTENT_CONTEXT, IntentCancel, IntentConfirm, IntentFewerDays, IntentJustSend, IntentMoreDays,
+    IntentNext, IntentPick1, IntentPick2, IntentPick3, IntentPrev,
+};
 use crate::app::snooze::{SnoozeCustom, SnoozePreset1, SnoozePreset2, SnoozePreset3};
 use crate::judge::{Kind, QuestionKey};
 use crate::model::{FolderId, MessageId};
@@ -39,11 +43,13 @@ gpui_kit::actions!(
         // Composer: opening, the durable draft's life, formatting and the send hold.
         NewMail,
         SendDraft,
+        ChooseSendIntent,
         CloseComposer,
         DiscardDraft,
         ExpandComposer,
         CollapseComposer,
         ToggleComposePreview,
+        ToggleFormattingBar,
         ComposeBold,
         ComposeItalic,
         ComposeLink,
@@ -312,6 +318,19 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("2", SnoozePreset2, Some("SnoozePicker && !Input")),
         KeyBinding::new("3", SnoozePreset3, Some("SnoozePicker && !Input")),
         KeyBinding::new("4", SnoozeCustom, Some("SnoozePicker && !Input")),
+        // Intent menu ("After sending"): a digit per row, enter takes the lit one.
+        KeyBinding::new("1", IntentPick1, Some(INTENT_CONTEXT)),
+        KeyBinding::new("2", IntentPick2, Some(INTENT_CONTEXT)),
+        KeyBinding::new("3", IntentPick3, Some(INTENT_CONTEXT)),
+        KeyBinding::new("cmd-enter", IntentJustSend, Some(INTENT_CONTEXT)),
+        KeyBinding::new("enter", IntentConfirm, Some(INTENT_CONTEXT)),
+        KeyBinding::new("escape", IntentCancel, Some(INTENT_CONTEXT)),
+        KeyBinding::new("down", IntentNext, Some(INTENT_CONTEXT)),
+        KeyBinding::new("j", IntentNext, Some(INTENT_CONTEXT)),
+        KeyBinding::new("up", IntentPrev, Some(INTENT_CONTEXT)),
+        KeyBinding::new("k", IntentPrev, Some(INTENT_CONTEXT)),
+        KeyBinding::new("left", IntentFewerDays, Some(INTENT_CONTEXT)),
+        KeyBinding::new("right", IntentMoreDays, Some(INTENT_CONTEXT)),
         // Choice dialog: one key per option, enter = default; escape is the dialog's.
         KeyBinding::new("1", Choice1, Some("ChoiceDialog && !Input")),
         KeyBinding::new("2", Choice2, Some("ChoiceDialog && !Input")),
@@ -347,6 +366,7 @@ pub fn bind_keys(cx: &mut App) {
         // own key context, so they act on the body selection while the composer is open —
         // inline or in a tab.
         KeyBinding::new("cmd-enter", SendDraft, c),
+        KeyBinding::new("cmd-shift-enter", ChooseSendIntent, c),
         KeyBinding::new("escape", CloseComposer, c),
         // Discard deletes the draft, so it is a modifier chord and asks first (the dialog).
         KeyBinding::new("cmd-shift-backspace", DiscardDraft, c),
@@ -361,6 +381,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-x", ComposeStrike, c),
         KeyBinding::new("cmd-shift-t", ComposeTable, c),
         KeyBinding::new("cmd-shift-v", ToggleComposePreview, c),
+        KeyBinding::new("cmd-alt-t", ToggleFormattingBar, c),
         // `cmd-shift-d` opens the Drafts list: a closed draft is kept, and this is how it
         // comes back. Modifier-chorded, so it works from an input without stealing a letter.
         KeyBinding::new("cmd-shift-d", ShowDrafts, Some(MAIL_SCOPE)),
@@ -474,6 +495,12 @@ pub fn commands() -> Vec<CommandSpec> {
         cmd!(Triage, "Forward", "w", Forward),
         cmd!(Triage, "New message", "cmd-n", NewMail),
         cmd!(Triage, "Send draft", "cmd-enter", SendDraft),
+        cmd!(
+            Triage,
+            "Choose what happens after sending…",
+            "cmd-shift-enter",
+            ChooseSendIntent
+        ),
         cmd!(Triage, "Close composer", "escape", CloseComposer),
         cmd!(Triage, "Discard draft", "cmd-shift-backspace", DiscardDraft),
         cmd!(View, "Expand composer to a tab", "", ExpandComposer),
@@ -489,6 +516,7 @@ pub fn commands() -> Vec<CommandSpec> {
             "cmd-shift-v",
             ToggleComposePreview
         ),
+        cmd!(View, "Toggle formatting bar", "cmd-alt-t", ToggleFormattingBar),
         cmd!(View, "Bold", "cmd-b", ComposeBold),
         cmd!(View, "Italic", "cmd-i", ComposeItalic),
         cmd!(View, "Insert link", "cmd-k", ComposeLink),

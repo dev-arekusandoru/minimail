@@ -1,3 +1,4 @@
+use crate::outgoing::SendIntent;
 use super::*;
 
 impl Mailbox {
@@ -40,6 +41,7 @@ impl Mailbox {
             let original_meta = self.meta.entry(original.id).or_default();
             original_meta.tags.retain(|tag| *tag != Tag::AwaitingReply);
             original_meta.awaiting_since = awaiting_reply.then_some(now);
+            original_meta.follow_up_after = None;
             if awaiting_reply {
                 original_meta.tags.push(Tag::AwaitingReply);
             }
@@ -83,5 +85,31 @@ impl Mailbox {
         }
         self.push_undo(changes);
         ids.len()
+    }
+
+    /// Leave `target`'s thread awaiting a reply: it resurfaces after `days` unless one
+    /// arrives (`tick`). Not an undo step — it follows a send, which cannot be undone.
+    pub fn await_reply(&mut self, target: MessageId, days: u32, now: Timestamp) {
+        if self.get(target).is_none() {
+            return;
+        }
+        let meta = self.meta.entry(target).or_default();
+        meta.awaiting_since = Some(now);
+        meta.follow_up_after = Some(i64::from(days) * DAY);
+        if !meta.tags.contains(&Tag::AwaitingReply) {
+            meta.tags.push(Tag::AwaitingReply);
+        }
+    }
+
+    /// What a confirmed send does to the thread (`target`: the original it answered, or the
+    /// sent message itself for a new thread). Archive is one undo step.
+    pub fn apply_send_intent(&mut self, target: MessageId, intent: SendIntent, now: Timestamp) {
+        match intent {
+            SendIntent::Archive => {
+                self.file_after_reply(target, TriageState::Archived);
+            }
+            SendIntent::RemindIfNoReply { days } => self.await_reply(target, days, now),
+            SendIntent::JustSend | SendIntent::SendLater { .. } => {}
+        }
     }
 }

@@ -200,6 +200,8 @@ pub struct TickReport {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Meta {
     awaiting_since: Option<Timestamp>,
+    /// Seconds to wait for a reply before resurfacing; `None` uses the global follow-up timeout.
+    follow_up_after: Option<Timestamp>,
     snoozed_until: Option<Timestamp>,
     tags: Vec<Tag>,
     /// Question keys the user set by hand. The classifier never overwrites these.

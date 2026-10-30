@@ -274,7 +274,7 @@ fn snoozing_from_triage_asks_when_and_advances_the_session(cx: &mut TestAppConte
     let mut h = harness_with(cx, inbox());
     h.keys("t enter");
     assert_eq!(h.read(|a| a.opened()), Some(4));
-    let until = h.read(|a| a.mailbox.snooze_presets(&a.local_now())[0].1);
+    let until = h.read(|a| mail_classifier::model::Mailbox::snooze_presets(&a.local_now())[0].1);
     let depth = h.read(|a| a.mailbox.undo_depth());
 
     h.keys("s");

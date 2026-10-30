@@ -94,6 +94,9 @@ pub struct ReplyContext {
     pub thread: Option<RemoteId>,
 }
 
+/// Days a "remind me if no reply" waits unless the user picks another count.
+pub const DEFAULT_REMIND_DAYS: u32 = 3;
+
 /// What happens to the conversation once the message is sent: the composer's
 /// `then …` clause. Persisted with the draft so a reopened draft keeps it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +110,16 @@ pub enum SendIntent {
     RemindIfNoReply { days: u32 },
     /// Hold the message and send it at `at`.
     SendLater { at: Timestamp },
+}
+
+impl SendIntent {
+    /// When a send-later intent wants the message to go out.
+    pub fn send_at(self) -> Option<Timestamp> {
+        match self {
+            SendIntent::SendLater { at } => Some(at),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -396,6 +409,7 @@ impl DraftRecord {
             || self.bcc != previous.bcc
             || self.subject != previous.subject
             || self.body != previous.body
+            || self.intent != previous.intent
     }
 
     /// Whether the payload a remote draft mirrors differs from `previous`: the

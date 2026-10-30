@@ -196,7 +196,12 @@ pub enum Command {
     /// Recover interrupted sends and interrupted holds after a restart.
     Recover { now: Timestamp },
     /// Put a draft into its send hold.
-    BeginHold { draft: DraftId, now: Timestamp },
+    BeginHold {
+        draft: DraftId,
+        now: Timestamp,
+        /// Send-later: hold until then instead of the ten-second undo window.
+        at: Option<Timestamp>,
+    },
     /// Take a draft back out of its hold.
     CancelHold(DraftId),
     /// Copy files into the draft's managed attachments.
@@ -3934,6 +3939,7 @@ mod tests {
         only(worker.handle(Command::BeginHold {
             draft: held.id,
             now: 100,
+            at: None,
         }));
         // A send that was in flight when the app stopped: persisted as attempted, exactly
         // as a crash between the write and the provider's answer would leave it.
@@ -3975,6 +3981,39 @@ mod tests {
             .expect("get")
             .expect("present");
         assert_eq!(back.state, DraftState::Editing, "and editable, not sent");
+    }
+
+    /// Send later is a promise: a restart keeps the draft held until its time instead of
+    /// handing it back as an editable draft, and it goes out once it is due.
+    #[test]
+    fn a_send_later_hold_survives_a_restart_and_sends_when_due() {
+        let (mut worker, _mock) = worker(100);
+        let draft = stored(&mut worker, "later", 100);
+        let Event::Held(hold) = only(worker.handle(Command::BeginHold {
+            draft: draft.id,
+            now: 100,
+            at: Some(5_000),
+        })) else {
+            panic!("held");
+        };
+        assert_eq!(hold.hold_until, 5_000);
+
+        let Event::Recovered(recovery, _) = only(worker.handle(Command::Recover { now: 200 }))
+        else {
+            panic!("expected a recovery report");
+        };
+        assert_eq!(recovery.scheduled, vec![hold.clone()]);
+        assert!(recovery.restored.is_empty());
+        let back = worker.stores.drafts.get(draft.id).expect("get").expect("present");
+        assert_eq!(back.state, DraftState::Held, "still waiting, not editable");
+        assert_eq!(worker.stores.drafts.pending_holds().expect("holds"), vec![hold.clone()]);
+
+        let event = only(worker.handle(Command::Send {
+            draft: draft.id,
+            account: ACCOUNT.to_owned(),
+            now: 5_000,
+        }));
+        assert!(matches!(event, Event::Sent { .. }), "{event:?}");
     }
 
     /// Store a provider draft with a rich body, an inline image and a file attachment,
@@ -4257,6 +4296,7 @@ mod tests {
         only(worker.handle(Command::BeginHold {
             draft: draft.id,
             now: 100,
+            at: None,
         }));
         assert_eq!(
             worker.stores.drafts.pending_holds().expect("holds").len(),
@@ -4396,6 +4436,7 @@ mod tests {
         only(worker.handle(Command::BeginHold {
             draft: draft.id,
             now: 100,
+            at: None,
         }));
         refuse_state_writes(&database, r#""state":"Sending""#);
 
@@ -4969,6 +5010,7 @@ mod tests {
         let event = only(worker.handle(Command::BeginHold {
             draft: draft.id,
             now: 220,
+            at: None,
         }));
         assert!(
             !matches!(event, Event::Held(..)),

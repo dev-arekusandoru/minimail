@@ -104,9 +104,7 @@ impl MailApp {
             return;
         }
         let now = self.local_now();
-        let presets: Vec<(String, Timestamp)> = self
-            .mailbox
-            .snooze_presets(&now)
+        let presets: Vec<(String, Timestamp)> = crate::model::Mailbox::snooze_presets(&now)
             .into_iter()
             .map(|(l, t)| (l.to_string(), t))
             .collect();

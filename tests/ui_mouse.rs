@@ -498,7 +498,7 @@ fn reply_button_shows_with_a_reader_and_opens_compose(cx: &mut TestAppContext) {
     h.click(("btn-reply", id as usize));
     // A draft is durable before it is shown, so the composer opens on the worker's answer.
     h.await_state("the reply opens", |a| a.compose_open());
-    h.click("compose-save-close");
+    h.keys("escape");
     assert!(!h.read(|a| a.compose_open()));
 }
 

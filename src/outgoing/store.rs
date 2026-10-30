@@ -95,6 +95,8 @@ pub struct Recovery {
     pub restored: Vec<DraftId>,
     /// Sends that may still be in flight and need reconciliation.
     pub uncertain: Vec<DraftId>,
+    /// Send-later holds: still waiting for their time, kept as they were.
+    pub scheduled: Vec<PendingHold>,
 }
 
 /// A handle on the draft database. Clones share one connection, so the worker
@@ -253,6 +255,7 @@ impl DraftStore {
         next.cc = draft.cc.clone();
         next.bcc = draft.bcc.clone();
         next.body = draft.body.clone();
+        next.intent = draft.intent;
 
         let account_moved = draft.account != current.account;
         let subject_changed = draft.subject.trim() != current.subject.trim();
@@ -481,6 +484,21 @@ impl DraftStore {
         let mut conn = self.lock()?;
         let tx = conn.transaction()?;
         let mut report = Recovery::default();
+        let scheduled: Vec<PendingHold> = {
+            let mut stmt = tx.prepare("SELECT json FROM holds")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<String>, rusqlite::Error>>()?;
+            rows.iter()
+                .map(|json| {
+                    serde_json::from_str::<PendingHold>(json)
+                        .map_err(|e| DraftError::Corrupt(format!("hold: {e}")))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(PendingHold::is_scheduled)
+                .collect()
+        };
         let mut stmt = tx.prepare("SELECT json FROM drafts")?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))?
@@ -490,6 +508,11 @@ impl DraftStore {
             let mut draft: DraftRecord = decode(&json)?;
             let state = match (&draft.state, draft.attempted) {
                 (DraftState::Held, _) => {
+                    // A send-later hold is a promise to send, not an interrupted countdown.
+                    if let Some(hold) = scheduled.iter().find(|h| h.draft == draft.id) {
+                        report.scheduled.push(hold.clone());
+                        continue;
+                    }
                     report.restored.push(draft.id);
                     Some(DraftState::Editing)
                 }
@@ -520,6 +543,12 @@ impl DraftStore {
             write(&tx, &draft)?;
         }
         tx.execute("DELETE FROM holds", [])?;
+        for hold in &report.scheduled {
+            tx.execute(
+                "INSERT INTO holds(draft, json) VALUES (?1, ?2)",
+                rusqlite::params![hold.draft.0, encode(hold)?],
+            )?;
+        }
         tx.commit()?;
         report.restored.sort();
         report.uncertain.sort();
@@ -850,6 +879,27 @@ mod tests {
                 .revision,
             revision
         );
+    }
+
+    #[test]
+    fn recovery_keeps_a_send_later_hold_waiting() {
+        let store = store();
+        let mut later = draft();
+        store.create(&mut later).expect("create");
+        let hold = PendingHold::scheduled(later.id, later.account.clone(), 100, 9_000);
+        store.set_pending(&hold).expect("hold");
+        let expected = later.revision;
+        later.state = DraftState::Held;
+        store.save(&mut later, expected).expect("save");
+
+        let report = store.recover(1_000).expect("recover");
+        assert_eq!(report.scheduled, vec![hold.clone()]);
+        assert!(report.restored.is_empty());
+        assert_eq!(
+            store.get(later.id).expect("get").expect("present").state,
+            DraftState::Held
+        );
+        assert_eq!(store.pending_holds().expect("holds"), vec![hold]);
     }
 
     #[test]
