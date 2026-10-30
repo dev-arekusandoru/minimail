@@ -94,6 +94,21 @@ pub struct ReplyContext {
     pub thread: Option<RemoteId>,
 }
 
+/// What happens to the conversation once the message is sent: the composer's
+/// `then …` clause. Persisted with the draft so a reopened draft keeps it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SendIntent {
+    /// Send and leave the thread as it is.
+    #[default]
+    JustSend,
+    /// Send, then archive the thread.
+    Archive,
+    /// Send, then resurface the thread if nobody replies within `days`.
+    RemindIfNoReply { days: u32 },
+    /// Hold the message and send it at `at`.
+    SendLater { at: Timestamp },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DraftRecord {
     pub id: DraftId,
@@ -164,6 +179,9 @@ pub struct DraftRecord {
     /// finished record actually has.
     #[serde(default, skip)]
     pub(crate) mirrored_now: bool,
+    /// The `then …` clause: what sending does to the thread.
+    #[serde(default)]
+    pub intent: SendIntent,
     pub updated_at: Timestamp,
     pub state: DraftState,
 }
@@ -197,6 +215,7 @@ impl DraftRecord {
             content_revision: 0,
             synced_content_revision: None,
             mirrored_now: false,
+            intent: SendIntent::default(),
             updated_at: now,
             state: DraftState::Editing,
         }

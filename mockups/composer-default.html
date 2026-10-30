@@ -1,0 +1,645 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Composer — The Sentence</title>
+<style>
+/* Tokens sampled from the app's dark theme. */
+:root{--bg:#1b1b1b;--fg:#c9c9cf;--strong:#ececf0;--muted:#85858f;--border:#34343a;--field:#262629;--hover:#2c2c31;--primary:#6e74b8;--primary-fg:#fff;--danger:#e06c75;--warn:#d19a66;--ok:#98c379}
+*{box-sizing:border-box;margin:0}
+body{background:#111;color:var(--fg);font:14px/20px -apple-system,system-ui,sans-serif;padding:24px 24px 64px;display:flex;flex-direction:column;gap:44px}
+h1{font-size:18px;line-height:24px;color:var(--strong);font-weight:600}
+h2{font:600 11px/16px ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+p.note{font-size:12px;line-height:18px;color:var(--muted);max-width:780px;margin-bottom:14px}
+p.note b{color:var(--fg);font-weight:500}
+.grid{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.col{display:flex;flex-direction:column;gap:6px}
+.cap{font:10px/14px ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;max-width:640px}
+.cap em{color:#9d9da6;font-style:normal}
+svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sp{flex:1}
+.m{color:var(--muted)}
+.kbd{font:10px/14px ui-monospace,monospace;color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:0 4px;white-space:nowrap}
+.win{width:640px;background:var(--bg);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.win.w420{width:420px}
+
+/* ---- the sentence header ---- */
+.hd{position:relative;padding:10px 10px 9px 10px;border-bottom:1px solid var(--border)}
+.hd.focus{background:#1f1f23}
+.hd.focus .sent .cl:not(.to){opacity:.55}
+.sent{display:flex;flex-wrap:wrap;align-items:center;gap:7px 12px}
+.cl{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;min-width:0}
+.cl.to{cursor:text}
+.verb{font-size:13px;line-height:20px;color:var(--muted)}
+.tk{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 7px;border-radius:6px;background:var(--field);border:1px solid var(--border);font-size:13px;line-height:20px;color:var(--strong);white-space:nowrap}
+.tk .av{width:16px;height:16px;border-radius:8px;font:700 9px/16px -apple-system,system-ui,sans-serif;text-align:center;color:#151517;flex:none}
+.tk.pad{padding-left:4px}
+.tk.subj{color:var(--strong)}
+.tk.intent{gap:6px}
+.tk.intent svg{width:13px;height:13px;color:var(--muted)}
+.tk.edit{border-color:var(--primary);background:#2b2c38}
+.caret{display:inline-block;width:1px;height:14px;background:var(--primary);margin-left:1px}
+.to-caret{display:none}
+.cl.to.armed .to-caret{display:inline-block}
+.more{font:11px/20px -apple-system,system-ui,sans-serif;color:var(--muted);background:var(--field);border:1px solid var(--border);border-radius:6px;height:24px;padding:0 8px}
+.tag.new{font:600 8px/12px ui-monospace,monospace;letter-spacing:.05em;padding:1px 3px;border-radius:3px;border:1px solid currentColor;color:var(--ok)}
+.addbtn{width:24px;height:24px;border-radius:6px;border:1px dashed #4b4b55;background:none;color:var(--muted);display:grid;place-items:center;padding:0;cursor:pointer;flex:none}
+.addbtn:hover{color:var(--strong);border-color:var(--primary)}
+.addbtn svg{width:13px;height:13px}
+.ghost{font-size:13px;line-height:20px;color:#6f6f79;border-bottom:1px dotted #46464e;border-radius:4px;padding:1px 2px;cursor:pointer;transition:color .12s,border-color .12s}
+.ghost:hover{color:var(--fg);border-color:#6e6e78}
+.ghost.on{color:var(--strong);border:1px dashed var(--primary);background:#232327;padding:0 4px}
+.ghost b{font-weight:600;color:var(--muted)}
+.gdot{color:#4c4c54;padding:0 1px}
+.ghostcl{gap:5px}
+
+/* ---- floating autocomplete popup (P1) ---- */
+.ac{position:absolute;left:14px;top:38px;width:300px;z-index:9}
+.ac .mi{height:28px}
+.mi .av{width:16px;height:16px;border-radius:8px;font:700 9px/16px -apple-system,system-ui,sans-serif;text-align:center;color:#151517;flex:none}
+.ac .mi .nm{font-weight:600;color:var(--strong);font-size:12px}
+.ac .mi .ad{font-size:11px;color:var(--muted)}
+.ac .rt{font:10px/14px ui-monospace,monospace;color:var(--muted);margin-left:auto;white-space:nowrap}
+
+/* ---- floating dropped-recipient note (overlay, no reflow) ---- */
+.diffnote{position:absolute;right:10px;bottom:7px;z-index:8;display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 4px 0 7px;border:1px solid #4a4238;background:#26231e;border-radius:6px;font-size:11px;line-height:16px;color:var(--fg);white-space:nowrap}
+.diffnote .ic{width:12px;height:12px;color:var(--warn)}
+.diffnote .dx{text-decoration:line-through;color:var(--muted)}
+.diffnote button{background:none;border:none;color:var(--strong);font:inherit;padding:0 3px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.diffnote button:hover{color:#fff}
+
+/* ---- body / toolbar / status ---- */
+.body{padding:10px 14px 12px;font-size:14px;line-height:22px;color:var(--strong);min-height:104px}
+.body p{margin-bottom:8px}
+.body p:last-child{margin-bottom:0}
+.quote{margin:0 14px 10px;padding-left:10px;border-left:2px solid var(--border);font-size:12px;line-height:18px;color:var(--muted)}
+.tb{display:flex;align-items:center;gap:2px;padding:4px 8px;border-top:1px solid var(--border)}
+.tb .b{width:26px;height:26px;border-radius:5px;display:grid;place-items:center;color:var(--muted)}
+.tb .b:hover{background:var(--hover);color:var(--fg)}
+.tb .d{width:1px;height:14px;background:var(--border);margin:0 4px}
+.win.tb-off .tb{display:none}
+.stat{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);min-height:38px}
+.dot{width:6px;height:6px;border-radius:3px;background:var(--ok);flex:none}
+.dot.w{background:var(--warn)}
+.dot.p{background:var(--primary)}
+.tgl{width:26px;height:26px;border-radius:5px;display:grid;place-items:center;color:var(--muted);border:1px solid transparent;background:none;cursor:pointer}
+.tgl:hover{background:var(--hover);color:var(--fg)}
+.tgl.on{color:var(--strong);background:var(--hover);border-color:var(--border)}
+.btn{height:26px;padding:0 7px;border-radius:5px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg);background:none;border:none;cursor:pointer}
+.btn:hover,.btn.on{background:var(--hover);color:var(--strong)}
+.send{height:28px;padding:0 11px;border-radius:6px;background:var(--primary);color:var(--primary-fg);font-weight:600;font-size:12px;display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer}
+.send .kbd{border-color:#ffffff44;color:#ffffffcc}
+.wn{display:inline-flex;align-items:center;gap:5px;color:var(--warn)}
+.wn .ic{width:12px;height:12px}
+
+/* ---- menus (P1: 8px radius, 1px border, 28px rows, right kbd) ---- */
+.menu{position:absolute;width:300px;background:#26262b;border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 30px #0009;padding:4px;z-index:9}
+.mhd{font:600 9px/16px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:4px 8px 2px}
+.mi{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:5px;font-size:12px;color:var(--fg)}
+.mi:hover,.mi.on{background:var(--hover);color:var(--strong)}
+.mi .ic{color:var(--muted)}
+.mi.on .ic{color:var(--primary)}
+.mi b{font-weight:500;color:var(--strong)}
+.mi .m{font-size:11px}
+.mi .rt{margin-left:auto;font:10px/14px ui-monospace,monospace;color:var(--muted);white-space:nowrap}
+.mi.danger{color:var(--danger)}
+.mi.danger .ic{color:var(--danger)}
+.mi.danger b{color:var(--danger)}
+.mi.quiet{color:var(--muted)}
+.msep{height:1px;background:var(--border);margin:4px 6px}
+
+/* ---- hint (no arrow) ---- */
+.hint{position:absolute;right:120px;bottom:40px;width:272px;background:#2a2a33;border:1px solid var(--primary);border-radius:8px;padding:9px 11px;font-size:12px;line-height:17px;box-shadow:0 8px 24px #000a;color:var(--fg);z-index:9}
+.hint b{color:var(--strong);font-weight:600}
+
+/* ---- frozen sending container + pill (P2) ---- */
+.frozen .hd,.frozen .tb,.frozen .stat,.frozen .body p{opacity:.38;pointer-events:none}
+.frozen .body{min-height:132px}
+.fpill{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 5px 0 11px;border-radius:9px;background:var(--field);border:1px solid var(--border);font-size:12px;color:var(--fg)}
+.fpill b{color:var(--strong);font-weight:600}
+.fpill .track{width:60px;height:3px;border-radius:2px;background:#3a3a42;overflow:hidden;flex:none}
+.fpill .track i{display:block;height:100%;background:var(--primary)}
+.fpill .rt{font:10px/14px ui-monospace,monospace;color:var(--muted)}
+.undo{height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--primary);background:#2a2b3a;color:var(--strong);font:600 11px/1 -apple-system,system-ui,sans-serif;display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.undo svg{width:12px;height:12px}
+.undo .kbd{border-color:#ffffff33;color:#ffffffaa;font-weight:400}
+.toast{display:flex;align-items:center;gap:7px;padding:6px 14px;font-size:11px;color:var(--ok);border-bottom:1px solid var(--border);background:#1f2320}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+<symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol>
+<symbol id="i-italic" viewBox="0 0 24 24"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></symbol>
+<symbol id="i-strike" viewBox="0 0 24 24"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></symbol>
+<symbol id="i-heading" viewBox="0 0 24 24"><path d="M6 12h12"/><path d="M6 20V4"/><path d="M18 20V4"/></symbol>
+<symbol id="i-quote" viewBox="0 0 24 24"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></symbol>
+<symbol id="i-list-ordered" viewBox="0 0 24 24"><line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+<symbol id="i-table" viewBox="0 0 24 24"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></symbol>
+<symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="i-restore" viewBox="0 0 24 24"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+<symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></symbol>
+<symbol id="i-expand" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+</defs></svg>
+
+<div>
+  <h1>The Sentence — the header is prose you fill in</h1>
+  <p class="note">One clause per job: <b>To</b> who · <b>about</b> what · <b>from</b> which account · <b>then</b> what happens after send. Unset slots stay ghost words; Tab hops clause to clause. Popups, dropdowns and the dropped-recipient note are absolute overlays — nothing under them moves. The footer carries draft state, warning text and Send, nothing else.</p>
+</div>
+
+<!-- ================= A ================= -->
+<section>
+<h2>A · New message, blurred (default)</h2>
+<div class="col">
+  <div class="cap">The header starts at <em>To</em>. The dashed <em>+</em> adds a recipient; clicking anywhere in the To clause focuses it, and Tab or typing an address starts the same thing.</div>
+  <div class="win">
+    <div class="hd">
+      <div class="sent">
+        <div class="cl to"><span class="verb">To</span>
+          <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+          <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+          <span class="more">+3</span>
+          <button class="addbtn" aria-label="Add recipient"><svg class="ic"><use href="#i-plus"/></svg></button>
+          <span class="caret to-caret"></span>
+          <span class="ghost">cc</span>
+          <span class="ghost">bcc</span>
+        </div>
+        <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+        <div class="cl"><span class="verb">from</span><span class="tk">work<svg class="ic" style="width:12px;height:12px;color:var(--muted)"><use href="#i-chevron-down"/></svg></span></div>
+        <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        <div class="cl ghostcl"><span class="gdot">·</span><span class="ghost">if no reply in <b>3d</b> remind me</span><span class="gdot">·</span><span class="ghost">send later</span></div>
+      </div>
+    </div>
+    <div class="body">
+      <p>Hi all,</p>
+      <p>Quick update on dates — we can hold the beta cut at the 14th if QA gets the build by Friday.</p>
+      <p>Sam, can you confirm the build slot?</p>
+    </div>
+    <div class="tb">
+      <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-strike"/></svg></span>
+      <span class="d"></span>
+      <span class="b"><svg class="ic"><use href="#i-heading"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-quote"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-code"/></svg></span>
+      <span class="d"></span>
+      <span class="b"><svg class="ic"><use href="#i-list"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-list-ordered"/></svg></span>
+      <span class="d"></span>
+      <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-table"/></svg></span>
+      <span class="sp"></span>
+      <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-eye"/></svg></span>
+    </div>
+    <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+      <button class="tgl on" data-tb title="Toggle formatting bar"><svg class="ic"><use href="#i-sliders"/></svg></button>
+      <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+      <button class="send">Send <span class="kbd">⌘↵</span></button>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= B ================= -->
+<section>
+<h2>B · Reply-all, address invented in place</h2>
+<div class="col">
+  <div class="cap">The autocomplete floats under the focused clause; the dropped-recipient note rides the header's bottom-right, so neither moves the sentence or body. Added people only carry NEW on their chip.</div>
+  <div class="win">
+    <div class="hd focus">
+      <div class="sent">
+        <div class="cl to"><span class="verb">Reply to</span>
+          <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+          <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+          <span class="tk pad"><span class="av" style="background:#b6a4d6">A</span>Ana Ruiz</span>
+          <span class="tk pad"><span class="av" style="background:#9fc79a">S</span>sam@stripe.com<span class="tag new">NEW</span></span>
+          <span class="more">+1</span>
+          <span class="tk edit">jo<span class="caret"></span></span>
+          <span class="caret to-caret"></span>
+        </div>
+        <div class="cl"><span class="verb">cc</span>
+          <span class="tk pad"><span class="av" style="background:#c79a9a">D</span>Dana Lee</span>
+          <span class="verb">bcc</span>
+          <span class="tk pad">Legal</span>
+        </div>
+        <div class="cl"><span class="verb">about</span><span class="tk subj" style="font-weight:500">re: Q4 launch plan</span></div>
+        <div class="cl"><span class="verb">from</span><span class="tk">work<svg class="ic" style="width:12px;height:12px;color:var(--muted)"><use href="#i-chevron-down"/></svg></span></div>
+        <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+      </div>
+      <div class="menu ac" style="top:38px">
+        <div class="mhd">Recipients · contacts &amp; history</div>
+        <div class="mi on"><span class="av" style="background:#7fb4c4">J</span><span class="nm">Jon Parker</span><span class="ad">jon@acme.io</span><span class="rt">12</span></div>
+        <div class="mi"><span class="av" style="background:#c9b47e">J</span><span class="nm">Jonas Weber</span><span class="ad">jonas@weber.de</span><span class="rt">3</span></div>
+        <div class="mi"><span class="av" style="background:#9fb8d6">J</span><span class="nm">Jordan Lee</span><span class="ad">j.lee@vendor.co</span><span class="rt">0</span></div>
+        <div class="msep"></div>
+        <div class="mi"><svg class="ic"><use href="#i-plus"/></svg><b>jo</b><span class="m">send to this new address</span><span class="rt">↵</span></div>
+      </div>
+      <div class="diffnote"><svg class="ic"><use href="#i-restore"/></svg><span class="dx">Raj Patel</span> dropped<button>Restore</button></div>
+    </div>
+    <div class="body" style="min-height:88px">
+      <p>Thanks — moving the beta cut to the 14th and holding the rest.</p>
+    </div>
+    <div class="quote">Maya Chen wrote on Oct 27 — “Let’s lock the dates this week.”</div>
+    <div class="tb">
+      <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+      <span class="sp"></span>
+      <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+      <span class="b"><svg class="ic"><use href="#i-eye"/></svg></span>
+    </div>
+    <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+      <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+      <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+      <button class="send">Send <span class="kbd">⌘↵</span></button>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= C ================= -->
+<section>
+<h2>C · Send — confirm the clause, freeze the container, undo in place</h2>
+<div class="grid" style="gap:20px">
+  <div class="col">
+    <div class="cap">C1 · Send opens the intent menu as an overlay above the footer; the selected row is what the sentence already says. ⌘↵ sends it as written.</div>
+    <div class="win">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="more">+3</span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent edit"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:150px">
+        <p>Hi all — holding the 14th. Sam, confirm the build slot.</p>
+      </div>
+      <div class="menu" style="right:8px;bottom:79px;width:340px">
+        <div class="mhd">After sending</div>
+        <div class="mi on"><svg class="ic"><use href="#i-archive"/></svg><b>Archive thread</b><span class="m">leaves the inbox</span><span class="rt">1</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-bell"/></svg><b>Remind if no reply</b><span class="m">3 days</span><span class="rt">2</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-clock"/></svg><b>Send later</b><span class="m">tomorrow 9:00</span><span class="rt">3</span></div>
+        <div class="msep"></div>
+        <div class="mi quiet"><svg class="ic"><use href="#i-send"/></svg><span>Just send</span><span class="rt">⌘↵</span></div>
+      </div>
+      <div class="tb">
+        <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+        <span class="sp"></span>
+        <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-eye"/></svg></span>
+      </div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">C2 · After Send the container stays put and freezes; the pill and its 10s track sit inside it. Undo (⌘Z) reopens the same draft in place.</div>
+    <div class="win frozen">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="more">+3</span>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        </div>
+      </div>
+      <div class="body">
+        <p>Hi all — holding the 14th. Sam, confirm the build slot.</p>
+        <div class="fpill">
+          <svg class="ic" style="color:var(--primary)"><use href="#i-send"/></svg>
+          <b>Sending…</b>
+          <span class="track"><i style="width:36%"></i></span>
+          <span class="rt">10s</span>
+          <button class="undo"><svg class="ic"><use href="#i-undo"/></svg>Undo</button>
+        </div>
+      </div>
+      <div class="tb">
+        <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+        <span class="sp"></span>
+        <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+      </div>
+      <div class="stat"><span class="dot p"></span>Sending…<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">C3 · Undo. Same window, same sentence, no pill — nothing was sent and the status line says it once.</div>
+    <div class="win">
+      <div class="toast"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg>Draft restored — nothing was sent</div>
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="more">+3</span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <span class="ghost">cc</span><span class="ghost">bcc</span>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:58px">
+        <p>Hi all — holding the 14th. Sam, confirm the build slot.</p>
+      </div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= D ================= -->
+<section>
+<h2>D · Same sentence at 420px</h2>
+<div class="cap" style="margin-bottom:10px">Clauses wrap whole, chips keep their radius and padding, prose never truncates. The popup is narrower, still an overlay.</div>
+<div class="grid">
+  <div class="col">
+    <div class="cap">D1 · New · blurred</div>
+    <div class="win w420">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="more">+3</span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <span class="ghost">cc</span><span class="ghost">bcc</span>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work<svg class="ic" style="width:12px;height:12px;color:var(--muted)"><use href="#i-chevron-down"/></svg></span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive</span></div>
+          <div class="cl ghostcl"><span class="gdot">·</span><span class="ghost">remind 3d</span><span class="gdot">·</span><span class="ghost">later</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:84px"><p>Hi all — holding the 14th.</p><p>Sam, confirm the build slot?</p></div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send</button>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="cap">D2 · Reply-all focused — at 420 the list drops below the sentence so the prose stays whole; header and body keep their height.</div>
+    <div class="win w420">
+      <div class="hd focus">
+        <div class="sent">
+          <div class="cl to"><span class="verb">Reply to</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon</span>
+            <span class="more">+2</span>
+            <span class="tk edit">jo<span class="caret"></span></span>
+          </div>
+          <div class="cl"><span class="verb">cc</span><span class="tk">Dana</span><span class="verb">bcc</span><span class="ghost">add</span></div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">re: Q4 launch</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive</span></div>
+        </div>
+        <div class="menu ac" style="left:8px;top:108px;width:240px">
+          <div class="mhd">Recipients</div>
+          <div class="mi on"><span class="av" style="background:#7fb4c4">J</span><span class="nm">Jon Parker</span><span class="ad">jon@acme.io</span><span class="rt">12</span></div>
+          <div class="mi"><span class="av" style="background:#c9b47e">J</span><span class="nm">Jonas Weber</span><span class="ad">jonas@weber.de</span><span class="rt">3</span></div>
+          <div class="mi"><span class="av" style="background:#9fb8d6">J</span><span class="nm">Jordan Lee</span><span class="ad">j.lee@vendor.co</span><span class="rt">0</span></div>
+        </div>
+        <div class="diffnote"><svg class="ic"><use href="#i-restore"/></svg><span class="dx">Raj</span> dropped<button>Restore</button></div>
+      </div>
+      <div class="body" style="min-height:96px"><p class="m">Reply…</p></div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= E ================= -->
+<section>
+<h2>E · Toolbar hidden vs shown, first-run hint</h2>
+<div class="grid" style="gap:20px">
+  <div class="col">
+    <div class="cap">E1 · First run: bar hidden, one hint above the toggle that brings it back. Click the sliders — or ⌘⌥T, persisted per user.</div>
+    <div class="win tb-off">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#98c379">S</span>Sam Iyer<span class="tag new">NEW</span></span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <span class="ghost">cc</span><span class="ghost">bcc</span>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Re: build slot</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
+          <div class="cl ghostcl"><span class="gdot">·</span><span class="ghost">remind 3d</span><span class="gdot">·</span><span class="ghost">send later</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:96px"><p>Confirmed — build lands Friday<span class="caret" style="vertical-align:-3px"></span></p></div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+      <div class="hint"><b>Formatting is hidden.</b> Click the sliders (or <b>⌘⌥T</b>) to show it. Type <b>/</b> in the body for attach, snippet, send later — and <b>Draft with AI</b>.</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">E2 · Same click, bar restored and remembered; the hint retires. Slash commands keep one quiet AI entry at the bottom.</div>
+    <div class="win">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#98c379">S</span>Sam Iyer<span class="tag new">NEW</span></span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <span class="ghost">cc</span><span class="ghost">bcc</span>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Re: build slot</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-check"/></svg>just send</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:150px"><p>Confirmed — build lands Friday.</p><p class="m">/<span class="caret" style="vertical-align:-3px"></span></p></div>
+      <div class="menu" style="left:14px;bottom:79px;width:250px">
+        <div class="mhd">Insert</div>
+        <div class="mi"><svg class="ic"><use href="#i-paperclip"/></svg><span>Attach file</span><span class="rt">⌘⇧A</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-scissors"/></svg><span>Snippet</span><span class="rt">⌘⇧S</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-clock"/></svg><span>Send later</span><span class="rt">⌘⇧L</span></div>
+        <div class="msep"></div>
+        <div class="mi quiet"><svg class="ic"><use href="#i-sparkles"/></svg><span>Draft with AI</span></div>
+      </div>
+      <div class="tb">
+        <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-strike"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-heading"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-quote"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-code"/></svg></span>
+        <span class="d"></span>
+        <span class="b"><svg class="ic"><use href="#i-list"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-list-ordered"/></svg></span>
+        <span class="d"></span>
+        <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-table"/></svg></span>
+        <span class="sp"></span>
+        <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-eye"/></svg></span>
+      </div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= F ================= -->
+<section>
+<h2>F · The ⋯ menu, and a content warning</h2>
+<div class="grid" style="gap:20px">
+  <div class="col">
+    <div class="cap">F1 · The ⋯ menu holds what the hidden toolbar and the shell would otherwise expose; Expand is the shell's (tab / window / inline). Discard is the only destructive row, so it alone is tinted.</div>
+    <div class="win">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="more">+1</span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:186px"><p>Hi all — holding the 14th. Sam, confirm the build slot.</p></div>
+      <div class="menu" style="right:8px;bottom:79px;width:294px">
+        <div class="mhd">Composer</div>
+        <div class="mi"><svg class="ic"><use href="#i-expand"/></svg><span>Expand</span><span class="rt">shell</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-eye"/></svg><span>Preview as sent</span><span class="rt">⌘⇧V</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-paperclip"/></svg><span>Attach file</span><span class="rt">⌘⇧A</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-scissors"/></svg><span>Insert snippet</span><span class="rt">⌘⇧S</span></div>
+        <div class="mi"><svg class="ic"><use href="#i-sliders"/></svg><span>Hide formatting bar</span><span class="rt">⌘⌥T</span></div>
+        <div class="msep"></div>
+        <div class="mi danger"><svg class="ic"><use href="#i-trash"/></svg><span>Discard draft</span><span class="rt">⌘⌫</span></div>
+      </div>
+      <div class="tb">
+        <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+        <span class="sp"></span>
+        <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+      </div>
+      <div class="stat"><span class="dot"></span>Saved<span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn on"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send <span class="kbd">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">F2 · Content warnings live in the status line; the Send label becomes Send anyway until it clears. Recipient flags stay on chips, never in the footer.</div>
+    <div class="win">
+      <div class="hd">
+        <div class="sent">
+          <div class="cl to"><span class="verb">To</span>
+            <span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span>
+            <span class="tk pad"><span class="av" style="background:#d6a77a">J</span>Jon Park</span>
+            <span class="tk pad"><span class="av" style="background:#98c379">S</span>Sam Iyer<span class="tag new">NEW</span></span>
+            <span class="more">+1</span>
+            <button class="addbtn"><svg class="ic"><use href="#i-plus"/></svg></button>
+          </div>
+          <div class="cl"><span class="verb">about</span><span class="tk subj">Q4 launch plan</span></div>
+          <div class="cl"><span class="verb">from</span><span class="tk">work</span></div>
+          <div class="cl"><span class="verb">then</span><span class="tk intent"><svg class="ic"><use href="#i-archive"/></svg>archive thread</span></div>
+        </div>
+      </div>
+      <div class="body" style="min-height:150px">
+        <p>Hi all — holding the 14th.</p>
+        <p>I’ve attached the deck and the updated dates.</p>
+      </div>
+      <div class="tb">
+        <span class="b"><svg class="ic"><use href="#i-bold"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-italic"/></svg></span>
+        <span class="b"><svg class="ic"><use href="#i-link"/></svg></span>
+        <span class="sp"></span>
+        <span class="b"><svg class="ic"><use href="#i-paperclip"/></svg></span>
+      </div>
+      <div class="stat"><span class="dot w"></span>
+        <span class="wn"><svg class="ic"><use href="#i-alert"/></svg>Attachment mentioned, none attached</span>
+        <span class="sp"></span>
+        <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
+        <button class="btn"><svg class="ic"><use href="#i-ellipsis"/></svg></button>
+        <button class="send">Send anyway</button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<script>
+document.querySelectorAll('[data-tb]').forEach(b=>b.addEventListener('click',()=>{
+  const w=b.closest('.win');
+  w.classList.toggle('tb-off');
+  b.classList.toggle('on',!w.classList.contains('tb-off'));
+  const h=w.querySelector('.hint'); if(h) h.style.display='none';
+}));
+document.querySelectorAll('.ghost').forEach(g=>g.addEventListener('click',e=>{
+  e.stopPropagation();
+  g.classList.toggle('on');
+}));
+document.querySelectorAll('.cl.to').forEach(cl=>cl.addEventListener('click',e=>{
+  if(e.target.closest('.tk')||e.target.closest('.more')||e.target.closest('.addbtn')) return;
+  cl.classList.toggle('armed');
+}));
+document.querySelectorAll('.addbtn').forEach(b=>b.addEventListener('click',e=>{
+  e.stopPropagation();
+  b.closest('.cl.to').classList.toggle('armed');
+}));
+</script>
