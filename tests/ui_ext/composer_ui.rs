@@ -302,3 +302,146 @@ pub fn the_discard_shortcut_asks_and_deletes(cx: &mut TestAppContext) {
     h.await_composer("the draft is deleted", |a| a.composer.drafts.is_empty());
     assert!(!h.read(|a| a.compose_open()), "the composer closed");
 }
+
+/// An inline reply belongs to its own thread: opening another conversation leaves it there,
+/// and coming back shows the same draft again. Nothing is parked in a draft tab.
+#[gpui_kit::gpui::test]
+pub fn an_inline_reply_stays_attached_to_its_thread(cx: &mut TestAppContext) {
+    let msgs = vec![
+        msg(1, 1, "alice@example.com", "Thread A", 10, "Inbox"),
+        msg(2, 2, "bob@example.com", "Thread B", 11, "Inbox"),
+    ];
+    let mut h = harness_with(cx, mailbox(&msgs));
+    h.goto(1);
+    h.keys("enter");
+    h.compose_reply("answer in A");
+    h.settle();
+    let id = h.read(|a| a.inline_draft()).expect("the reply is inline in A");
+    assert!(
+        h.has("reader-reply-card"),
+        "the reply renders as a card at the bottom of the thread"
+    );
+    assert!(
+        h.read(|a| a.tabs.draft_ids().is_empty()),
+        "an inline reply has no tab"
+    );
+
+    h.click(("row", 2usize));
+    h.tick();
+    assert_eq!(h.read(|a| a.inline_draft()), None, "B has no reply of its own");
+    assert!(
+        h.read(|a| a.tabs.draft_ids().is_empty()),
+        "leaving A did not move its draft into a tab"
+    );
+
+    h.click(("row", 1usize));
+    h.tick();
+    assert_eq!(
+        h.read(|a| a.inline_draft()),
+        Some(id),
+        "the same draft is back under A"
+    );
+    assert!(
+        h.has("reader-reply-card"),
+        "and it renders as a card again"
+    );
+    assert!(
+        h.read(|a| a.tabs.draft_ids().is_empty()),
+        "still no draft tab"
+    );
+}
+
+/// Reopening a closed reply brings back the conversation it answers, with the reply inline
+/// under it — even when that thread's tab was closed too.
+#[gpui_kit::gpui::test]
+pub fn reopening_a_reply_opens_its_original_thread_inline(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.compose_reply("kept for later");
+    h.settle();
+    let id = h.read(|a| a.composer.drafts[0].record.id);
+    let thread = h
+        .read(|a| a.tabs.active().and_then(|tab| tab.thread_id()))
+        .expect("the reply's thread is open");
+
+    h.run_palette("Close composer");
+    h.tick();
+    // Close the original's tab as well, so reopening has to bring it back.
+    h.click(("reader-tab-close", thread as usize));
+    h.tick();
+    assert!(
+        !h.read(|a| a.compose_in_tab()) && !h.read(|a| a.inline_compose_open()),
+        "closing the thread also closed its reply surface"
+    );
+    assert!(
+        h.read(|a| a.tabs.tabs().is_empty()),
+        "the original's tab is gone"
+    );
+
+    h.keys("cmd-shift-d");
+    h.tick();
+    h.keys("enter");
+    h.tick();
+    assert_eq!(
+        h.read(|a| a.inline_draft()),
+        Some(id),
+        "the reply reopened inline under its original"
+    );
+    assert_eq!(
+        h.read(|a| a.tabs.active_draft()),
+        None,
+        "not in a draft tab"
+    );
+    assert!(
+        !h.read(|a| a.tabs.tabs().is_empty()),
+        "its original's thread opened"
+    );
+    assert!(h.has("reader-reply-card"), "the reply card is rendered");
+    assert_eq!(
+        h.draft_fields().3,
+        "kept for later",
+        "with what was written"
+    );
+}
+
+/// A forward is not a reply: reopening it keeps its own tab, as a new message does.
+#[gpui_kit::gpui::test]
+pub fn a_forward_reopens_in_a_tab(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.keys("w");
+    h.await_composer("the forward opens", |a| a.compose_open());
+    h.type_text("forwarded body");
+    h.settle();
+    let id = h.read(|a| a.inline_draft()).expect("the forward is inline");
+    h.run_palette("Close composer");
+    h.tick();
+
+    h.keys("cmd-shift-d");
+    h.tick();
+    h.keys("enter");
+    h.tick();
+    assert_eq!(
+        h.read(|a| a.tabs.active_draft()),
+        Some(id),
+        "the forward reopened in a tab"
+    );
+    assert_eq!(
+        h.read(|a| a.inline_draft()),
+        None,
+        "a forward has no thread to sit under"
+    );
+}
+
+/// A lone message has no rail, so its reply card sits below it with a gap.
+#[gpui_kit::gpui::test]
+pub fn the_reply_card_renders_below_a_lone_message(cx: &mut TestAppContext) {
+    let msgs = vec![msg(1, 1, "alice@example.com", "Alone", 10, "Inbox")];
+    let mut h = harness_with(cx, mailbox(&msgs));
+    h.goto(1);
+    h.keys("enter");
+    h.compose_reply("reply to the lone message");
+    h.settle();
+    assert!(
+        h.has("reader-reply-card"),
+        "the reply card renders below a lone message"
+    );
+}
