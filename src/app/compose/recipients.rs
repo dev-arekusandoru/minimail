@@ -448,7 +448,7 @@ impl Recipients {
                                 }),
                             )
                             .child(
-                                Icon::new(gpui_kit::assets::IconName::X)
+                                Icon::new(gpui_kit::assets::IconName::Close)
                                     .with_size(px(12.))
                                     .text_color(fg),
                             ),

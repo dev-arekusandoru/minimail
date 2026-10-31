@@ -1,7 +1,7 @@
 //! The sidebar's account rail: a fixed 56px column left of the folder panel (see
 //! [`super::sidebar`]).
 //!
-//! Top to bottom: the compose button (disabled: there is no composer for new mail yet), a
+//! Top to bottom: the compose button, a
 //! divider, one tile per account (All first) in a region of its own that scrolls when there are
 //! many, the add-account tile, then the tools pinned to the bottom — fetch mail, the
 //! classifier, sender rules and settings. Account tiles only choose which account the panel
@@ -120,11 +120,12 @@ impl MailApp {
             .text_color(t.muted_foreground)
             .child(Icon::new(IconName::Plus).with_size(px(16.)))
             .on_click(run(ManageAccounts));
-        // The compose button is a placeholder until there is a composer for new mail.
-        let compose = tile("sidebar-compose", "New message — coming soon", "")
+        let compose = tile("sidebar-compose", "New message", "cmd-n")
             .bg(t.primary)
-            .opacity(0.45)
-            .child(Icon::new(IconName::SquarePen).with_size(px(18.)).text_color(t.primary_foreground));
+            .hover(|s| s.opacity(0.85))
+            .cursor_pointer()
+            .child(Icon::new(IconName::SquarePen).with_size(px(18.)).text_color(t.primary_foreground))
+            .on_click(run(NewMail));
         div()
             .w(px(RAIL_W))
             .flex_none()

@@ -451,7 +451,7 @@ impl MailApp {
             .child(
                 icon_button(
                     format!("pill-remove-{id}"),
-                    IconName::X,
+                    IconName::Close,
                     "Remove this filter",
                     "",
                     cx,
