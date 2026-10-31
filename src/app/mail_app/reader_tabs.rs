@@ -55,9 +55,6 @@ impl MailApp {
         if pin {
             self.tabs.pin(thread);
         }
-        // An inline reply under the conversation the reader just left moves to a tab of its
-        // own rather than disappearing with it.
-        self.park_inline_composer(cx);
         // Opening a message is what the reader is for, so the tab keys follow it there.
         self.focus_pane(Pane::Reader);
         cx.notify();
@@ -122,14 +119,13 @@ impl MailApp {
 
     /// The list cursor follows the active tab's message when the list has it. Selection is
     /// untouched.
-    pub(super) fn follow_active_tab(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn follow_active_tab(&mut self) {
         if let Some(id) = self.tabs.opened() {
             self.focus_message(id, false);
             self.scroll_to_cursor();
             // The cursor moved because of the tab: `follow_cursor` must not open it back.
             self.followed_cursor = self.cursor_id();
         }
-        self.park_inline_composer(cx);
     }
 
     /// Cursor and open message are one thing: while a reader tab is open, a cursor that moved
@@ -162,7 +158,7 @@ impl MailApp {
             if clicks >= 2 {
                 self.tabs.pin_active();
             }
-            self.follow_active_tab(cx);
+            self.follow_active_tab();
         }
         self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
@@ -182,9 +178,25 @@ impl MailApp {
             // Closing a draft tab keeps the draft; closing a thread tab forgets the reader
             // state that thread owned.
             if let Some(thread) = closed.thread() {
+                // The tab took its inline reply with it: close that surface the way Close
+                // composer does (save now, keep the record) so it reopens correctly.
+                let inline: Vec<_> = self
+                    .composer
+                    .drafts
+                    .iter()
+                    .filter(|open| open.inline)
+                    .filter(|open| {
+                        open.record.source_message.and_then(|source| self.thread_of(source))
+                            == Some(thread)
+                    })
+                    .map(|open| open.record.id)
+                    .collect();
+                for draft in inline {
+                    self.close_composer(draft);
+                }
                 self.forget_thread(thread);
             }
-            self.follow_active_tab(cx);
+            self.follow_active_tab();
         }
         self.focus_pane(Pane::Reader);
         window.focus(&self.focus_handle, cx);
@@ -208,7 +220,7 @@ impl MailApp {
             return;
         }
         if self.tabs.cycle(delta) {
-            self.follow_active_tab(cx);
+            self.follow_active_tab();
             // The tab we left may have owned the focused find input.
             window.focus(&self.focus_handle, cx);
             cx.notify();

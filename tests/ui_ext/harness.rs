@@ -405,7 +405,7 @@ impl Harness<'_> {
         let id = self.read(|a| {
             a.tabs
                 .active_draft()
-                .or(a.inline_composer)
+                .or(a.inline_draft())
                 .expect("a draft is open")
         });
         self.app
@@ -449,7 +449,7 @@ impl Harness<'_> {
     /// The state line of the draft the composer is showing.
     pub fn draft_status(&mut self) -> String {
         self.read(|a| {
-            let id = a.tabs.active_draft().or(a.inline_composer)?;
+            let id = a.tabs.active_draft().or(a.inline_draft())?;
             let open = a.composer.get(id)?;
             Some(open.status_line())
         })
@@ -469,7 +469,7 @@ impl Harness<'_> {
             let id = a
                 .tabs
                 .active_draft()
-                .or(a.inline_composer)
+                .or(a.inline_draft())
                 .expect("a draft is open");
             let r = a.composer.record(id).expect("the draft record");
             (
@@ -484,7 +484,7 @@ impl Harness<'_> {
     /// The attachments the draft's record holds, by file name.
     pub fn draft_attachments(&mut self) -> Vec<String> {
         self.read(|a| {
-            let Some(id) = a.tabs.active_draft().or(a.inline_composer) else {
+            let Some(id) = a.tabs.active_draft().or(a.inline_draft()) else {
                 return Vec::new();
             };
             a.composer

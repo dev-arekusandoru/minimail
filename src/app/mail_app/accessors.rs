@@ -8,7 +8,7 @@ impl MailApp {
 
     /// Whether a draft is being composed anywhere: inline under a thread or in a tab.
     pub fn compose_open(&self) -> bool {
-        self.inline_composer.is_some() || self.tabs.has_drafts()
+        self.composer.drafts.iter().any(|open| open.inline) || self.tabs.has_drafts()
     }
 
     /// Whether the active tab is a draft.
@@ -16,9 +16,16 @@ impl MailApp {
         self.tabs.active_draft().is_some()
     }
 
-    /// Whether a reply is open inline under the conversation it answers.
+    /// Whether a reply is open inline under the conversation on screen.
     pub fn inline_compose_open(&self) -> bool {
-        self.inline_composer.is_some()
+        self.inline_draft().is_some()
+    }
+
+    /// The inline draft of the conversation the reader is showing, if it has one. A draft
+    /// stays attached to its own thread: when another conversation is on screen this is
+    /// `None`, and the draft reappears with its thread.
+    pub fn inline_draft(&self) -> Option<DraftId> {
+        self.inline_composer_for_thread()
     }
 
     /// The drafts that currently have a tab. An inline reply has none, so this is not the
@@ -381,7 +388,7 @@ impl MailApp {
     /// The open composer's subject scroll, in pixels, so a test can tell whether the field
     /// slid the text under its own left edge.
     pub fn subject_scroll(&self, cx: &App) -> Option<f32> {
-        let id = self.tabs.active_draft().or(self.inline_composer)?;
+        let id = self.tabs.active_draft().or_else(|| self.inline_draft())?;
         let composer = self.composers.get(&id)?;
         Some(f32::from(composer.read(cx).subject_scroll(cx)))
     }

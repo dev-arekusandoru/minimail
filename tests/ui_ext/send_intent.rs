@@ -9,9 +9,7 @@ use mail_classifier::outgoing::{DraftState, HOLD_SECONDS, SendIntent};
 /// The intent the open draft carries.
 fn intent(h: &mut Harness<'_>) -> SendIntent {
     h.read(|a| {
-        let id = a
-            .inline_composer
-            .or_else(|| a.tabs.active_draft())
+        let id = a.inline_draft().or_else(|| a.tabs.active_draft())
             .expect("an open composer");
         a.composer.record(id).expect("the draft").intent()
     })
@@ -106,7 +104,7 @@ pub fn undo_during_the_hold_restores_the_draft_in_place_with_a_notice(cx: &mut T
     h.await_composer("the draft is editable again", |a| {
         a.composer.holds.is_empty()
             && a.composer
-                .record(a.inline_composer.expect("still inline"))
+                .record(a.inline_draft().expect("still inline"))
                 .is_some_and(|r| r.state == DraftState::Editing)
     });
     assert!(!h.has("compose-send-pill"));

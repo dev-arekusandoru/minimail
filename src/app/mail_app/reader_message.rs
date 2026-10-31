@@ -815,7 +815,7 @@ fn suggestion_banner(
 /// Background of a message card. The embedded web page, its loading skeleton and its
 /// no-snapshot fallback all paint this same color, so the card never shows a seam between
 /// them; the token keeps light and dark in step.
-fn message_card_bg(t: &ThemeColor) -> Hsla {
+pub(super) fn message_card_bg(t: &ThemeColor) -> Hsla {
     t.secondary
 }
 

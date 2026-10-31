@@ -356,7 +356,7 @@ impl MailApp {
                 PendingUi::Collapse(id) => self.collapse_composer(id, window, cx),
                 PendingUi::FocusBody(id) => self.focus_draft_body(id, window, cx),
                 PendingUi::RestoreDraft(id) => {
-                    if self.inline_composer != Some(id) {
+                    if self.inline_draft() != Some(id) {
                         self.reopen_draft(id, window, cx);
                     }
                     self.focus_draft_body(id, window, cx);
@@ -954,7 +954,7 @@ impl MailApp {
         &mut self,
         id: MessageId,
         kind: DraftKind,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.modal_open() {
@@ -963,6 +963,15 @@ impl MailApp {
         let Some(message) = self.mailbox.get(id).cloned() else {
             return;
         };
+        // The conversation already has an inline draft of this intent: reply goes back into
+        // it instead of stacking a second one under the same thread.
+        if let Some(existing) = self.inline_reply_in_thread(message.thread_id, kind) {
+            self.pin_message(id);
+            self.reveal_inline_composer(message.thread_id);
+            self.focus_draft_body(existing, window, cx);
+            cx.notify();
+            return;
+        }
         let own = self
             .mailbox
             .account(&message.account)
@@ -1099,14 +1108,9 @@ impl MailApp {
             state.inline = placement == Placement::Inline;
         }
         if placement == Placement::Inline {
-            self.close_other_inline(cx);
-            self.inline_composer = Some(id);
+            self.close_other_inline(id, cx);
             if let Some(thread) = reveal_thread {
-                self.reader_panes
-                    .borrow_mut()
-                    .entry(thread)
-                    .or_default()
-                    .reveal_composer = true;
+                self.reveal_inline_composer(thread);
             }
         } else {
             self.tabs.open_draft_pinned(id);
@@ -1133,18 +1137,82 @@ impl MailApp {
             .collect()
     }
 
-    /// Only one draft is inline at a time; another inline draft moves to a tab rather than
-    /// disappearing.
-    fn close_other_inline(&mut self, cx: &mut Context<Self>) {
-        if let Some(previous) = self.inline_composer
-            && let Some(entity) = self.composers.get(&previous).cloned()
-        {
-            entity.update(cx, |composer, cx| {
-                composer.set_placement(Placement::Tab, cx)
-            });
-            self.tabs.open_draft_pinned(previous);
+    /// A thread shows one inline draft. Another one appearing there moves the older draft to
+    /// a tab rather than disappearing; other threads keep theirs.
+    fn close_other_inline(&mut self, id: DraftId, cx: &mut Context<Self>) {
+        let Some(thread) = self.thread_of_draft(id) else {
+            return;
+        };
+        let displaced: Vec<DraftId> = self
+            .composer
+            .drafts
+            .iter()
+            .filter(|open| open.inline && open.record.id != id)
+            .filter(|open| {
+                open.record
+                    .source_message
+                    .and_then(|source| self.thread_of(source))
+                    == Some(thread)
+            })
+            .map(|open| open.record.id)
+            .collect();
+        for previous in displaced {
+            if let Some(entity) = self.composers.get(&previous).cloned() {
+                entity.update(cx, |composer, cx| {
+                    composer.set_placement(Placement::Tab, cx)
+                });
+            }
+            if let Some(open) = self.composer.get_mut(previous) {
+                open.inline = false;
+            }
+            // The user is looking at the thread the new reply belongs to: the displaced
+            // draft keeps its tab without taking that away.
+            self.tabs.add_draft_pinned(previous);
         }
-        self.inline_composer = None;
+    }
+
+    /// The conversation `draft` answers, by its source message.
+    fn thread_of_draft(&self, draft: DraftId) -> Option<u32> {
+        let source = self.composer.record(draft)?.source_message?;
+        self.thread_of(source)
+    }
+
+    /// The inline draft attached to `thread`, if any.
+    fn inline_draft_in(&self, thread: u32) -> Option<DraftId> {
+        self.composer
+            .drafts
+            .iter()
+            .find(|open| {
+                open.inline
+                    && open.record.source_message.and_then(|source| self.thread_of(source))
+                        == Some(thread)
+            })
+            .map(|open| open.record.id)
+    }
+
+    /// An inline draft of the same intent answering `thread`: a reply looks for a reply, a
+    /// forward for a forward, so `f` after `r` still forwards.
+    fn inline_reply_in_thread(&self, thread: u32, kind: DraftKind) -> Option<DraftId> {
+        let forward = kind == DraftKind::Forward;
+        self.composer
+            .drafts
+            .iter()
+            .find(|open| {
+                open.inline
+                    && (open.record.kind == DraftKind::Forward) == forward
+                    && open.record.source_message.and_then(|source| self.thread_of(source))
+                        == Some(thread)
+            })
+            .map(|open| open.record.id)
+    }
+
+    /// Scroll `thread` down to its inline composer on the next render.
+    fn reveal_inline_composer(&mut self, thread: u32) {
+        self.reader_panes
+            .borrow_mut()
+            .entry(thread)
+            .or_default()
+            .reveal_composer = true;
     }
 
     fn tabs_index_of_draft(&self, id: DraftId) -> Option<usize> {
@@ -1976,7 +2044,7 @@ impl MailApp {
     /// arrives while focus is outside the composer (the palette hands focus back to the
     /// app before running one).
     pub(super) fn emit_to_composer(&self, event: ComposeEvent, cx: &mut Context<Self>) {
-        let Some(id) = self.tabs.active_draft().or(self.inline_composer) else {
+        let Some(id) = self.tabs.active_draft().or_else(|| self.inline_draft()) else {
             return;
         };
         if let Some(entity) = self.composers.get(&id).cloned() {
@@ -1994,22 +2062,16 @@ impl MailApp {
         if let Some(open) = self.composer.get_mut(id) {
             open.inline = false;
         }
-        if self.inline_composer == Some(id) {
-            self.inline_composer = None;
-        }
         self.tabs.open_draft_pinned(id);
         cx.notify();
     }
 
-    /// The inline draft, but only while the conversation it answers is the one on screen.
+    /// The inline draft of the conversation on screen, if it has one.
     ///
     /// A reply belongs under its own original: shown under another thread it would read as
-    /// an answer to that one. One predicate serves both the reader, which draws the composer
-    /// only when it matches, and the places that move the draft out when it does not.
+    /// an answer to that one. Drafts stay attached to their thread, so another tab simply
+    /// shows none and the draft reappears with its own conversation.
     pub(super) fn inline_composer_for_thread(&self) -> Option<DraftId> {
-        let draft = self.inline_composer?;
-        let source = self.composer.record(draft)?.source_message?;
-        let original = self.mailbox.get(source)?.thread_id;
         let active = if self.triage_open() {
             self.session_current().and_then(|id| self.thread_of(id))
         } else {
@@ -2022,30 +2084,7 @@ impl MailApp {
                         .and_then(|id| self.thread_of(id))
                 })
         }?;
-        (active == original).then_some(draft)
-    }
-
-    /// The reader moved to another conversation. An inline draft cannot stay under a thread
-    /// it does not answer, and it must not vanish either: it becomes a tab of its own, the
-    /// same draft and the same editor, so nothing typed is lost and it stays reachable.
-    pub(super) fn park_inline_composer(&mut self, cx: &mut Context<Self>) {
-        let Some(draft) = self.inline_composer else {
-            return;
-        };
-        if self.inline_composer_for_thread().is_some() {
-            return;
-        }
-        if let Some(entity) = self.composers.get(&draft).cloned() {
-            entity.update(cx, |composer, cx| {
-                composer.set_placement(Placement::Tab, cx)
-            });
-        }
-        if let Some(open) = self.composer.get_mut(draft) {
-            open.inline = false;
-        }
-        self.inline_composer = None;
-        self.tabs.open_draft_pinned(draft);
-        cx.notify();
+        self.inline_draft_in(active)
     }
 
     fn collapse_composer(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
@@ -2059,6 +2098,19 @@ impl MailApp {
             );
             return;
         }
+        self.show_inline(id, source, window, cx);
+    }
+
+    /// Put `draft` back inline under `source`'s conversation: close its tab if it has one,
+    /// open and pin the thread, scroll the composer into view and put the caret in the body.
+    /// Used by Collapse and by reopening a reply from the Drafts pane.
+    fn show_inline(
+        &mut self,
+        id: DraftId,
+        source: MessageId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(entity) = self.composers.get(&id).cloned() {
             entity.update(cx, |composer, cx| {
                 composer.set_placement(Placement::Inline, cx)
@@ -2071,18 +2123,13 @@ impl MailApp {
             self.tabs.close(ix);
         }
         self.pin_message(source);
-        self.follow_active_tab(cx);
-        self.close_other_inline(cx);
-        self.inline_composer = Some(id);
+        self.follow_active_tab();
+        self.close_other_inline(id, cx);
         // The composer is the thread's last child, so the reader has to be at the bottom for
         // it to be on screen. The reveal runs on the next render, after the reply is in the
         // tree, and is what an inline reply opened from a message higher up already does.
         if let Some(thread) = self.mailbox.get(source).map(|message| message.thread_id) {
-            self.reader_panes
-                .borrow_mut()
-                .entry(thread)
-                .or_default()
-                .reveal_composer = true;
+            self.reveal_inline_composer(thread);
         }
         self.focus_draft_body(id, window, cx);
         cx.notify();
@@ -2099,17 +2146,15 @@ impl MailApp {
     /// Close a surface and keep the draft: the tab goes, the record stays, and the draft
     /// reopens from the drafts list. An untouched draft is kept too — closing is never a
     /// discard, and only the discard path asks first and then deletes.
-    fn close_composer(&mut self, id: DraftId) {
+    pub(super) fn close_composer(&mut self, id: DraftId) {
         // Closing is an explicit save: the pending write goes out now instead of waiting out
         // the autosave debounce, even if a save is already in flight (it then follows that
         // answer without another wait).
         if let Some(open) = self.composer.get_mut(id) {
             open.mark_urgent();
+            open.inline = false;
         }
         self.write_draft(id);
-        if self.inline_composer == Some(id) {
-            self.inline_composer = None;
-        }
         if let Some(ix) = self.tabs_index_of_draft(id) {
             self.tabs.close(ix);
         }
@@ -2228,7 +2273,11 @@ impl MailApp {
     /// held it has just vanished: list keys work straight after a send instead of being
     /// swallowed by an input that no longer exists. An open modal keeps the focus it owns.
     fn retire_draft(&mut self, id: DraftId, cx: &mut Context<Self>) {
-        let shown = self.inline_composer == Some(id) || self.tabs.active_draft() == Some(id);
+        let shown = self
+            .composer
+            .get(id)
+            .is_some_and(|open| open.inline)
+            || self.tabs.active_draft() == Some(id);
         self.forget_draft(id);
         if shown && !self.modal_open() {
             // Queued, not immediate: taking the countdown toast down is window work too, and
@@ -2245,9 +2294,6 @@ impl MailApp {
         self.pending_resolutions.remove(&id);
         self.composer.remove(id);
         self.composers.remove(&id);
-        if self.inline_composer == Some(id) {
-            self.inline_composer = None;
-        }
         if let Some(ix) = self.tabs_index_of_draft(id) {
             self.tabs.close(ix);
         }
@@ -2255,19 +2301,45 @@ impl MailApp {
 
     // ------------------------------------------------------------------- the drafts list
 
-    /// Reopen a stored draft in its own tab, from the record the store already holds. This
-    /// is the Drafts pane's Enter/click path.
+    /// Reopen a stored draft, from the record the store already holds. This is the Drafts
+    /// pane's Enter/click path.
+    ///
+    /// A reply whose original is still in the mailbox reopens where it was written: under
+    /// that conversation, inline, as if `r` had been pressed there. Everything else (a
+    /// forward, a new message, a reply whose original is gone) opens in its own tab.
     pub(super) fn reopen_draft(&mut self, id: DraftId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(record) = self.composer.record(id).cloned() else {
             return;
         };
-        self.tabs.open_draft_pinned(id);
         // Reopening a draft puts the caret in it, so the reader is the pane the user is now
         // in: the tab keys (`cmd-w`, `ctrl-tab`) follow them there, as with any opened mail.
         self.focus_pane(Pane::Reader);
+        let original = matches!(record.kind, DraftKind::Reply | DraftKind::ReplyAll)
+            .then_some(record.source_message)
+            .flatten()
+            .filter(|source| self.mailbox.get(*source).is_some());
+        if let Some(source) = original {
+            if self.composers.contains_key(&id) {
+                self.sync_composer_record(id, cx);
+            } else {
+                self.build_composer(
+                    record,
+                    PendingOpen {
+                        placement: Placement::Inline,
+                        focus: Focus::Body,
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+            }
+            self.show_inline(id, source, window, cx);
+            return;
+        }
+        self.tabs.open_draft_pinned(id);
         if self.composers.contains_key(&id) {
-            if self.inline_composer == Some(id) {
-                self.inline_composer = None;
+            if let Some(open) = self.composer.get_mut(id) {
+                open.inline = false;
             }
             if let Some(entity) = self.composers.get(&id).cloned() {
                 entity.update(cx, |composer, cx| {

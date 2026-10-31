@@ -9,7 +9,7 @@ fn focus_to(h: &mut Harness<'_>) {
     h.cx
         .update_window(window, |_, window, cx| {
             h.app.update(cx, |a, cx| {
-                let id = a.tabs.active_draft().or(a.inline_composer).expect("draft");
+                let id = a.tabs.active_draft().or(a.inline_draft()).expect("draft");
                 a.composers
                     .get(&id)
                     .expect("composer")

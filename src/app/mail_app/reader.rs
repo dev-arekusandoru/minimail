@@ -92,23 +92,23 @@ impl MailApp {
         )
     }
 
-    /// The reply composer shown inline under the conversation it answers. It is the same
-    /// entity the tab would show, so expanding moves it rather than copying it.
+    /// The reply composer shown inline under the conversation it answers, as a card matching
+    /// the message cards. It is the same entity the tab would show, so expanding moves it
+    /// rather than copying it.
     pub(super) fn inline_composer_element(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let draft = self.inline_composer_for_thread()?;
         let composer = self.composers.get(&draft)?.clone();
+        let t = cx.theme();
         Some(
             div()
+                .id("reader-reply-card").test_support()
                 .flex_none()
-                .mt_3()
-                .pt_3()
-                .border_t(px(1.))
-                .border_color(cx.theme().border)
                 .h(px(420.))
                 .rounded_md()
                 .overflow_hidden()
                 .border_1()
-                .border_color(cx.theme().border)
+                .border_color(t.border)
+                .bg(message::message_card_bg(t))
                 .child(composer)
                 .into_any_element(),
         )
@@ -153,7 +153,9 @@ impl MailApp {
         let order = crate::threads::thread_order(self.mailbox.messages(), msg.thread_id);
         // Thread messages in timeline order (oldest first). The opened one is the expanded
         // surface wherever it falls; it is never moved.
-        let (title, rows): (Option<AnyElement>, Vec<AnyElement>) = if others.is_empty() {
+        let inline = self.inline_composer_element(cx);
+        let lone = others.is_empty();
+        let (title, mut rows): (Option<AnyElement>, Vec<AnyElement>) = if lone {
             // A lone message has no thread, so no rail: the surface takes the full width.
             (
                 None,
@@ -174,11 +176,22 @@ impl MailApp {
                         let dot = if expanded { DOT_FULL } else { DOT_COLLAPSED };
                         (dot, self.thread_message(m, expanded, &newest, &look, cx))
                     };
-                    rail_row(t, Some((dot, color)), i == 0, i + 1 == count, el).into_any_element()
+                    // The inline reply is the last row: the rail continues down to its dot.
+                    let last = i + 1 == count && inline.is_none();
+                    rail_row(t, Some((dot, color)), i == 0, last, el).into_any_element()
                 })
                 .collect();
             (Some(self.thread_title(msg, &others, &look, cx)), rows)
         };
+        // The reply is a card after the last one: on the rail in a thread, below the message
+        // with a gap when there is no thread.
+        if let Some(el) = inline {
+            rows.push(if lone {
+                div().mt_3().child(el).into_any_element()
+            } else {
+                rail_row(t, Some((DOT_FULL, t.primary)), false, true, el).into_any_element()
+            });
+        }
 
         // Scroll container children, in order: summary card, thread title, message rows. The
         // opened message's child index is what `scroll_to_top_of_item` needs.
@@ -251,9 +264,6 @@ impl MailApp {
                                 for el in rows {
                                     d = d.child(edges(column(el), i));
                                     i += 1;
-                                }
-                                if let Some(el) = self.inline_composer_element(cx) {
-                                    d = d.child(el);
                                 }
                                 d
                             }),

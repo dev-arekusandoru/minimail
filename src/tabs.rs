@@ -224,6 +224,15 @@ impl Tabs {
         replaced
     }
 
+    /// Show `draft` in its own permanent tab without taking the active tab away from what
+    /// the user is looking at.
+    pub fn add_draft_pinned(&mut self, draft: DraftId) -> Option<DraftId> {
+        let active = self.active;
+        let replaced = self.open_draft_pinned(draft);
+        self.active = active;
+        replaced
+    }
+
     /// The first unpinned tab of `kind`'s kind, which is the slot a new preview replaces.
     fn preview_slot(&self, kind: &TabKind) -> Option<usize> {
         let want = kind.preview_slot();

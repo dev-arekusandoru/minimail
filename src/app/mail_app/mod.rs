@@ -155,8 +155,6 @@ pub struct MailApp {
     /// Every draft the composer currently has open, by id. The strip and the reader show
     /// the same entities, so expanding a draft moves it rather than copying it.
     pub composers: HashMap<DraftId, Entity<crate::app::compose::Composer>>,
-    /// The draft shown inline under the conversation it answers, if any.
-    pub inline_composer: Option<DraftId>,
     /// Durable draft state: what each open draft says and how it is saved.
     pub composer: ComposerState,
     /// The remote id of the last confirmed send, so the next sync adopts it instead of
@@ -396,7 +394,6 @@ impl MailApp {
             dark_theme: crate::app_settings::DEFAULT_DARK_THEME.to_owned(),
             palette: None,
             composers: HashMap::new(),
-            inline_composer: None,
             composer: ComposerState::default(),
             last_sent_remote: None,
             pending_composers: VecDeque::new(),

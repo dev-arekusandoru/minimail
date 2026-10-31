@@ -217,13 +217,13 @@ pub fn two_holds_count_down_at_once_and_are_recalled_one_at_a_time(cx: &mut Test
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("first message");
     h.settle();
-    let first = h.read(|a| a.inline_composer.expect("the inline reply"));
+    let first = h.read(|a| a.inline_draft().expect("the inline reply"));
     // Close the first so the list is driving again, then start a second reply beside it.
     h.run_palette("Close composer");
     h.tick();
     h.compose_reply("second message");
     h.settle();
-    let second = h.read(|a| a.inline_composer.expect("the second inline reply"));
+    let second = h.read(|a| a.inline_draft().expect("the second inline reply"));
     assert_ne!(first, second, "each reply is its own draft");
     assert_eq!(
         h.read(|a| a.composer.drafts.len()),
@@ -247,7 +247,13 @@ pub fn two_holds_count_down_at_once_and_are_recalled_one_at_a_time(cx: &mut Test
         "the newer countdown is untouched"
     );
     assert_eq!(h.hold_count(), 1, "exactly one countdown was ended");
-    h.show_draft(first);
+    h.settle();
+    // The recalled reply comes back where it was written: inline under its thread.
+    assert_eq!(
+        h.read(|a| a.inline_draft()),
+        Some(first),
+        "the earlier draft came back inline"
+    );
     assert_eq!(
         h.draft_fields().3,
         "first message",
@@ -554,14 +560,15 @@ pub fn the_sidebar_drafts_row_opens_the_pane_and_reopens_a_draft(cx: &mut TestAp
         "the snippet shows what was written: {rows:?}"
     );
 
-    // A click opens the row, the same as Enter.
+    // A click opens the row, the same as Enter: a reply reopens inline under its original.
     h.click(("draft-row", 0usize));
     h.tick();
     assert_eq!(
-        h.read(|a| a.tabs.active_draft()),
+        h.read(|a| a.inline_draft()),
         Some(id),
-        "the clicked draft opened"
+        "the clicked reply reopened under its thread"
     );
+    assert_eq!(h.read(|a| a.tabs.active_draft()), None, "not in a draft tab");
     assert_eq!(h.draft_fields().3, "from the sidebar");
     assert_eq!(
         h.read(|a| a.composer.drafts.len()),
@@ -765,7 +772,7 @@ pub fn expanding_moves_the_same_draft_between_inline_and_a_tab(cx: &mut TestAppC
     let mut h = harness_with(cx, snooze_box());
     h.compose_reply("moving draft");
     h.settle();
-    let id = h.read(|a| a.inline_composer.expect("inline"));
+    let id = h.read(|a| a.inline_draft().expect("inline"));
     assert_eq!(
         h.read(|a| a.tabs.draft_ids().len()),
         0,
@@ -777,7 +784,7 @@ pub fn expanding_moves_the_same_draft_between_inline_and_a_tab(cx: &mut TestAppC
         h.read(|a| a.compose_in_tab()),
         "the draft is in the tab strip"
     );
-    assert_eq!(h.read(|a| a.inline_composer), None, "and no longer inline");
+    assert_eq!(h.read(|a| a.inline_draft()), None, "and no longer inline");
     assert_eq!(
         h.read(|a| a.composer.drafts.len()),
         1,
@@ -787,7 +794,7 @@ pub fn expanding_moves_the_same_draft_between_inline_and_a_tab(cx: &mut TestAppC
 
     h.collapse_active_draft();
     assert_eq!(
-        h.read(|a| a.inline_composer),
+        h.read(|a| a.inline_draft()),
         Some(id),
         "the same draft came back under its thread"
     );
@@ -868,10 +875,11 @@ pub fn a_closed_draft_reopens_from_the_drafts_pane(cx: &mut TestAppContext) {
     h.keys("enter");
     h.tick();
     assert_eq!(
-        h.read(|a| a.tabs.active_draft()),
+        h.read(|a| a.inline_draft()),
         Some(id),
-        "the same draft reopened"
+        "the reply reopened inline under its original"
     );
+    assert_eq!(h.read(|a| a.tabs.active_draft()), None, "not in a draft tab");
     assert_eq!(
         h.draft_fields().3,
         "kept for later",

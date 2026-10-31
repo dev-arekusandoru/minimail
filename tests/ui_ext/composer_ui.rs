@@ -88,7 +88,7 @@ pub fn a_reply_with_cc_shows_the_field_automatically(cx: &mut TestAppContext) {
     h.await_composer("reply all opens inline", |a| a.inline_compose_open());
     h.settle();
     let cc = h.read(|a| {
-        let id = a.inline_composer.expect("inline reply");
+        let id = a.inline_draft().expect("inline reply");
         a.composer.record(id).expect("record").cc.clone()
     });
     assert!(!cc.trim().is_empty(), "reply-all prefilled a Cc");
