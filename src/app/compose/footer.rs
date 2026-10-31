@@ -317,6 +317,39 @@ impl Composer {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_toolbar(cx))),
             )
+            .child(
+                crate::app::ui::key_tooltip(
+                    Button::new("compose-discard")
+                        .icon(IconName::Trash)
+                        .ghost()
+                        .h(px(26.))
+                        .w(px(26.))
+                        .px_0()
+                        .rounded(px(5.))
+                        .text_color(muted)
+                        .disabled(frozen),
+                    "Discard draft",
+                    "cmd-shift-backspace",
+                )
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Discard))),
+            )
+            .when(self.placement == super::Placement::Inline, |d| {
+                d.child(
+                    crate::app::ui::key_tooltip(
+                        Button::new("compose-expand")
+                            .icon(IconName::Maximize)
+                            .ghost()
+                            .h(px(26.))
+                            .w(px(26.))
+                            .px_0()
+                            .rounded(px(5.))
+                            .text_color(muted),
+                        "Expand to a tab",
+                        "",
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposeEvent::Expand))),
+                )
+            })
             // The hold is a fixed ten seconds with an Undo: while a message is held the
             // control offers nothing, so pressing Send again cannot send it early.
             .child({
