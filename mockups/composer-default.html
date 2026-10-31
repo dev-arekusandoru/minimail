@@ -124,6 +124,21 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
 .undo svg{width:12px;height:12px}
 .undo .kbd{border-color:#ffffff33;color:#ffffffaa;font-weight:400}
 .toast{display:flex;align-items:center;gap:7px;padding:6px 14px;font-size:11px;color:var(--ok);border-bottom:1px solid var(--border);background:#1f2320}
+
+/* ---- G: the inline reply card in the reader ---- */
+.reader{width:640px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px 20px}
+.rrow{display:flex;gap:20px;position:relative}
+.rrow .gutter{position:relative;width:20px;flex:none}
+.rrow .gutter .line{position:absolute;left:9.5px;width:1px;background:var(--border)}
+.rrow .gutter .rail-dot{position:absolute;left:4.5px;width:11px;height:11px;border-radius:6px;border:2px solid var(--bg)}
+.rrow .card{flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:14px 16px}
+.rrow.last .card{margin-bottom:16px}
+.who{font-size:13px;font-weight:600;color:var(--strong)}
+.txt{font-size:13px;line-height:20px;color:var(--fg);margin-top:5px}
+.reader .reply{height:420px;border:1px solid var(--border);border-radius:6px;background:var(--field);display:flex;flex-direction:column;overflow:hidden}
+.reader .reply .hd{border-bottom:1px solid var(--border);padding:10px}
+.reader .reply .body{min-height:0}
+.reader.lone > .reply{margin-top:12px}
 </style>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -627,6 +642,43 @@ svg.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-wid
         <span class="sp"></span>
         <button class="tgl on" data-tb><svg class="ic"><use href="#i-sliders"/></svg></button>
         <button class="send">Send anyway</button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+
+<!-- ================= G ================= -->
+<section>
+<h2>G · The inline reply in the reader</h2>
+<div class="cap">A reply is one more card after the thread's last message, on the same rail: the line runs down to its own dot and the card uses the message card's radius, border and background. A lone message has no rail, so the card sits below it with a gap and no dot.</div>
+<div class="grid">
+  <div class="col">
+    <div class="cap">G1 · Threaded reader · the reply card closes the rail</div>
+    <div class="reader">
+      <div class="rrow">
+        <div class="gutter"><span class="line" style="top:27px;bottom:0"></span><span class="rail-dot" style="top:21.5px;background:#6e74b8"></span></div>
+        <div class="card" style="margin-bottom:12px"><span class="who">Maya Chen <span class="m" style="font-weight:400">· Oct 27</span></span><p class="txt">Let’s lock the dates this week.</p></div>
+      </div>
+      <div class="rrow last">
+        <div class="gutter"><span class="line" style="top:0;height:27px"></span><span class="rail-dot" style="top:21.5px;background:var(--primary)"></span></div>
+        <div class="reply">
+          <div class="hd"><div class="sent"><span class="verb">Reply to</span><span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span><span class="cl"><span class="verb">about</span><span class="tk subj" style="font-weight:500">re: Q4 launch plan</span></span></div></div>
+          <div class="body" style="flex:1"><p>Thanks — moving the beta cut to the 14th.</p></div>
+          <div class="stat"><span class="dot"></span>Saved<span class="sp"></span><span class="send">Send <span class="kbd">⌘↵</span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="cap">G2 · Lone message · no rail, one gap</div>
+    <div class="reader lone">
+      <div class="rrow"><div class="card"><span class="who">Maya Chen <span class="m" style="font-weight:400">· Oct 27</span></span><p class="txt">Let’s lock the dates this week.</p></div></div>
+      <div class="reply">
+        <div class="hd"><div class="sent"><span class="verb">Reply to</span><span class="tk pad"><span class="av" style="background:#7fb4c4">M</span>Maya Chen</span><span class="cl"><span class="verb">about</span><span class="tk subj" style="font-weight:500">re: Q4 launch plan</span></span></div></div>
+        <div class="body" style="flex:1"><p>Thanks — moving the beta cut to the 14th.</p></div>
+        <div class="stat"><span class="dot"></span>Saved<span class="sp"></span><span class="send">Send <span class="kbd">⌘↵</span></span></div>
       </div>
     </div>
   </div>
