@@ -9,6 +9,34 @@ impl Mailbox {
         self.meta.get(&id).and_then(|m| m.awaiting_since)
     }
 
+    /// This message's reminder in the shape the cache stores it.
+    pub fn reminder(&self, id: MessageId) -> Reminder {
+        let meta = self.meta.get(&id);
+        Reminder {
+            awaiting_since: meta.and_then(|m| m.awaiting_since),
+            follow_up_after: meta.and_then(|m| m.follow_up_after),
+            followed_up: self.tags(id).contains(&Tag::FollowUp),
+        }
+    }
+
+    /// Put reminders read back from the cache into `Meta`.
+    pub fn restore_reminders(&mut self, reminders: Vec<(MessageId, Reminder)>) {
+        for (id, reminder) in reminders {
+            if self.get(id).is_none() {
+                continue;
+            }
+            let meta = self.meta.entry(id).or_default();
+            meta.awaiting_since = reminder.awaiting_since;
+            meta.follow_up_after = reminder.follow_up_after;
+            if reminder.awaiting_since.is_some() && !meta.tags.contains(&Tag::AwaitingReply) {
+                meta.tags.push(Tag::AwaitingReply);
+            }
+            if reminder.followed_up && !meta.tags.contains(&Tag::FollowUp) {
+                meta.tags.push(Tag::FollowUp);
+            }
+        }
+    }
+
     pub fn snoozed_until(&self, id: MessageId) -> Option<Timestamp> {
         self.meta.get(&id).and_then(|m| m.snoozed_until)
     }

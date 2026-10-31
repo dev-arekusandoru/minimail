@@ -55,6 +55,7 @@ impl Mailbox {
         }
         let id = message.id;
         let state = message.state;
+        let previous_state = self.get(id).map(|m| m.state);
         let stamp = |m: &Message| m.received_at();
         let new_stamp = stamp(&message);
         if let Some(&i) = self.index.get(&id) {
@@ -83,7 +84,13 @@ impl Mailbox {
             meta.snoozed_until = until;
         } else {
             meta.snoozed_until = None;
+        }
+        // A plain re-sync keeps an in-flight await; a moved message is a state change, which
+        // ends the reminder the same way `set_state` does.
+        if previous_state.is_some_and(|old| old != state) {
             meta.awaiting_since = None;
+            meta.follow_up_after = None;
+            meta.tags.retain(|tag| *tag != Tag::FollowUp);
         }
         self.drop_suggestions_left_inbox();
     }

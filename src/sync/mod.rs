@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::clock::{DAY, Timestamp};
 use crate::model::{
-    Folder, FolderId, Location, Mailbox, Message, MessageId, TriageState, format_rfc3339,
+    Folder, FolderId, Location, Mailbox, Message, MessageId, Reminder, TriageState, format_rfc3339,
 };
 use crate::provider::{
     Body, MailProvider, ProviderError, RemoteFlags, RemoteFolder, RemoteId, RemoteMessage,
@@ -1373,32 +1373,41 @@ pub fn apply_body(
 
 // -------------------------------------------------------------- persistence
 
-/// Write local-only changes (pending states, snoozes, reads, folders made but never filed
-/// into) back to the cache so they survive a restart.
+/// Write local-only changes (pending states, snoozes, reads, follow-up reminders, folders
+/// made but never filed into) back to the cache so they survive a restart.
 pub fn persist_local(mb: &Mailbox, cache: &Cache) {
     persist_local_folders(mb, cache);
     let Ok(cached) = cache.cached_messages() else {
         return;
     };
     let by_id: HashMap<MessageId, Message> = cached.into_iter().map(|m| (m.id, m)).collect();
+    let stored: HashMap<MessageId, Reminder> = cache
+        .reminders()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     for message in mb.messages() {
         let Some(old) = by_id.get(&message.id) else {
             continue;
         };
-        if old.state == message.state
-            && old.snooze == message.snooze
-            && old.read == message.read
-            && old.partial == message.partial
+        if old.state != message.state
+            || old.snooze != message.snooze
+            || old.read != message.read
+            || old.partial != message.partial
         {
-            continue;
+            let mut next = message.clone();
+            next.snooze = if message.state == TriageState::Snoozed {
+                mb.snoozed_until(message.id).map(format_rfc3339)
+            } else {
+                None
+            };
+            let _ = cache.save_local(&next);
         }
-        let mut next = message.clone();
-        next.snooze = if message.state == TriageState::Snoozed {
-            mb.snoozed_until(message.id).map(format_rfc3339)
-        } else {
-            None
-        };
-        let _ = cache.save_local(&next);
+        let reminder = mb.reminder(message.id);
+        if stored.get(&message.id).copied().unwrap_or_default() != reminder {
+            let keep = (reminder != Reminder::default()).then_some(reminder);
+            let _ = cache.save_reminder(message.id, keep);
+        }
     }
 }
 

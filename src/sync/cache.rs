@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::{Account, Folder, FolderId, Message, MessageId, ProviderKind};
+use crate::model::{Account, Folder, FolderId, Message, MessageId, ProviderKind, Reminder};
 use crate::provider::{RemoteId, RemoteState};
 
 /// `$MAIL_CLASSIFIER_MAIL_DB`, else
@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS messages(
     remote_id TEXT NOT NULL,
     json TEXT NOT NULL,
     remote_state TEXT NOT NULL,
+    reminder TEXT,
     UNIQUE(account, remote_id)
 );
 CREATE TABLE IF NOT EXISTS backfill(
@@ -123,7 +124,16 @@ impl Cache {
         // Columns added after a table's first release need an ALTER; fields added to the
         // serialized `Message` JSON (bcc, html, partial, bulk…) instead ride `#[serde(default)]`,
         // so an old row reads them as false/empty with no schema change.
-        // Caches created before read sync lack the column; their rows start unknown (NULL).
+        // Reminders (`Meta`) live beside the message JSON; older caches have no column yet.
+        let has_reminder: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='reminder'",
+            [],
+            |row| row.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_reminder {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN reminder TEXT")?;
+        }
+        // Caches from before read sync lack the column; their rows start unknown (NULL).
         let has_read: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='remote_read'",
             [],
@@ -594,6 +604,33 @@ impl Cache {
             .filter_map(|json| json.ok())
             .filter_map(|json| serde_json::from_str::<Message>(&json).ok())
             .collect())
+    }
+
+    /// Reply reminders saved beside the cached messages.
+    pub fn reminders(&self) -> rusqlite::Result<Vec<(MessageId, Reminder)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, reminder FROM messages WHERE reminder IS NOT NULL")?;
+        Ok(stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)? as MessageId, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|row| row.ok())
+            .filter_map(|(id, json)| serde_json::from_str(&json).ok().map(|r| (id, r)))
+            .collect())
+    }
+
+    /// Store `id`'s reminder, or clear it when `None`; the message row is untouched.
+    pub fn save_reminder(&self, id: MessageId, reminder: Option<Reminder>) -> rusqlite::Result<()> {
+        let json = reminder
+            .map(|r| serde_json::to_string(&r))
+            .transpose()
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        self.conn.execute(
+            "UPDATE messages SET reminder=?2 WHERE id=?1",
+            params![id as i64, json],
+        )?;
+        Ok(())
     }
 
     /// Live cached folders of `account` with the remote label they map to, if any.

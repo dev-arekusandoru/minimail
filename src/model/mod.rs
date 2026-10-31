@@ -210,6 +210,16 @@ struct Meta {
     overrides: Vec<QuestionKey>,
 }
 
+/// A reply reminder, kept beside the cached message so it survives a restart (it lives in
+/// `Meta` at runtime, not in the message).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reminder {
+    pub awaiting_since: Option<Timestamp>,
+    pub follow_up_after: Option<Timestamp>,
+    /// `tick` resurfaced the thread as overdue: the Follow Up badge.
+    pub followed_up: bool,
+}
+
 /// One inverse operation; a user action's `UndoStep` is a list of these.
 #[derive(Clone, Debug)]
 enum Change {

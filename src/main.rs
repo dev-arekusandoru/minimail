@@ -69,7 +69,7 @@ fn main() {
                             None
                         }
                     });
-                    let mailbox = match cached {
+                    let mut mailbox = match cached {
                         Some((accounts, folders, messages)) => {
                             Mailbox::from_parts(messages, accounts, folders, store.clone())
                         }
@@ -77,6 +77,9 @@ fn main() {
                             Mailbox::from_parts(Vec::new(), Vec::new(), Vec::new(), store.clone())
                         }
                     };
+                    if let Some(reminders) = cache.as_ref().and_then(|c| c.reminders().ok()) {
+                        mailbox.restore_reminders(reminders);
+                    }
                     let prefs = store.clone();
                     let view = cx.new(|cx| {
                         let mut app = MailApp::new(mailbox, window, cx);

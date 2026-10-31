@@ -6,8 +6,10 @@ use std::sync::{Arc, Mutex};
 use mail_classifier::clock::{Clock, DAY, FakeClock, Timestamp};
 use mail_classifier::contacts;
 use mail_classifier::model::{
-    Account, Folder, FolderId, Location, Mailbox, Message, MessageId, ProviderKind, TriageState,
+    Account, Folder, FolderId, Location, Mailbox, Message, MessageId, ProviderKind, Tag,
+    TriageState,
 };
+use mail_classifier::outgoing::SendIntent;
 use mail_classifier::provider::{
     Body, Changes, MailProvider, Page, ProviderError, RemoteFlags, RemoteFolder, RemoteId,
     RemoteMessage, RemoteState, Scope, Window,
@@ -1552,6 +1554,47 @@ fn pending_states_and_snoozes_survive_a_restart() {
 
     // The restored mailbox still sees both changes as unconfirmed.
     assert_eq!(pending_moves(&restored, &cache, ACCOUNT).len(), 2);
+}
+
+#[test]
+fn a_follow_up_reminder_survives_a_restart() {
+    let cache = seeded();
+    let mut mb = mailbox(Vec::new());
+    let (_state, provider) = FakeProvider::without_folders(vec![remote("m1", "t1", 1_790_000_000)]);
+    drain(&mut mb, &cache, &provider, true);
+    let id = inbox(&mb)[0];
+
+    let clock = FakeClock::new(1_790_000_000);
+    mb.apply_send_intent(id, SendIntent::RemindIfNoReply { days: 3 }, clock.now());
+    persist_local(&mb, &cache);
+
+    let (accounts, folders, messages) = cache.load().unwrap();
+    let mut restored = Mailbox::from_parts(
+        messages,
+        accounts,
+        folders,
+        Rc::new(contacts::open_seeded_in_memory().unwrap()),
+    );
+    restored.restore_reminders(cache.reminders().unwrap());
+    assert_eq!(restored.awaiting_since(id), Some(clock.now()));
+    assert!(restored.tags(id).contains(&Tag::AwaitingReply));
+    assert!(restored.tick(clock.now() + 2 * DAY).followed_up.is_empty());
+    assert_eq!(restored.tick(clock.now() + 3 * DAY).followed_up, vec![id]);
+    assert_eq!(restored.state_of(id), Some(TriageState::Inbox));
+    assert!(restored.tags(id).contains(&Tag::FollowUp));
+
+    // The resurfaced thread keeps its Follow Up badge across a second restart.
+    persist_local(&restored, &cache);
+    let (accounts, folders, messages) = cache.load().unwrap();
+    let mut again = Mailbox::from_parts(
+        messages,
+        accounts,
+        folders,
+        Rc::new(contacts::open_seeded_in_memory().unwrap()),
+    );
+    again.restore_reminders(cache.reminders().unwrap());
+    assert!(again.tags(id).contains(&Tag::FollowUp));
+    assert_eq!(again.awaiting_since(id), None);
 }
 
 #[test]

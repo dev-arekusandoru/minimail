@@ -89,3 +89,29 @@ fn remind_intent_resurfaces_after_its_days_unless_a_reply_arrives() {
     assert!(mb.tags(1).contains(&Tag::FollowUp));
     assert_eq!(mb.undo_depth(), depth, "tick pushes no undo step");
 }
+
+#[test]
+fn resyncing_an_awaited_message_keeps_its_reminder() {
+    use mail_classifier::outgoing::SendIntent;
+    let mut mb = sample();
+    mb.apply_send_intent(1, SendIntent::RemindIfNoReply { days: 3 }, T0);
+    let mut resynced = mb.get(1).unwrap().clone();
+    resynced.subject = "Re-synced".into();
+    mb.upsert_remote(resynced);
+    assert_eq!(mb.awaiting_since(1), Some(T0));
+    assert!(mb.tags(1).contains(&Tag::AwaitingReply));
+    assert!(mb.tick(T0 + 3 * 86_400 - 1).followed_up.is_empty());
+    assert_eq!(mb.tick(T0 + 3 * 86_400).followed_up, vec![1]);
+}
+
+#[test]
+fn a_remote_move_ends_the_reminder() {
+    use mail_classifier::outgoing::SendIntent;
+    let mut mb = sample();
+    mb.apply_send_intent(1, SendIntent::RemindIfNoReply { days: 3 }, T0);
+    let mut moved = mb.get(1).unwrap().clone();
+    moved.state = State::Deleted;
+    mb.upsert_remote(moved);
+    assert_eq!(mb.awaiting_since(1), None);
+    assert!(mb.tick(T0 + 3 * 86_400).followed_up.is_empty());
+}
