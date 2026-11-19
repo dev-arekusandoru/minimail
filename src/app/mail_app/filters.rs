@@ -7,7 +7,6 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::popover::Popover;
-use gpui_kit::prelude::FluentBuilder as _;
 
 use super::*;
 use crate::app::filter_popover::{FilterPopover, FilterPopoverEvent, Step};

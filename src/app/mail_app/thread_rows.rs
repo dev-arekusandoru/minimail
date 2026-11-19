@@ -5,7 +5,6 @@
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::assets::IconName;
 use crate::theme::ThemeColor;

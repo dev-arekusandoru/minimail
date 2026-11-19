@@ -22,8 +22,6 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::notification::Notification;
-use gpui_kit::prelude::*;
-use gpui_kit::*;
 
 use crate::app::compose::{AccountChoice, ComposeEvent, Composer, Focus, Placement};
 use crate::app::composer_state::{DraftOperation, SaveStatus};
@@ -31,7 +29,6 @@ use crate::app::composer_worker::{
     Accounts, Client as ComposerWorker, Command, ComposeAccount, Event, ImportFailure, ResolveMode,
     Stores,
 };
-use crate::judge::Judge as _;
 use crate::model::{Message, MessageId, ProviderKind, TriageState};
 use crate::outgoing::{AttachmentId, DraftId, DraftKind, DraftRecord, DraftState, SendIntent};
 use crate::provider::RemoteId;

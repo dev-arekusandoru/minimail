@@ -6,7 +6,6 @@
 //! composer tab. The list shows one account's drafts, or every account's from the All view;
 //! the sidebar's count is the same set.
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::prelude::FluentBuilder as _;
 
 use super::*;
 
